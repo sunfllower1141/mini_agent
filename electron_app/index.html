@@ -33,6 +33,7 @@
       max-width: 80%;
       word-break: break-word;
       line-height: 1.4;
+      white-space: pre-wrap;
     }
 
     .msg.user {
@@ -51,6 +52,12 @@
       color: #a6adc8;
       font-size: 0.8rem;
       font-style: italic;
+    }
+
+    .msg.error {
+      align-self: center;
+      color: #f38ba8;
+      font-size: 0.8rem;
     }
 
     #input-area {
@@ -93,58 +100,177 @@
       opacity: 0.5;
       cursor: default;
     }
+
+    #status {
+      padding: 0.3rem 1rem;
+      font-size: 0.75rem;
+      color: #a6adc8;
+      text-align: center;
+    }
   </style>
 </head>
 <body>
 
   <div id="messages"></div>
+  <div id="status">Initializing…</div>
 
   <form id="input-area" autocomplete="off">
-    <input type="text" id="input" placeholder="Type a message…" />
-    <button type="submit" id="send">Send</button>
+    <input type="text" id="input" placeholder="Connecting…" disabled />
+    <button type="submit" id="send" disabled>Send</button>
   </form>
 
   <script>
+    // ── state ──
     const messagesEl = document.getElementById("messages");
     const inputEl    = document.getElementById("input");
     const sendBtn    = document.getElementById("send");
+    const statusEl   = document.getElementById("status");
 
-    /** @param {"user"|"assistant"|"system"} role */
-    function addMessage(role, text) {
+    let initialized = false;
+    let nextId = 1;
+    let assistantMsgEl = null;   // streaming message element (grows as tokens arrive)
+    let sendPending = false;
+
+    // ── helpers ──
+    function addMessage(role, text, persistent = true) {
       const div = document.createElement("div");
       div.className = `msg ${role}`;
       div.textContent = text;
       messagesEl.appendChild(div);
       messagesEl.scrollTop = messagesEl.scrollHeight;
+      return persistent ? div : null;
     }
 
-    // Listen for Python bridge output
+    function setStatus(text) {
+      statusEl.textContent = text;
+    }
+
+    function setReady() {
+      initialized = true;
+      setStatus("Ready");
+      inputEl.disabled = false;
+      inputEl.placeholder = "Type a message…";
+      sendBtn.disabled = false;
+      inputEl.focus();
+    }
+
+    // ── JSON-RPC ──
+    async function rpc(method, params = {}) {
+      const id = nextId++;
+      const req = JSON.stringify({ jsonrpc: "2.0", id, method, params });
+      const result = await window.bridge.send(req);
+      if (!result.ok) {
+        addMessage("error", `Send error: ${result.error}`);
+      }
+    }
+
+    // ── Handle bridge output (JSON lines) ──
+    function handleBridgeLine(line) {
+      try {
+        const obj = JSON.parse(line);
+        processMessage(obj);
+      } catch {
+        // non-JSON output (e.g. startup banner) — show as system
+        addMessage("system", line);
+      }
+    }
+
+    function processMessage(obj) {
+      // --- init result ---
+      if (obj.jsonrpc === "2.0" && obj.result && obj.result.status === "ok" && !initialized) {
+        setReady();
+        addMessage("system", "Connected to mini_agent backend.");
+        return;
+      }
+
+      // --- streaming token ---
+      if (obj.type === "token") {
+        if (!assistantMsgEl) {
+          assistantMsgEl = addMessage("assistant", "");
+        }
+        assistantMsgEl.textContent += obj.content;
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+        return;
+      }
+
+      // --- final chat result ---
+      if (obj.jsonrpc === "2.0" && obj.result) {
+        if (obj.result.cancelled) {
+          if (assistantMsgEl) {
+            assistantMsgEl.textContent += " [cancelled]";
+            assistantMsgEl = null;
+          }
+          addMessage("system", "Request cancelled.");
+        } else {
+          // If we were streaming, finalize the streaming message.
+          // If not (no tokens, all-at-once response), show the content.
+          if (!assistantMsgEl && obj.result.content) {
+            addMessage("assistant", obj.result.content);
+          }
+          assistantMsgEl = null;
+        }
+        setReady();
+        sendPending = false;
+        return;
+      }
+
+      // --- error ---
+      if (obj.jsonrpc === "2.0" && obj.error) {
+        addMessage("error", `Error ${obj.error.code}: ${obj.error.message}`);
+        assistantMsgEl = null;
+        sendPending = false;
+        setReady();
+        return;
+      }
+
+      // --- anything else ---
+      addMessage("system", JSON.stringify(obj));
+    }
+
+    // ── Wire bridge events ──
     if (window.bridge) {
-      window.bridge.onStdout((text) => addMessage("assistant", text));
-      window.bridge.onStderr((text) => addMessage("system", `[stderr] ${text}`));
-      window.bridge.onClose((code) => addMessage("system", `Bridge closed (code ${code})`));
+      window.bridge.onStdout((text) => {
+        // stdout may contain multiple JSON lines from buffering
+        text.split("\n").filter(Boolean).forEach(handleBridgeLine);
+      });
+
+      window.bridge.onStderr((text) => {
+        addMessage("system", `[stderr] ${text}`);
+      });
+
+      window.bridge.onClose((code) => {
+        addMessage("system", `Bridge closed (code ${code})`);
+        setStatus("Disconnected");
+        inputEl.disabled = true;
+        sendBtn.disabled = true;
+      });
+    } else {
+      addMessage("error", "Bridge API not available. Is preload.js loading?");
     }
 
+    // ── Form submit ──
     document.getElementById("input-area").addEventListener("submit", async (e) => {
       e.preventDefault();
+      if (!initialized || sendPending) return;
+
       const text = inputEl.value.trim();
       if (!text) return;
 
       addMessage("user", text);
       inputEl.value = "";
       sendBtn.disabled = true;
+      setStatus("Thinking…");
+      sendPending = true;
 
-      if (window.bridge) {
-        const result = await window.bridge.send(text);
-        if (!result.ok) {
-          addMessage("system", `Error: ${result.error}`);
-        }
-      } else {
-        addMessage("system", "Bridge not available");
-      }
-
-      sendBtn.disabled = false;
+      await rpc("chat", { message: text });
     });
+
+    // ── Startup: send init ──
+    setTimeout(() => {
+      if (window.bridge) {
+        rpc("init", { workspace: null });  // null = auto-detect from cwd
+      }
+    }, 200); // brief delay to let bridge IPC settle
   </script>
 
 </body>

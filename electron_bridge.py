@@ -40,7 +40,8 @@ def _error(id_: Any, code: int, message: str) -> None:
 
 def _handle_init(id_: Any, params: dict) -> None:
     global _config, _write_gate, _read_gate, _memory, _messages
-    workspace = params.get("workspace", None)
+    import os as _os
+    workspace = params.get("workspace", None) or _os.getcwd()
     try:
         _config, _write_gate, _read_gate, _memory, _messages = init_session(workspace)
         _write_line({"jsonrpc": "2.0", "id": id_, "result": {"status": "ok"}})
