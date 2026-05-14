@@ -1,5 +1,10 @@
 # mini_agent Project Conventions
 # Read this before making changes. Consult STATE.txt for current architecture decisions.
+#
+# NOTE: This file is a supplement to prompt.py's _STATIC_PROMPT — it covers
+# project-specific conventions (code style, module map, testing rules).
+# The full AI behavioral instruction lives in prompt.py. These rules are
+# injected at the end of the system prompt as an appendix.
 
 ## Code Style
 - Use type hints on all public functions. Prefer dataclasses for structured data.

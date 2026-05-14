@@ -25,9 +25,9 @@ MEMORY_FILENAME = ".mini_agent_memory.db"
 
 DEFAULT_MODEL        = "deepseek-v4-pro"
 DEFAULT_API_URL      = "https://api.deepseek.com/v1/chat/completions"
-DEFAULT_API_KEY      = ""  # set via DEEPSEEK_API_KEY env var or .mini_agent.toml
+DEFAULT_API_KEY      = ""  # set via DEEPSEEK_API_KEY env var, .env file, or .mini_agent.toml
 DEFAULT_MAX_MESSAGES = 500
-DEFAULT_MAX_TOKENS   = 800_000
+DEFAULT_MAX_TOKENS   = 200_000
 DEFAULT_SUB_AGENT_MAX_TURNS = 25
 DEFAULT_EXA_API_KEY = ""  # set via EXA_API_KEY env var or .mini_agent.toml
 DEFAULT_OPENAI_API_KEY = ""  # set via OPENAI_API_KEY env var or .mini_agent.toml
@@ -124,6 +124,8 @@ class AgentConfig:
 
         # Phase 1: TOML config file
         _load_toml_from_workspace(config, workspace)
+        # Phase 1.5: .env file (loads into os.environ, skips keys already set)
+        _load_dotenv(workspace)
         # Phase 2: environment variable overrides
         _apply_env_overrides(config)
         # Phase 3: CLI flag overrides (highest priority)
@@ -235,6 +237,37 @@ def _load_toml_from_workspace(config: AgentConfig, workspace: str) -> None:
     except Exception as exc:
         print(f"Warning: failed to parse {config_path}: {exc}",
               file=sys.stderr)
+
+
+def _load_dotenv(workspace: str) -> None:
+    """Load key=value pairs from ``.env`` in *workspace* into ``os.environ``.
+
+    Supports simple VAR=value, VAR="value", VAR='value' syntax.
+    Blank lines and #-comments are ignored.
+    Does NOT overwrite existing environment variables (host env wins).
+    """
+    env_path = os.path.join(workspace, ".env")
+    if not os.path.isfile(env_path):
+        return
+    try:
+        with open(env_path) as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                key = key.strip()
+                value = value.strip()
+                # Remove optional surrounding quotes
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+                    value = value[1:-1]
+                # Only set if not already in environment (env vars take priority)
+                if key and key not in os.environ:
+                    os.environ[key] = value
+    except OSError:
+        pass
 
 
 def _apply_env_overrides(config: AgentConfig) -> None:

@@ -31,16 +31,18 @@ source venv/bin/activate  # Linux/macOS
 # 3. Install dependencies
 pip install -r requirements.txt
 
-# 4. Set your API keys
-# DeepSeek (required) — get one at https://platform.deepseek.com
-export DEEPSEEK_API_KEY="sk-your-key-here"
-# OpenAI (for embeddings / alternate models) — https://platform.openai.com
-export OPENAI_API_KEY="sk-your-key-here"
-# Exa (web search) — https://exa.ai
-export EXA_API_KEY="your-exa-key-here"
-# or copy and edit the config file:
-cp .mini_agent.toml.example .mini_agent.toml
-# then edit .mini_agent.toml with your keys and MCP servers
+# 4. Create a .env file with your API keys
+#    This is the recommended way — .env is .gitignore'd and never committed.
+cat > .env << 'EOF'
+DEEPSEEK_API_KEY="sk-your-key-here"    # required — https://platform.deepseek.com
+OPENAI_API_KEY="sk-your-key-here"      # optional — https://platform.openai.com
+EXA_API_KEY="your-exa-key-here"        # optional — https://exa.ai
+EOF
+#    Alternatively, export them directly:
+#    export DEEPSEEK_API_KEY="sk-your-key-here"
+#
+#    For MCP servers or advanced settings, create .mini_agent.toml:
+#    cp .mini_agent.toml.example .mini_agent.toml
 
 # 5. Run
 python tui.py          # Textual TUI (recommended)
@@ -53,9 +55,10 @@ python mini_agent.py   # Terminal REPL
 Settings are loaded from (in priority order):
 1. CLI flags (e.g. `--stream`, `--quiet`)
 2. Environment variables (`DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, `EXA_API_KEY`, `AGENT_WORKSPACE`)
-3. `.mini_agent.toml` in the workspace root
+3. `.env` file in the workspace root (API keys live here — kept out of git)
+4. `.mini_agent.toml` in the workspace root (advanced settings, MCP servers)
 
-Copy `.mini_agent.toml.example` to `.mini_agent.toml` for local configuration.
+Create a `.env` file for API keys (recommended). Create `.mini_agent.toml` only if you need MCP servers or non-default settings.
 
 ### MCP Servers
 

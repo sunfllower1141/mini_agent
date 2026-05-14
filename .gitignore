@@ -21,6 +21,7 @@ venv/
 # Secrets / local config (contains API keys)
 keys
 .mini_agent.toml
+.env
 
 # Session backups
 .mini_agent_backups/
