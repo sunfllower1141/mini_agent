@@ -1,0 +1,13 @@
+{
+  "name": "mini-agent-electron",
+  "version": "1.0.0",
+  "description": "Electron shell for mini_agent",
+  "main": "main.js",
+  "type": "module",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "electron": "^28.0.0"
+  }
+}

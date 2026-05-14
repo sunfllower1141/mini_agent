@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'" />
+  <title>mini_agent</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      background: #1e1e2e;
+      color: #cdd6f4;
+    }
+
+    #messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .msg {
+      padding: 0.6rem 1rem;
+      border-radius: 8px;
+      max-width: 80%;
+      word-break: break-word;
+      line-height: 1.4;
+    }
+
+    .msg.user {
+      align-self: flex-end;
+      background: #45475a;
+    }
+
+    .msg.assistant {
+      align-self: flex-start;
+      background: #313244;
+    }
+
+    .msg.system {
+      align-self: center;
+      background: transparent;
+      color: #a6adc8;
+      font-size: 0.8rem;
+      font-style: italic;
+    }
+
+    #input-area {
+      display: flex;
+      gap: 0.5rem;
+      padding: 0.75rem 1rem;
+      border-top: 1px solid #45475a;
+    }
+
+    #input {
+      flex: 1;
+      padding: 0.6rem 0.8rem;
+      border: 1px solid #45475a;
+      border-radius: 6px;
+      background: #313244;
+      color: #cdd6f4;
+      font-size: 0.95rem;
+      outline: none;
+    }
+
+    #input:focus {
+      border-color: #89b4fa;
+    }
+
+    #send {
+      padding: 0.6rem 1.2rem;
+      border: none;
+      border-radius: 6px;
+      background: #89b4fa;
+      color: #1e1e2e;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    #send:hover {
+      background: #74c7ec;
+    }
+
+    #send:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="messages"></div>
+
+  <form id="input-area" autocomplete="off">
+    <input type="text" id="input" placeholder="Type a message…" />
+    <button type="submit" id="send">Send</button>
+  </form>
+
+  <script>
+    const messagesEl = document.getElementById("messages");
+    const inputEl    = document.getElementById("input");
+    const sendBtn    = document.getElementById("send");
+
+    /** @param {"user"|"assistant"|"system"} role */
+    function addMessage(role, text) {
+      const div = document.createElement("div");
+      div.className = `msg ${role}`;
+      div.textContent = text;
+      messagesEl.appendChild(div);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    // Listen for Python bridge output
+    if (window.bridge) {
+      window.bridge.onStdout((text) => addMessage("assistant", text));
+      window.bridge.onStderr((text) => addMessage("system", `[stderr] ${text}`));
+      window.bridge.onClose((code) => addMessage("system", `Bridge closed (code ${code})`));
+    }
+
+    document.getElementById("input-area").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const text = inputEl.value.trim();
+      if (!text) return;
+
+      addMessage("user", text);
+      inputEl.value = "";
+      sendBtn.disabled = true;
+
+      if (window.bridge) {
+        const result = await window.bridge.send(text);
+        if (!result.ok) {
+          addMessage("system", `Error: ${result.error}`);
+        }
+      } else {
+        addMessage("system", "Bridge not available");
+      }
+
+      sendBtn.disabled = false;
+    });
+  </script>
+
+</body>
+</html>

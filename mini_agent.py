@@ -149,6 +149,38 @@ def main() -> None:
                 print(f"Turns: {stats['turns']}  Tool calls: {stats['tool_calls']}  Messages: {len(messages)}")
                 continue
 
+            if user_input.lower().startswith("/session"):
+                parts = user_input.split(maxsplit=2)
+                sub = parts[1] if len(parts) > 1 else ""
+                arg = parts[2] if len(parts) > 2 else ""
+                from config import list_sessions, switch_session, delete_session
+                if sub == "list":
+                    sessions = list_sessions(workspace)
+                    if sessions:
+                        print(f"Sessions: {', '.join(sessions)}")
+                    else:
+                        print("No saved sessions found.")
+                elif sub == "new" and arg:
+                    session_data = switch_session(workspace, arg, memory, config)
+                    memory.save(messages)
+                    memory = session_data["memory"]
+                    messages = session_data["messages"]
+                    stats = {"turns": 0, "tool_calls": 0}
+                    print(f"Created and switched to session '{arg}'.")
+                elif sub == "switch" and arg:
+                    memory.save(messages)
+                    session_data = switch_session(workspace, arg, memory, config)
+                    memory = session_data["memory"]
+                    messages = session_data["messages"]
+                    stats = {"turns": 0, "tool_calls": 0}
+                    print(f"Switched to session '{arg}'.")
+                elif sub == "delete" and arg:
+                    ok, msg = delete_session(workspace, arg)
+                    print(msg)
+                else:
+                    print("Usage: /session new <name> | switch <name> | delete <name> | list")
+                continue
+
             if not user_input:
                 continue
 

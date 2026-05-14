@@ -42,7 +42,7 @@ from textual.binding import Binding
 
 import requests
 
-from config import AgentConfig, resolve_workspace, init_session, parse_args
+from config import AgentConfig, resolve_workspace, init_session, parse_args, build_startup_context
 from llm import run_agent_turn, THINKING_START, THINKING_END
 from prompt import build_system_prompt
 from safety import ReadSafetyGate, WriteSafetyGate
@@ -775,7 +775,10 @@ class MiniAgentTUI(App):
         log = self.query_one("#tools-log", RichLog)
 
         if cmd == "/clear":
-            self.messages = [{"role": "system", "content": build_system_prompt(self.config)}]
+            self.messages = [
+                {"role": "system", "content": build_system_prompt(self.config)},
+                {"role": "system", "content": build_startup_context(self.config.workspace)},
+            ]
             self.memory.clear()
             self._history = []
             self._history_pos = 0
@@ -792,12 +795,51 @@ class MiniAgentTUI(App):
             log.write(f"[{t.dim}]  /export    Write conversation to a markdown file[/]")
             log.write(f"[{t.dim}]  /help      Show this help[/]")
             log.write(f"[{t.dim}]  /theme     Switch theme (dawn, sepia, ember, slate, midnight, cobalt, neon, forest)[/]")
+            log.write(f"[{t.dim}]  /session   Manage sessions (new | switch | delete | list)[/]")
             log.write(f"[{t.dim}]  /stats     Show session stats[/]")
             return
 
         if cmd == "/stats":
             log.write(f"[{t.dim}]Session: {len(self.messages)} msgs, {self._total_turns} turns, "
                       f"{self._total_tokens} tokens, {self.config.model}[/]")
+            return
+
+        if cmd.startswith("/session"):
+            parts = cmd.split(maxsplit=2)
+            sub = parts[1] if len(parts) > 1 else ""
+            arg = parts[2] if len(parts) > 2 else ""
+            from config import list_sessions, switch_session, delete_session
+            ws = self.config.workspace
+            if sub == "list":
+                sessions = list_sessions(ws)
+                if sessions:
+                    log.write(f"[{t.dim}]Sessions: {', '.join(sessions)}[/]")
+                else:
+                    log.write(f"[{t.dim}]No saved sessions found.[/]")
+            elif sub == "new" and arg:
+                session_data = switch_session(ws, arg, self.memory, self.config)
+                self.memory.save(self.messages)
+                self.memory.close()
+                self.memory = session_data["memory"]
+                self.messages = session_data["messages"]
+                self._total_turns = 0
+                self._total_tokens = 0
+                log.write(f"[{t.green}]Created and switched to session '{arg}'.[/]")
+            elif sub == "switch" and arg:
+                self.memory.save(self.messages)
+                self.memory.close()
+                session_data = switch_session(ws, arg, self.memory, self.config)
+                self.memory = session_data["memory"]
+                self.messages = session_data["messages"]
+                self._total_turns = 0
+                self._total_tokens = 0
+                log.write(f"[{t.green}]Switched to session '{arg}'.[/]")
+            elif sub == "delete" and arg:
+                ok, msg = delete_session(ws, arg)
+                log.write(f"[{t.dim}]{msg}[/]")
+            else:
+                log.write(f"[{t.yellow}]Usage: /session new <name> | switch <name> | delete <name> | list[/]")
+            self.query_one("#input", TextArea).focus()
             return
 
         if cmd == "/export":

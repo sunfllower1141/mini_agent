@@ -27,5 +27,8 @@ keys
 .mini_agent_scratchpad.md
 result.txt
 
+# Electron app dependencies
+electron_app/node_modules/
+
 # Local data mounted in workspace
 $HOME/
