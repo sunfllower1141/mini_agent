@@ -498,11 +498,12 @@ def _verify(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
     results: list[str] = []
 
     # Step 1: tests for modified files
-    from tools import _MODIFIED_FILES
+    from tools import get_modified_files
     test_targets: list[str] = []
-    if _MODIFIED_FILES:
+    mod_files = get_modified_files()
+    if mod_files:
         seen = set()
-        for fpath in _MODIFIED_FILES:
+        for fpath in mod_files:
             base = _os.path.basename(fpath)
             if base.startswith("test_"):
                 test_targets.append(base)
@@ -582,8 +583,8 @@ def _verify(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
                 results.append(f"Tests ({target}): timed out")
 
     # Step 3: modified files summary
-    if _MODIFIED_FILES:
-        results.append(f"Modified files: {len(_MODIFIED_FILES)} files")
+    if get_modified_files():
+        results.append(f"Modified files: {len(get_modified_files())} files")
 
     all_ok = all("failed" not in r.lower() for r in results if "Tests" in r)
     return ToolResult(

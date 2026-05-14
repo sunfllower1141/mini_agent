@@ -137,9 +137,10 @@ def _spawn_one(
                      label=short_name, parent_task_id=parent_id)
     # Reserve files if specified
     if reserved_files:
-        from tools import _FILE_RESERVATIONS
-        for f in reserved_files:
-            _FILE_RESERVATIONS[f] = task_id
+        from tools import _FILE_RESERVATIONS, _FILE_RESERVATIONS_LOCK
+        with _FILE_RESERVATIONS_LOCK:
+            for f in reserved_files:
+                _FILE_RESERVATIONS[f] = task_id
     # Set subscriptions if provided
     if subscriptions is not None:
         runtime.set_subscriptions(task_id, subscriptions)
@@ -1229,8 +1230,9 @@ def _restore_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolR
     try:
         shutil.copy2(backup_path, resolved)
         del _BACKUPS[resolved]
-        from tools import _MODIFIED_FILES
-        _MODIFIED_FILES.discard(safety_result.resolved_path)
+        from tools import _MODIFIED_FILES, _MODIFIED_FILES_LOCK
+        with _MODIFIED_FILES_LOCK:
+            _MODIFIED_FILES.discard(safety_result.resolved_path)
         return ToolResult(
             success=True,
             content=f"Restored '{resolved}' from backup ({_os_restore.path.basename(backup_path)}).",

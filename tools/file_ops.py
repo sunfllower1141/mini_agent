@@ -137,7 +137,9 @@ def _write_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
     # File reservation check — prevent sub-agent collisions
     agent_id = getattr(_current_agent_id, "task_id", None)
     if agent_id is not None:
-        existing = _FILE_RESERVATIONS.get(path)
+        from tools import _FILE_RESERVATIONS, _FILE_RESERVATIONS_LOCK
+        with _FILE_RESERVATIONS_LOCK:
+            existing = _FILE_RESERVATIONS.get(path)
         if existing is not None and existing != agent_id:
             return ToolResult(
                 success=False,
@@ -155,8 +157,8 @@ def _write_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
         _backup_before_write(safety_result.resolved_path)
         with open(safety_result.resolved_path, "w") as f:
             f.write(content)
-        from tools import _MODIFIED_FILES
-        _MODIFIED_FILES.add(safety_result.resolved_path)
+        from tools import add_modified_file
+        add_modified_file(safety_result.resolved_path)
         clear_tool_cache()
         # Keep symbol index fresh for newly written .py files
         if path.endswith(".py"):
@@ -203,7 +205,9 @@ def _edit_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResu
     # File reservation check — prevent sub-agent collisions
     agent_id = getattr(_current_agent_id, "task_id", None)
     if agent_id is not None:
-        existing = _FILE_RESERVATIONS.get(path)
+        from tools import _FILE_RESERVATIONS_LOCK
+        with _FILE_RESERVATIONS_LOCK:
+            existing = _FILE_RESERVATIONS.get(path)
         if existing is not None and existing != agent_id:
             return ToolResult(
                 success=False,
@@ -251,8 +255,8 @@ def _edit_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResu
         with open(safety_result.resolved_path, "w") as f:
             f.write(updated)
 
-        from tools import _MODIFIED_FILES
-        _MODIFIED_FILES.add(safety_result.resolved_path)
+        from tools import add_modified_file
+        add_modified_file(safety_result.resolved_path)
         clear_tool_cache()
 
         # Short summary: no full diff on success (saves context tokens)

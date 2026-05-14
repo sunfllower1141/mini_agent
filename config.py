@@ -408,8 +408,8 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
                 saved.insert(0, {"role": "user", "content": summary})
     startup_ctx = build_startup_context(workspace)
     messages: list[dict] = [
-        {"role": "system", "content": startup_ctx},
         {"role": "system", "content": build_system_prompt(config)},
+        {"role": "system", "content": startup_ctx},
     ]
     if saved:
         messages.extend(saved)

@@ -29,7 +29,7 @@ from api import truncate_content, format_tool_detail, call_deepseek, clear_api_c
 
 from config import AgentConfig
 from terminal import c, DIM
-from tools import TOOLS, execute_tool, tool_summary, clear_tool_cache, _TOOL_CONTEXT, _MODIFIED_FILES
+from tools import TOOLS, execute_tool, tool_summary, clear_tool_cache, _TOOL_CONTEXT, get_modified_files
 from memory import _total_tokens
 from safety import ReadSafetyGate, WriteSafetyGate
 from interject import poll_interjections
@@ -267,11 +267,11 @@ def _inject_modified_files_checkpoint(
     messages: list[dict], *, read_gate: ReadSafetyGate | None = None,
 ) -> None:
     """Inject modified-files checkpoint (turn 2 only)."""
-    if not _MODIFIED_FILES:
+    if not get_modified_files():
         return
-    mod_list = "\n".join(f"  - {f}" for f in sorted(_MODIFIED_FILES))
+    mod_list = "\n".join(f"  - {f}" for f in get_modified_files())
     test_hint = ""
-    for mf in _MODIFIED_FILES:
+    for mf in get_modified_files():
         base = os.path.basename(mf)
         if base.startswith("test_") and base.endswith(".py"):
             test_hint += f"\n  Relevant test: {base}"

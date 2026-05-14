@@ -25,6 +25,7 @@ Submodules:
 import json
 import subprocess
 import re
+import threading
 
 from safety import ReadSafetyGate, WriteSafetyGate
 from tools.schema import TOOLS
@@ -122,11 +123,14 @@ _TOOL_CACHE: dict[str, "ToolResult"] = {}
 
 # Files modified by write/edit — used by verify
 _MODIFIED_FILES: set[str] = set()
+_MODIFIED_FILES_LOCK = threading.Lock()
+
 _TASK_REGISTRY: dict[str, subprocess.Popen] = {}  # background shell task registry
 
 # File reservation system — prevents sub-agent write collisions
 # Maps file_path (relative to workspace) → task_id of owning agent
 _FILE_RESERVATIONS: dict[str, str] = {}
+_FILE_RESERVATIONS_LOCK = threading.Lock()
 
 # Sub-agent runtime registry (lazy init in config.init_session)
 _AGENT_RUNTIME = None  # AgentRuntime — set by init_session
@@ -163,24 +167,39 @@ def reserve_file(path: str, task_id: str) -> tuple[bool, str]:
     Fails if the file is already reserved by another agent.
     Call this before write_file/edit_file to prevent collisions.
     """
-    existing = _FILE_RESERVATIONS.get(path)
-    if existing is not None and existing != task_id:
-        return False, f"File '{path}' is reserved by agent '{existing[:8]}'"
-    _FILE_RESERVATIONS[path] = task_id
+    with _FILE_RESERVATIONS_LOCK:
+        existing = _FILE_RESERVATIONS.get(path)
+        if existing is not None and existing != task_id:
+            return False, f"File '{path}' is reserved by agent '{existing[:8]}'"
+        _FILE_RESERVATIONS[path] = task_id
     return True, ""
 
 
 def release_file(path: str, task_id: str) -> None:
     """Release a file reservation. No-op if not reserved by this agent."""
-    if _FILE_RESERVATIONS.get(path) == task_id:
-        del _FILE_RESERVATIONS[path]
+    with _FILE_RESERVATIONS_LOCK:
+        if _FILE_RESERVATIONS.get(path) == task_id:
+            del _FILE_RESERVATIONS[path]
 
 
 def release_all_files(task_id: str) -> None:
     """Release all file reservations held by an agent."""
-    to_release = [p for p, t in _FILE_RESERVATIONS.items() if t == task_id]
-    for path in to_release:
-        del _FILE_RESERVATIONS[path]
+    with _FILE_RESERVATIONS_LOCK:
+        to_release = [p for p, t in _FILE_RESERVATIONS.items() if t == task_id]
+        for path in to_release:
+            del _FILE_RESERVATIONS[path]
+
+
+def add_modified_file(path: str) -> None:
+    """Record a file as modified (thread-safe). Used by write_file/edit_file."""
+    with _MODIFIED_FILES_LOCK:
+        _MODIFIED_FILES.add(path)
+
+
+def get_modified_files() -> list[str]:
+    """Return a snapshot of modified files (thread-safe)."""
+    with _MODIFIED_FILES_LOCK:
+        return sorted(_MODIFIED_FILES)
 
 
 def _register(name: str):
