@@ -43,7 +43,12 @@ def _handle_init(id_: Any, params: dict) -> None:
     import os as _os
     workspace = params.get("workspace", None) or _os.getcwd()
     try:
-        _config, _write_gate, _read_gate, _memory, _messages = init_session(workspace)
+        session = init_session(workspace)
+        _config      = session["config"]
+        _write_gate  = session["write_gate"]
+        _read_gate   = session["read_gate"]
+        _memory      = session["memory"]
+        _messages    = session["messages"]
         _write_line({"jsonrpc": "2.0", "id": id_, "result": {"status": "ok"}})
     except Exception as exc:
         _error(id_, -1, f"init failed: {exc}")
