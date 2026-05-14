@@ -1,0 +1,45 @@
+# mini_agent Project Conventions
+# Read this before making changes. Consult STATE.txt for current architecture decisions.
+
+## Code Style
+- Use type hints on all public functions. Prefer dataclasses for structured data.
+- No magic numbers — define named UPPER_CASE constants in the relevant module.
+- Keep modules small and single-purpose. Use explicit control flow over magic.
+- No circular imports. No global mutable state unless unavoidable.
+- All tool results must be structured dataclasses — never raw exceptions.
+- Use `from __future__ import annotations` in every module.
+
+## Module Map
+# prompt.py     — system prompt, personality rules
+# config.py     — AgentConfig (TOML + env + CLI), startup context
+# llm.py        — API calls, turn orchestration, tool piping
+# memory.py     — SQLite conversation persistence + pruning
+# safety.py     — workspace read/write gates (SafetyResult dataclass)
+# tui.py        — Textual TUI frontend, themes, AgentWorker
+# tools/        — tool implementations (file_ops, shell_ops, search_ops, agent_ops, …)
+# STATE.txt     — architecture decisions, current state (consult before major changes)
+
+## Testing
+- Test files live at root: `test_<module>.py`. Use unittest.TestCase.
+- Run relevant tests after every code change (use `run_tests` tool with path).
+- 562 tests currently, all must pass. Do not stack speculative fixes — verify each.
+- Use tempfile.mkdtemp for test workspaces; clean up in tearDown.
+
+## Architecture Rules
+- Before touching >3 core files, pause and explain the plan first.
+- Reuse existing abstractions before introducing new ones. Avoid duplicate logic.
+- Do not create new subsystems unless existing architecture cannot handle the need.
+- Prefer small incremental edits over large rewrites.
+- Prefer readable code over clever code. Add TODO comments, not partial systems.
+
+## Preferred Patterns
+- Use `find_symbol` / `read_file` to consult existing code before changes (never guess).
+- Use LSP tools (`lsp_definition`, `lsp_references`, `lsp_hover`, `lsp_diagnostics`) for
+  precise code intelligence — go-to-definition, find-all-references, type hovering, and
+  diagnostics. Prefer these over grep for understanding code structure.
+- Before non-trivial tasks, state your plan in 1-3 sentences.
+- Make parallel independent tool calls in one batch; only serialize when dependent.
+- Use `write_scratchpad` to track progress across turns.
+- Update STATE.txt after every completed change.
+- Every new feature needs at least one test.
+- If tests fail, stop and diagnose before making additional changes.

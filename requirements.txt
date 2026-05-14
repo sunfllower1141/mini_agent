@@ -1,0 +1,7 @@
+exa-py>=2.0
+sentence-transformers>=3.0
+requests>=2.20
+tomli>=2.0; python_version < "3.11"
+textual>=1.0
+flake8>=7.0
+pytest>=9.0

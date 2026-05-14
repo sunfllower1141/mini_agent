@@ -1,0 +1,27 @@
+id: "add-hello-world"
+name: "Add hello_world to utils.py"
+description: |
+  Add a function `hello_world(name: str = "World") -> str` to a new file
+  `utils.py` in the workspace root.
+  The function should return `"Hello, {name}!"`.
+  Include a docstring and type hints.
+  After writing, run `python -c "from utils import hello_world; print(hello_world('Eval'))"`
+  to verify it works.
+category: "feature"
+difficulty: "easy"
+checks:
+  - type: "file_exists"
+    path: "utils.py"
+  - type: "file_contains"
+    path: "utils.py"
+    pattern: "def hello_world"
+  - type: "file_contains"
+    path: "utils.py"
+    pattern: "Hello, \\{name\\}"
+  - type: "shell"
+    command: "python -c 'from utils import hello_world; assert hello_world(\"Eval\") == \"Hello, Eval!\"'"
+expected_tools:
+  - "write_file"
+  - "run_shell"
+expected_turns_max: 10
+tags: ["functions", "basics"]

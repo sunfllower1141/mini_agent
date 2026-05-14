@@ -1,0 +1,31 @@
+# Bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual env
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+
+# Runtime data
+.mini_agent_memory.db
+.mini_agent_memory.db-shm
+.mini_agent_memory.db-wal
+.mini_agent_index.json
+
+# Secrets / local config (contains API keys)
+keys
+.mini_agent.toml
+
+# Session backups
+.mini_agent_backups/
+.mini_agent_scratchpad.md
+result.txt
+
+# Local data mounted in workspace
+$HOME/

@@ -1,0 +1,23 @@
+id: "write-tests-for-calculator"
+name: "Write tests for calculator.py"
+description: |
+  The file `calculator.py` defines four functions: `add(a, b)`, `subtract(a, b)`,
+  `multiply(a, b)`, `divide(a, b)`.  None have tests.
+  Write a `test_calculator.py` file with pytest tests covering:
+  - Normal cases for all four functions
+  - Edge case: division by zero raises ValueError
+  Run `python -m pytest test_calculator.py -v` to verify all tests pass.
+category: "test"
+difficulty: "medium"
+workspace_fixture: "mini_repo"
+checks:
+  - type: "file_exists"
+    path: "test_calculator.py"
+  - type: "test_passes"
+    path: "test_calculator.py"
+expected_tools:
+  - "read_file"
+  - "write_file"
+  - "run_tests"
+expected_turns_max: 15
+tags: ["testing", "basics"]

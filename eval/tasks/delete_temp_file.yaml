@@ -1,0 +1,16 @@
+id: "delete-temp-file"
+name: "Delete a temporary file"
+description: |
+  A file `temp_notes.txt` exists in the workspace root.  Delete it.
+  Verify the file no longer exists.
+category: "feature"
+difficulty: "easy"
+workspace_fixture: "mini_repo"
+checks:
+  - type: "file_not_exists"
+    path: "temp_notes.txt"
+expected_tools:
+  - "run_shell"
+  - "read_file"
+expected_turns_max: 5
+tags: ["cleanup", "basics"]
