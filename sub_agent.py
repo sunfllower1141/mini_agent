@@ -161,6 +161,21 @@ def run_sub_agent(
         # Token budget awareness (shared helper)
         _inject_token_budget(messages, turn_count)
 
+        # --- Communication nudge: every 3 turns, force the agent to coordinate ---
+        if turn_count % 3 == 0:
+            messages.append({
+                "role": "system",
+                "content": (
+                    "[COMMUNICATION NUDGE] You have been working for {t} turns.\n"
+                    "1. Check your **agent_inbox** for messages from the orchestrator or siblings.\n"
+                    "2. Check **agent_read** for broadcast messages from sibling agents.\n"
+                    "3. Send a **status.heartbeat** via agent_handoff summarizing what you're doing.\n"
+                    "4. If you are editing a shared file, broadcast your intent via **agent_message**.\n"
+                    "5. If a sibling is working on the same file, coordinate via **agent_handoff**.\n"
+                ).format(t=turn_count),
+                "_transient": True,
+            })
+
         # --- Pre-call snapshot: tell the orchestrator we're about to call the LLM ---
         _pre_snap = getattr(_TOOL_CONTEXT, "_agent_runtime", None)
         if _pre_snap is not None and task_id:
