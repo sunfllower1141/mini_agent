@@ -5,6 +5,7 @@ config.py — project-level configuration for mini_agent.
 Looks for ``.mini_agent.toml`` in the workspace root and merges settings
 with env vars and CLI flags.  Priority: CLI > env var > config file > default.
 """
+from __future__ import annotations
 
 import os
 import sys

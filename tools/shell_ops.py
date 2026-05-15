@@ -4,6 +4,7 @@ shell_ops.py — shell, search, test, and git tools for mini_agent.
 
 Tools: run_shell, task_status, search_files, run_tests, verify, git
 """
+from __future__ import annotations
 
 import os
 import re

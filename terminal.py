@@ -5,6 +5,7 @@ terminal.py — ANSI colour helpers for mini_agent output.
 Colours are automatically disabled when stderr is not a TTY or the user
 passes ``--no-color``.
 """
+from __future__ import annotations
 
 import sys
 

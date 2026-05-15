@@ -4,6 +4,7 @@ file_ops.py — file/directory tools for mini_agent.
 
 Tools: read_file, write_file, edit_file, list_directory, file_info
 """
+from __future__ import annotations
 
 import os
 import stat as stat_module

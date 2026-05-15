@@ -16,6 +16,7 @@ Memory management (in order, applied on every save):
 
 Migrates existing ``.mini_agent_memory.json`` files automatically on first run.
 """
+from __future__ import annotations
 
 import json
 import os

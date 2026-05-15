@@ -5,6 +5,7 @@ schema.py — API tool schemas sent to the LLM.
 Each entry defines a function that the model can call.
 Adding a new tool requires an entry here plus a @_register implementation.
 """
+from __future__ import annotations
 
 TOOLS = [
     {

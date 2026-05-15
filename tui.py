@@ -9,6 +9,7 @@ Live status bar stolen from Agent Terminal.
 Tool cards stolen from better-agent-terminal.
 Attention pulse stolen from CodeGrid.
 """
+from __future__ import annotations
 
 import os
 import sys

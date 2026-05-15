@@ -6,6 +6,7 @@ Provides ``_parse_stream()`` for parsing DeepSeek's server-sent event response
 stream, accumulating text content, reasoning blocks, and tool call fragments.
 Resilient to connection drops — returns partial results instead of crashing.
 """
+from __future__ import annotations
 
 import json
 import sys

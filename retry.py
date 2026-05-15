@@ -5,6 +5,7 @@ retry.py — HTTP retry logic for mini_agent.
 Provides ``_request_with_retry()`` with exponential backoff on transient
 failures (429, 5xx).  Used by ``api.py::call_deepseek()``.
 """
+from __future__ import annotations
 
 import os
 import random

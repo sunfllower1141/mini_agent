@@ -12,6 +12,7 @@ for completion.  collect_agent blocks until the sub-agent finishes
 and returns the full result.  collect_any returns the first finishing
 sub-agent from a set.
 """
+from __future__ import annotations
 
 import threading
 import time

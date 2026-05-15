@@ -4,6 +4,7 @@ search_ops.py — semantic search and web search tools for mini_agent.
 
 Tools: find_symbol, find_usages, semantic_search, web_search
 """
+from __future__ import annotations
 
 import json
 import os

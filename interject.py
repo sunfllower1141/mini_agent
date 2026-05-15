@@ -5,6 +5,7 @@ Allows the user to type messages while the agent is working.  Messages are
 queued and injected into the conversation at the next tool-call boundary
 by ``run_agent_turn()``.
 """
+from __future__ import annotations
 
 import threading
 from collections import deque

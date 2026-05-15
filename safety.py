@@ -7,6 +7,7 @@ Enforces:
     2. Overwrites trigger a confirmation check (unless explicitly allowed).
     3. All results are returned as structured dataclasses — never raw exceptions.
 """
+from __future__ import annotations
 
 import difflib
 import os
