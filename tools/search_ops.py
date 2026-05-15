@@ -771,11 +771,14 @@ def _find_usages(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolRe
             content=f"No usages found for '{name}' in workspace.",
         )
 
-    # Limit output
+    # Limit output — context is truncated to 60 chars to keep tool responses
+    # lightweight. Full multi-line context makes sub-agents hit 400 errors.
     shown = matches[:30]
     lines: list[str] = [f"Found {len(matches)} usage(s) of '{name}':"]
     for ref in shown:
-        lines.append(f"  {ref['path']}:{ref['line']}  {ref['context']}")
+        ctx = ref.get('context', '')
+        ctx = ctx.strip().replace('\n', ' | ')[:60]
+        lines.append(f"  {ref['path']}:{ref['line']}  {ctx}")
 
     if len(matches) > 30:
         lines.append(f"  … and {len(matches) - 30} more")

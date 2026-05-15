@@ -34,6 +34,8 @@ Configuration:
   See STATE.txt for architecture overview and tool reference.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import sys
@@ -250,4 +252,3 @@ def main() -> None:
 if __name__ == "__main__":
     main()
 
-from __future__ import annotations

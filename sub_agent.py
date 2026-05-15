@@ -248,17 +248,19 @@ def run_sub_agent(
             if config.sub_agent_api_key:
                 config.api_key = config.sub_agent_api_key
 
-                        # --- Pre-call token budget check ---
+            # --- Pre-call token budget check ---
             # Estimate total tokens and force-prune if over safety ceiling.
-            from memory import _total_tokens, _compress_tool_results, _prune_by_tokens
+            # Use a 2x multiplier on the estimate because code tokenizes at
+            # ~2 chars/token, not the 4 chars/token assumed by _total_tokens.
+            # This prevents 400 errors from underestimated token counts.
+            from memory import _total_tokens, _compress_tool_results, _prune_by_tokens, _summarize_pruned
             est = _total_tokens(messages)
-            if est > _SUB_SAFETY_TOKEN_CEILING:
+            if est > _SUB_SAFETY_TOKEN_CEILING // 2:
                 messages, _ = _compress_tool_results(messages, keep_recent=_SUB_COMPRESSION_KEEP_RECENT)
                 messages, pruned = _prune_by_tokens(
-                    messages, max_tokens=_SUB_SAFETY_TOKEN_CEILING, max_messages=_SUB_MAX_MESSAGES,
+                    messages, max_tokens=_SUB_SAFETY_TOKEN_CEILING // 2, max_messages=_SUB_MAX_MESSAGES,
                 )
                 if pruned:
-                    from memory import _summarize_pruned
                     summary = _summarize_pruned(pruned)
                     if summary:
                         messages.insert(0, {"role": "user", "content": summary})
