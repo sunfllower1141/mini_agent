@@ -49,7 +49,7 @@ _VACUUM  = "VACUUM"
 # ---------------------------------------------------------------------------
 
 # Token estimation
-_CHARS_PER_TOKEN = 4                 # heuristic: ~4 characters per token
+_CHARS_PER_TOKEN = 2                 # heuristic: ~2 characters per token (code is denser)
 _MIN_TOKEN_ESTIMATE = 1              # floor for token count estimates
 
 # Tool result compression
