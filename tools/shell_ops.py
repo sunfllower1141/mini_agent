@@ -162,6 +162,23 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
         block = _check_destructive(command)
         if block is not None:
             return ToolResult(success=False, content=block)
+    # Auto-backup files before any rm command (prevents permanent data loss)
+    if force and re.search(r'\brm\b', command):
+        from tools.file_ops import _backup_before_write
+        import shlex
+        try:
+            tokens = shlex.split(command)
+            idx = 1  # skip 'rm'
+            while idx < len(tokens):
+                token = tokens[idx]
+                if token == '-r' or token == '-rf' or token == '-f':
+                    idx += 1
+                    continue
+                if not token.startswith('-'):
+                    _backup_before_write(token)
+                idx += 1
+        except Exception:
+            pass  # best-effort, don't block the rm
     try:
         stdin_kw = {}
         if stdin_text is not None:
