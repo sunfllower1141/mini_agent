@@ -33,3 +33,5 @@ electron_app/node_modules/
 
 # Local data mounted in workspace
 $HOME/
+.mini_agent_memory_session_default.db*
+.mini_agent_memory_session_images.db
