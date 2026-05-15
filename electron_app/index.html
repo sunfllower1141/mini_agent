@@ -158,9 +158,14 @@
     async function rpc(method, params = {}) {
       const id = nextId++;
       const req = JSON.stringify({ jsonrpc: "2.0", id, method, params });
-      const result = await window.bridge.send(req);
-      if (!result.ok) {
-        addMessage("error", `Send error: ${result.error}`);
+      addMessage("system", `→ ${method} (id=${id})`);
+      try {
+        const result = await window.bridge.send(req);
+        if (!result.ok) {
+          addMessage("error", `Send error: ${result.error}`);
+        }
+      } catch (e) {
+        addMessage("error", `bridge.send() threw: ${e.message}`);
       }
     }
 
@@ -231,7 +236,11 @@
     if (window.bridge) {
       window.bridge.onStdout((text) => {
         // stdout may contain multiple JSON lines from buffering
-        text.split("\n").filter(Boolean).forEach(handleBridgeLine);
+        const lines = text.split("\n").filter(Boolean);
+        lines.forEach(line => {
+          addMessage("system", `← ${line.substring(0, 120)}`);
+          handleBridgeLine(line);
+        });
       });
 
       window.bridge.onStderr((text) => {
