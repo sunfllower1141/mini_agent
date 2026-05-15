@@ -186,10 +186,10 @@ def run_sub_agent(
                         "message": f"Sub-agent has {max_turns - turn_count} turns left. Please extend."
                     }
                 }, write_gate, read_gate)
-            except APIError:
-                pass  # best-effort, don't crash the sub-agent
-            except Exception:
-                pass  # best-effort, don't crash the sub-agent
+            except APIError as exc:
+                print(f"  ⚠ auto-ping failed: {exc}", file=sys.stderr, flush=True)
+            except Exception as exc:
+                print(f"  ⚠ auto-ping failed: {exc}", file=sys.stderr, flush=True)
 
         if cancel_event is not None and cancel_event.is_set():
             return SubAgentResult(

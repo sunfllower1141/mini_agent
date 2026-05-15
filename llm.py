@@ -227,6 +227,20 @@ def _inject_orchestration_context(messages: list[dict]) -> None:
                 "Use agent_status() to check each or collect_any() to grab "
                 "the first result. Do NOT redo their work."
             )
+        # --- Inject new broadcast messages from sub-agents ---
+        all_msgs = getattr(runtime, "messages", None)
+        if all_msgs is not None:
+            msg_count = len(all_msgs)
+            last_seen = getattr(_TOOL_CONTEXT, "_last_msg_count", 0)
+            if msg_count > last_seen:
+                new_msgs = all_msgs[last_seen:]
+                _TOOL_CONTEXT._last_msg_count = msg_count
+                parts.append("New message(s) from sub-agents:")
+                for m in new_msgs[-5:]:  # cap at 5 most recent
+                    parts.append(f"  [{getattr(m,'type','?')}] {getattr(m,'from','?')}: {str(getattr(m,'result',''))[:200]}")
+                if len(new_msgs) > 5:
+                    parts.append(f"  ... ({len(new_msgs)-5} more)")
+                parts.append("Use agent_inbox or agent_read to view full messages.")
         if parts:
             messages.append({
                 "role": "user",

@@ -510,7 +510,8 @@ def tool_summary(tc: dict) -> str:
     name = fn["name"]
     try:
         args = json.loads(fn["arguments"])
-    except Exception:
+    except Exception as exc:
+        print(f"  ⚠ tool summary parse failed for '{name}': {exc}", file=sys.stderr, flush=True)
         args = {}
 
     summarize = _TOOL_SUMMARIES.get(name)

@@ -315,8 +315,8 @@ def _apply_single_edit(
                             summary=f"edit_file mismatch: {old_first_line[:80]}",
                             detail=f"File: {resolved}. Could not find exact match for old_string.",
                         )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    print(f"  ⚠ backup skipped: {exc}", file=sys.stderr, flush=True)
             return (path, ToolResult(success=False, content=hint))
 
         if count == -1:
