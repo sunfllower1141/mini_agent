@@ -241,6 +241,19 @@ def _inject_orchestration_context(messages: list[dict]) -> None:
                 if len(new_msgs) > 5:
                     parts.append(f"  ... ({len(new_msgs)-5} more)")
                 parts.append("Use agent_inbox or agent_read to view full messages.")
+        # --- Auto-extend productive sub-agents running low on turns ---
+        if running_ids:
+            for tid in running_ids:
+                status_snap = runtime.status_snapshots.get(tid, {})
+                turns_budget = status_snap.get("turns_budget", 0)
+                current_turn = status_snap.get("turn", 0)
+                remaining = turns_budget - current_turn
+                if remaining <= 3 and remaining > 0:
+                    # Only extend if agent is making forward progress
+                    last_action = status_snap.get("last_action", "")
+                    if last_action and last_action != "idle":
+                        runtime.extend_turns(tid, 10)
+                        parts.append(f"  🔄 Auto-extended '{tid}' (+10 turns, {remaining} left)")
         if parts:
             messages.append({
                 "role": "user",

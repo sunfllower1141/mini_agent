@@ -88,6 +88,18 @@ class AgentRuntime:
         self.status_snapshots: dict[str, dict] = {}
         # Global broadcast message list for the orchestrator to read
         self.messages: list[dict] = []
+        # Garbage-collect stale tasks from previous sessions
+        self._gc_stale()
+
+    def _gc_stale(self) -> None:
+        """Cancel any running tasks left over from a previous session."""
+        with self._lock:
+            stale = list(self.tasks.keys())
+        for tid in stale:
+            self.cancel(tid)
+        if stale:
+            import sys
+            print(f"  🧹 Cleaned up {len(stale)} stale agent(s) from previous session", file=sys.stderr, flush=True)
 
     # ---- spawn ----
 
