@@ -814,6 +814,8 @@ def _agent_handoff(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> Too
             runtime._lock,
             target=target,
         )
+        # Also append to runtime.messages for orchestrator visibility
+        runtime.messages.append(msg.to_legacy_dict())
 
     target_info = f" to '{target}'" if target else ""
     return ToolResult(

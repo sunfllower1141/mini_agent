@@ -86,6 +86,8 @@ class AgentRuntime:
         # by the sub-agent loop every turn. The parent can read these via agent_status
         # to see what a running sub-agent is doing without waiting for a heartbeat.
         self.status_snapshots: dict[str, dict] = {}
+        # Global broadcast message list for the orchestrator to read
+        self.messages: list[dict] = []
 
     # ---- spawn ----
 
