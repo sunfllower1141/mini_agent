@@ -409,7 +409,7 @@ class TestRunAgentTurn(unittest.TestCase):
 
         self.assertEqual(msg["content"], "Done.")
         self.assertTrue(os.path.isfile(os.path.join(self.workspace, "f.txt")))
-        self.assertEqual(len(messages), 6)  # user, asst(tools), tool, budget, checkpoint, asst
+        self.assertEqual(len(messages), 5)  # user, asst(tools), tool, checkpoint, asst
 
     @patch("api.requests.post")
     def test_callbacks_fire(self, mock_post):
@@ -457,7 +457,7 @@ class TestRunAgentTurn(unittest.TestCase):
 
         self.assertEqual(msg["content"], "All done.")
         self.assertTrue(os.path.isfile(os.path.join(self.workspace, "out.txt")))
-        self.assertEqual(len(messages), 9)  # user, budget, asst, tool, budget, asst, tool, budget, asst
+        self.assertEqual(len(messages), 7)  # user, asst, tool, asst, tool, checkpoint, asst
 
     def test_token_budget_code_path_exists(self):
         """Verify _save_turn_summary stores turn history and _total_tokens counts."""

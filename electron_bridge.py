@@ -133,7 +133,10 @@ def main() -> None:
             _error(id_, -32601, f"method not found: {method}")
             continue
 
-        handler(id_, params)
+        try:
+            handler(id_, params)
+        except Exception as exc:
+            _error(id_, -5, f"handler error: {exc}")
 
 
 if __name__ == "__main__":

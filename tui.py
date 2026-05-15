@@ -43,7 +43,8 @@ from textual.binding import Binding
 import requests
 
 from config import AgentConfig, resolve_workspace, init_session, parse_args, build_startup_context
-from llm import run_agent_turn, THINKING_START, THINKING_END
+from llm import run_agent_turn
+from stream import THINKING_START, THINKING_END
 from prompt import build_system_prompt
 from safety import ReadSafetyGate, WriteSafetyGate
 from memory import MemoryStore

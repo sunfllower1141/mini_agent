@@ -41,7 +41,7 @@ _AGENT_MSGS_LOCK = threading.Lock()
 # spawn_agent
 # ---------------------------------------------------------------------------
 
-_MAX_CONCURRENT = 5          # hard cap on concurrent sub-agents
+_MAX_CONCURRENT = 10         # hard cap on concurrent sub-agents
 _DEFAULT_MAX_TURNS = 15      # default turn budget per sub-agent
 _ABSOLUTE_MAX_TURNS = 35     # never allow more than this
 
@@ -129,6 +129,11 @@ def _spawn_one(
                 tui_queue.put(("sub_tree", "status", task_id, status))
         finally:
             config.stream = original_stream
+            # Always release file reservations, even on crash.
+            # store_result (called in try) would normally do this, but if
+            # run_sub_agent raises an unhandled exception, files are leaked.
+            from tools import release_all_files
+            release_all_files(task_id)
 
     thread = threading.Thread(target=_runner, daemon=True, name=f"subagent-{task_id}")
     # Determine parent task_id (passed explicitly by caller)
@@ -205,8 +210,9 @@ def _spawn_agent(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolRes
 
         parent_task_id = getattr(_TOOL_CONTEXT, "_agent_task_id", "")
         task_ids = []
+        _max_concurrent = getattr(getattr(_TOOL_CONTEXT, "_agent_config", None), "sub_agent_max_concurrent", _MAX_CONCURRENT)
         for task in valid_tasks:
-            if runtime.active_count >= _MAX_CONCURRENT:
+            if runtime.active_count >= _max_concurrent:
                 break
             tid = _spawn_one(task, config, runtime, wg, rg, max_turns,
                              cancel_event=None, visible=visible,
@@ -255,7 +261,9 @@ def _spawn_agent(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolRes
             content="Agent runtime not initialized. Multi-agent support is unavailable.",
         )
 
-    if runtime.active_count >= _MAX_CONCURRENT:
+    config = getattr(_TOOL_CONTEXT, "_agent_config", None)
+    _max_concurrent = getattr(config, "sub_agent_max_concurrent", _MAX_CONCURRENT)
+    if runtime.active_count >= _max_concurrent:
         return ToolResult(
             success=False,
             content=(
@@ -487,7 +495,6 @@ def _collect_agent_summary(args: dict) -> str:
 # collect_any
 # ---------------------------------------------------------------------------
 
-_COLLECT_ANY_POLL = 0.2     # seconds between polls (unused, kept for reference)
 _COLLECT_ANY_TIMEOUT = 10   # seconds to wait for any sub-agent (kept short so
                             # parent agent can check for user interjections between
                             # polls — the parent's natural turn cycle handles this)
@@ -1419,21 +1426,22 @@ def _read_image(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolRes
 
     # Validate file exists and is an image
     import os as _os
-    if not _os.path.isfile(path):
+    resolved = sr.resolved_path
+    if not _os.path.isfile(resolved):
         return ToolResult(success=False, content=f"File not found: {path}")
 
-    ext = _os.path.splitext(path)[1].lower()
+    ext = _os.path.splitext(resolved)[1].lower()
     if ext not in _IMAGE_EXTENSIONS:
         return ToolResult(
             success=False,
             content=f"Unsupported image format: {ext}. Supported: {sorted(_IMAGE_EXTENSIONS)}",
         )
 
-    mime_type = _guess_mime_type(path)
+    mime_type = _guess_mime_type(resolved)
 
     # Read and base64-encode the image
     try:
-        with open(path, "rb") as f:
+        with open(resolved, "rb") as f:
             image_bytes = f.read()
         b64_data = base64.b64encode(image_bytes).decode("utf-8")
     except Exception as e:

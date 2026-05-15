@@ -75,3 +75,26 @@ tools/
 - Sub-agent system prompt enhanced with shared file coordination rules
 - FILE_RESERVATIONS system confirmed fully wired into write_file/edit_file
 - Multiple Electron fixes: CSP, preload.cjs, venv python, dict unpacking, stdout buffering
+
+### 2025-07-17 (Session 2 — Memory Compression/Pruning Review)
+- Comprehensive review of memory.py compression/pruning pipeline
+- Added 3 new test files: test_memory_compression.py (39 tests), test_memory_internals.py (29 tests), test_memory_summarize.py (22 tests)
+- Total memory tests: 25 → 115 (25 original + 90 new)
+- BUG FIX: _prune_by_tokens `range(start, len(messages))` → `range(start + 1, len(messages))` — was breaking immediately when first message was a user, preventing ALL token-budget pruning
+- Updated prompt.py Orchestrator mode: added "LLM generation is SLOW — wait MINUTES" rule to prevent premature sub-agent cancellation
+- Bumped prompt length test limit 17500 → 18500
+- All 115 memory + 14 prompt tests pass (4 pre-existing unrelated failures in agent_loop + TUI)
+
+### 2025-07-17 (Session 3 — Architecture Audit + Fixes)
+- Full architecture audit across 4 reports (audit_core.md, audit_tools.md, audit_agent_system.md, audit_io.md)
+- CRITICAL fixes: scatter_gather param name, read_image workspace bypass
+- HIGH fixes: electron_bridge handler try/except, fan_in timeout starvation, subscription edge case, file reservation leak on crash, stream.py timeout doc
+- MEDIUM/LOW: deleted _inject_token_budget no-op from 3 files, deleted dead imports from llm/api, used named constants in _summarize_pruned, extracted _SKIP_REF_NAMES module constant, deleted _sem_chunk_py dead code
+- New test files from session 2: test_memory_compression.py (39), test_memory_internals.py (29), test_memory_summarize.py (22) — 115 total memory tests
+- Memory bug fixed: _prune_by_tokens range(start) → range(start+1)
+- Prompt updated: LLM generation patience rule for sub-agents
+
+### 2025-07-17 (Session 4 — Test Fixes + Sub-agent Pruning)
+- Fixed 3 pre-existing test failures: agent_loop budget injection (now no-op, removed from tests), TUI handle_clear (now 2 system messages)
+- CRITICAL: Added periodic compression+pruning to sub-agent loop — sub-agents previously grew unbounded messages causing API 400 errors. Now calls _compress_tool_results + _prune_by_tokens every 5 turns when >20 messages, with summary injection.
+- Full suite: 817 passed, 0 failed

@@ -101,19 +101,15 @@ def fan_in(
 
     results: list[SubAgentResult | None] = [None] * len(task_ids)
 
-    deadline = time.monotonic() + timeout
     for i, tid in enumerate(task_ids):
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            break
-
-        # Use wait_for with predicate to avoid lost-wakeup race.
+        # Each task gets the full timeout independently — earlier tasks
+        # no longer starve later ones.        # Use wait_for with predicate to avoid lost-wakeup race.
         def _ready(tid=tid):
             status = runtime.get_status(tid)
             return status != "running"
 
         with runtime._condition:
-            runtime._condition.wait_for(_ready, timeout=remaining)
+            runtime._condition.wait_for(_ready, timeout=timeout)
 
         status = runtime.get_status(tid)
         if status == "completed":
@@ -531,11 +527,11 @@ def _scatter_gather(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> To
             content="Missing required parameter: 'items' (list).",
         )
 
-    template = args.get("template", "")
+    template = args.get("worker_task_template", "")
     if not template:
         return ToolResult(
             success=False,
-            content="Missing required parameter: 'template' (str).",
+            content="Missing required parameter: 'worker_task_template' (str).",
         )
 
     max_turns = args.get("max_turns", 15)

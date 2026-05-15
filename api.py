@@ -21,7 +21,7 @@ import requests
 
 from config import AgentConfig
 from retry import _request_with_retry
-from stream import _parse_stream, THINKING_START, THINKING_END
+from stream import _parse_stream
 from tools.schema import TOOLS
 
 
@@ -38,7 +38,6 @@ def truncate_content(content: str, max_len: int = 300) -> str:
 
 def format_tool_detail(result: "ToolResult", max_len: int = 300) -> str:
     """Format a ToolResult's content for display, truncated to *max_len*."""
-    from tools import ToolResult as TR
     detail = result.content[:max_len]
     if len(result.content) > max_len:
         detail += "…"

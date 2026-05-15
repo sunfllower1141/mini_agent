@@ -48,6 +48,9 @@ def configured_context(tmp_path, monkeypatch):
         api_key = "test-key"
         api_url = "https://test.api"
         stream = False
+        sub_agent_model = "test-model"
+        sub_agent_api_key = ""
+        sub_agent_max_concurrent = 5
         sub_agent_max_turns = 5
     config = MockConfig()
     set_context(_agent_runtime=runtime, _agent_config=config, workspace=str(tmp_path))
@@ -366,6 +369,9 @@ class TestRecursionGuard:
             api_key = "key"
             api_url = "http://test"
             stream = False
+            sub_agent_model = "test"
+            sub_agent_api_key = ""
+            sub_agent_max_concurrent = 5
             workspace = "/tmp"
             unrestricted = False
             allow_overwrites = True

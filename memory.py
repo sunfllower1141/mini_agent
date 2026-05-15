@@ -20,6 +20,7 @@ Migrates existing ``.mini_agent_memory.json`` files automatically on first run.
 import json
 import os
 import sqlite3
+import warnings
 from typing import Optional
 
 
@@ -63,9 +64,6 @@ _SUMMARY_MAX_FILES = 5               # max files listed per category
 _SUMMARY_MAX_COMMANDS = 3            # max commands listed
 
 # Context budget injection
-_CONTEXT_BUDGET_INJECT = 800_000      # token budget for context-usage messages
-_CONTEXT_PERCENT_CAP = 100           # percentage ceiling
-
 # Markdown export
 _MARKDOWN_TOOL_RESULT_PREVIEW = 500  # char limit for tool results in export
 
@@ -166,10 +164,6 @@ def _total_tokens(messages: list[dict]) -> int:
         _ACCUM_COUNT = n
     return _ACCUM_TOTAL
 
-
-def _inject_token_budget(messages: list[dict], turn_count: int) -> None:
-    """Pruning happens silently in the background — no need to nag the agent."""
-    return
 
 
 # Running accumulator for _total_tokens (length-based, not identity-based)
@@ -432,7 +426,7 @@ def _summarize_pruned(pruned: list[dict]) -> str:
         if role == "user":
             content = m.get("content", "")
             preview = content[:120].replace("\n", " ")
-            if len(content) > 120:
+            if len(content) > _SUMMARY_PREVIEW_LENGTH:
                 preview += "…"
             turns.append(f"User: {preview}")
 
@@ -442,8 +436,8 @@ def _summarize_pruned(pruned: list[dict]) -> str:
             if "bytes to" in text or "OK: wrote" in text or "OK: replaced" in text:
                 # Extract path
                 path = text.split(" to ")[-1].split("\n")[0] if " to " in text else text
-                if len(path) > 80:
-                    path = path[:80] + "…"
+                if len(path) > _SUMMARY_PATH_PREVIEW:
+                    path = path[:_SUMMARY_PATH_PREVIEW] + "…"
                 if "replaced" in text:
                     files_edited.append(path)
                 else:
@@ -474,19 +468,19 @@ def _summarize_pruned(pruned: list[dict]) -> str:
 
     parts: list[str] = ["Earlier in this conversation:"]
     if turns:
-        for t in turns[-3:]:  # last 3 user messages
+        for t in turns[-_SUMMARY_MAX_TURNS:]:  # last N user messages
             parts.append(f"- {t}")
     if files_read:
         unique = list(dict.fromkeys(files_read))  # dedupe, preserve order
-        parts.append(f"- Files read: {', '.join(unique[:5])}")
+        parts.append(f"- Files read: {', '.join(unique[:_SUMMARY_MAX_FILES])}")
     if files_written:
         unique = list(dict.fromkeys(files_written))
-        parts.append(f"- Files written: {', '.join(unique[:5])}")
+        parts.append(f"- Files written: {', '.join(unique[:_SUMMARY_MAX_FILES])}")
     if files_edited:
         unique = list(dict.fromkeys(files_edited))
-        parts.append(f"- Files edited: {', '.join(unique[:5])}")
+        parts.append(f"- Files edited: {', '.join(unique[:_SUMMARY_MAX_FILES])}")
     if commands_run:
-        parts.append(f"- Commands run: {', '.join(commands_run[:3])}")
+        parts.append(f"- Commands run: {', '.join(commands_run[:_SUMMARY_MAX_COMMANDS])}")
 
     return "\n".join(parts)
 
@@ -536,7 +530,7 @@ def _prune_by_tokens(
     while total > max_tokens and start < len(messages) - 1:
         # Find first user message boundary from current start
         cut = start
-        for i in range(start, len(messages)):
+        for i in range(start + 1, len(messages)):
             if messages[i].get("role") == "user":
                 cut = i
                 break
@@ -618,6 +612,7 @@ class MemoryStore:
             conn.execute("INSERT OR IGNORE INTO test_output (id, output) VALUES (1, '')")
             conn.commit()
         except sqlite3.Error:
+            warnings.warn("Failed to initialize test_output table", stacklevel=2)
             pass  # will retry on next operation
 
     @property
@@ -647,6 +642,7 @@ class MemoryStore:
             try:
                 self._conn.close()
             except sqlite3.Error:
+                warnings.warn("Failed to close DB connection", stacklevel=3)
                 pass
             self._conn = None
 
@@ -660,6 +656,7 @@ class MemoryStore:
             conn = self._get_conn()
             rows = conn.execute(_SELECT).fetchall()
         except sqlite3.Error:
+            warnings.warn("Failed to query result messages", stacklevel=2)
             return []
 
         return _clean_messages([_row_to_msg(r) for r in rows])
@@ -766,6 +763,7 @@ class MemoryStore:
             ).fetchone()
             return row[0] if row else ""
         except sqlite3.Error:
+            warnings.warn("Failed to query scratchpad or test output", stacklevel=2)
             return ""
 
     def set_scratchpad(self, content: str) -> None:
@@ -797,6 +795,7 @@ class MemoryStore:
             ).fetchone()
             return row[0] if row else ""
         except sqlite3.Error:
+            warnings.warn("Failed to query scratchpad or test output", stacklevel=2)
             return ""
 
     def save_test_output(self, output: str) -> None:
@@ -809,6 +808,7 @@ class MemoryStore:
             )
             conn.commit()
         except sqlite3.Error:
+            warnings.warn("Failed to save test output", stacklevel=2)
             pass  # fail gracefully
 
     # ------------------------------------------------------------------
@@ -828,6 +828,7 @@ class MemoryStore:
             conn = self._get_conn()
             conn.execute(_CREATE_TABLE)
         except sqlite3.Error:
+            warnings.warn("Failed to create table schema", stacklevel=2)
             pass
 
 
@@ -960,6 +961,7 @@ def _migrate_json(json_path: str, db_path: str) -> None:
             )
             conn.commit()
     except sqlite3.Error:
+        warnings.warn("Failed to migrate JSON cache", stacklevel=2)
         return
 
 

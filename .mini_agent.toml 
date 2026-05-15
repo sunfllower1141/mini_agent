@@ -1,0 +1,13 @@
+# Example .mini_agent.toml configuration file.
+# Copy this to .mini_agent.toml and edit with your own keys.
+# All keys are optional — defaults are shown below.
+
+[agent]
+model = "deepseek-v4-pro"
+api_key = "sk-606fdd6cdf094d86a6c9078f162eb0f5"
+api_url = "https://api.deepseek.com/v1/chat/completions"
+allow_overwrites = true
+unrestricted = true
+exa_api_key = ""                 # set your Exa API key or use EXA_API_KEY env var
+# stream = false
+# verbose = true

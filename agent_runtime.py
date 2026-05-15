@@ -244,6 +244,9 @@ class AgentRuntime:
         with self._lock:
             inbox = self.inboxes.setdefault(task_id, [])
             inbox.append(msg)
+            # Ring-buffer cap at 1000 to prevent unbounded growth on long-running agents
+            if len(inbox) > 1000:
+                inbox[:] = inbox[-1000:]
 
     def clear_inbox(self, task_id: str) -> None:
         """Remove inbox and subscriptions for a task_id (cleanup on completion)."""

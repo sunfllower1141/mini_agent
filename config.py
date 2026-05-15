@@ -24,6 +24,8 @@ CONFIG_FILENAME = ".mini_agent.toml"
 MEMORY_FILENAME = ".mini_agent_memory.db"
 
 DEFAULT_MODEL        = "deepseek-v4-pro"
+DEFAULT_SUB_AGENT_MODEL = "deepseek-v4-flash"
+DEFAULT_SUB_AGENT_MAX_CONCURRENT = 10
 DEFAULT_API_URL      = "https://api.deepseek.com/v1/chat/completions"
 DEFAULT_API_KEY      = ""  # set via DEEPSEEK_API_KEY env var, .env file, or .mini_agent.toml
 DEFAULT_MAX_MESSAGES = 500
@@ -44,6 +46,7 @@ HTTP_POOL_MAXSIZE       = 4    # max total pool size
 
 # Environment variable names used during config loading
 ENV_DEEPSEEK_API_KEY = "DEEPSEEK_API_KEY"
+ENV_SUB_AGENT_API_KEY = "SUB_AGENT_API_KEY"
 ENV_DEEPSEEK_API_URL = "DEEPSEEK_API_URL"
 ENV_AGENT_WORKSPACE   = "AGENT_WORKSPACE"
 ENV_EXA_API_KEY       = "EXA_API_KEY"
@@ -90,6 +93,9 @@ class AgentConfig:
     """
 
     model: str = DEFAULT_MODEL
+    sub_agent_model: str = DEFAULT_SUB_AGENT_MODEL
+    sub_agent_api_key: str = DEFAULT_API_KEY  # separate key for sub-agents
+    sub_agent_max_concurrent: int = DEFAULT_SUB_AGENT_MAX_CONCURRENT
     api_key: str = DEFAULT_API_KEY
     api_url: str = DEFAULT_API_URL
     workspace: str = ""
@@ -154,6 +160,9 @@ AgentConfig._toml_cache = {}
 # Keys recognised in TOML and their expected types
 _TOML_SCHEMA: dict[str, type] = {
     "model": str,
+    "sub_agent_model": str,
+    "sub_agent_api_key": str,
+    "sub_agent_max_concurrent": int,
     "api_key": str,
     "api_url": str,
     "allow_overwrites": bool,
@@ -234,7 +243,7 @@ def _load_toml_from_workspace(config: AgentConfig, workspace: str) -> None:
         agent_data = data.get("agent", {})
         AgentConfig._toml_cache[cache_key] = agent_data
         _apply_toml(config, agent_data)
-    except Exception as exc:
+    except (OSError, tomllib.TOMLDecodeError) as exc:
         print(f"Warning: failed to parse {config_path}: {exc}",
               file=sys.stderr)
 
@@ -274,6 +283,8 @@ def _apply_env_overrides(config: AgentConfig) -> None:
     """Phase 2: apply environment variable overrides on top of TOML/defaults."""
     if os.environ.get(ENV_DEEPSEEK_API_KEY):
         config.api_key = os.environ[ENV_DEEPSEEK_API_KEY]
+    if os.environ.get(ENV_SUB_AGENT_API_KEY):
+        config.sub_agent_api_key = os.environ[ENV_SUB_AGENT_API_KEY]
     if os.environ.get(ENV_DEEPSEEK_API_URL):
         config.api_url = os.environ[ENV_DEEPSEEK_API_URL]
     if os.environ.get(ENV_AGENT_WORKSPACE):
@@ -375,7 +386,7 @@ def build_startup_context(workspace: str) -> str:
                     capture_output=True, text=True, timeout=GIT_LOG_TIMEOUT)
         if r.returncode == 0 and r.stdout.strip():
             parts.append("\n## Recent git log\n```\n" + r.stdout.rstrip() + "\n```")
-    except Exception:
+    except OSError | subprocess.TimeoutExpired:
         pass
 
     return "\n".join(parts) + "\n"
@@ -502,7 +513,7 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
                     f"{', '.join(connected)}",
                     file=sys.stderr,
                 )
-        except Exception as exc:
+        except OSError as exc:
             print(f"Warning: MCP init failed: {exc}", file=sys.stderr)
 
     saved = memory.load()

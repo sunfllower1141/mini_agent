@@ -78,7 +78,7 @@ class TestFanOut:
 
         runtime = MagicMock(spec=AgentRuntime)
         # Set active_count at the max — fan_out should spawn zero new agents
-        runtime.active_count = 5
+        runtime.active_count = 10
         runtime._condition = threading.Condition()
 
         with patch("tools.agent_ops._spawn_one") as mock_spawn:

@@ -55,6 +55,10 @@ def _parse_stream(response: requests.Response, on_token: Callable[[str], None] |
         print(flush=True)  # separate streaming output from the prompt line
 
     try:
+        # NOTE: iter_lines has no per-line timeout.  If the server stalls
+        # mid-stream (TCP open but no data), this blocks indefinitely.
+        # Callers should set requests-level (connect, read) timeouts on the
+        # session and consider wrapping in a timeout thread for long streams.
         for line in response.iter_lines(decode_unicode=True):
             if not line or not line.startswith(_SSE_PREFIX):
                 continue

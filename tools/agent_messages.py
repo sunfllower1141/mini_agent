@@ -222,3 +222,11 @@ def _route_message(
                 inbox = inboxes.setdefault(task_id, [])
                 inbox.append(msg)
                 routed = True
+
+        # Agents with no subscription entry at all receive ALL message types
+        # (matching the docstring: "agents with empty/no subscriptions receive ALL")
+        for task_id in inboxes:
+            if task_id not in subscriptions:
+                inbox = inboxes[task_id]
+                inbox.append(msg)
+                routed = True

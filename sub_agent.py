@@ -137,7 +137,6 @@ def run_sub_agent(
 
     import json
     import requests
-    from memory import _inject_token_budget
 
     # main loop — uses while + dynamic max_turns re-read so parent can extend budget
     while turn_count < max_turns:
@@ -158,8 +157,6 @@ def run_sub_agent(
                 error="Cancelled",
             )
 
-        # Token budget awareness (shared helper)
-        _inject_token_budget(messages, turn_count)
 
         # --- Communication nudge: every 3 turns, force the agent to coordinate ---
         if turn_count % 3 == 0:
@@ -192,7 +189,7 @@ def run_sub_agent(
             # Accumulator for periodic streaming-snapshot updates
             _stream_buf: list[str] = []
             _stream_count = [0]  # mutable counter for closure
-            _STREAM_SNAP_EVERY = 50  # tokens between streaming-snapshot updates
+            _STREAM_SNAP_EVERY = 200  # tokens between streaming-snapshot updates
             _snap_rt = getattr(_TOOL_CONTEXT, "_agent_runtime", None)
 
             def _make_streaming_wrapper(inner_on_token):
@@ -222,12 +219,21 @@ def run_sub_agent(
                     _sys.stderr.flush()
                 on_token = _make_streaming_wrapper(_on_token_stderr)
         try:
+            # Sub-agents use a cheaper/faster model for worker tasks.
+            # Save and restore to avoid mutating the shared config object.
+            _saved_model = config.model
+            _saved_key = config.api_key
+            config.model = config.sub_agent_model
+            if config.sub_agent_api_key:
+                config.api_key = config.sub_agent_api_key
             msg = call_deepseek(
                 messages, config,
                 session=requests,
                 cancel_event=cancel_event,
                 on_token=on_token,
             )
+            config.model = _saved_model
+            config.api_key = _saved_key
         except Exception as exc:
             return SubAgentResult(
                 success=False,
@@ -358,6 +364,21 @@ def run_sub_agent(
                 tool_calls_made=tool_calls_made,
                 last_error=last_err,
             )
+
+        # --- Memory management: compress old tool results and prune to
+        #     keep the sub-agent's context within API limits.  Without
+        #     this, sub-agents grow unbounded messages and hit 400 errors.
+        if turn_count % 5 == 0 and len(messages) > 20:
+            from memory import _compress_tool_results, _prune_by_tokens
+            messages, _ = _compress_tool_results(messages, keep_recent=10)
+            messages, pruned = _prune_by_tokens(
+                messages, max_tokens=100_000, max_messages=50,
+            )
+            if pruned:
+                from memory import _summarize_pruned
+                summary = _summarize_pruned(pruned)
+                if summary:
+                    messages.insert(0, {"role": "user", "content": summary})
 
     # Exhausted turns
     return SubAgentResult(

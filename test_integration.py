@@ -50,6 +50,9 @@ def configured_context(tmp_path, monkeypatch):
         api_key = "test-key"
         api_url = "https://test.api"
         stream = False
+        sub_agent_model = "test-model"
+        sub_agent_api_key = ""
+        sub_agent_max_concurrent = 5
         sub_agent_max_turns = 5
         workspace = str(tmp_path)
         unrestricted = False

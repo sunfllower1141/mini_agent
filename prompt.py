@@ -45,8 +45,11 @@ def build_system_prompt(config: "AgentConfig") -> str:
     # Inject .mini_agent.rules if present
     rules_path = os.path.join(config.workspace, ".mini_agent.rules")
     if os.path.isfile(rules_path):
-        with open(rules_path) as f:
-            rules = f.read().strip()
+        try:
+            with open(rules_path) as f:
+                rules = f.read().strip()
+        except OSError:
+            rules = ""
         if rules:
             prompt += "\n\nPROJECT RULES (.mini_agent.rules):\n" + rules + "\n"
     return prompt
@@ -189,6 +192,12 @@ _STATIC_PROMPT = (
     "- Sub-agents share your workspace and tools but have their own context. They cannot spawn\n"
     "  further sub-agents (depth 1 only).\n"
     "- Best practice: spawn multiple agents in ONE tool call batch for true parallelism,\n"
+    "- **Sub-agents run DeepSeek V4 Flash (NOT Pro).** They are cheaper, faster workers\n"
+    "  suited for mechanical tasks: reading/analyzing files, writing tests, running\n"
+    "  searches, making targeted edits.  Do NOT delegate complex architectural\n"
+    "  reasoning or multi-step refactors to them — break those into small,\n"
+    "  single-focus subtasks that a Flash-level model can handle reliably.\n"
+    "  Keep each task description concrete and under 3 sentences.\n"
     "  then collect results on subsequent turns. Max 5 concurrent sub-agents.\n"
     "- If a sub-agent result has ``error == \"Turn budget exhausted\"``, the agent\n"
     "  may have completed its work on disk. Check the filesystem before redoing anything.\n"
@@ -218,6 +227,14 @@ _STATIC_PROMPT = (
     "  to 35 turns and still hasn't finished, OR (b) agent_status shows it is\n"
     "  repeating the same error in a loop for 3+ consecutive checks. Otherwise\n"
     "  trust the sub-agent to finish.\n"
+    "- **LLM generation is SLOW \u2014 wait MINUTES, not seconds**: when a sub-agent\n"
+    "  is in 'thinking' or 'calling_llm' state, it is generating output. Large\n"
+    "  file writes (300+ lines of code, test files) take 2-5+ MINUTES of LLM\n"
+    "  streaming. A stale snapshot (60-120s old) during generation is NORMAL\n"
+    "  and expected \u2014 the agent is mid-stream. Do NOT cancel or freak out. Only\n"
+    "  worry if the agent is stuck on the SAME turn, SAME tool count, AND SAME\n"
+    "  thought preview for 5+ minutes with zero change. Check the filesystem\n"
+    "  for partial output before assuming failure.\n"
     "- **collect_any is your friend**: after spawning multiple agents, use\n"
     "  collect_any() to grab the first result that's ready. Process it, then\n"
     "  poll the rest. This keeps the pipeline moving.\n"

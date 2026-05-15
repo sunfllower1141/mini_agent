@@ -15,7 +15,7 @@ from tui import (
     _TokenMsg, _ToolStart, _ToolEnd, _SubAgentToken, _Done, _Error,
     _safe, _NotifyQueue,
 )
-from llm import THINKING_START, THINKING_END
+from stream import THINKING_START, THINKING_END
 from config import AgentConfig, DEFAULT_API_KEY
 from safety import ReadSafetyGate, WriteSafetyGate
 
@@ -530,7 +530,7 @@ class TestHandleCommand(unittest.TestCase):
     def test_handle_clear(self):
         """/clear resets messages, memory, history, and counters."""
         self.app._handle_command("/clear")
-        self.assertEqual(len(self.app.messages), 1)
+        self.assertEqual(len(self.app.messages), 2)  # system prompt + startup context
         self.assertEqual(self.app.messages[0]["role"], "system")
         self.app.memory.clear.assert_called_once()
         self.assertEqual(self.app._history, [])

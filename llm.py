@@ -22,15 +22,11 @@ from typing import Any, Callable
 
 import requests
 
-from retry import _request_with_retry
-from stream import _parse_stream, THINKING_START, THINKING_END
 
-from api import truncate_content, format_tool_detail, call_deepseek, clear_api_cache
+from api import format_tool_detail, call_deepseek, clear_api_cache
 
 from config import AgentConfig
-from terminal import c, DIM
-from tools import TOOLS, execute_tool, tool_summary, clear_tool_cache, _TOOL_CONTEXT, get_modified_files
-from memory import _total_tokens
+from tools import execute_tool, tool_summary, clear_tool_cache, _TOOL_CONTEXT, get_modified_files
 from safety import ReadSafetyGate, WriteSafetyGate
 from interject import poll_interjections
 
@@ -290,7 +286,7 @@ def _inject_modified_files_checkpoint(
 
 
 def _inject_circuit_breaker(
-    messages: list[dict], *, recent_tool_keys: list[str] | None = None,
+    messages: list[dict], *, recent_tool_keys: deque[str] | None = None,
 ) -> None:
     """Inject circuit breaker warning if recent calls are repetitive."""
     if recent_tool_keys is None:
@@ -349,7 +345,7 @@ def _inject_context(
     turn_count: int,
     memory_store: Any = None,
     read_gate: ReadSafetyGate | None = None,
-    recent_tool_keys: list[str] | None = None,
+    recent_tool_keys: deque[str] | None = None,
     cancel_event: threading.Event | None = None,
 ) -> None:
     """Inject all context messages for the current turn.
@@ -364,8 +360,6 @@ def _inject_context(
     _inject_orchestration_context(messages)
     _inject_interjections(messages)
 
-    from memory import _inject_token_budget
-    _inject_token_budget(messages, turn_count)
 
     _inject_progress_check(messages, turn_count=turn_count)
 
@@ -410,6 +404,12 @@ def _extract_pipe_deps(
     """
     pipe_deps: dict[int, tuple[int, str]] = {}
     pipe_results: dict[int, "ToolResult"] = {}
+    has_pipe = any(
+        "_pipe" in tc["function"].get("arguments", "")
+        for tc in remaining
+    )
+    if not has_pipe:
+        return pipe_deps, pipe_results
     for i, tc in enumerate(remaining):
         raw = tc["function"].get("arguments", "{}")
         try:
@@ -434,7 +434,7 @@ def _execute_single_no_pipe(
     on_tool_output: Callable[..., Any] | None,
     approve_callback: Callable[..., Any] | None,
     cancel_event: threading.Event | None,
-    recent_tool_keys: list[str] | None,
+    recent_tool_keys: deque[str] | None,
     tool_keys_lock: threading.Lock | None,
 ) -> list[tuple[dict, "ToolResult"]]:
     """Execute a single tool call with no piping dependencies."""
@@ -828,12 +828,14 @@ def run_agent_turn(
     _git_diff_injected = False
 
     # One-time cleanup / cache invalidation
-    clear_api_cache()
+    # Note: clear_api_cache is intentionally NOT called here — the incremental
+    # message-cleaning cache in api.py survives across turns since the same
+    # messages list is mutated. Clearing it every turn defeats the optimization.
     clear_tool_cache()
 
     total_usage: dict[str, int] = {}
     turn_count: int = 0
-    recent_tool_keys: list[str] = []  # circuit breaker tracking
+    recent_tool_keys: deque[str] = deque()  # circuit breaker tracking
     tool_keys_lock: threading.Lock = threading.Lock()
 
     _original_session = session  # track whether we own the session for cleanup
@@ -940,8 +942,8 @@ def _append_tool_result(
             with lock:
                 recent_keys.append(_tool_call_key(tc))
                 while len(recent_keys) > _CIRCUIT_WINDOW:
-                    recent_keys.pop(0)
+                    recent_keys.popleft()
         else:
             recent_keys.append(_tool_call_key(tc))
             while len(recent_keys) > _CIRCUIT_WINDOW:
-                recent_keys.pop(0)
+                recent_keys.popleft()
