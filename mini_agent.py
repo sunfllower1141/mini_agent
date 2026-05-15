@@ -50,6 +50,8 @@ from safety import ReadSafetyGate, WriteSafetyGate
 from memory import MemoryStore
 from terminal import c, DIM, _CYAN, _YELLOW, _GREEN, _RED
 from tools import set_context, build_symbol_index
+import tools  # for auto-wake sub-agent check
+import tools  # for auto-wake sub-agent check
 
 
 # ---------------------------------------------------------------------------
@@ -119,9 +121,30 @@ def main() -> None:
         _log(config.verbose, "(quiet mode — use --quiet to suppress tool logs)")
     _log(config.verbose)
 
+    def _auto_wake_subagents(messages):
+        """Check for sub-agent completions/messages and inject as user turn."""
+        try:
+            runtime = getattr(tools._TOOL_CONTEXT, "_agent_runtime", None)
+            if runtime is not None:
+                pending = runtime.get_pending_results()
+                if pending:
+                    parts = ["[Auto-wake] Sub-agent(s) completed since last response:"]
+                    for tid, result in pending:
+                        status = "OK" if result.success else "FAILED"
+                        parts.append(f"  - {tid}: [{status}] {str(result.content)[:300]}")
+                    parts.append("Respond to the completions above.")
+                    messages.append({"role": "user", "content": "\n".join(parts)})
+                    return True
+        except Exception:
+            pass
+        return False
+
     session = session_data["session"]
     try:
         while True:
+            # --- Auto-wake: check sub-agents before blocking on input ---
+            if _auto_wake_subagents(messages):
+                continue
             try:
                 user_input = input("> ").strip()
             except (EOFError, KeyboardInterrupt):
