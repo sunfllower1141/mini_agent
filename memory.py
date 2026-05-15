@@ -168,27 +168,8 @@ def _total_tokens(messages: list[dict]) -> int:
 
 
 def _inject_token_budget(messages: list[dict], turn_count: int) -> None:
-    """Append a context-usage message so the LLM knows how full its window is."""
-    if turn_count <= 1:
-        return
-    estimate = _total_tokens(messages)
-    used_pct = min(_CONTEXT_PERCENT_CAP, estimate * _CONTEXT_PERCENT_CAP // _CONTEXT_BUDGET_INJECT)
-    rem_pct = _CONTEXT_PERCENT_CAP - used_pct
-
-    # Average burn rate and estimated turns remaining
-    burn_rate = estimate / turn_count  # tokens per turn
-    turns_left = int((_CONTEXT_BUDGET_INJECT - estimate) / burn_rate) if burn_rate > 0 else 999
-    note = " LOW" if rem_pct < 20 else ""
-
-    messages.append({
-        "role": "user",
-        "content": (
-            f"[Context: ~{estimate}//{_CONTEXT_BUDGET_INJECT} tokens "
-            f"({rem_pct}% left, ~{turns_left} turns{note}). "
-            f"Be concise if nearing limit.]"
-        ),
-        "_transient": True,
-    })
+    """Pruning happens silently in the background — no need to nag the agent."""
+    return
 
 
 # Running accumulator for _total_tokens (length-based, not identity-based)
