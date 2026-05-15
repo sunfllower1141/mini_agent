@@ -274,13 +274,20 @@ def run_sub_agent(
             config.model = _saved_model
             config.api_key = _saved_key
         except Exception as exc:
+            # On 400, dump message structure for debugging
+            detail = f"API call failed: {exc}"
+            if "tool" in str(exc).lower() and "preceding" in str(exc).lower():
+                roles = [m.get("role", "?") for m in messages]
+                tc_ids = [m.get("tool_call_id", "-")[:12] if m.get("role") == "tool" else "-" for m in messages]
+                detail += f" | Roles: {roles}"
+                detail += f" | ToolIDs: {tc_ids[:20]}"
             return SubAgentResult(
                 success=False,
-                content=f"API call failed: {exc}",
+                content=detail,
                 turns_used=turn_count,
                 tool_calls_made=tool_calls_made,
                 scratchpad=_scratchpad,
-                error=f"API error: {exc}",
+                error=detail,
             )
 
         if cancel_event is not None and cancel_event.is_set():
