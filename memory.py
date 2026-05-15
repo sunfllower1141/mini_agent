@@ -489,7 +489,7 @@ def _summarize_pruned(pruned: list[dict]) -> str:
         role = m.get("role", "")
         if role == "user":
             content = m.get("content", "")
-            preview = content[:120].replace("\n", " ")
+            preview = content[:_SUMMARY_PREVIEW_LENGTH].replace("\n", " ")
             if len(content) > _SUMMARY_PREVIEW_LENGTH:
                 preview += "…"
             turns.append(f"User: {preview}")
@@ -869,7 +869,7 @@ class MemoryStore:
         """
         _clear_message_caches()
         cleaned = _clean_messages(messages)
-        cleaned, compressed = _compress_tool_results(cleaned, keep_recent=6)
+        cleaned, compressed = _compress_tool_results(cleaned, keep_recent=_COMPRESSION_KEEP_RECENT)
 
         # Incremental token accounting: only count new messages since
         # last save.  When compression or pruning occurs, adjust below.
