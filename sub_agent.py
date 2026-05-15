@@ -250,13 +250,14 @@ def run_sub_agent(
 
             # --- Pre-call token budget check ---
             # Estimate total tokens and force-prune if over safety ceiling.
-            from memory import _total_tokens, _compress_tool_results, _prune_by_tokens, _summarize_pruned
+            from memory import _total_tokens, _compress_tool_results, _prune_by_tokens, _summarize_pruned, _strip_orphaned_tool_results
             est = _total_tokens(messages)
             if est > _SUB_SAFETY_TOKEN_CEILING:
                 messages, _ = _compress_tool_results(messages, keep_recent=_SUB_COMPRESSION_KEEP_RECENT)
                 messages, pruned = _prune_by_tokens(
                     messages, max_tokens=_SUB_SAFETY_TOKEN_CEILING, max_messages=_SUB_MAX_MESSAGES,
                 )
+                messages = _strip_orphaned_tool_results(messages)
                 if pruned:
                     summary = _summarize_pruned(pruned)
                     if summary:
@@ -421,11 +422,12 @@ def run_sub_agent(
         #     Run every turn (not just every 5th) once we have enough
         #     messages, because a single turn can produce massive tool output.
         if len(messages) > _SUB_COMPRESSION_THRESHOLD:
-            from memory import _compress_tool_results, _prune_by_tokens
+            from memory import _compress_tool_results, _prune_by_tokens, _summarize_pruned, _strip_orphaned_tool_results
             messages, _ = _compress_tool_results(messages, keep_recent=_SUB_COMPRESSION_KEEP_RECENT)
             messages, pruned = _prune_by_tokens(
                 messages, max_tokens=_SUB_MAX_TOKENS, max_messages=_SUB_MAX_MESSAGES,
             )
+            messages = _strip_orphaned_tool_results(messages)
             if pruned:
                 from memory import _summarize_pruned
                 summary = _summarize_pruned(pruned)

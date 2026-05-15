@@ -550,6 +550,32 @@ def _summarize_pruned(pruned: list[dict]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Orphaned-tool cleanup
+# ---------------------------------------------------------------------------
+
+def _strip_orphaned_tool_results(messages: list[dict]) -> list[dict]:
+    """Remove any ``tool`` messages whose preceding ``assistant``
+    message lacks matching ``tool_calls``.  Pruning can delete the
+    assistant message but leave its tool results orphaned, causing
+    API 400: ``\"Messages with role 'tool' must be a response to a
+    preceding message with 'tool_calls'\"``."""
+    result: list[dict] = []
+    pending_tool_call_ids: set[str] = set()
+    for m in messages:
+        if m.get("role") == "assistant" and "tool_calls" in m:
+            pending_tool_call_ids = {tc["id"] for tc in m["tool_calls"]}
+            result.append(m)
+        elif m.get("role") == "tool":
+            tid = m.get("tool_call_id", "")
+            if tid in pending_tool_call_ids:
+                result.append(m)
+            # else: orphaned — drop it
+        else:
+            result.append(m)
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Token-aware pruning
 # ---------------------------------------------------------------------------
 
