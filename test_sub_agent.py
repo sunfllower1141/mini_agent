@@ -1008,6 +1008,12 @@ class TestSubscriptionsInSpawn:
 class TestIdentityCleanup:
     """Verify _agent_task_id is restored after sub-agent completes (regression)."""
 
+    def setup_method(self):
+        """Reset agent context before each test to avoid cross-test pollution."""
+        from tools import _TOOL_CONTEXT
+        _TOOL_CONTEXT._agent_depth = 0
+        _TOOL_CONTEXT._agent_task_id = ""
+
     def test_task_id_restored_after_spawn(self, configured_context):
         """After spawn_agent completes, _agent_task_id must be empty (not leak sub ID)."""
         from tools import _TOOL_CONTEXT, execute_tool
@@ -1028,7 +1034,7 @@ class TestIdentityCleanup:
         )
 
         # Wait for thread to fully finish (finally block must execute)
-        thread = _TOOL_CONTEXT._agent_runtime._threads.get(task_id)
+        thread = _TOOL_CONTEXT._agent_runtime.tasks.get(task_id)
         if thread:
             thread.join(timeout=15)
 
@@ -1056,7 +1062,7 @@ class TestIdentityCleanup:
             visible=False,
         )
 
-        thread = _TOOL_CONTEXT._agent_runtime._threads.get(task_id)
+        thread = _TOOL_CONTEXT._agent_runtime.tasks.get(task_id)
         if thread:
             thread.join(timeout=15)
 
