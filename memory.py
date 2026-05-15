@@ -610,6 +610,20 @@ class MemoryStore:
                 ")"
             )
             conn.execute("INSERT OR IGNORE INTO test_output (id, output) VALUES (1, '')")
+            # Project knowledge — persists across sessions. Stores patterns,
+            # errors, fixes and learnings that compound over time within a workspace.
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS project_knowledge ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "category TEXT NOT NULL DEFAULT 'general',"
+                "summary TEXT NOT NULL,"
+                "detail TEXT NOT NULL DEFAULT '',"
+                "importance INTEGER NOT NULL DEFAULT 1,"
+                "hits INTEGER NOT NULL DEFAULT 0,"
+                "created_at TEXT NOT NULL DEFAULT (datetime('now')),"
+                "updated_at TEXT NOT NULL DEFAULT (datetime('now'))"
+                ")"
+            )
             conn.commit()
         except sqlite3.Error:
             warnings.warn("Failed to initialize test_output table", stacklevel=2)

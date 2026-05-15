@@ -330,11 +330,17 @@ def _apply_cli_overrides(config: AgentConfig,
 
 # TODO: build_startup_context is ~70 lines — consider splitting tree generation,
 #       STATE.txt reading, and git log into separate helpers.
-def build_startup_context(workspace: str) -> str:
+def build_startup_context(
+    workspace: str, *, knowledge: list[dict] | None = None,
+) -> str:
     """Generate a one-shot system message describing the workspace at startup.
 
     Saves the agent discovery turns — no need to list_directory / read STATE.txt
     before getting to work.
+
+    If *knowledge* is provided (list of {summary, category, detail} dicts from
+    the project_knowledge table), it is appended as a "Project Learnings" section
+    so the agent benefits from past session experience.
     """
     import subprocess as _sp
 
@@ -388,6 +394,20 @@ def build_startup_context(workspace: str) -> str:
             parts.append("\n## Recent git log\n```\n" + r.stdout.rstrip() + "\n```")
     except OSError | subprocess.TimeoutExpired:
         pass
+
+    # 4. Project knowledge (cross-session learnings, if available)
+    if knowledge:
+        lines = ["\n## Project Learnings (from past sessions)"]
+        for entry in knowledge:
+            cat = entry.get("category", "general")
+            summary = entry.get("summary", "")
+            detail = entry.get("detail", "")
+            tags = f"[{cat}]"
+            if detail:
+                lines.append(f"- {tags} {summary} — {detail}")
+            else:
+                lines.append(f"- {tags} {summary}")
+        parts.append("\n".join(lines))
 
     return "\n".join(parts) + "\n"
 
@@ -447,7 +467,8 @@ def switch_session(
             if summary:
                 saved.insert(0, {"role": "user", "content": summary})
 
-    startup_ctx = build_startup_context(workspace)
+    knowledge = memory.get_top_knowledge(limit=15) if not memory._skip_load else []
+    startup_ctx = build_startup_context(workspace, knowledge=knowledge)
     messages: list[dict] = [
         {"role": "system", "content": build_system_prompt(current_config)},
         {"role": "system", "content": startup_ctx},
@@ -527,7 +548,8 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
             summary = _summarize_pruned(pruned)
             if summary:
                 saved.insert(0, {"role": "user", "content": summary})
-    startup_ctx = build_startup_context(workspace)
+    knowledge = memory.get_top_knowledge(limit=15) if memory else []
+    startup_ctx = build_startup_context(workspace, knowledge=knowledge)
     messages: list[dict] = [
         {"role": "system", "content": build_system_prompt(config)},
         {"role": "system", "content": startup_ctx},

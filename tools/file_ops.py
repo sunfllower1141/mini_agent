@@ -238,6 +238,18 @@ def _edit_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResu
             )
             if candidates:
                 hint += "\nSimilar lines found (did you mean one of these?):\n" + "\n".join(candidates)
+            # Auto-capture project knowledge on edit mismatch
+            if old_first_line:
+                try:
+                    memory = getattr(_TOOL_CONTEXT, "_memory_store", None)
+                    if memory is not None:
+                        memory.add_knowledge(
+                            category="pattern",
+                            summary=f"edit_file mismatch: {old_first_line[:80]}",
+                            detail=f"File: {safety_result.resolved_path}. Could not find exact match for old_string.",
+                        )
+                except Exception:
+                    pass  # non-critical — never crash tool execution
             return ToolResult(success=False, content=hint)
 
         if count == -1:

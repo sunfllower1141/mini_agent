@@ -449,8 +449,18 @@ def _run_tests(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
         task_id = str(uuid.uuid4())[:8]
         _TASK_REGISTRY[task_id] = proc
         # Drain stdout/stderr in daemon threads to prevent pipe-buffer deadlock
-        threading.Thread(target=_stream_reader, args=(proc.stdout, []), daemon=True).start()
-        threading.Thread(target=_stream_reader, args=(proc.stderr, []), daemon=True).start()
+        stdout_lines: list[str] = []
+        stderr_lines: list[str] = []
+        threading.Thread(target=_stream_reader, args=(proc.stdout, stdout_lines), daemon=True).start()
+        threading.Thread(target=_stream_reader, args=(proc.stderr, stderr_lines), daemon=True).start()
+        # Persist output after the process completes
+        def _persist_when_done():
+            proc.wait()
+            output = "".join(stdout_lines)
+            if stderr_lines:
+                output += "\n[stderr]\n" + "".join(stderr_lines)
+            _persist_test_output(output)
+        threading.Thread(target=_persist_when_done, daemon=True).start()
         return ToolResult(
             success=True,
             content=f"Started background test run {task_id}. Use task_status to check.",

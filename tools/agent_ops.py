@@ -1389,6 +1389,97 @@ def _recall_turn_summary(args: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# remember — store project knowledge in the persistent knowledge base
+# ---------------------------------------------------------------------------
+
+
+@_register("remember")
+def _remember(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
+    """Store a project-level learning that persists across sessions.
+
+    Saved to the ``project_knowledge`` table in the session SQLite DB.
+    Returns a summary of what was stored.
+    """
+    summary = args.get("summary", "")
+    if not summary.strip():
+        return ToolResult(
+            success=False,
+            content="Missing required parameter: 'summary' (the knowledge snippet to remember).",
+        )
+    category = args.get("category", "general")
+    detail = args.get("detail", "")
+
+    memory_store = getattr(_TOOL_CONTEXT, "_memory_store", None)
+    if memory_store is not None:
+        try:
+            conn = memory_store._get_conn()
+            conn.execute(
+                "INSERT INTO project_knowledge (category, summary, detail) VALUES (?, ?, ?)",
+                (category, summary, detail),
+            )
+            conn.commit()
+        except Exception as e:
+            return ToolResult(
+                success=True,
+                content=f"Remember noted, but DB insert failed: {e}",
+            )
+        return ToolResult(
+            success=True,
+            content=(
+                f"Stored in project knowledge:\\n"
+                f"  Category: {category}\\n"
+                f"  Summary: {summary[:200]}{'...' if len(summary) > 200 else ''}\\n"
+                f"  Detail: {detail[:200]}{'...' if len(detail) > 200 else ''}"
+            ),
+        )
+
+    # Fallback: try SQLite directly via scratchpad_path
+    db_path = getattr(_TOOL_CONTEXT, "scratchpad_path", None)
+    if db_path:
+        try:
+            import sqlite3
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                "INSERT INTO project_knowledge (category, summary, detail) VALUES (?, ?, ?)",
+                (category, summary, detail),
+            )
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            return ToolResult(
+                success=True,
+                content=f"Remember noted, but DB fallback failed: {e}",
+            )
+        return ToolResult(
+            success=True,
+            content=(
+                f"Stored in project knowledge (DB fallback):\\n"
+                f"  Category: {category}\\n"
+                f"  Summary: {summary[:200]}{'...' if len(summary) > 200 else ''}\\n"
+                f"  Detail: {detail[:200]}{'...' if len(detail) > 200 else ''}"
+            ),
+        )
+
+    return ToolResult(
+        success=True,
+        content=(
+            f"Remember noted (no persistent storage available):\\n"
+            f"  Category: {category}\\n"
+            f"  Summary: {summary[:200]}{'...' if len(summary) > 200 else ''}"
+        ),
+    )
+
+
+@_summarize("remember")
+def _remember_summary(args: dict) -> str:
+    summary = args.get("summary", "?")
+    preview = summary[:60]
+    if len(summary) > 60:
+        preview += "…"
+    return f"remember(\"{preview}\")"
+
+
+# ---------------------------------------------------------------------------
 # read_image — describe an image using GPT-4o
 # ---------------------------------------------------------------------------
 
