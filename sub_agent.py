@@ -185,7 +185,7 @@ def run_sub_agent(
                         "turns_remaining": max_turns - turn_count,
                         "message": f"Sub-agent has {max_turns - turn_count} turns left. Please extend."
                     }
-                }, None, None)
+                }, write_gate, read_gate)
             except APIError:
                 pass  # best-effort, don't crash the sub-agent
             except Exception:
