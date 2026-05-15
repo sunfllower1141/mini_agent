@@ -182,7 +182,7 @@ def run_sub_agent(
         # --- Communication nudge: every 3 turns, force the agent to coordinate ---
         if turn_count % 3 == 0:
             messages.append({
-                "role": "system",
+                "role": "user",
                 "content": (
                     "[COMMUNICATION NUDGE] You have been working for {t} turns.\n"
                     "1. Check your **agent_inbox** for messages from the orchestrator or siblings.\n"
