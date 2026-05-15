@@ -1,20 +1,45 @@
 # mini_agent
 
-A coding agent powered by DeepSeek V4 Pro with 28+ tools. Runs as a terminal REPL or a Textual TUI.
+A coding agent powered by DeepSeek V4 Pro with **44 tools**. Terminal REPL, Textual TUI, or Electron desktop app. SQLite-backed memory with cross-session project knowledge.
 
 ## Features
 
-- **29+ tools**: file operations, shell commands, search, git, web search, semantic search, symbol lookup, multi-agent delegation with 9 message types, fan-out/fan-in/pipeline/barrier/scatter-gather patterns, read_image (GPT-4o vision), MCP client for external tool servers, test running, and more
-- **MCP support**: discover tools from external MCP servers at startup (stdio JSON-RPC), configured via `[[mcp_server]]` TOML blocks
-- **Eval harness**: YAML task format, 8 checker types, binary scoring, temp workspace copies — zero core changes
-- **User interjection**: type while agent works — messages queued and surfaced at tool boundaries. Purple indicator in TUI. `/cancel` command to abort in-progress work.
+### Core
+- **44 tools**: file operations, shell commands, search, git, web search, semantic search, symbol lookup, test running, LSP integration (pylsp), MCP client for external tool servers, read_image (GPT-4o vision), and more
+- **Two models**: orchestrator uses DeepSeek V4 Pro; sub-agents use Flash (cheaper, faster workers). Separate API keys supported via `SUB_AGENT_API_KEY`
 - **Streaming**: token-by-token responses with live tool output
-- **Two interfaces**: terminal REPL (`python mini_agent.py`) or rich TUI (`python tui.py`)
-- **Safety layer**: workspace isolation, destructive command guard, overwrite protection (opt-in per config)
-- **Multi-agent**: spawn sub-agents for parallel task execution; structured inter-agent messages with validation and routing; 5 patterns (fan_out, fan_in, pipeline, barrier, scatter_gather)
-- **Memory**: SQLite-backed conversation store with token-aware pruning and incremental saves
-- **~185 bugs fixed** across 20+ files in a single session via parallel multi-agent code review and remediation
-- **717 tests**
+- **Safety**: workspace isolation, destructive command guard, overwrite protection (opt-in), file reservation system preventing cross-agent write collisions
+
+### Multi-Agent
+- **10 concurrent sub-agents** (configurable up to 15) running in background threads
+- **5 coordination patterns**: fan_out, fan_in, pipeline, barrier, scatter_gather
+- **9 inter-agent message types**: text, handoff.result, handoff.request, handoff.ack, status.heartbeat, status.error, coord.fan_out, coord.fan_in, coord.sync
+- Sub-agents auto-prune memory every 5 turns to prevent API errors
+- Streaming snapshots at 200-token granularity for real-time status
+
+### Memory & Learning
+- **SQLite conversation store** with token-aware pruning, progressive compression, and summarization
+- **Project knowledge**: cross-session pattern memory — edit_file mismatches auto-captured, workspace tree cached, manual `remember` tool. Injected at session start
+- **Inbox ring-buffer**: prevents memory leaks on long-running agents
+- **Background test output**: persisted to DB, not discarded
+
+### Interfaces
+- **Textual TUI** (`python tui.py`) — rich terminal UI with themes, diff preview, file tree
+- **Terminal REPL** (`python mini_agent.py`) — lightweight CLI
+- **Electron desktop app** (`electron_app/`) — JSON-RPC bridge with token streaming
+
+### Dev Tools
+- **LSP integration**: definition, references, hover, diagnostics via pylsp (auto-started on first use)
+- **MCP support**: discover tools from external MCP servers at startup (stdio JSON-RPC), configured via `[[mcp_server]]` TOML blocks
+- **Eval harness**: YAML task format, 8 checker types, binary scoring, temp workspace copies
+- **User interjection**: type while agent works — messages queued at tool boundaries. `/cancel` to abort
+
+### Performance
+- **Symbol index**: persisted to `.mini_agent_index.json`, mtime-gated, incremental reindex on writes
+- **Semantic search**: embeddings-based code search with per-file mtime invalidation
+- **Tool piping**: JSON parse short-circuit when no `_pipe` deps exist
+- **Deque circuit breaker**: O(1) pop vs O(n) list pop(0)
+- **Workspace tree cache**: skips `os.walk` on unchanged workspaces
 
 ## Quick Start
 
@@ -32,17 +57,12 @@ source venv/bin/activate  # Linux/macOS
 pip install -r requirements.txt
 
 # 4. Create a .env file with your API keys
-#    This is the recommended way — .env is .gitignore'd and never committed.
 cat > .env << 'EOF'
-DEEPSEEK_API_KEY="sk-your-key-here"    # required — https://platform.deepseek.com
-OPENAI_API_KEY="sk-your-key-here"      # optional — https://platform.openai.com
-EXA_API_KEY="your-exa-key-here"        # optional — https://exa.ai
+DEEPSEEK_API_KEY="sk-your-key-here"        # required — https://platform.deepseek.com
+SUB_AGENT_API_KEY="sk-your-sub-key-here"   # optional — separate key for sub-agents
+OPENAI_API_KEY="sk-your-key-here"          # optional — https://platform.openai.com
+EXA_API_KEY="your-exa-key-here"            # optional — https://exa.ai
 EOF
-#    Alternatively, export them directly:
-#    export DEEPSEEK_API_KEY="sk-your-key-here"
-#
-#    For MCP servers or advanced settings, create .mini_agent.toml:
-#    cp .mini_agent.toml.example .mini_agent.toml
 
 # 5. Run
 python tui.py          # Textual TUI (recommended)
@@ -52,26 +72,32 @@ python mini_agent.py   # Terminal REPL
 
 ## Configuration
 
-Settings are loaded from (in priority order):
-1. CLI flags (e.g. `--stream`, `--quiet`)
-2. Environment variables (`DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, `EXA_API_KEY`, `AGENT_WORKSPACE`)
-3. `.env` file in the workspace root (API keys live here — kept out of git)
-4. `.mini_agent.toml` in the workspace root (advanced settings, MCP servers)
+Priority: CLI flags > environment variables > `.env` file > `.mini_agent.toml` > defaults.
 
-Create a `.env` file for API keys (recommended). Create `.mini_agent.toml` only if you need MCP servers or non-default settings.
+### `.env` (API keys — gitignored)
+```
+DEEPSEEK_API_KEY="sk-..."       # required
+SUB_AGENT_API_KEY="sk-..."      # optional — isolates sub-agent quota
+OPENAI_API_KEY="sk-..."         # optional — GPT-4o vision
+EXA_API_KEY="..."               # optional — web search
+```
 
-### MCP Servers
-
-Define external MCP servers in `.mini_agent.toml`:
-
+### `.mini_agent.toml` (advanced settings)
 ```toml
+model = "deepseek-v4-pro"
+sub_agent_model = "deepseek-v4-flash"
+sub_agent_max_concurrent = 10
+sub_agent_max_turns = 25
+max_messages = 500
+max_tokens = 200_000
+allow_overwrites = false
+stream = false
+
 [[mcp_server]]
 name = "my-server"
 command = "python"
 args = ["-m", "my_mcp_server"]
 ```
-
-Tools from each server are registered as `mcp/<server>/<tool>` and are available automatically at startup.
 
 ### CLI Flags
 
@@ -85,50 +111,48 @@ Tools from each server are registered as `mcp/<server>/<tool>` and are available
 | `--allow-overwrites` | Allow overwriting existing files |
 | `--unrestricted` | Remove workspace boundary checks |
 | `--timeout SECONDS` | Max seconds for shell commands (default 60, max 300) |
-| `--help, -h` | Show help |
+| `-h, --help` | Show help |
 
 ## Running Tests
 
 ```bash
 python -m pytest
-# 466 tests in ~6 seconds
+# 817 tests in ~13 seconds
 ```
 
 ## Architecture
 
 ```
-mini_agent/
-  mini_agent.py       Terminal REPL entry point
-  tui.py              Textual TUI interface
-  config.py           Configuration loading (TOML, env, CLI)
-  llm.py              API calls, agent loop, circuit breaker
-  safety.py           File read/write safety gates
-  memory.py           SQLite-backed conversation store
-  prompt.py           System prompt template
-  stream.py           SSE stream parser
-  retry.py            HTTP retry with jitter and exponential backoff
-  sub_agent.py        Sub-agent execution
-  agent_runtime.py    Sub-agent registry and lifecycle
-  terminal.py         ANSI colour helpers
-  tools/
-    __init__.py       Tool dispatch, registration, JSON repair
-    schema.py         Tool JSON schemas
-    file_ops.py       read/write/edit/list/info/scratchpad/diff/restore/plan
-    shell_ops.py      run_shell, search_files, run_tests, git, task_status, verify
-    search_ops.py     find_symbol, find_usages, semantic_search, web_search, recall_turn
-    agent_ops.py      spawn/status/collect/collect_any/message/read/extend/handoff/inbox/subscribe + read_image
-    agent_messages.py AgentMessage, 9 message types, validation, routing
-    agent_patterns.py fan_out, fan_in, pipeline, barrier, scatter_gather
-    lsp.py            LSP client — JSON-RPC 2.0 over stdio, 4 tools
-    mcp_client.py     MCP client — JSON-RPC over stdio, tool discovery at startup
-  eval/
-    __init__.py       Eval package
-    runner.py         Task runner with temp workspace copies
-    scorer.py         Binary scoring with 8 checker types
-    metrics.py        Aggregate metrics
-    tasks/            YAML task definitions
-    fixtures/         Test fixtures for eval tasks
-    reports/          Eval run output
+mini_agent.py        Terminal REPL entry point
+tui.py               Textual TUI (AgentWorker, themes, tree, diff preview)
+electron_app/        Electron desktop app (main.js, preload.cjs, index.html)
+electron_bridge.py   JSON-RPC bridge for Electron (stdin/stdout)
+llm.py               LLM turn orchestration, circuit breaker, tool piping/grouping
+api.py               API calls (call_deepseek, incremental message cleaning cache)
+prompt.py            System prompt + .mini_agent.rules injection
+config.py            AgentConfig (.env + TOML + env + CLI priority)
+memory.py            SQLite conversation store + pruning + project_knowledge table
+safety.py            Read/Write safety gates + diff preview
+interject.py         Thread-safe user interjection queue
+terminal.py          ANSI colour helpers
+retry.py             HTTP retry with jitter and exponential backoff
+stream.py            SSE stream parser
+agent_runtime.py     Sub-agent lifecycle, file reservations, inboxes, subscriptions, snapshots
+sub_agent.py         Sub-agent loop with turn budget, pruning, streaming, heartbeats
+tools/
+  __init__.py        Tool dispatch, cache, JSON repair, FILE_RESERVATIONS
+  schema.py          TOOLS definitions (44 tools)
+  file_ops.py        read/write/edit/list/info — cross-agent collision detection
+  shell_ops.py       run_shell, search_files, run_tests, git, task_status, verify
+  search_ops.py      find_symbol, find_usages, semantic_search, web_search
+  agent_ops.py       spawn/status/collect/message/read/extend/handoff/inbox/subscribe/cancel
+  agent_messages.py  AgentMessage, 9 message types, validation, routing
+  agent_patterns.py  fan_out, fan_in, pipeline, barrier, scatter_gather
+  lsp.py             LSP client — pylsp integration, 4 tools
+  mcp_client.py      MCP client — stdio JSON-RPC, tool discovery
+  _json_rpc_shared.py  Shared subprocess management for LSP and MCP clients
+tests/
+  test_*.py          40 test files, 817 tests
 ```
 
 ## License
