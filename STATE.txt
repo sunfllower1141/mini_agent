@@ -1,6 +1,6 @@
 # mini_agent — Architecture & State
 
-A coding agent powered by DeepSeek V4 Pro (orchestrator) + Flash (sub-agents).
+A coding agent powered by DeepSeek V4 Pro (orchestrator) + V4 Pro (sub-agents).
 Terminal REPL + Textual TUI + Electron app. 827 tests, 45 tools, SQLite memory.
 
 ## Architecture
@@ -21,7 +21,7 @@ terminal.py          ANSI colour helpers
 retry.py             HTTP retry with jitter and exponential backoff
 stream.py            SSE stream parser
 agent_runtime.py     Sub-agent lifecycle, file reservations, inboxes, subscriptions, snapshots
-sub_agent.py         Sub-agent loop with turn budget, pruning, streaming, Flash model
+sub_agent.py         Sub-agent loop with turn budget, pruning, streaming, Pro model
 tools/
   __init__.py        Tool dispatch, cache, JSON repair, FILE_RESERVATIONS
   schema.py          TOOLS definitions (45 tools)
@@ -41,7 +41,7 @@ tests/
 ## Key State
 
 ### Models & API
-- Orchestrator: DeepSeek V4 Pro. Sub-agents: DeepSeek V4 Flash.
+- Orchestrator: DeepSeek V4 Pro. Sub-agents: DeepSeek V4 Pro.
 - Separate API keys supported via DEEPSEEK_API_KEY and SUB_AGENT_API_KEY env vars.
 - max_tokens = 200k. max_messages = 500. Priority: CLI > env var > .env > TOML > default.
 
