@@ -249,6 +249,11 @@ def run_sub_agent(
             # Always strip orphaned tool messages — pruning can delete
             # assistant(tool_calls) but leave orphaned tool results.
             messages = _strip_orphaned_tool_results(messages)
+            # Clear API message cache — _strip_orphaned_tool_results creates
+            # a new list, and Python may reuse the memory address, causing
+            # the cache to serve stale cleaned messages with orphaned tools.
+            from api import clear_api_cache
+            clear_api_cache()
 
             msg = call_deepseek(
                 messages, config,
