@@ -377,6 +377,28 @@ def _inject_plan_status(messages: list[dict]) -> None:
 # ---------------------------------------------------------------------------
 
 
+
+def _inject_strategy_hint(messages: list[dict]) -> None:
+    """#5 Auto tool strategy hints — suggest optimal search tool."""
+    try:
+        for msg in reversed(messages):
+            if msg["role"] == "user":
+                last = msg["content"]
+                break
+        else:
+            return
+        hint = ""
+        if any(kw in last.lower() for kw in ("find where", "locate", "where is", "find_symbol", "function ", "class ", "def ")):
+            hint = "[Hint: Use find_symbol for fast symbol lookup. Use search_files for text patterns.]"
+        elif any(kw in last.lower() for kw in ("refactor", "all callers", "who uses", "references")):
+            hint = "[Hint: Use find_usages to find all callers, then edit_file for targeted changes.]"
+        elif any(kw in last.lower() for kw in ("semantic", "similar", "feels like", "find code that")):
+            hint = "[Hint: Use semantic_search for meaning-based code search.]"
+        if hint and not any(m["role"] == "system" and m["content"] == hint for m in messages):
+            messages.insert(1, {"role": "system", "content": hint})
+    except Exception:
+        pass
+
 def _inject_context(
     messages: list[dict],
     *,
@@ -408,6 +430,7 @@ def _inject_context(
 
     _inject_circuit_breaker(messages, recent_tool_keys=recent_tool_keys)
     _inject_scratchpad_nudge(messages, turn_count=turn_count)
+    _inject_strategy_hint(messages)
     _inject_plan_status(messages)
 
 

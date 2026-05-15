@@ -24,6 +24,33 @@ _INDEX_MAX_MTIME: float = 0.0  # max mtime across all .py files from last build
 _INDEX_LAST_PERSIST: float = 0.0  # timestamp of last disk cache write (debounce)
 
 
+# --- #8 Background indexing ---
+import threading
+_background_index_thread: threading.Thread | None = None
+_background_index_ready: threading.Event = threading.Event()
+
+def _run_background_index(root: str) -> None:
+    """Build symbol index in background thread, signal when ready."""
+    try:
+        build_symbol_index(root)
+    finally:
+        _background_index_ready.set()
+
+def start_background_index(root: str) -> None:
+    """Start background symbol indexing. Non-blocking."""
+    global _background_index_thread, _background_index_ready
+    _background_index_ready.clear()
+    _background_index_thread = threading.Thread(
+        target=_run_background_index, args=(root,),
+        daemon=True, name="symbol-indexer"
+    )
+    _background_index_thread.start()
+
+def wait_background_index(timeout: float = 30.0) -> bool:
+    """Wait for background index to complete. Returns True if ready."""
+    return _background_index_ready.wait(timeout=timeout)
+
+
 def build_symbol_index(root: str) -> dict[str, list[dict]]:
     """Scan workspace .py files for def/class lines.  Fast — no parsing, just regex.
 

@@ -500,6 +500,25 @@ def execute_tool(
         else:
             result.hint = standard_hint
 
+    # --- #7 Error recovery patterns ---
+    if not result.success:
+        recent = _TOOL_CONTEXT.__dict__.setdefault("_recent_tool_failures", {})
+        recent[name] = recent.get(name, 0) + 1
+        if recent[name] >= 2:
+            hints = {
+                "edit_file": "Try read_file first to verify exact whitespace. Use Python script via run_shell for structural edits.",
+                "find_symbol": "Try search_files with regex or grep for text patterns instead.",
+                "search_files": "Try find_symbol for symbols, semantic_search for meaning.",
+                "run_shell": "Check the command syntax. Use force=True for destructive ops.",
+            }
+            rh = hints.get(name, f"Tool '{name}' failed {recent[name]} times. Try a different approach.")
+            if result.hint:
+                result.hint += "\nRecovery: " + rh
+            else:
+                result.hint = rh
+    else:
+        _TOOL_CONTEXT.__dict__.get("_recent_tool_failures", {}).pop(name, None)
+
     # --- Win 3: Auto-remember on tool failures ---
     if not result.success:
         try:

@@ -62,15 +62,15 @@
 
 | # | Feature | Effort | Competitor |
 |---|---------|--------|-----------|
-| 5 | **Auto tool strategy hints** — pre-turn hint suggesting search strategy based on prompt | Low-Med | Cursor |
+| 5 | **Auto tool strategy hints** ✅ **DONE** — pre-turn hint suggesting search strategy based on prompt | Low-Med | Cursor |
 | 6 | **Onboarding wizard** — "What kind of project? Python? Node? Here's how to start." | Medium | — |
-| 7 | **Error recovery patterns** — inject hints when same tool fails 2+ times in a row | Low | Claude Code |
+| 7 | **Error recovery patterns** ✅ **DONE** — inject hints when same tool fails 2+ times in a row | Low | Claude Code |
 
 ## Future (Post-MVP)
 
 | # | Feature | Effort | Competitor |
 |---|---------|--------|-----------|
-| 8 | Background codebase indexing with embeddings cache | High | Cursor, Windsurf |
+| 8 | Background codebase indexing ✅ **DONE** with embeddings cache | High | Cursor, Windsurf |
 | 9 | Tree-sitter repo map (Aider-style proactive context) | High | Aider |
 | 10 | Conversation rewind/resume/fork | Medium | Claude Code |
 | 11 | Multi-root workspace support | Medium | Cursor |
