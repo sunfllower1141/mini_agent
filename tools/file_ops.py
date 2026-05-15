@@ -258,6 +258,8 @@ def _fuzzy_find(content: str, search: str) -> tuple[int, int] | None:
     """Cascading 3-pass match for edit_file.
     1. Exact match. 2. Trailing-whitespace-tolerant. 3. Indentation-tolerant.
     """
+    if not search or not content:
+        return None
     idx = content.find(search)
     if idx != -1:
         return (idx, idx + len(search))
@@ -268,13 +270,13 @@ def _fuzzy_find(content: str, search: str) -> tuple[int, int] | None:
     if not search_lines:
         return None
     for trim in ('right', 'all'):
-        result = _line_match(content_lines, search_lines, trim)
+        result = _line_match(content_lines, search_lines, trim, content)
         if result is not None:
             return result
     return None
 
 
-def _line_match(content_lines, search_lines, trim):
+def _line_match(content_lines, search_lines, trim, content=''):
     normalize = str.rstrip if trim == 'right' else str.strip
     n_search = len(search_lines)
     n_content = len(content_lines)
