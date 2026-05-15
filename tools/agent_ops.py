@@ -1601,11 +1601,15 @@ def _read_image(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolRes
 
 @_register("wait_for_agent")
 def _wait_for_agent(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
-    """Block until any sub-agent completes or timeout expires.
+    """Block until any sub-agent completes, needs extension, or timeout expires.
+
+    Wakes on three events:
+    1. Any agent completes (returns result immediately)
+    2. Any agent exhausts its turn budget (returns so orchestrator can extend)
+    3. New messages arrive in the orchestrator's inbox
 
     Sleeps with exponential backoff (1s→2s→4s…→30s) between polls
-    to minimize LLM token burn.  Returns immediately if any agent
-    has already completed.
+    to minimize LLM token burn.
     """
     import time
     from tools import _TOOL_CONTEXT
@@ -1621,26 +1625,58 @@ def _wait_for_agent(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> To
     if runtime is None:
         return ToolResult(success=False, content="Agent runtime not initialized.")
 
-    # Check for already-completed
-    for tid in task_ids:
-        status = runtime.get_status(tid)
-        if status == "completed":
-            result = runtime.get_result(tid)
-            if result is not None:
-                runtime._collected.add(tid)
-                return _format_collect_any(tid, result)
+    last_inbox_count = len(runtime.messages)  # track new messages
 
-    deadline = time.time() + timeout
-    delay = 1.0  # start at 1s, exponential backoff capped at 30s
-
-    while time.time() < deadline:
+    def _check_once() -> str | None:
+        """Return reason to wake, or None if still waiting."""
+        nonlocal last_inbox_count
+        # Check for completed agents
         for tid in task_ids:
-            status = runtime.get_status(tid)
-            if status == "completed":
+            s = runtime.get_status(tid)
+            if s == "completed":
                 result = runtime.get_result(tid)
                 if result is not None:
                     runtime._collected.add(tid)
-                    return _format_collect_any(tid, result)
+                    return "completed:" + tid
+            elif s == "turn_budget_exhausted":
+                return "budget_exhausted:" + tid
+        # Check for new inbox messages
+        if len(runtime.messages) > last_inbox_count:
+            last_inbox_count = len(runtime.messages)
+            return "new_message"
+        return None
+
+    # Check immediately
+    reason = _check_once()
+    if reason is not None:
+        if reason.startswith("completed:"):
+            tid = reason.split(":", 1)[1]
+            return _format_collect_any(tid, runtime.get_result(tid))
+        return ToolResult(
+            success=False,
+            content=f"Agent {reason.split(':',1)[1]} needs attention ({reason.split(':',1)[0]}). Use agent_extend or collect_agent.",
+        )
+
+    deadline = time.time() + timeout
+    delay = 1.0
+
+    while time.time() < deadline:
+        reason = _check_once()
+        if reason is not None:
+            if reason.startswith("completed:"):
+                tid = reason.split(":", 1)[1]
+                return _format_collect_any(tid, runtime.get_result(tid))
+            if reason.startswith("budget_exhausted:"):
+                tid = reason.split(":", 1)[1]
+                return ToolResult(
+                    success=False,
+                    content=f"Agent '{tid}' exhausted turn budget. Use agent_extend then retry.",
+                )
+            if reason == "new_message":
+                return ToolResult(
+                    success=False,
+                    content=f"New message(s) in inbox. Check agent_inbox.",
+                )
 
         time.sleep(min(delay, deadline - time.time()))
         delay = min(delay * 2, 30.0)
