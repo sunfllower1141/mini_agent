@@ -36,3 +36,4 @@ $HOME/
 .mini_agent_memory_session_default.db*
 .mini_agent_memory_session_images.db
 .mini_agent.toml
+*.toml
