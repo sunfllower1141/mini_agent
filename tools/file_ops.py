@@ -254,6 +254,48 @@ def _write_file_summary(args: dict) -> str:
 _EditResult = tuple[str, ToolResult]  # (path, result)
 
 
+def _fuzzy_find(content: str, search: str) -> tuple[int, int] | None:
+    """Cascading 3-pass match for edit_file.
+    1. Exact match. 2. Trailing-whitespace-tolerant. 3. Indentation-tolerant.
+    """
+    idx = content.find(search)
+    if idx != -1:
+        return (idx, idx + len(search))
+    content_lines = content.split('\n')
+    search_lines = search.split('\n')
+    if search_lines and search_lines[-1] == '':
+        search_lines.pop()
+    if not search_lines:
+        return None
+    for trim in ('right', 'all'):
+        result = _line_match(content_lines, search_lines, trim)
+        if result is not None:
+            return result
+    return None
+
+
+def _line_match(content_lines, search_lines, trim):
+    normalize = str.rstrip if trim == 'right' else str.strip
+    n_search = len(search_lines)
+    n_content = len(content_lines)
+    norm_search = [normalize(s) for s in search_lines]
+    match_start = None
+    for i in range(n_content - n_search + 1):
+        window = content_lines[i:i + n_search]
+        if [normalize(w) for w in window] == norm_search:
+            if match_start is not None:
+                return None
+            match_start = i
+    if match_start is None:
+        return None
+    start_byte = sum(len(line) + 1 for line in content_lines[:match_start])
+    end_byte = start_byte + sum(len(line) + 1 for line in content_lines[match_start:match_start + n_search])
+    if end_byte > start_byte and content[end_byte - 1:end_byte] == '\n':
+        end_byte -= 1
+    return (start_byte, end_byte)
+
+
+
 def _apply_single_edit(
     path: str,
     old: str,
@@ -290,7 +332,8 @@ def _apply_single_edit(
             original = f.read()
         diff = wg.generate_diff("edit_file", args)
         _backup_before_write(resolved)
-        if old not in original:
+        match = _fuzzy_find(original, old)
+        if match is None:
             # Search for similar substrings to help the agent self-correct
             candidates: list[str] = []
             old_first_line = old.split("\n")[0].strip()
@@ -324,8 +367,9 @@ def _apply_single_edit(
             updated = original.replace(old, new)
             replaced = occurrences
         elif count >= 1:
-            updated = original.replace(old, new, count)
-            replaced = min(count, original.count(old))
+            start, end = match
+            updated = original[:start] + new + original[end:]
+            replaced = 1
         else:
             return (path, ToolResult(success=False, content=f"Invalid count: {count}. Use a positive integer or -1 (all)."))
 
