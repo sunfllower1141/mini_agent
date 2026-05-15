@@ -85,13 +85,18 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "edit_file",
-            "description": "Edit a file by replacing a specific string with another. Replaces the first occurrence of old_string with new_string by default. Use count=-1 to replace all occurrences. Returns an error if old_string is not found in the file.",
+            "description": "Edit a file by replacing a specific string with another. Replaces the first occurrence of old_string with new_string by default. Use count=-1 to replace all occurrences. When preview=True, skips the write and returns a unified diff preview. Use 'paths' (list of strings) to apply the same old\u2192new edit to multiple files at once (batch edit). Returns an error if old_string is not found in the file.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Path to the file to edit"
+                        "description": "Path to the file to edit (required for single-file edit; ignored if 'paths' is provided)"
+                    },
+                    "paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional: list of file paths to apply the same old\u2192new edit to (batch edit). When set, 'path' is ignored."
                     },
                     "old_string": {
                         "type": "string",
@@ -104,6 +109,10 @@ TOOLS = [
                     "count": {
                         "type": "integer",
                         "description": "Optional: number of occurrences to replace (1 = first only, -1 = all). Default: 1."
+                    },
+                    "preview": {
+                        "type": "boolean",
+                        "description": "Optional: if true, skip the write and return a unified diff (lines starting with - for old, + for new). Default: false."
                     }
                 },
                 "required": [
@@ -967,6 +976,18 @@ TOOLS = [
                     }
                 },
                 "required": ["path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "diagnose_failures",
+            "description": "Read the last test run output from memory store, parse for FAILED lines, extract test function names and file paths, read the relevant source files, and return a structured failure summary with code snippets. No parameters needed — reads automatically from the persisted test output.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
             }
         }
     }

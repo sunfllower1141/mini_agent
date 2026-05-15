@@ -759,3 +759,158 @@ def _git_summary(args: dict) -> str:
     if extra:
         return f"git {sub} {extra}"
     return f"git {sub}"
+
+
+# ---------------------------------------------------------------------------
+# diagnose_failures — parse last test output and summarize failures
+# ---------------------------------------------------------------------------
+
+_FAILED_LINE_RE = re.compile(r"FAILED\s+(.+?\.py)::(.+?)(?:\s+-|\s*$)")
+
+
+@_register("diagnose_failures")
+def _diagnose_failures(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
+    """Read the last test output from MemoryStore, parse FAILED lines,
+    extract test function names and file paths, and return a structured
+    summary with relevant source snippets."""
+    import os as _os
+
+    # Build MemoryStore path — same default used by _persist_test_output
+    db_path = _os.path.join(rg.workspace_root, ".mini_agent_memory.db")
+    try:
+        from memory import MemoryStore
+        store = MemoryStore(db_path, max_messages=500)
+        output = store.get_test_output()
+    except Exception as e:
+        return ToolResult(
+            success=False,
+            content=f"Could not read test output from memory store ({db_path}): {e}",
+        )
+
+    if not output or not output.strip():
+        return ToolResult(
+            success=True,
+            content="No test output found in memory store. Run tests first with run_tests.",
+        )
+
+    lines = output.split("\n")
+
+    # Find the summary line (e.g. "1 passed, 2 failed")
+    summary_line = ""
+    for line in reversed(lines):
+        stripped = line.strip()
+        if any(kw in stripped for kw in ("passed", "failed", "error")):
+            summary_line = stripped
+            break
+
+    # Parse FAILED lines
+    failures: list[dict] = []
+    for line in lines:
+        m = _FAILED_LINE_RE.search(line)
+        if m:
+            file_path = m.group(1)
+            func_path = m.group(2)  # e.g. "TestEditFile::test_func_name" or just "test_func_name"
+            # Split on "::" to handle class-qualified method names
+            func_parts = func_path.split("::")
+            func_name = func_parts[-1]  # Last part is the actual function/method name
+            failures.append({
+                "file": file_path,
+                "function": func_name,
+                "qualified_function": func_path,
+                "line": line.strip(),
+            })
+
+    if not failures:
+        # No FAILED lines — check if there's useful output at all
+        if summary_line:
+            return ToolResult(success=True, content=f"No FAILED lines parsed. Summary: {summary_line}")
+        return ToolResult(success=True, content="No FAILED lines found in test output.")
+
+    # Read source snippets for each failure
+    snippets: list[str] = []
+    for f in failures:
+        fpath = f["file"]
+        func = f["function"]
+        # Resolve relative to workspace
+        resolved = _os.path.join(rg.workspace_root, fpath)
+        if not _os.path.isfile(resolved):
+            # Try just the basename in workspace root
+            alt = _os.path.join(rg.workspace_root, _os.path.basename(fpath))
+            if _os.path.isfile(alt):
+                resolved = alt
+            else:
+                snippets.append(f"\n--- {fpath}::{func} (file not found) ---")
+                snippets.append(f"  FAILED: {f['line']}")
+                continue
+
+        # Extract lines around the function definition
+        try:
+            with open(resolved) as fh:
+                src_lines = fh.readlines()
+        except Exception as e:
+            snippets.append(f"\n--- {fpath}::{func} (error reading: {e}) ---")
+            continue
+
+        # Determine if this is a class method (qualified_function contains "::")
+        qualified = f.get("qualified_function", func)
+        class_name = ""
+        if "::" in qualified:
+            class_name = qualified.rsplit("::", 1)[0]  # e.g. "TestEditFile"
+
+        # Find function/class + method definition
+        func_lines: list[str] = []
+        in_func = False
+        in_class = False
+        brace_depth = 0
+        start_line = 0
+        for i, sl in enumerate(src_lines):
+            # Track class entry if we need it
+            if class_name and re.search(rf"^\s*(async\s+)?class\s+{re.escape(class_name)}\s*[(:]", sl):
+                in_class = True
+
+            # Match "def func_name" or "    def func_name" etc.
+            if not in_func and re.search(rf"^\s*(async\s+)?def\s+{re.escape(func)}\s*\(", sl):
+                in_func = True
+                start_line = i + 1
+                # Include class context line if we're inside a class
+                if class_name and not any(c in func_lines for c in [class_name]):
+                    pass  # We'll just show the method, class context is implicit
+                func_lines.append(sl.rstrip())
+                continue
+            if in_func:
+                stripped_sl = sl.rstrip("\n")
+                indent = len(sl) - len(sl.lstrip())
+                first_indent = len(func_lines[0]) - len(func_lines[0].lstrip())
+                if (not stripped_sl.strip() or
+                    (indent <= first_indent and stripped_sl.strip()
+                     and not stripped_sl.startswith("@")
+                     and not stripped_sl.startswith("#")
+                     and not stripped_sl.startswith('"""')
+                     and not stripped_sl.startswith("'''"))):
+                    if len(func_lines) > 1:
+                        break
+                    if not stripped_sl.strip():
+                        func_lines.append(stripped_sl)
+                        continue
+                    break
+                func_lines.append(stripped_sl)
+                if len(func_lines) > 60:
+                    func_lines.append("... (truncated at 60 lines)")
+                    break
+
+        snippet = "\n".join(func_lines) if func_lines else "(function body not found)"
+        file_basename = _os.path.basename(resolved)
+        snippets.append(f"\n--- {file_basename}::{func} (line ~{start_line}) ---")
+        snippets.append(snippet)
+
+    result_parts = [f"Test output summary: {summary_line or 'unknown'}"]
+    result_parts.append(f"Failed tests: {len(failures)}")
+    result_parts.append("\n".join(snippets))
+    content = "\n".join(result_parts)
+
+    return ToolResult(success=True, content=content)
+
+
+@_summarize("diagnose_failures")
+def _diagnose_failures_summary(args: dict) -> str:
+    return "diagnose_failures()"

@@ -26,6 +26,37 @@ _current_agent_id: threading.local = threading.local()
 
 _BACKUPS: dict[str, str] = {}  # resolved_path -> backup path
 
+# Cross-turn file content cache — avoids re-reading files whose mtime hasn't changed.
+# Key: resolved path (str), Value: (content: str, mtime: float)
+_FILE_CACHE: dict[str, tuple[str, float]] = {}
+
+
+# ---------------------------------------------------------------------------
+# Auto plan advancement — after a successful write/edit, check if any
+# incomplete plan step’s keywords appear in the file path or edit content,
+# and auto-complete it.
+# ---------------------------------------------------------------------------
+
+def _auto_advance_plan(file_path: str, edit_text: str = "") -> None:
+    """Check plan steps against file_path and edit_text; auto-complete matches."""
+    steps = getattr(_TOOL_CONTEXT, "_plan_steps", None)
+    done = getattr(_TOOL_CONTEXT, "_plan_done", None)
+    if not steps or done is None:
+        return
+    # Build set of words from the file path + edit text
+    haystack = (file_path + " " + edit_text).lower()
+    incomplete_indices = [i for i, _ in enumerate(steps) if i not in done]
+    for idx in incomplete_indices:
+        step_text = steps[idx].lower()
+        # Tokenise the step into meaningful words (2+ chars, skip very common words)
+        words = {w for w in step_text.split() if len(w) >= 4}
+        if not words:
+            # Fallback: use the whole step text as one token
+            words = {step_text}
+        if any(w in haystack for w in words):
+            done.add(idx)
+    _TOOL_CONTEXT._plan_done = done
+
 
 def _backup_before_write(resolved_path: str) -> None:
     """Save a backup of *resolved_path* if it exists and hasn't already been backed up."""
@@ -61,6 +92,8 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
             success=False,
             content=f"Read blocked by safety layer: {safety_result.reason}",
         )
+    resolved = safety_result.resolved_path
+
     # Apply offset and limit
     offset = args.get("offset", 0)
     if offset < 0:
@@ -71,8 +104,20 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
     limit = min(limit, _ABSOLUTE_MAX_LINES)
     line_numbers = args.get("line_numbers", False)
 
+    # Cross-turn cache: if file mtime hasn't changed, return cached content directly.
+    # Only used when no offset/limit/line_numbers are specified (full reads).
+    if offset == 0 and limit == _DEFAULT_READ_LINES and not line_numbers:
+        try:
+            current_mtime = os.path.getmtime(resolved)
+            if resolved in _FILE_CACHE:
+                cached_content, cached_mtime = _FILE_CACHE[resolved]
+                if cached_mtime == current_mtime:
+                    return ToolResult(success=True, content=cached_content)
+        except OSError:
+            pass  # fall through to normal read on stat error
+
     try:
-        with open(safety_result.resolved_path, "r") as f:
+        with open(resolved, "r") as f:
             # Use enumerate + early break to avoid reading the whole file
             collected: list[str] = []
             total_lines = 0
@@ -94,12 +139,23 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
         hint = ""
         if isinstance(e, FileNotFoundError) or "No such file" in str(e):
             hint = "\nHint: Check the path spelling. Try list_directory to see available files."
-        return ToolResult(success=False, content=f"Error reading '{safety_result.resolved_path}': {e}{hint}")
+        return ToolResult(success=False, content=f"Error reading '{resolved}': {e}{hint}")
 
     if offset >= total_lines:
         return ToolResult(success=False, content=f"Offset {offset} exceeds file length ({total_lines} lines).")
 
+    full_content = "\n".join(collected)
     lines_after_offset = total_lines - offset
+
+    # Cache full file content for cross-turn reuse (only when reading from offset 0)
+    # We store the actual full content from disk for the cache invalidation pattern.
+    if offset == 0:
+        try:
+            current_mtime = os.path.getmtime(resolved)
+            _FILE_CACHE[resolved] = (full_content, current_mtime)
+        except OSError:
+            pass
+
     if lines_after_offset > limit:
         truncated = "\n".join(collected[:limit])
         msg = (
@@ -109,7 +165,7 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
         )
         return ToolResult(success=True, content=msg)
 
-    return ToolResult(success=True, content="\n".join(collected))
+    return ToolResult(success=True, content=full_content)
 
 
 @_summarize("read_file")
@@ -160,10 +216,14 @@ def _write_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
         from tools import add_modified_file
         add_modified_file(safety_result.resolved_path)
         clear_tool_cache()
+        # Invalidate cross-turn file cache
+        _FILE_CACHE.pop(safety_result.resolved_path, None)
         # Keep symbol index fresh for newly written .py files
         if path.endswith(".py"):
             from tools.search_ops import _reindex_file
             _reindex_file(safety_result.resolved_path, wg.workspace_root)
+        # Auto plan advancement
+        _auto_advance_plan(safety_result.resolved_path, content)
         return ToolResult(
             success=True,
             content=f"OK: wrote {len(content)} bytes to {safety_result.resolved_path}",
@@ -190,18 +250,25 @@ def _write_file_summary(args: dict) -> str:
 # edit_file
 # ---------------------------------------------------------------------------
 
-@_register("edit_file")
-def _edit_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
-    path = args["path"]
-    old = args["old_string"]
-    new = args["new_string"]
-    count = args.get("count", 1)  # 1 = first occurrence, -1 = all occurrences
+_EditResult = tuple[str, ToolResult]  # (path, result)
+
+
+def _apply_single_edit(
+    path: str,
+    old: str,
+    new: str,
+    count: int,
+    preview: bool,
+    wg: WriteSafetyGate,
+    args: dict,
+) -> _EditResult:
+    """Apply an edit to a single file. Returns (path, ToolResult)."""
     safety_result = wg.check(path)
     if not safety_result.allowed:
-        return ToolResult(
+        return (path, ToolResult(
             success=False,
             content=f"Edit blocked by safety layer: {safety_result.reason}",
-        )
+        ))
     # File reservation check — prevent sub-agent collisions
     agent_id = getattr(_current_agent_id, "task_id", None)
     if agent_id is not None:
@@ -209,19 +276,19 @@ def _edit_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResu
         with _FILE_RESERVATIONS_LOCK:
             existing = _FILE_RESERVATIONS.get(path)
         if existing is not None and existing != agent_id:
-            return ToolResult(
+            return (path, ToolResult(
                 success=False,
                 content=(
                     f"Edit blocked: '{path}' is reserved by agent '{existing[:8]}'. "
                     f"Hint: Coordinate with the parent — only one agent should edit a file."
                 ),
-            )
+            ))
+    resolved = safety_result.resolved_path
     try:
-        with open(safety_result.resolved_path, "r") as f:
+        with open(resolved, "r") as f:
             original = f.read()
-        # Generate diff preview before editing
         diff = wg.generate_diff("edit_file", args)
-        _backup_before_write(safety_result.resolved_path)
+        _backup_before_write(resolved)
         if old not in original:
             # Search for similar substrings to help the agent self-correct
             candidates: list[str] = []
@@ -232,13 +299,12 @@ def _edit_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResu
                 if len(candidates) >= 3:
                     break
             hint = (
-                f"Edit failed: old_string not found in '{safety_result.resolved_path}'.\n"
+                f"Edit failed: old_string not found in '{resolved}'.\n"
                 f"Hint: The string must match exactly — check whitespace, indentation, "
                 f"and line endings. Try read_file first to verify the exact text."
             )
             if candidates:
-                hint += "\nSimilar lines found (did you mean one of these?):\n" + "\n".join(candidates)
-            # Auto-capture project knowledge on edit mismatch
+                hint += "\nSimilar lines found (did you mean one of this?):\n" + "\n".join(candidates)
             if old_first_line:
                 try:
                     memory = getattr(_TOOL_CONTEXT, "_memory_store", None)
@@ -246,57 +312,110 @@ def _edit_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResu
                         memory.add_knowledge(
                             category="pattern",
                             summary=f"edit_file mismatch: {old_first_line[:80]}",
-                            detail=f"File: {safety_result.resolved_path}. Could not find exact match for old_string.",
+                            detail=f"File: {resolved}. Could not find exact match for old_string.",
                         )
                 except Exception:
-                    pass  # non-critical — never crash tool execution
-            return ToolResult(success=False, content=hint)
+                    pass
+            return (path, ToolResult(success=False, content=hint))
 
         if count == -1:
-            # Replace all occurrences
             occurrences = original.count(old)
             updated = original.replace(old, new)
             replaced = occurrences
         elif count >= 1:
-            # Replace first N occurrences
             updated = original.replace(old, new, count)
             replaced = min(count, original.count(old))
         else:
-            return ToolResult(success=False, content=f"Invalid count: {count}. Use a positive integer or -1 (all).")
+            return (path, ToolResult(success=False, content=f"Invalid count: {count}. Use a positive integer or -1 (all)."))
 
-        with open(safety_result.resolved_path, "w") as f:
+        if preview:
+            raw_diff = wg._format_diff(resolved, original, updated)
+            return (path, ToolResult(
+                success=True,
+                content=f"Preview: proposed edit to {resolved}\n{raw_diff}",
+            ))
+
+        with open(resolved, "w") as f:
             f.write(updated)
 
         from tools import add_modified_file
-        add_modified_file(safety_result.resolved_path)
+        add_modified_file(resolved)
         clear_tool_cache()
+        _FILE_CACHE.pop(resolved, None)
 
-        # Short summary: no full diff on success (saves context tokens)
+        # Auto plan advancement
+        _auto_advance_plan(resolved, old)
+
         added = updated.count("\n") - original.count("\n")
         label = f"{replaced} occurrence(s)" if replaced > 1 else "1 occurrence"
-        return ToolResult(
+        return (path, ToolResult(
             success=True,
             content=(
-                f"OK: replaced {label} in {safety_result.resolved_path}"
+                f"OK: replaced {label} in {resolved}"
                 + (f" (+{added} lines)" if added > 0 else f" ({added} lines)" if added < 0 else "")
             ),
             diff_preview=diff.preview_text if diff.changed else None,
-        )
+        ))
     except Exception as e:
-        return ToolResult(
+        return (path, ToolResult(
             success=False,
-            content=f"Error editing '{safety_result.resolved_path}': {e}",
-        )
+            content=f"Error editing '{resolved}': {e}",
+        ))
+
+
+@_register("edit_file")
+def _edit_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
+    old = args["old_string"]
+    new = args["new_string"]
+    count = args.get("count", 1)
+    preview = args.get("preview", False)
+    paths = args.get("paths", None)
+
+    if paths is not None:
+        # Batch edit: apply same old→new to all paths
+        if not isinstance(paths, list) or not paths:
+            return ToolResult(
+                success=False,
+                content="'paths' must be a non-empty list of file paths.",
+            )
+        results: list[_EditResult] = []
+        for p in paths:
+            result = _apply_single_edit(p, old, new, count, preview, wg, {**args, "path": p})
+            results.append(result)
+        all_ok = all(r.success for _, r in results)
+        lines: list[str] = []
+        failures: list[str] = []
+        for p, r in results:
+            first_line = r.content.split("\n")[0]
+            if r.success:
+                lines.append(f"  [OK] {p}: {first_line}")
+            else:
+                lines.append(f"  [FAIL] {p}: {first_line}")
+                failures.append(p)
+        summary = "Batch edit results:\n" + "\n".join(lines)
+        if all_ok:
+            return ToolResult(success=True, content=summary)
+        else:
+            return ToolResult(
+                success=False,
+                content=summary + f"\n\nFailed paths: {failures}",
+            )
+    else:
+        path = args["path"]
+        result = _apply_single_edit(path, old, new, count, preview, wg, args)
+        return result[1]
 
 
 @_summarize("edit_file")
 def _edit_file_summary(args: dict) -> str:
     path = args.get("path", "?")
     old = args.get("old_string", "")
-    preview = old[:40].replace("\n", "\\n")
+    old_preview = old[:40].replace("\n", "\\n")
     if len(old) > 40:
-        preview += "…"
-    return f"edit_file({path}, \"{preview}\")"
+        old_preview += "…"
+    preview_flag = args.get("preview", False)
+    suffix = " [preview]" if preview_flag else ""
+    return f"edit_file({path}, \"{old_preview}\"){suffix}"
 
 
 # ---------------------------------------------------------------------------
