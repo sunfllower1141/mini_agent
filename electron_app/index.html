@@ -265,12 +265,31 @@
       await rpc("chat", { message: text });
     });
 
-    // ── Startup: send init ──
-    setTimeout(() => {
+    // ── Startup: send init (retry if bridge not ready) ──
+    let initAttempts = 0;
+    let initTimeoutId = null;
+    function tryInit() {
+      initAttempts++;
       if (window.bridge) {
-        rpc("init", { workspace: null });  // null = auto-detect from cwd
+        setStatus("Connecting…");
+        rpc("init", { workspace: null });
+        // Timeout: if no response in 15s, show error
+        initTimeoutId = setTimeout(() => {
+          if (!initialized) {
+            addMessage("error", "Init timed out after 15s. Backend may be slow to start. Retrying…");
+            tryInit();
+          }
+        }, 15000);
+        return;
       }
-    }, 200); // brief delay to let bridge IPC settle
+      if (initAttempts < 20) {
+        setTimeout(tryInit, 250);  // retry every 250ms for ~5s
+      } else {
+        addMessage("error", "Bridge not available after 5s. Check that Electron is running with preload.js.");
+        setStatus("Bridge unavailable");
+      }
+    }
+    setTimeout(tryInit, 500);  // give IPC time to settle
   </script>
 
 </body>
