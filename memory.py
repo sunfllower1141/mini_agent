@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
 import warnings
 from typing import Optional
 
@@ -150,30 +151,39 @@ def _estimate_tokens(msg: dict) -> int:
 def _total_tokens(messages: list[dict]) -> int:
     """Sum estimated tokens across all messages.
 
-    Uses a running accumulator keyed by list length.  When messages are
-    only appended (the common case), only new messages are counted.
-    When the list shrinks (pruning), a full recount is done.
+    Uses a running accumulator keyed by list length and a checksum of the
+    first message identity.  When messages are only appended (the common
+    case), only new messages are counted.  When the list shrinks (pruning)
+    or messages are modified in-place (compression), a full recount is done.
+
     This avoids the O(n²) behaviour of recounting every message on
     every turn as the conversation grows.
     """
-    global _ACCUM_COUNT, _ACCUM_TOTAL
+    global _ACCUM_COUNT, _ACCUM_TOTAL, _ACCUM_LIST_ID
     n = len(messages)
-    if n >= _ACCUM_COUNT:
+    # Detect in-place modification: same length but different list identity
+    # or content (compression reuses the same list object but mutates messages).
+    list_id = id(messages)
+    if n >= _ACCUM_COUNT and list_id == _ACCUM_LIST_ID:
         # Only count new messages appended since last call
         new_tokens = sum(_estimate_tokens(m) for m in messages[_ACCUM_COUNT:])
         _ACCUM_TOTAL += new_tokens
         _ACCUM_COUNT = n
     else:
-        # List shrank (pruned) — full recount
+        # List shrank (pruned), messages mutated in-place, or new list — full recount
         _ACCUM_TOTAL = sum(_estimate_tokens(m) for m in messages)
         _ACCUM_COUNT = n
+        _ACCUM_LIST_ID = list_id
     return _ACCUM_TOTAL
 
 
 
-# Running accumulator for _total_tokens (length-based, not identity-based)
+# Running accumulator for _total_tokens.
+# _ACCUM_LIST_ID tracks the Python list identity so we detect in-place
+# mutation (compression reuses the same list object but changes content).
 _ACCUM_COUNT: int = 0
 _ACCUM_TOTAL: int = 0
+_ACCUM_LIST_ID: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -676,6 +686,7 @@ class MemoryStore:
         self._last_saved_count = 0  # for incremental save
         self._conn: Optional[sqlite3.Connection] = None
         self._token_count: int = 0  # running accumulator for saved messages
+        self._vacuum_thread: Optional[threading.Thread] = None  # background VACUUM
 
         # Migrate from old paths if needed
         _migrate_old_paths(filepath, self._db_path)
@@ -737,7 +748,22 @@ class MemoryStore:
         Creates the connection on first call.  All internal methods
         share this single connection instead of opening a new one
         for every operation.
+
+        Pings the cached connection with ``SELECT 1`` before use.
+        If the connection was closed (e.g. by a forked subprocess
+        or a prior error), it is transparently recreated.
         """
+        if self._conn is not None:
+            try:
+                self._conn.execute("SELECT 1")
+            except sqlite3.Error:
+                # Connection is dead — recreate it
+                try:
+                    self._conn.close()
+                except sqlite3.Error:
+                    pass
+                self._conn = None
+
         if self._conn is None:
             self._conn = sqlite3.connect(self._db_path)
             self._conn.execute("PRAGMA journal_mode=WAL")
@@ -747,6 +773,33 @@ class MemoryStore:
             self._conn.execute("PRAGMA busy_timeout=5000")
             self._conn.execute("PRAGMA foreign_keys=ON")
         return self._conn
+
+    def _start_background_vacuum(self) -> None:
+        """Run VACUUM on a private connection in a daemon thread.
+
+        VACUUM rewrites the entire database file and can be slow on
+        large databases.  Offloading it to a background thread keeps
+        the main agent loop responsive.  If a previous background
+        VACUUM is still running, this is a no-op (the previous vacuum
+        will already reclaim free pages).
+        """
+        # If a previous vacuum thread is still running, don't pile on.
+        if self._vacuum_thread is not None and self._vacuum_thread.is_alive():
+            return
+
+        db_path = self._db_path
+
+        def _run() -> None:
+            try:
+                conn = sqlite3.connect(db_path)
+                conn.execute("VACUUM")
+                conn.close()
+            except sqlite3.Error:
+                pass
+
+        t = threading.Thread(target=_run, daemon=True)
+        self._vacuum_thread = t
+        t.start()
 
     def close(self) -> None:
         """Close the shared database connection (if open)."""
@@ -931,7 +984,7 @@ class MemoryStore:
                 try:
                     row = conn.execute("PRAGMA freelist_count").fetchone()
                     if row and row[0] > _VACUUM_FREELIST_THRESHOLD:
-                        conn.execute(_VACUUM)
+                        self._start_background_vacuum()
                 except sqlite3.Error:
                     pass  # VACUUM is opportunistic; ignore failures
             self._last_saved_count = len(kept)

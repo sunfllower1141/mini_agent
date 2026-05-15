@@ -457,7 +457,6 @@ def switch_session(
 ) -> dict:
     """Save current session and load a new one. Returns new session dict."""
     from memory import MemoryStore
-    from prompt import build_system_prompt
 
     # Save current session
     if current_memory is not None:

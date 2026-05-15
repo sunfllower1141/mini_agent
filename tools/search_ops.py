@@ -764,8 +764,12 @@ def _find_usages(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolRe
                     success=True,
                     content=f"Found usages of '{name}' (grep fallback):\n" + "\n".join(f"  {l}" for l in lines_out),
                 )
-        except Exception:
-            pass
+            if result.stderr.strip():
+                import sys
+                print(f"Warning: grep stderr for '{name}': {result.stderr.strip()[:200]}", file=sys.stderr)
+        except Exception as exc:
+            import sys
+            print(f"Warning: find_usages grep fallback failed for '{name}': {exc}", file=sys.stderr)
         return ToolResult(
             success=True,
             content=f"No usages found for '{name}' in workspace.",

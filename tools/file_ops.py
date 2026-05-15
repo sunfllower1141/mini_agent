@@ -124,7 +124,7 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
             total_lines = 0
             for lineno, line in enumerate(f):
                 total_lines = lineno + 1
-                if lineno < offset:
+                if lineno + 1 < offset:
                     continue
                 if len(collected) < limit:
                     stripped = line.rstrip("\n")
@@ -134,7 +134,7 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
                 # Keep iterating to count total lines if we might need truncation message
                 # but stop once we've gone well past what we need (limit + 1 is enough
                 # to know whether we truncated)
-                if len(collected) >= limit and lineno >= offset + limit:
+                if len(collected) >= limit and lineno + 1 >= offset + limit:
                     break
     except Exception as e:
         hint = ""
@@ -142,11 +142,11 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
             hint = "\nHint: Check the path spelling. Try list_directory to see available files."
         return ToolResult(success=False, content=f"Error reading '{resolved}': {e}{hint}")
 
-    if offset >= total_lines:
+    if offset > total_lines:
         return ToolResult(success=False, content=f"Offset {offset} exceeds file length ({total_lines} lines).")
 
     full_content = "\n".join(collected)
-    lines_after_offset = total_lines - offset
+    lines_after_offset = total_lines - offset + 1
 
     # Cache full file content for cross-turn reuse (only when reading from offset 0)
     # We store the actual full content from disk for the cache invalidation pattern.
@@ -343,6 +343,10 @@ def _apply_single_edit(
         add_modified_file(resolved)
         clear_tool_cache()
         _FILE_CACHE.pop(resolved, None)
+        # Keep symbol index fresh for edited .py files
+        if path.endswith(".py"):
+            from tools.search_ops import _reindex_file
+            _reindex_file(resolved, wg.workspace_root)
 
         # Auto plan advancement
         _auto_advance_plan(resolved, old)

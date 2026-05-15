@@ -1403,22 +1403,23 @@ def _remember(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResu
     Saved to the ``project_knowledge`` table in the session SQLite DB.
     Returns a summary of what was stored.
     """
-    summary = args.get("summary", "")
-    if not summary.strip():
+    topic = args.get("topic", "")
+    detail = args.get("detail", "")
+    if not topic.strip():
         return ToolResult(
             success=False,
-            content="Missing required parameter: 'summary' (the knowledge snippet to remember).",
+            content="Missing required parameter: 'topic' (short topic label for this learning).",
         )
-    category = args.get("category", "general")
-    detail = args.get("detail", "")
 
     memory_store = getattr(_TOOL_CONTEXT, "_memory_store", None)
+    topic_preview = topic[:200] + ("..." if len(topic) > 200 else "")
+    detail_preview = detail[:200] + ("..." if len(detail) > 200 else "")
     if memory_store is not None:
         try:
             conn = memory_store._get_conn()
             conn.execute(
                 "INSERT INTO project_knowledge (category, summary, detail) VALUES (?, ?, ?)",
-                (category, summary, detail),
+                (topic, topic, detail),
             )
             conn.commit()
         except Exception as e:
@@ -1430,9 +1431,8 @@ def _remember(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResu
             success=True,
             content=(
                 f"Stored in project knowledge:\\n"
-                f"  Category: {category}\\n"
-                f"  Summary: {summary[:200]}{'...' if len(summary) > 200 else ''}\\n"
-                f"  Detail: {detail[:200]}{'...' if len(detail) > 200 else ''}"
+                f"  Topic: {topic_preview}\\n"
+                f"  Detail: {detail_preview}"
             ),
         )
 
@@ -1444,7 +1444,7 @@ def _remember(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResu
             conn = sqlite3.connect(db_path)
             conn.execute(
                 "INSERT INTO project_knowledge (category, summary, detail) VALUES (?, ?, ?)",
-                (category, summary, detail),
+                (topic, topic, detail),
             )
             conn.commit()
             conn.close()
@@ -1457,9 +1457,8 @@ def _remember(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResu
             success=True,
             content=(
                 f"Stored in project knowledge (DB fallback):\\n"
-                f"  Category: {category}\\n"
-                f"  Summary: {summary[:200]}{'...' if len(summary) > 200 else ''}\\n"
-                f"  Detail: {detail[:200]}{'...' if len(detail) > 200 else ''}"
+                f"  Topic: {topic_preview}\\n"
+                f"  Detail: {detail_preview}"
             ),
         )
 
@@ -1467,17 +1466,16 @@ def _remember(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResu
         success=True,
         content=(
             f"Remember noted (no persistent storage available):\\n"
-            f"  Category: {category}\\n"
-            f"  Summary: {summary[:200]}{'...' if len(summary) > 200 else ''}"
+            f"  Topic: {topic_preview}"
         ),
     )
 
 
 @_summarize("remember")
 def _remember_summary(args: dict) -> str:
-    summary = args.get("summary", "?")
-    preview = summary[:60]
-    if len(summary) > 60:
+    topic = args.get("topic", "?")
+    preview = topic[:60]
+    if len(topic) > 60:
         preview += "…"
     return f"remember(\"{preview}\")"
 

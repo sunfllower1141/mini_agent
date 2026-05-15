@@ -500,6 +500,18 @@ class McpClientManager:
         for tool_name, tool_schema in conn.tool_schemas.items():
             full_name = f"mcp/{server_name}/{tool_name}"
 
+            # Detect collision with a different server or duplicate registration.
+            # Warn and skip so we don't silently shadow another server's tool.
+            existing_dispatch = _TOOL_DISPATCH.get(full_name)
+            if existing_dispatch is not None:
+                import sys
+                print(
+                    f"Warning: MCP tool '{full_name}' already registered — "
+                    f"skipping duplicate registration",
+                    file=sys.stderr,
+                )
+                continue
+
             # 1. Add to TOOLS schema list
             TOOLS.append({
                 "type": "function",

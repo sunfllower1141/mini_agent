@@ -487,15 +487,17 @@ def execute_tool(
     else:
         result = dispatch(args, write_gate, read_gate)
 
-    # Enrich failed results with a heuristic hint when the tool hasn't
-    # already set one (or when the existing hint is terse).
-    if not result.success and result.hint:
-        enriched = _build_error_hint(name, error_msg=result.content)
-        # Only replace if our heuristic found something useful
-        if "Hint:" in enriched:
-            result.hint = enriched
-    elif not result.success:
-        result.hint = _build_error_hint(name, error_msg=result.content)
+    # Normalize: every failed result gets a _build_error_hint so the LLM
+    # always sees the same structure (tool name, error, valid params, retry
+    # nudge).  If the tool already set a hint that adds unique context,
+    # append it to the standard hint instead of discarding it.
+    if not result.success:
+        standard_hint = _build_error_hint(name, error_msg=result.content)
+        if result.hint and result.hint != standard_hint:
+            # Merge: standard first, then the tool-specific hint as extra context
+            result.hint = standard_hint + "\nAdditional info: " + result.hint
+        else:
+            result.hint = standard_hint
 
     # Cache successful read-only results (only when not streaming)
     if cache_key and result.success:
