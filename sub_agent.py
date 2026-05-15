@@ -160,6 +160,7 @@ def run_sub_agent(
     import requests
 
     # main loop — uses while + dynamic max_turns re-read so parent can extend budget
+    _extension_requested = False  # only ping once when running low
     while turn_count < max_turns:
         turn_count += 1
         # Re-read max_turns from runtime (parent may have extended it)
@@ -168,6 +169,26 @@ def run_sub_agent(
             updated = runtime_ctx.get_max_turns(task_id)
             if updated is not None and updated > max_turns:
                 max_turns = updated
+                _extension_requested = False  # reset so we can ping again if needed
+
+        # --- Budget warning: auto-ping orchestrator when running low ---
+        if not _extension_requested and max_turns - turn_count <= 2:
+            _extension_requested = True
+            try:
+                from tools.agent_ops import _agent_handoff
+                _agent_handoff({
+                    "type": "status.error",
+                    "from": task_id,
+                    "result": {
+                        "need_extension": True,
+                        "task_id": task_id,
+                        "turns_remaining": max_turns - turn_count,
+                        "message": f"Sub-agent has {max_turns - turn_count} turns left. Please extend."
+                    }
+                }, None, None)
+            except Exception:
+                pass  # best-effort, don't crash the sub-agent
+
         if cancel_event is not None and cancel_event.is_set():
             return SubAgentResult(
                 success=False,
