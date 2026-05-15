@@ -14,7 +14,10 @@ let pythonProcess = null;
 // ---------- Python bridge ----------
 function startPythonBridge() {
   const projectRoot = path.resolve(__dirname, "..");
-  pythonProcess = spawn("python3", ["-u", "electron_bridge.py"], {
+  const pythonCmd = process.platform === "win32"
+    ? path.join(projectRoot, "venv", "Scripts", "python.exe")
+    : path.join(projectRoot, "venv", "bin", "python3");
+  pythonProcess = spawn(pythonCmd, ["-u", "electron_bridge.py"], {
     cwd: projectRoot,
     stdio: ["pipe", "pipe", "pipe"],
   });
