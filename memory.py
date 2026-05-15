@@ -610,8 +610,7 @@ class MemoryStore:
                 ")"
             )
             conn.execute("INSERT OR IGNORE INTO test_output (id, output) VALUES (1, '')")
-            # Project knowledge — persists across sessions. Stores patterns,
-            # errors, fixes and learnings that compound over time within a workspace.
+            # Project knowledge table — persists across sessions within a workspace
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS project_knowledge ("
                 "id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -674,6 +673,60 @@ class MemoryStore:
             return []
 
         return _clean_messages([_row_to_msg(r) for r in rows])
+
+
+    # ------------------------------------------------------------------
+    # Project knowledge (cross-session learning)
+    # ------------------------------------------------------------------
+
+    def add_knowledge(
+        self, summary: str, category: str = "general",
+        detail: str = "", importance: int = 1,
+    ) -> None:
+        """Store a project-level learning that persists across sessions."""
+        try:
+            conn = self._get_conn()
+            conn.execute(
+                "INSERT INTO project_knowledge (category, summary, detail, importance)"
+                " VALUES (?, ?, ?, ?)",
+                (category, summary, detail, importance),
+            )
+            conn.commit()
+        except sqlite3.Error:
+            warnings.warn("Failed to store project knowledge", stacklevel=2)
+
+    def get_top_knowledge(self, limit: int = 20) -> list[dict]:
+        """Return highest-importance knowledge entries."""
+        try:
+            conn = self._get_conn()
+            rows = conn.execute(
+                "SELECT id, category, summary, detail, importance, hits"
+                " FROM project_knowledge"
+                " ORDER BY importance * (hits + 1) DESC"
+                " LIMIT ?",
+                (limit,),
+            ).fetchall()
+            return [
+                {"id": r[0], "category": r[1], "summary": r[2],
+                 "detail": r[3], "importance": r[4], "hits": r[5]}
+                for r in rows
+            ]
+        except sqlite3.Error:
+            warnings.warn("Failed to query project knowledge", stacklevel=2)
+            return []
+
+    def bump_knowledge(self, knowledge_id: int) -> None:
+        """Increment the hit counter for a knowledge entry."""
+        try:
+            conn = self._get_conn()
+            conn.execute(
+                "UPDATE project_knowledge SET hits = hits + 1,"
+                " updated_at = datetime('now') WHERE id = ?",
+                (knowledge_id,),
+            )
+            conn.commit()
+        except sqlite3.Error:
+            warnings.warn("Failed to bump project knowledge", stacklevel=2)
 
     # TODO: MemoryStore.save is ~50 lines — consider splitting compression,
     #       pruning, summarization, and SQL writes into separate helpers.
