@@ -255,6 +255,21 @@ def run_sub_agent(
             from api import clear_api_cache
             clear_api_cache()
 
+            # --- Communication nudge: every 3 turns, remind the agent to coordinate ---
+            if turn_count % 3 == 0:
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "[COMMUNICATION NUDGE] You have been working for {t} turns.\n"
+                        "1. Check your **agent_inbox** for messages from the orchestrator or siblings.\n"
+                        "2. Check **agent_read** for broadcast messages.\n"
+                        "3. Send a **status.heartbeat** via agent_handoff summarizing progress.\n"
+                        "4. If editing shared files, broadcast intent via **agent_message**.\n"
+                        "5. If a sibling works on the same file, coordinate via **agent_handoff**.\n"
+                    ).format(t=turn_count),
+                    "_transient": True,
+                })
+
             msg = call_deepseek(
                 messages, config,
                 session=requests,
