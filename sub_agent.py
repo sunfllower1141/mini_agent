@@ -326,6 +326,17 @@ def run_sub_agent(
                     # Track scratchpad content
                     if name == "write_scratchpad" and result.success:
                         _scratchpad = parsed.get("content", "")
+
+                    # Check cancellation after each tool execution
+                    if cancel_event is not None and cancel_event.is_set():
+                        return SubAgentResult(
+                            success=False,
+                            content="Cancelled by parent during tool execution.",
+                            turns_used=turn_count,
+                            tool_calls_made=tool_calls_made,
+                            scratchpad=_scratchpad,
+                            error="Cancelled during tool execution",
+                        )
                 except Exception as exc:
                     from tools import ToolResult as TR
                     result = TR(
