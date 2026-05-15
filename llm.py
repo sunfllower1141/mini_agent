@@ -540,6 +540,7 @@ def _execute_groups(
     approve_callback: Callable[..., Any] | None,
     cancel_event: threading.Event | None,
     recent_tool_keys: list[str] | None,
+    tool_keys_lock: threading.Lock | None = None,
 ) -> list[tuple[dict, "ToolResult"]]:
     """Execute groups in order (parallel within group, sequential across groups)."""
     all_results: list[tuple] = []
@@ -582,7 +583,8 @@ def _execute_groups(
                     with results_lock:
                         pipe_results[i] = result
                     _append_tool_result(messages, tc, result, on_tool_end,
-                                        recent_keys=recent_tool_keys)
+                                        recent_keys=recent_tool_keys,
+                                        lock=tool_keys_lock)
                     all_results.append((tc, result))
     return all_results
 
@@ -635,6 +637,7 @@ def _execute_tools(
         if on_tool_start is not None:
             for tc in remaining:
                 on_tool_start(tool_summary(tc))
+        results: list[tuple[dict, "ToolResult"]] = []
         for i, tc in enumerate(remaining):
             if cancel_event is not None and cancel_event.is_set():
                 break
@@ -644,7 +647,8 @@ def _execute_tools(
             pipe_results[i] = result
             _append_tool_result(messages, tc, result, on_tool_end,
                                 recent_keys=recent_tool_keys)
-        return []
+            results.append((tc, result))
+        return results
 
     # --- Execute groups: parallel within group, sequential across groups ---
     return _execute_groups(
@@ -653,6 +657,7 @@ def _execute_tools(
         on_tool_start=on_tool_start, on_tool_end=on_tool_end,
         on_tool_output=on_tool_output, approve_callback=approve_callback,
         cancel_event=cancel_event, recent_tool_keys=recent_tool_keys,
+        tool_keys_lock=tool_keys_lock,
     )
 
 

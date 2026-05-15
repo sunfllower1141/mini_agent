@@ -22,7 +22,7 @@
 # safety.py          — workspace read/write gates (SafetyResult dataclass)
 # tui.py             — Textual TUI frontend, themes, AgentWorker
 # api.py             — LLM API calls (call_deepseek), message cache
-# sub_agent.py       — sub-agent engine, turn budget, pruning, Flash model
+# sub_agent.py       — sub-agent engine, turn budget, pruning, Pro model
 # agent_runtime.py   — sub-agent lifecycle, inboxes, file reservations
 # interject.py       — thread-safe user interjection queue
 # terminal.py        — ANSI colour helpers
