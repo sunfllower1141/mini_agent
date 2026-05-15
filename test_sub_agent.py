@@ -999,3 +999,66 @@ class TestSubscriptionsInSpawn:
             assert "coord.sync" in subs
 
 
+
+
+# ---------------------------------------------------------------------------
+# Identity leak regression tests
+# ---------------------------------------------------------------------------
+
+class TestIdentityCleanup:
+    """Verify _agent_task_id is restored after sub-agent completes (regression)."""
+
+    def test_task_id_restored_after_spawn(self, configured_context):
+        """After spawn_agent completes, _agent_task_id must be empty (not leak sub ID)."""
+        from tools import _TOOL_CONTEXT, execute_tool
+        from tools.agent_ops import _spawn_one
+
+        parent_id_before = getattr(_TOOL_CONTEXT, "_agent_task_id", "")
+        assert parent_id_before == ""
+
+        # Spawn a minimal sub-agent that finishes quickly
+        task_id = _spawn_one(
+            task="Say 'done' and exit immediately.",
+            config=_TOOL_CONTEXT._agent_config,
+            runtime=_TOOL_CONTEXT._agent_runtime,
+            wg=None,
+            rg=None,
+            max_turns=1,
+            visible=False,
+        )
+
+        # Wait for thread to fully finish (finally block must execute)
+        thread = _TOOL_CONTEXT._agent_runtime._threads.get(task_id)
+        if thread:
+            thread.join(timeout=15)
+
+        restored_id = getattr(_TOOL_CONTEXT, "_agent_task_id", "")
+        assert restored_id == "", (
+            f"_agent_task_id leaked: expected '', got '{restored_id}' "
+            f"(sub-agent was '{task_id}')"
+        )
+
+    def test_depth_restored_after_spawn(self, configured_context):
+        """After spawn_agent completes, _agent_depth must be 0."""
+        from tools import _TOOL_CONTEXT
+        from tools.agent_ops import _spawn_one
+
+        depth_before = getattr(_TOOL_CONTEXT, "_agent_depth", 0)
+        assert depth_before == 0
+
+        task_id = _spawn_one(
+            task="Say 'done' and exit immediately.",
+            config=_TOOL_CONTEXT._agent_config,
+            runtime=_TOOL_CONTEXT._agent_runtime,
+            wg=None,
+            rg=None,
+            max_turns=1,
+            visible=False,
+        )
+
+        thread = _TOOL_CONTEXT._agent_runtime._threads.get(task_id)
+        if thread:
+            thread.join(timeout=15)
+
+        depth_after = getattr(_TOOL_CONTEXT, "_agent_depth", 0)
+        assert depth_after == 0, f"_agent_depth leaked: expected 0, got {depth_after}"
