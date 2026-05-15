@@ -85,6 +85,6 @@ def _request_with_retry(
             else:
                 raise  # exhausted retries, re-raise
 
-    if last_exc is not None:
-        raise last_exc
+    if last_exc is not None:  # pragma: no cover
+        raise last_exc  # pragma: no cover
     return r  # pragma: no cover
