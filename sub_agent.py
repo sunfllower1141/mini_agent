@@ -257,11 +257,13 @@ def run_sub_agent(
                 messages, pruned = _prune_by_tokens(
                     messages, max_tokens=_SUB_SAFETY_TOKEN_CEILING, max_messages=_SUB_MAX_MESSAGES,
                 )
-                messages = _strip_orphaned_tool_results(messages)
                 if pruned:
                     summary = _summarize_pruned(pruned)
                     if summary:
                         messages.insert(0, {"role": "user", "content": summary})
+            # Always strip orphaned tool messages — pruning from previous turns
+            # can leave tool results without their preceding assistant(tool_calls).
+            messages = _strip_orphaned_tool_results(messages)
 
             msg = call_deepseek(
                 messages, config,
