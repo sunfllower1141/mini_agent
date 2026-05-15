@@ -633,3 +633,54 @@ def _make_mcp_summary(server_name: str, tool_name: str):
 # ---------------------------------------------------------------------------
 # Helpers (continued)
 # ---------------------------------------------------------------------------
+
+
+# ---- Registered MCP orchestration tools ----
+
+from tools import _register, _TOOL_CONTEXT, ToolResult
+
+
+@_register("mcp_discover")
+def _mcp_discover(args: dict, _write_gate, _read_gate) -> "ToolResult":
+    """List all MCP tools discovered from connected servers."""
+    manager = getattr(_TOOL_CONTEXT, "_mcp_manager", None)
+    if manager is None:
+        return ToolResult(success=False, content="No MCP manager configured.")
+    tools_list = []
+    for name, conn in manager._connections.items():
+        state = "connected" if conn.is_connected else "disconnected"
+        for tool in conn._tools:
+            tools_list.append(
+                f"  {tool.get('name','?')} [{name}/{state}] "
+                f"- {tool.get('description','')[:120]}"
+            )
+    if not tools_list:
+        return ToolResult(
+            success=True,
+            content="No MCP tools discovered. Configure MCP servers in .mini_agent.toml [agent.mcp_servers].",
+        )
+    return ToolResult(success=True, content="MCP tools:\n" + "\n".join(tools_list))
+
+
+@_register("mcp_call")
+def _mcp_call(args: dict, _write_gate, _read_gate) -> "ToolResult":
+    """Call an MCP tool on a connected server.
+
+    Args:
+        server: MCP server name
+        tool: tool name on that server
+        arguments: dict of arguments to pass
+    """
+    manager = getattr(_TOOL_CONTEXT, "_mcp_manager", None)
+    if manager is None:
+        return ToolResult(success=False, content="No MCP manager configured.")
+    server = args.get("server", "")
+    tool = args.get("tool", "")
+    arguments = args.get("arguments", {})
+    if not server or not tool:
+        return ToolResult(
+            success=False,
+            content="Both 'server' and 'tool' are required. Use mcp_discover to find available tools.",
+        )
+    full_name = f"mcp/{server}/{tool}"
+    return manager.call_mcp_tool(full_name, arguments)
