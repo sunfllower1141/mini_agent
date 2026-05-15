@@ -441,6 +441,9 @@ def _search_files_summary(args: dict) -> str:
 
 @_register("run_tests")
 def _run_tests(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
+    from tools import _TOOL_CONTEXT
+    if getattr(_TOOL_CONTEXT, '_agent_depth', 0) > 0:
+        return ToolResult(success=False, content="run_tests is restricted to the orchestrator. Sub-agents must not run tests.")
     target = args.get("path", "").strip()
     background = args.get("background", False)
     timeout = args.get("timeout", 120)
@@ -517,6 +520,9 @@ def _verify(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
     which test files to run.  Falls back to running all tests if nothing
     has been modified yet.
     """
+    from tools import _TOOL_CONTEXT
+    if getattr(_TOOL_CONTEXT, '_agent_depth', 0) > 0:
+        return ToolResult(success=False, content="verify is restricted to the orchestrator. Sub-agents must not run tests.")
     import subprocess, os as _os
     root = rg.workspace_root
 
@@ -774,6 +780,9 @@ def _diagnose_failures(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> 
     """Read the last test output from MemoryStore, parse FAILED lines,
     extract test function names and file paths, and return a structured
     summary with relevant source snippets."""
+    from tools import _TOOL_CONTEXT
+    if getattr(_TOOL_CONTEXT, '_agent_depth', 0) > 0:
+        return ToolResult(success=False, content="diagnose_failures is restricted to the orchestrator. Sub-agents must not run tests.")
     import os as _os
 
     # Build MemoryStore path — same default used by _persist_test_output
