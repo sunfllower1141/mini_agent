@@ -130,6 +130,8 @@ def _spawn_one(
                 tui_queue.put(("sub_tree", "status", task_id, status))
         finally:
             config.stream = original_stream
+            # Restore agent depth so parent context isn't polluted
+            _TOOL_CONTEXT._agent_depth = parent_depth
             # Always release file reservations, even on crash.
             # store_result (called in try) would normally do this, but if
             # run_sub_agent raises an unhandled exception, files are leaked.

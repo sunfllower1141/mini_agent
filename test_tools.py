@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch, MagicMock
 
 from safety import ReadSafetyGate, WriteSafetyGate
-from tools import ToolResult, execute_tool, tool_summary
+from tools import ToolResult, execute_tool, tool_summary, _TOOL_CONTEXT
 
 
 # ---------------------------------------------------------------------------
@@ -474,6 +474,8 @@ class TestRunTests(unittest.TestCase):
     def setUp(self):
         self.workspace = tempfile.mkdtemp()
         self.write_gate, self.read_gate = _gates(self.workspace)
+        # Reset sub-agent depth in case another test leaked it (daemon threads)
+        _TOOL_CONTEXT._agent_depth = 0
         # Create a minimal test file so pytest has something to discover
         test_dir = os.path.join(self.workspace, "tests")
         os.makedirs(test_dir)

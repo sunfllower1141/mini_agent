@@ -48,14 +48,26 @@ def configured_context(tmp_path, monkeypatch):
         api_key = "test-key"
         api_url = "https://test.api"
         stream = False
+        verbose = True
         sub_agent_model = "test-model"
         sub_agent_api_key = ""
         sub_agent_max_concurrent = 5
         sub_agent_max_turns = 5
+        workspace = "/tmp"
+        unrestricted = False
+        allow_overwrites = True
+        approve_write_ops = False
+        memory_filename = ":memory:"
+        max_messages = 500
+        max_tokens = 200000
+        exa_api_key = ""
+        openai_api_key = ""
+        mcp_servers = []
     config = MockConfig()
     set_context(_agent_runtime=runtime, _agent_config=config, workspace=str(tmp_path))
     yield
-    # Cleanup
+    # Cleanup — cancel any sub-agent threads that may still be running
+    runtime.cancel_all()
     set_context(_agent_runtime=None, _agent_config=None)
 
 
@@ -365,17 +377,25 @@ class TestRecursionGuard:
         rg = MagicMock()
 
         class MockConfig:
-            model = "test"
-            api_key = "key"
-            api_url = "http://test"
+            model = "test-model"
+            api_key = "test-key"
+            api_url = "https://test.api"
             stream = False
-            sub_agent_model = "test"
+            verbose = True
+            sub_agent_model = "test-model"
             sub_agent_api_key = ""
             sub_agent_max_concurrent = 5
+            sub_agent_max_turns = 5
             workspace = "/tmp"
             unrestricted = False
             allow_overwrites = True
             approve_write_ops = False
+            memory_filename = ":memory:"
+            max_messages = 500
+            max_tokens = 200000
+            exa_api_key = ""
+            openai_api_key = ""
+            mcp_servers = []
 
         for tool_name in blocked:
             with patch("sub_agent.call_deepseek") as mock_llm:
