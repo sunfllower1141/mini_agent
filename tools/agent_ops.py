@@ -1595,6 +1595,72 @@ def _read_image(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolRes
         return ToolResult(success=False, content=f"OpenAI API request failed: {e}")
 
 
+# ---------------------------------------------------------------------------
+# wait_for_agent
+# ---------------------------------------------------------------------------
+
+@_register("wait_for_agent")
+def _wait_for_agent(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
+    """Block until any sub-agent completes or timeout expires.
+
+    Sleeps with exponential backoff (1s→2s→4s…→30s) between polls
+    to minimize LLM token burn.  Returns immediately if any agent
+    has already completed.
+    """
+    import time
+    from tools import _TOOL_CONTEXT
+    from agent_runtime import AgentRuntime
+
+    task_ids = args.get("task_ids", [])
+    timeout = args.get("timeout", 120)
+
+    if not task_ids:
+        return ToolResult(success=False, content="Missing required parameter: 'task_ids'.")
+
+    runtime: AgentRuntime | None = getattr(_TOOL_CONTEXT, "_agent_runtime", None)
+    if runtime is None:
+        return ToolResult(success=False, content="Agent runtime not initialized.")
+
+    # Check for already-completed
+    for tid in task_ids:
+        status = runtime.get_status(tid)
+        if status == "completed":
+            result = runtime.get_result(tid)
+            if result is not None:
+                runtime._collected.add(tid)
+                return _format_collect_any(tid, result)
+
+    deadline = time.time() + timeout
+    delay = 1.0  # start at 1s, exponential backoff capped at 30s
+
+    while time.time() < deadline:
+        for tid in task_ids:
+            status = runtime.get_status(tid)
+            if status == "completed":
+                result = runtime.get_result(tid)
+                if result is not None:
+                    runtime._collected.add(tid)
+                    return _format_collect_any(tid, result)
+
+        time.sleep(min(delay, deadline - time.time()))
+        delay = min(delay * 2, 30.0)
+
+    still_running = [tid for tid in task_ids if runtime.get_status(tid) == "running"]
+    return ToolResult(
+        success=False,
+        content=(
+            f"Timeout after {timeout}s. Still running: {still_running}. "
+            "Use agent_extend then retry."
+        ),
+    )
+
+
+@_summarize("wait_for_agent")
+def _wait_for_agent_summary(args: dict) -> str:
+    tids = args.get("task_ids", [])
+    timeout = args.get("timeout", 120)
+    return f"wait_for_agent([{len(tids)} ids], {timeout}s)"
+
 @_summarize("read_image")
 def _read_image_summary(args: dict) -> str:
     path = args.get("path", "?")

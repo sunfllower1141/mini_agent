@@ -1004,6 +1004,28 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "wait_for_agent",
+            "description": "Block until any sub-agent from the given list completes, or timeout expires. Uses exponential backoff sleep (1s→2s→4s…→30s) to minimize token burn while waiting. Returns immediately if any agent has already completed. Use this instead of repeated collect_any calls to save on LLM cost.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of sub-agent task IDs to wait for."
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Max seconds to wait (default 120)."
+                    }
+                },
+                "required": ["task_ids"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "diagnose_failures",
             "description": "Read the last test run output from memory store, parse for FAILED lines, extract test function names and file paths, read the relevant source files, and return a structured failure summary with code snippets. No parameters needed — reads automatically from the persisted test output.",
             "parameters": {

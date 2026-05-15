@@ -122,8 +122,8 @@ class TestAllToolsDispatchable(unittest.TestCase):
     def test_tool_count_matches_state_txt(self):
         """Sanity check: 45 tools expected per STATE.txt."""
         from tools.schema import TOOLS
-        self.assertEqual(len(TOOLS), 45,
-                         f"Expected 45 tools, got {len(TOOLS)}. Update STATE.txt if changed.")
+        self.assertEqual(len(TOOLS), 46,
+                         f"Expected 46 tools, got {len(TOOLS)}. Update STATE.txt if changed.")
 
 
 class TestProjectKnowledgeMethods(unittest.TestCase):
