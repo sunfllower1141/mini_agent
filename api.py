@@ -133,11 +133,12 @@ def call_deepseek(
         return None  # cancelled during retry
 
     if not r.ok:
-        try:
-            err = r.json()
-        except (ValueError, AttributeError):
-            err = r.text
-        print(f"\n[API {r.status_code}] {err}", file=sys.stderr, flush=True)
+        if isinstance(r.status_code, int) and r.status_code >= 400:
+            try:
+                err = r.json()
+            except (ValueError, AttributeError):
+                err = r.text
+            print(f"\n[API {r.status_code}] {err}", file=sys.stderr, flush=True)
     r.raise_for_status()
 
     if config.stream:
