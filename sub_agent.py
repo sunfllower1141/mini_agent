@@ -28,11 +28,11 @@ from api import call_deepseek, truncate_content
 # ---------------------------------------------------------------------------
 _SHARED_CONTEXT_CAP = 4_000          # max chars for shared_context from parent
 _TASK_CAP = 8_000                    # max chars for task description
-_SUB_MAX_TOKENS = 32_000             # max tokens before pruning sub-agent context
+_SUB_MAX_TOKENS = 64_000             # max tokens before pruning sub-agent context
 _SUB_MAX_MESSAGES = 50               # max messages before pruning sub-agent context
-_SUB_COMPRESSION_THRESHOLD = 8       # start compressing when messages exceed this
-_SUB_COMPRESSION_KEEP_RECENT = 3     # keep this many recent messages uncompressed
-_SUB_SAFETY_TOKEN_CEILING = 16_000   # hard cap: force-prune before API call if over this
+_SUB_COMPRESSION_THRESHOLD = 15      # start compressing when messages exceed this
+_SUB_COMPRESSION_KEEP_RECENT = 4     # keep this many recent messages uncompressed
+_SUB_SAFETY_TOKEN_CEILING = 32_000   # hard cap: force-prune before API call if over this
 _MAX_TOOL_RESULT_CHARS = 5_000       # max chars in a single tool result before truncation
 _STREAM_SNAP_EVERY = 200             # tokens between streaming-snapshot updates
 _TURN_INTERVAL_COMM_NUDGE = 3        # turns between communication nudges
@@ -250,7 +250,7 @@ def run_sub_agent(
 
             # --- Pre-call token budget check ---
             # Estimate total tokens and force-prune if over safety ceiling.
-            from memory import _total_tokens, _compress_tool_results, _prune_by_tokens, _summarize_pruned, _strip_orphaned_tool_results
+            from memory import _total_tokens, _compress_tool_results, _prune_by_tokens, _summarize_pruned
             est = _total_tokens(messages)
             if est > _SUB_SAFETY_TOKEN_CEILING:
                 messages, _ = _compress_tool_results(messages, keep_recent=_SUB_COMPRESSION_KEEP_RECENT)
@@ -261,9 +261,6 @@ def run_sub_agent(
                     summary = _summarize_pruned(pruned)
                     if summary:
                         messages.insert(0, {"role": "user", "content": summary})
-            # Always strip orphaned tool messages — pruning from previous turns
-            # can leave tool results without their preceding assistant(tool_calls).
-            messages = _strip_orphaned_tool_results(messages)
 
             msg = call_deepseek(
                 messages, config,
@@ -431,12 +428,11 @@ def run_sub_agent(
         #     Run every turn (not just every 5th) once we have enough
         #     messages, because a single turn can produce massive tool output.
         if len(messages) > _SUB_COMPRESSION_THRESHOLD:
-            from memory import _compress_tool_results, _prune_by_tokens, _summarize_pruned, _strip_orphaned_tool_results
+            from memory import _compress_tool_results, _prune_by_tokens, _summarize_pruned
             messages, _ = _compress_tool_results(messages, keep_recent=_SUB_COMPRESSION_KEEP_RECENT)
             messages, pruned = _prune_by_tokens(
                 messages, max_tokens=_SUB_MAX_TOKENS, max_messages=_SUB_MAX_MESSAGES,
             )
-            messages = _strip_orphaned_tool_results(messages)
             if pruned:
                 from memory import _summarize_pruned
                 summary = _summarize_pruned(pruned)

@@ -25,7 +25,7 @@ CONFIG_FILENAME = ".mini_agent.toml"
 MEMORY_FILENAME = ".mini_agent_memory.db"
 
 DEFAULT_MODEL        = "deepseek-v4-pro"
-DEFAULT_SUB_AGENT_MODEL = "deepseek-v4-flash"
+DEFAULT_SUB_AGENT_MODEL = "deepseek-v4-pro"
 DEFAULT_SUB_AGENT_MAX_CONCURRENT = 10
 DEFAULT_API_URL      = "https://api.deepseek.com/v1/chat/completions"
 DEFAULT_API_KEY      = ""  # set via DEEPSEEK_API_KEY env var, .env file, or .mini_agent.toml
