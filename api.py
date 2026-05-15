@@ -26,6 +26,22 @@ from tools.schema import TOOLS
 
 
 # ---------------------------------------------------------------------------
+# APIError exception class
+# ---------------------------------------------------------------------------
+
+class APIError(Exception):
+    """Raised when the DeepSeek API returns a non-OK HTTP status."""
+
+    def __init__(self, status_code: int, body: str) -> None:
+        self.status_code = status_code
+        self.body = body
+        super().__init__(f"API {status_code}: {body}")
+
+    def __str__(self) -> str:
+        return f"APIError({self.status_code}): {self.body}"
+
+
+# ---------------------------------------------------------------------------
 # Shared truncation / utility functions
 # ---------------------------------------------------------------------------
 
@@ -137,7 +153,7 @@ def call_deepseek(
             err = r.json()
         except (ValueError, AttributeError):
             err = r.text
-        raise Exception(f"API {r.status_code}: {err}")
+        raise APIError(status_code=r.status_code, body=str(err))
 
     if config.stream:
         return _parse_stream(r, on_token, on_tool_ready)

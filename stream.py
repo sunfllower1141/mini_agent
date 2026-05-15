@@ -45,8 +45,8 @@ def _parse_stream(response: requests.Response, on_token: Callable[[str], None] |
     Returns a reconstructed message dict (role, content, optional
     reasoning_content, optional tool_calls).
     """
-    full_content = ""
-    full_reasoning = ""
+    full_content_parts: list[str] = []
+    full_reasoning_parts: list[str] = []
     tool_calls_by_index: dict[int, dict] = {}  # index → accumulated tc dict
     fired_indices: set[int] = set()
     reasoning_header_printed = False
@@ -78,11 +78,11 @@ def _parse_stream(response: requests.Response, on_token: Callable[[str], None] |
 
                 # Text content — print and accumulate
                 if "content" in delta and delta["content"]:
-                    if full_reasoning and not full_content:
+                    if full_reasoning_parts and not full_content_parts:
                         # First content token after reasoning — signal end of thinking
                         if on_token:
                             on_token(THINKING_END)
-                    full_content += delta["content"]
+                    full_content_parts.append(delta["content"])
                     if on_token:
                         on_token(delta["content"])
                     else:
@@ -90,13 +90,13 @@ def _parse_stream(response: requests.Response, on_token: Callable[[str], None] |
 
                 # Reasoning content (thinking mode) — forward via on_token or print
                 if "reasoning_content" in delta and delta["reasoning_content"]:
-                    if not reasoning_header_printed and not full_content:
+                    if not reasoning_header_printed and not full_content_parts:
                         if on_token:
                             on_token(THINKING_START)
                         else:
                             print(c("  thinking…", DIM), file=sys.stderr, flush=True)
                         reasoning_header_printed = True
-                    full_reasoning += delta["reasoning_content"]
+                    full_reasoning_parts.append(delta["reasoning_content"])
                     if on_token:
                         on_token(delta["reasoning_content"])
                     else:
@@ -110,7 +110,7 @@ def _parse_stream(response: requests.Response, on_token: Callable[[str], None] |
                             tool_calls_by_index[idx] = {
                                 "id": "",
                                 "type": "function",
-                                "function": {"name": "", "arguments": ""},
+                                "function": {"name": "", "arguments": "", "_arguments_parts": []},
                             }
                         tc = tool_calls_by_index[idx]
                         if "id" in tc_delta:
@@ -122,13 +122,13 @@ def _parse_stream(response: requests.Response, on_token: Callable[[str], None] |
                             if "name" in fn_delta and fn_delta["name"]:
                                 tc["function"]["name"] = fn_delta["name"]
                             if "arguments" in fn_delta:
-                                tc["function"]["arguments"] += fn_delta["arguments"]
+                                tc["function"]["_arguments_parts"].append(fn_delta["arguments"])
 
                         # Fire on_tool_ready when arguments form valid JSON.
                         # Brace-balance pre-check avoids most premature parse
                         # failures on still-fragmented arguments.
                         if on_tool_ready and idx not in fired_indices:
-                            args = tc["function"]["arguments"]
+                            args = "".join(tc["function"]["_arguments_parts"])
                             if args.count("{") == args.count("}") and args.count("[") == args.count("]"):
                                 try:
                                     json.loads(args)
@@ -152,6 +152,9 @@ def _parse_stream(response: requests.Response, on_token: Callable[[str], None] |
             file=sys.stderr, flush=True,
         )
 
+    full_content = "".join(full_content_parts)
+    full_reasoning = "".join(full_reasoning_parts) if full_reasoning_parts else ""
+
     if full_reasoning and not on_token:
         print(file=sys.stderr, flush=True)  # newline after dimmed reasoning block
 
@@ -169,6 +172,10 @@ def _parse_stream(response: requests.Response, on_token: Callable[[str], None] |
             tool_calls_by_index[i]
             for i in sorted(tool_calls_by_index)
         ]
+        # Join accumulated argument parts for each tool call
+        for tc in msg["tool_calls"]:
+            if "_arguments_parts" in tc["function"]:
+                tc["function"]["arguments"] = "".join(tc["function"].pop("_arguments_parts"))
         # Tag which ones were already incrementally executed
         if fired_indices:
             msg["_fired_indices"] = list(fired_indices)

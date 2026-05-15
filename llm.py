@@ -23,7 +23,7 @@ from typing import Any, Callable
 import requests
 
 
-from api import format_tool_detail, call_deepseek, clear_api_cache
+from api import APIError, format_tool_detail, call_deepseek, clear_api_cache
 
 from config import AgentConfig
 from tools import execute_tool, tool_summary, clear_tool_cache, _TOOL_CONTEXT, get_modified_files
@@ -192,6 +192,8 @@ def _inject_git_diff(
                 ),
                 "_transient": True,
             })
+    except APIError as exc:
+        print(f"  ⚠ git diff failed: {exc}", file=sys.stderr, flush=True)
     except Exception as exc:
         print(f"  ⚠ git diff failed: {exc}", file=sys.stderr, flush=True)
 
@@ -231,6 +233,8 @@ def _inject_orchestration_context(messages: list[dict]) -> None:
                 "content": "\n".join(parts),
                 "_transient": True,
             })
+    except APIError as exc:
+        print(f"  ⚠ orchestration context failed: {exc}", file=sys.stderr, flush=True)
     except Exception as exc:
         print(f"  ⚠ orchestration context failed: {exc}", file=sys.stderr, flush=True)
 
@@ -414,6 +418,8 @@ def _extract_pipe_deps(
         raw = tc["function"].get("arguments", "{}")
         try:
             ad = json.loads(raw) if isinstance(raw, str) else dict(raw)
+        except APIError:
+            continue
         except Exception:
             continue
         pipe_cfg = ad.pop("_pipe", None)

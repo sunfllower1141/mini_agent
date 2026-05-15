@@ -20,7 +20,7 @@ import uuid
 
 from safety import ReadSafetyGate, WriteSafetyGate
 from agent_runtime import SubAgentResult, AgentRuntime
-from api import call_deepseek, truncate_content
+from api import APIError, call_deepseek, truncate_content
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +186,8 @@ def run_sub_agent(
                         "message": f"Sub-agent has {max_turns - turn_count} turns left. Please extend."
                     }
                 }, None, None)
+            except APIError:
+                pass  # best-effort, don't crash the sub-agent
             except Exception:
                 pass  # best-effort, don't crash the sub-agent
 
@@ -299,6 +301,17 @@ def run_sub_agent(
             )
             config.model = _saved_model
             config.api_key = _saved_key
+        except APIError as exc:
+            # API error with structured detail
+            detail = f"API call failed [{exc.status_code}]: {exc.body}"
+            return SubAgentResult(
+                success=False,
+                content=detail,
+                turns_used=turn_count,
+                tool_calls_made=tool_calls_made,
+                scratchpad=_scratchpad,
+                error=f"APIError({exc.status_code})",
+            )
         except Exception as exc:
             # On 400, dump message structure for debugging
             detail = f"API call failed: {exc}"
@@ -409,6 +422,12 @@ def run_sub_agent(
                             scratchpad=_scratchpad,
                             error="Cancelled during tool execution",
                         )
+                except APIError as exc:
+                    from tools import ToolResult as TR
+                    result = TR(
+                        success=False,
+                        content=f"API error during tool execution [{exc.status_code}]: {exc.body}",
+                    )
                 except Exception as exc:
                     from tools import ToolResult as TR
                     result = TR(

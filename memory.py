@@ -43,6 +43,10 @@ _SELECT  = "SELECT role, content FROM messages ORDER BY id ASC"
 _DELETE  = "DELETE FROM messages"
 _VACUUM  = "VACUUM"
 
+# VACUUM threshold: only reclaim disk space when freelist exceeds this
+# page count.  Avoids running VACUUM on every full-rewrite save.
+_VACUUM_FREELIST_THRESHOLD = 1000
+
 
 # ---------------------------------------------------------------------------
 # Named constants (extracted from magic numbers)
@@ -921,6 +925,15 @@ class MemoryStore:
                         [(m["role"], json.dumps(m)) for m in new_msgs],
                     )
             conn.commit()
+            # After a full rewrite, check freelist bloat and VACUUM if needed.
+            # Avoids VACUUM on every save — only when free pages exceed threshold.
+            if need_full_rewrite:
+                try:
+                    row = conn.execute("PRAGMA freelist_count").fetchone()
+                    if row and row[0] > _VACUUM_FREELIST_THRESHOLD:
+                        conn.execute(_VACUUM)
+                except sqlite3.Error:
+                    pass  # VACUUM is opportunistic; ignore failures
             self._last_saved_count = len(kept)
         except sqlite3.Error as exc:
             try:
