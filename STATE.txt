@@ -1,6 +1,6 @@
 # mini_agent — Architecture & State
 
-A coding agent powered by DeepSeek V4 Pro. Terminal REPL + Textual TUI.
+A coding agent powered by DeepSeek V4 Pro. Terminal REPL + Textual TUI + Electron app.
 717 tests, 31 tools, SQLite memory.
 
 ## Current Architecture
@@ -8,100 +8,70 @@ A coding agent powered by DeepSeek V4 Pro. Terminal REPL + Textual TUI.
 ```
 mini_agent.py        Terminal REPL entry point
 tui.py               Textual TUI (AgentWorker, themes, tree, diff preview)
+electron_app/        Electron desktop app (main.js, preload.cjs, index.html)
+electron_bridge.py   JSON-RPC bridge for Electron (stdin/stdout)
 llm.py               LLM turn orchestration (_execute_tools, _inject_context, run_agent_turn)
 api.py               API calls (call_deepseek, truncate_content, format_tool_detail)
 prompt.py            System prompt + .mini_agent.rules injection
-config.py            AgentConfig (TOML + env + CLI), GIT_LOG_COUNT constant
+config.py            AgentConfig (.env + TOML + env + CLI priority)
 memory.py            SQLite conversation store + pruning
 safety.py            Read/Write safety gates + DiffPreview
 terminal.py          ANSI colour helpers (DIM, c, format_table)
 retry.py             HTTP retry with jitter
 stream.py            SSE stream parser
-agent_runtime.py     SubAgentResult + AgentRuntime (task registry, file reservations, status snapshots)
-sub_agent.py         run_sub_agent() — imports call_deepseek from api.py, auto-snapshots every turn
+agent_runtime.py     SubAgentResult + AgentRuntime (task registry, file reservations, inboxes, subscriptions, snapshots)
+sub_agent.py         run_sub_agent() — sub-agent loop with turn budget, file coordination, heartbeats
 interject.py         Thread-safe user interjection queue
 tools/
-  __init__.py        ToolResult, dispatch, cache, JSON repair, diff_preview
+  __init__.py        ToolResult, dispatch, cache, JSON repair, FILE_RESERVATIONS with lock
   schema.py          TOOLS list (31 tools)
-  file_ops.py        read/write/edit/list/info
+  file_ops.py        read/write/edit/list/info — ALL writes check _FILE_RESERVATIONS for agent collisions
   shell_ops.py       run_shell, search_files, run_tests, git, task_status, verify
   search_ops.py      find_symbol, find_usages, semantic_search, web_search
-  agent_ops.py       spawn/status/collect/collect_any/message/read/extend/handoff/inbox/subscribe + recall_turn/plan/plan_status/write_scratchpad/diff/restore_file
-  agent_messages.py  AgentMessage, MSG_TYPE_REGISTRY, validation, routing
+  agent_ops.py       spawn/status/collect/collect_any/message/read/extend/handoff/inbox/subscribe/cancel + recall_turn/plan/plan_status/write_scratchpad/diff/restore_file
+  agent_messages.py  AgentMessage, 9 message types, validation, routing
   agent_patterns.py  fan_out, fan_in, pipeline, barrier, scatter_gather
-  lsp.py             LspConnection, LspClientManager — JSON-RPC 2.0 over stdio, Content-Length framing
-  mcp_client.py      McpConnection, McpClientManager — MCP JSON-RPC over stdio
-eval/
-  __init__.py, runner.py, scorer.py, metrics.py
-  tasks/ (5 YAML tasks), fixtures/mini_repo/, reports/
-tests/
-  test_lsp.py, lsp_mock_server.py, mcp_echo_server.py
-```
+  lsp.py             LSP client (pylsp integration, 4 tools)
+  mcp_client.py      MCP client (stdio JSON-RPC, tool discovery)
 
-## Key Architectural Decisions
+## Key State (2025-07-17)
 
-- **api.py**: Extracted `call_deepseek` etc. to break circular import between llm.py ↔ sub_agent.py
-- **.mini_agent.rules**: Project conventions injected into system prompt via `build_system_prompt()`
-- **LSP**: 4 tools (definition, references, hover, diagnostics) — working with real pylsp. Fix: skip all header lines (Content-Type) before reading body.
-- **Diff preview**: `DiffPreview` dataclass in safety.py; write_file/edit_file generate before writing; rendered in tui.py
-- **Named constants**: All magic numbers extracted (`GIT_LOG_COUNT`, `SSE_PREFIX`, `TOOL_DETAIL_DISPLAY_LENGTH`, etc.)
-- **Binary I/O**: LSP uses binary pipes with manual encode/decode (Content-Length counts bytes)
-- **Mock paths**: Tests patch `api.*` or `sub_agent.*` directly (not `llm.*`)
+### API Keys & Security
+- NO hardcoded keys in source. All keys via .env file (DEEPSEEK_API_KEY, EXA_API_KEY, OPENAI_API_KEY).
+- .env is .gitignore'd. Priority: CLI > env var > .env > TOML > default.
+- max_tokens lowered 800k → 200k for cost savings.
 
-## Recent Session (2025-07-18)
+### Inter-Agent Communication (FULLY IMPLEMENTED)
+- 9 message types: text, handoff.result, handoff.request, handoff.ack, status.heartbeat, status.error, coord.fan_out, coord.fan_in, coord.sync
+- Tools: agent_message, agent_read, agent_handoff, agent_inbox, agent_subscribe
+- Routing: direct target delivery, subscription-based, broadcast
+- Sub-agents instructed to send heartbeats every ~3 turns + check inbox each turn
+- Shared file coordination rules in sub-agent system prompt
 
-### read_image tool + OpenAI Config
-- `read_image` tool sends an image to GPT-4o and returns a text description.
-- Requires `openai_api_key` set in `.mini_agent.toml` under `[agent]` section, or `OPENAI_API_KEY` env var.
-- Config is loaded at startup via `init_session()` → `set_context(openai_api_key=...)`.
-- TOML format: `[agent]\nopenai_api_key = "sk-..."` — the `[agent]` section is required.
+### File Reservation System (FULLY IMPLEMENTED)
+- _FILE_RESERVATIONS dict (path → task_id) with threading.Lock
+- _current_agent_id (threading.local) set per sub-agent
+- write_file and edit_file BOTH check reservations and block cross-agent collisions
+- reserve_file(), release_file(), release_all_files() in tools/__init__.py
+- AgentRuntime releases all files on task completion
 
-## Previous Session (2025-07-17)
+### Electron App
+- Working JSON-RPC bridge (init, chat, cancel methods)
+- Token streaming from backend to frontend
+- CommonJS preload.cjs (ESM preload.js did not load)
+- Uses venv/bin/python3 (system python3 lacked deps)
+- CSP allows unsafe-inline scripts
 
-### Multi-Agent Communication Overhaul
-- **Problem**: Communication plumbing existed (agent_message, agent_handoff, agent_inbox, agent_subscribe, agent_read) but prompts never told agents to use them. Orchestrator only polled; sub-agents worked silently.
-- **Fix**: Injected inter-agent comms guidance into 3 places:
-  1. `prompt.py` "Orchestrator mode" section — new "Inter-agent communication" block covering all 5 comm tools + heartbeat expectations + Push > Poll guidance
-  2. `sub_agent.py` `_SUB_AGENT_SYSTEM_PROMPT` — sub-agents now told to broadcast progress, send heartbeats every ~3 turns, check inbox first each turn
-  3. `sub_agent.py` `run_sub_agent()` — task_id injected as system message so sub-agents can use agent_inbox/agent_handoff with `target=`
-- **agent_inbox fix**: Made `task_id` optional — defaults to caller's own ID. Parent orchestrator can now call `agent_inbox()` without knowing its task_id.
-- **Loop-enforced nudges**: Every 3 turns, the sub-agent turn loop injects a COMMUNICATION NUDGE system message requiring a heartbeat + inbox check. This guarantees communication even if the LLM "forgets."
-- **Test**: `test_prompt.py` limit raised 15,000 → 17,000. 717 passed, same 6 pre-existing failures.
+### Configuration
+- .env file for API keys (recommended, gitignored)
+- .mini_agent.toml for advanced settings (MCP servers, overwrite flags)
+- Priority: CLI flags > env vars > .env file > .mini_agent.toml > defaults
 
-### Comprehensive Code Audit + Fix (18 issues)
-- 4 audit agents + 4 fix agents in parallel
-- **CRITICAL**: Deduplicated api.py/llm.py
-- **HIGH**: Named constants for all magic numbers; TODO comments on long functions
-- **MEDIUM**: Bare excepts → specific types; in-loop imports → module-level; docstrings updated; _DIM → DIM
-- **LOW**: recall_turn/plan/scratchpad/diff/restore moved to agent_ops.py; SSE_PREFIX constant; import order; duplicate constants removed; format_table return type; _toml_cache comment; ToolResult.diff_preview
+## Recent Sessions
 
-### LSP Integration
-- tools/lsp.py: LspConnection with Content-Length framing, binary I/O, 15s timeout
-- 4 tools in schema + dispatch + prompt guidance
-- **Now working with real pylsp**: root cause was `Content-Type` header sent after `Content-Length` — fix skips all header lines until blank separator before reading body
-
-### .mini_agent.rules + Prompt Injection
-- 47-line project conventions file; injected at end of system prompt
-
-### Test Results
-- **717 passed**, 6 pre-existing integration failures (network-dependent)
-
-## Previous Sessions
-
-### Tree Display Fix (2025-07-16)
-- Fixed race condition in sub-agent tree via explicit `parent_task_id` + `_pending_children` queue
-
-### Multi-Agent Fix Sprint (~150 fixes)
-- 5 audit agents + 4 fix agents across 20+ files
-- DEADLOCK fix (notify outside lock), lost-wakeup, garbled handoff, inbox cleanup
-- JSON repair, cache key mismatch, LRU ordering, MCP stderr drain
-
-### Agent Tree + Orchestrator Mode
-- Event-driven TUI (no polling), multi-agent depth > 1, sub-agent tree display
-- Orchestrator instructions in prompt: poll, extend, never duplicate delegated work
-
-### Scratchpad + Completion Signals
-- SQLite scratchpad table auto-creation; sub-agent completion signals in turn context
-
-### collect_any timeout: 120s → 10s; collect: 120s → 30s
-### TUI: Queued messages in purple
+### 2025-07-17
+- Electron app fully wired (JSON-RPC bridge, init/chat/token streaming)
+- API key security: removed hardcoded key, added .env loading, lowered max_tokens
+- Sub-agent system prompt enhanced with shared file coordination rules
+- FILE_RESERVATIONS system confirmed fully wired into write_file/edit_file
+- Multiple Electron fixes: CSP, preload.cjs, venv python, dict unpacking, stdout buffering
