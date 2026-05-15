@@ -271,13 +271,20 @@ def run_sub_agent(
             config.model = _saved_model
             config.api_key = _saved_key
         except Exception as exc:
+            # Extract API response body for 400 errors
+            body = ""
+            if hasattr(exc, "response") and exc.response is not None:
+                try:
+                    body = exc.response.text
+                except Exception:
+                    body = str(exc.response)
             return SubAgentResult(
                 success=False,
-                content=f"API call failed: {exc}",
+                content=f"API call failed: {exc}" + (f" | Body: {body}" if body else ""),
                 turns_used=turn_count,
                 tool_calls_made=tool_calls_made,
                 scratchpad=_scratchpad,
-                error=f"API error: {exc}",
+                error=f"API error: {exc}" + (f" | Body: {body}" if body else ""),
             )
 
         if cancel_event is not None and cancel_event.is_set():
