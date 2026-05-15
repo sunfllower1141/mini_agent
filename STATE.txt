@@ -35,7 +35,7 @@ tools/
   mcp_client.py      MCP client — stdio JSON-RPC, tool discovery at startup
   _json_rpc_shared.py  Shared subprocess drain_stderr + is_subprocess_connected
 tests/
-  40 test files, 817 tests
+  28 test files, 827 tests
 ```
 
 ## Key State

@@ -124,11 +124,11 @@ def main() -> None:
                 user_input = input("> ").strip()
             except (EOFError, KeyboardInterrupt):
                 print("\nGoodbye.")
-                memory.save(messages)
+                messages = memory.save(messages)
                 break
 
             if user_input.lower() == "quit":
-                memory.save(messages)
+                messages = memory.save(messages)
                 if stats["turns"] > 0:
                     print(f"Session: {stats['turns']} turns, {stats['tool_calls']} tool calls")
                 break
@@ -162,13 +162,13 @@ def main() -> None:
                         print("No saved sessions found.")
                 elif sub == "new" and arg:
                     session_data = switch_session(workspace, arg, memory, config)
-                    memory.save(messages)
+                    messages = memory.save(messages)
                     memory = session_data["memory"]
                     messages = session_data["messages"]
                     stats = {"turns": 0, "tool_calls": 0}
                     print(f"Created and switched to session '{arg}'.")
                 elif sub == "switch" and arg:
-                    memory.save(messages)
+                    messages = memory.save(messages)
                     session_data = switch_session(workspace, arg, memory, config)
                     memory = session_data["memory"]
                     messages = session_data["messages"]
@@ -241,7 +241,7 @@ def main() -> None:
             # Track stats
             stats["turns"] += 1
             # Persist after every turn
-            memory.save(messages)
+            messages = memory.save(messages)
             _log(config.verbose, c("─" * 50, DIM), file=sys.stderr)
     finally:
         session.close()

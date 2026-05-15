@@ -10,6 +10,27 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "remember",
+            "description": "Manually capture a learning or observation to project_knowledge for cross-session persistence. Use this when you discover a pattern, workaround, or convention worth remembering in future sessions.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {
+                        "type": "string",
+                        "description": "Short topic label for this learning (e.g. 'edit_file whitespace', 'module import pattern')"
+                    },
+                    "detail": {
+                        "type": "string",
+                        "description": "The learning itself — what to remember, the pattern, workaround, or convention."
+                    }
+                },
+                "required": ["topic", "detail"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "find_symbol",
             "description": "Find where a Python symbol (function, class, method name) is defined in the workspace. Returns file path and line number for each match. Much faster than grep/search_files for symbol lookup. Use this to locate definitions before editing code.",
             "parameters": {

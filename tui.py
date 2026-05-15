@@ -608,7 +608,7 @@ class MiniAgentTUI(App):
             self._thinking_buf = ""
             self._thinking_flush_pos = 0
             self._in_thinking = False
-            self.memory.save(self.messages)
+            self.messages = self.memory.save(self.messages)
             log = self.query_one("#chat-pane", RichLog)
             t = self._tui_theme
             log.write(f"[{t.yellow}]  ╼ Cancelled.[/]")
@@ -618,7 +618,7 @@ class MiniAgentTUI(App):
 
     def action_quit(self) -> None:
         """Save conversation before quitting (Ctrl+Q)."""
-        self.memory.save(self.messages)
+        self.messages = self.memory.save(self.messages)
         self.exit()
 
     def action_copy(self) -> None:
@@ -819,7 +819,7 @@ class MiniAgentTUI(App):
                     log.write(f"[{t.dim}]No saved sessions found.[/]")
             elif sub == "new" and arg:
                 session_data = switch_session(ws, arg, self.memory, self.config)
-                self.memory.save(self.messages)
+                self.messages = self.memory.save(self.messages)
                 self.memory.close()
                 self.memory = session_data["memory"]
                 self.messages = session_data["messages"]
@@ -827,7 +827,7 @@ class MiniAgentTUI(App):
                 self._total_tokens = 0
                 log.write(f"[{t.green}]Created and switched to session '{arg}'.[/]")
             elif sub == "switch" and arg:
-                self.memory.save(self.messages)
+                self.messages = self.memory.save(self.messages)
                 self.memory.close()
                 session_data = switch_session(ws, arg, self.memory, self.config)
                 self.memory = session_data["memory"]
@@ -1253,7 +1253,7 @@ class MiniAgentTUI(App):
             self._box_close(self._tools_log, t.accent)
         self._accumulated_content = []
 
-        self.memory.save(self.messages)
+        self.messages = self.memory.save(self.messages)
         self.worker = None
         self._turn_finished = True
         self.query_one("#input", TextArea).focus()

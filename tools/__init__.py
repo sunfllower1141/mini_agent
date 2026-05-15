@@ -23,9 +23,10 @@ Submodules:
 """
 
 import json
-import subprocess
 import re
+import subprocess
 import threading
+from dataclasses import dataclass
 
 from safety import ReadSafetyGate, WriteSafetyGate
 from tools.schema import TOOLS
@@ -49,6 +50,7 @@ def _get_tool_schema(name: str) -> dict | None:
 # Structured tool result
 # ---------------------------------------------------------------------------
 
+@dataclass
 class ToolResult:
     """Structured result from a tool execution — never a raw exception.
 
@@ -57,12 +59,10 @@ class ToolResult:
     wrong types, etc.).  It is included only on failure.
     """
 
-    def __init__(self, success: bool, content: str, hint: str = "",
-                 diff_preview: str | None = None) -> None:
-        self.success = success
-        self.content = content
-        self.hint = hint
-        self.diff_preview = diff_preview
+    success: bool
+    content: str
+    hint: str = ""
+    diff_preview: str | None = None
 
     def to_dict(self) -> dict:
         d: dict = {"success": self.success, "content": self.content}

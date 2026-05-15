@@ -264,6 +264,8 @@ def _compress_tool_results(
             kept = _compress_search_files(lines)
         elif tool_name == "run_shell":
             kept = _compress_run_shell(lines)
+        elif tool_name == "run_tests":
+            kept = _compress_run_tests(lines)
         else:
             kept = _compress_default(lines)
 
@@ -351,15 +353,76 @@ def _is_match_line(line: str) -> bool:
 
 
 def _compress_run_shell(lines: list[str]) -> str:
-    """Keep the last 20 lines for run_shell output (exit code + tail summary)."""
+    """Keep exit code line(s) + last 20 meaningful lines of output.
+
+    Shell output often starts with a marker like 'exit_code=0' or
+    the exit code is embedded in the first/last few lines.  We keep
+    any line that looks like an exit code / status marker, plus the
+    trailing 20 lines (which usually contain the final result).
+    """
     if len(lines) <= 20:
         return "\n".join(lines)
 
-    kept = lines[-20:]
+    # Identify lines that look like status/exit-code info
+    head: list[str] = []
+    for line in lines[:3]:
+        s = line.strip().lower()
+        if any(marker in s for marker in
+               ("exit_code", "returncode", "exit", "failed", "ok", "success", "error", "status")):
+            head.append(line)
+
+    tail = lines[-20:]
+    # Deduplicate if head and tail overlap
+    kept = list(dict.fromkeys(head + tail))
     result = "\n".join(kept)
     if len(result) > _COMPRESSION_MAX_FIRST_LINE:
         result = result[:_COMPRESSION_MAX_FIRST_LINE] + "…"
-    return f"… (truncated, last {len(kept)} of {len(lines)} lines)\n{result}"
+    label = f"status + last {len(tail)}" if head else f"last {len(tail)}"
+    return f"… (truncated, {label} of {len(lines)} lines)\n{result}"
+
+
+def _compress_run_tests(lines: list[str]) -> str:
+    """Keep pass/fail summary lines + list of FAILED test names.
+
+    Pytest output is mostly dot-progress and per-test detail.  After
+    compression we want: the summary line (X passed, Y failed),
+    the list of FAILED test names, and any error summary footer.
+    """
+    if len(lines) <= _COMPRESSION_MAX_LINES * 4:
+        return "\n".join(lines)
+
+    kept_indices: list[int] = []
+    for idx, line in enumerate(lines):
+        s = line.strip()
+        # Summary line: "X passed, Y failed" or "X passed"
+        if "passed" in s.lower() and ("failed" in s.lower() or "passed" not in s.lower()):
+            kept_indices.append(idx)
+        # FAILED test marker
+        elif s.startswith("FAILED") or s.startswith("ERRORS") or s.startswith("==="):
+            kept_indices.append(idx)
+        # Assertion summary / error footer
+        elif s.startswith("!") and "short test summary" not in s.lower():
+            kept_indices.append(idx)
+        # Keep the "short test summary info" header + its lines
+        elif "short test summary" in s.lower():
+            kept_indices.append(idx)
+
+    if not kept_indices:
+        # Fall back: keep first 3 + last 3 lines to capture header + footer
+        kept_indices = [0, 1, 2, len(lines) - 3, len(lines) - 2, len(lines) - 1]
+
+    kept = sorted(set(kept_indices))
+    parts: list[str] = []
+    last = -2
+    for k in kept:
+        if k > last + 1:
+            skipped = k - last - 1
+            parts.append(f"… ({skipped} lines skipped) …")
+        parts.append(lines[k])
+        last = k
+    if last < len(lines) - 1:
+        parts.append(f"… ({len(lines) - last - 1} lines skipped — {len(lines)} total)")
+    return "\n".join(parts)
 
 
 def _compress_default(lines: list[str]) -> str:
@@ -764,7 +827,7 @@ class MemoryStore:
 
     # TODO: MemoryStore.save is ~50 lines — consider splitting compression,
     #       pruning, summarization, and SQL writes into separate helpers.
-    def save(self, messages: list[dict]) -> None:
+    def save(self, messages: list[dict]) -> list[dict]:
         """Persist *messages* to the database.
 
         1. Strip system messages and incomplete tool-call sequences.
@@ -772,6 +835,10 @@ class MemoryStore:
         3. Prune by token budget, preserving turn boundaries.
         4. Summarize pruned messages into a context note.
         5. Write atomically to SQLite.
+
+        Returns *kept*, the processed list of messages that was written.
+        Callers should replace their in-memory list with this return value
+        to keep their working set in sync with the compacted/pruned store.
         """
         _clear_message_caches()
         cleaned = _clean_messages(messages)
@@ -830,6 +897,9 @@ class MemoryStore:
                 pass
             import sys
             print(f"Warning: memory save failed: {exc}", file=sys.stderr)
+            return messages  # return original on failure so caller doesn't lose data
+
+        return kept
 
     def clear(self) -> None:
         """Remove all messages and reclaim disk space."""

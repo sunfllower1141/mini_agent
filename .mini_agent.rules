@@ -15,19 +15,37 @@
 - Use `from __future__ import annotations` in every module.
 
 ## Module Map
-# prompt.py     — system prompt, personality rules
-# config.py     — AgentConfig (TOML + env + CLI), startup context
-# llm.py        — API calls, turn orchestration, tool piping
-# memory.py     — SQLite conversation persistence + pruning
-# safety.py     — workspace read/write gates (SafetyResult dataclass)
-# tui.py        — Textual TUI frontend, themes, AgentWorker
-# tools/        — tool implementations (file_ops, shell_ops, search_ops, agent_ops, …)
-# STATE.txt     — architecture decisions, current state (consult before major changes)
+# prompt.py          — system prompt, personality rules
+# config.py          — AgentConfig (TOML + env + CLI), startup context
+# llm.py             — API calls, turn orchestration, tool piping
+# memory.py          — SQLite conversation persistence + pruning
+# safety.py          — workspace read/write gates (SafetyResult dataclass)
+# tui.py             — Textual TUI frontend, themes, AgentWorker
+# api.py             — LLM API calls (call_deepseek), message cache
+# sub_agent.py       — sub-agent engine, turn budget, pruning, Flash model
+# agent_runtime.py   — sub-agent lifecycle, inboxes, file reservations
+# interject.py       — thread-safe user interjection queue
+# terminal.py        — ANSI colour helpers
+# retry.py           — HTTP retry with jitter and backoff
+# stream.py          — SSE stream parser
+# tools/             — tool implementations
+#   __init__.py      — dispatch, cache, ToolResult, JSON repair
+#   schema.py        — TOOLS definitions sent to LLM
+#   file_ops.py      — read/write/edit/list/info/scratchpad/diff/plan
+#   shell_ops.py     — run_shell, run_tests, search_files, git, task_status, verify
+#   search_ops.py    — find_symbol, find_usages, semantic_search, web_search, recall_turn
+#   agent_ops.py     — spawn/status/collect/message/read/extend/handoff/inbox/subscribe/cancel
+#   agent_messages.py — typed message registry, validation, routing
+#   agent_patterns.py — fan_out, fan_in, pipeline, barrier, scatter_gather
+#   lsp.py           — LSP client (pylsp integration)
+#   mcp_client.py    — MCP client (stdio JSON-RPC tool discovery)
+# STATE.txt          — architecture decisions, current state (consult before major changes)
 
 ## Testing
 - Test files live at root: `test_<module>.py`. Use unittest.TestCase.
+- Tests with supporting files (mock servers, fixtures) may live in `tests/` subdirectory.
 - Run relevant tests after every code change (use `run_tests` tool with path).
-- 562 tests currently, all must pass. Do not stack speculative fixes — verify each.
+- 827 tests currently, all must pass. Do not stack speculative fixes — verify each.
 - Use tempfile.mkdtemp for test workspaces; clean up in tearDown.
 
 ## Architecture Rules

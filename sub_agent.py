@@ -24,6 +24,19 @@ from api import call_deepseek, truncate_content
 
 
 # ---------------------------------------------------------------------------
+# Named constants (avoid magic numbers)
+# ---------------------------------------------------------------------------
+_SHARED_CONTEXT_CAP = 4_000          # max chars for shared_context from parent
+_TASK_CAP = 8_000                    # max chars for task description
+_SUB_MAX_TOKENS = 32_000             # max tokens before pruning sub-agent context
+_SUB_MAX_MESSAGES = 50               # max messages before pruning sub-agent context
+_SUB_COMPRESSION_THRESHOLD = 8       # start compressing when messages exceed this
+_SUB_COMPRESSION_KEEP_RECENT = 4     # keep this many recent messages uncompressed
+_STREAM_SNAP_EVERY = 200             # tokens between streaming-snapshot updates
+_TURN_INTERVAL_COMM_NUDGE = 3        # turns between communication nudges
+
+
+# ---------------------------------------------------------------------------
 # Sub-agent loop (runs in a background thread)
 # ---------------------------------------------------------------------------
 
@@ -107,6 +120,9 @@ def run_sub_agent(
             ),
         })
     if shared_context:
+        # Cap shared_context to avoid blowing the first API call
+        if len(shared_context) > _SHARED_CONTEXT_CAP:
+            shared_context = shared_context[:_SHARED_CONTEXT_CAP] + "\n...[shared_context truncated to {_SHARED_CONTEXT_CAP} chars]"
         messages.append({
             "role": "system",
             "content": (
@@ -124,6 +140,9 @@ def run_sub_agent(
                 f"Use your own ID with agent_inbox(). Use the parent ID as target with agent_handoff(target=...)."
             ),
         })
+    # Cap task to prevent oversized user message from blowing the first API call
+    if len(task) > _TASK_CAP:
+        task = task[:_TASK_CAP] + "\n...[task truncated to {_TASK_CAP} chars]"
     messages.append({"role": "user", "content": task})
 
     turn_count = 0
@@ -189,7 +208,7 @@ def run_sub_agent(
             # Accumulator for periodic streaming-snapshot updates
             _stream_buf: list[str] = []
             _stream_count = [0]  # mutable counter for closure
-            _STREAM_SNAP_EVERY = 200  # tokens between streaming-snapshot updates
+              # tokens between streaming-snapshot updates
             _snap_rt = getattr(_TOOL_CONTEXT, "_agent_runtime", None)
 
             def _make_streaming_wrapper(inner_on_token):
@@ -379,11 +398,13 @@ def run_sub_agent(
         # --- Memory management: compress old tool results and prune to
         #     keep the sub-agent's context within API limits.  Without
         #     this, sub-agents grow unbounded messages and hit 400 errors.
-        if turn_count % 5 == 0 and len(messages) > 20:
+        #     Run every turn (not just every 5th) once we have enough
+        #     messages, because a single turn can produce massive tool output.
+        if len(messages) > _SUB_COMPRESSION_THRESHOLD:
             from memory import _compress_tool_results, _prune_by_tokens
-            messages, _ = _compress_tool_results(messages, keep_recent=10)
+            messages, _ = _compress_tool_results(messages, keep_recent=_SUB_COMPRESSION_KEEP_RECENT)
             messages, pruned = _prune_by_tokens(
-                messages, max_tokens=100_000, max_messages=50,
+                messages, max_tokens=_SUB_MAX_TOKENS, max_messages=_SUB_MAX_MESSAGES,
             )
             if pruned:
                 from memory import _summarize_pruned
