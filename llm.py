@@ -237,7 +237,7 @@ def _inject_orchestration_context(messages: list[dict]) -> None:
                 _TOOL_CONTEXT._last_msg_count = msg_count
                 parts.append("New message(s) from sub-agents:")
                 for m in new_msgs[-5:]:  # cap at 5 most recent
-                    parts.append(f"  [{getattr(m,'type','?')}] {getattr(m,'from','?')}: {str(getattr(m,'result',''))[:200]}")
+                    parts.append(f"  [{m.get('type','?')}] {m.get('from','?')}: {str(m.get('payload',''))[:200]}")
                 if len(new_msgs) > 5:
                     parts.append(f"  ... ({len(new_msgs)-5} more)")
                 parts.append("Use agent_inbox or agent_read to view full messages.")
