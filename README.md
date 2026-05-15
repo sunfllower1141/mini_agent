@@ -1,6 +1,6 @@
 # mini_agent
 
-A coding agent powered by DeepSeek V4 Pro with **44 tools**. Terminal REPL, Textual TUI, or Electron desktop app. SQLite-backed memory with cross-session project knowledge.
+A coding agent powered by DeepSeek V4 Pro with **48 tools**. Terminal REPL, Textual TUI, or Electron desktop app. SQLite-backed memory with cross-session project knowledge.
 
 ## Features
 

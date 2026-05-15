@@ -1,7 +1,7 @@
 # mini_agent — Architecture & State
 
 A coding agent powered by DeepSeek V4 Pro (orchestrator) + V4 Pro (sub-agents).
-Terminal REPL + Textual TUI + Electron app. 827 tests, 46 tools, SQLite memory.
+Terminal REPL + Textual TUI + Electron app. 904 tests, 48 tools, SQLite memory.
 
 ## Architecture
 
@@ -24,18 +24,21 @@ agent_runtime.py     Sub-agent lifecycle, file reservations, inboxes, subscripti
 sub_agent.py         Sub-agent loop with turn budget, pruning, streaming, Pro model
 tools/
   __init__.py        Tool dispatch, cache, JSON repair, FILE_RESERVATIONS
-  schema.py          TOOLS definitions (46 tools)
-  file_ops.py        read/write/edit/list/info — cross-agent collision detection
-  shell_ops.py       run_shell, search_files, run_tests, git, task_status, verify
+  schema.py          TOOLS definitions (48 tools)
+  file_ops.py        read/write/edit/list/info — cross-agent collision detection,
+                     cascading fuzzy whitespace match (3-pass: exact→trailing→indent)
+  shell_ops.py       run_shell, search_files, run_tests, git, task_status, verify,
+                     auto-backup before rm commands
   search_ops.py      find_symbol, find_usages, semantic_search, web_search, recall_turn
   agent_ops.py       spawn/status/collect/message/read/extend/handoff/inbox/subscribe/cancel + remember
   agent_messages.py  AgentMessage, 9 message types, validation, routing
   agent_patterns.py  fan_out, fan_in, pipeline, barrier, scatter_gather
   lsp.py             LSP client — pylsp integration, 4 tools (definition, references, hover, diagnostics)
-  mcp_client.py      MCP client — stdio JSON-RPC, tool discovery at startup
+  mcp_client.py      MCP client — stdio JSON-RPC, tool discovery at startup,
+                     mcp_discover + mcp_call tools registered
   _json_rpc_shared.py  Shared subprocess drain_stderr + is_subprocess_connected
 tests/
-  28 test files, 827 tests
+  28 test files, 904 tests
 ```
 
 ## Key State
@@ -47,6 +50,9 @@ tests/
 
 ### Multi-Agent System
 - Max 10 concurrent sub-agents (configurable via sub_agent_max_concurrent in TOML).
+- Auto-wake: completions injected as user messages before input() blocks — no missed finishes.
+- Sub-agents auto-extend when ≤3 turns remaining and making progress (max 35 turns).
+- Stale agent GC: threads from previous sessions cleaned up on startup.
 - Sub-agents auto-prune memory every 5 turns when >20 messages to avoid 400 errors.
 - Streaming snapshots at 200-token granularity.
 - 5 coordination patterns: fan_out, fan_in, pipeline, barrier, scatter_gather.
