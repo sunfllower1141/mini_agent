@@ -1,100 +1,76 @@
 # mini_agent — Architecture & State
 
-A coding agent powered by DeepSeek V4 Pro. Terminal REPL + Textual TUI + Electron app.
-717 tests, 31 tools, SQLite memory.
+A coding agent powered by DeepSeek V4 Pro (orchestrator) + Flash (sub-agents).
+Terminal REPL + Textual TUI + Electron app. 817 tests, 44 tools, SQLite memory.
 
-## Current Architecture
+## Architecture
 
 ```
 mini_agent.py        Terminal REPL entry point
 tui.py               Textual TUI (AgentWorker, themes, tree, diff preview)
 electron_app/        Electron desktop app (main.js, preload.cjs, index.html)
 electron_bridge.py   JSON-RPC bridge for Electron (stdin/stdout)
-llm.py               LLM turn orchestration (_execute_tools, _inject_context, run_agent_turn)
-api.py               API calls (call_deepseek, truncate_content, format_tool_detail)
+llm.py               LLM turn orchestration, circuit breaker, tool piping/grouping
+api.py               API calls (call_deepseek, incremental message cleaning cache)
 prompt.py            System prompt + .mini_agent.rules injection
-config.py            AgentConfig (.env + TOML + env + CLI priority)
-memory.py            SQLite conversation store + pruning
-safety.py            Read/Write safety gates + DiffPreview
-terminal.py          ANSI colour helpers (DIM, c, format_table)
-retry.py             HTTP retry with jitter
-stream.py            SSE stream parser
-agent_runtime.py     SubAgentResult + AgentRuntime (task registry, file reservations, inboxes, subscriptions, snapshots)
-sub_agent.py         run_sub_agent() — sub-agent loop with turn budget, file coordination, heartbeats
+config.py            AgentConfig (.env + TOML + env + CLI), build_startup_context
+memory.py            SQLite conversation store + pruning + project_knowledge table
+safety.py            Read/Write safety gates + diff preview
 interject.py         Thread-safe user interjection queue
+terminal.py          ANSI colour helpers
+retry.py             HTTP retry with jitter and exponential backoff
+stream.py            SSE stream parser
+agent_runtime.py     Sub-agent lifecycle, file reservations, inboxes, subscriptions, snapshots
+sub_agent.py         Sub-agent loop with turn budget, pruning, streaming, Flash model
 tools/
-  __init__.py        ToolResult, dispatch, cache, JSON repair, FILE_RESERVATIONS with lock
-  schema.py          TOOLS list (31 tools)
-  file_ops.py        read/write/edit/list/info — ALL writes check _FILE_RESERVATIONS for agent collisions
+  __init__.py        Tool dispatch, cache, JSON repair, FILE_RESERVATIONS
+  schema.py          TOOLS definitions (44 tools)
+  file_ops.py        read/write/edit/list/info — cross-agent collision detection
   shell_ops.py       run_shell, search_files, run_tests, git, task_status, verify
-  search_ops.py      find_symbol, find_usages, semantic_search, web_search
-  agent_ops.py       spawn/status/collect/collect_any/message/read/extend/handoff/inbox/subscribe/cancel + recall_turn/plan/plan_status/write_scratchpad/diff/restore_file
+  search_ops.py      find_symbol, find_usages, semantic_search, web_search, recall_turn
+  agent_ops.py       spawn/status/collect/message/read/extend/handoff/inbox/subscribe/cancel + remember
   agent_messages.py  AgentMessage, 9 message types, validation, routing
   agent_patterns.py  fan_out, fan_in, pipeline, barrier, scatter_gather
-  lsp.py             LSP client (pylsp integration, 4 tools)
-  mcp_client.py      MCP client (stdio JSON-RPC, tool discovery)
+  lsp.py             LSP client — pylsp integration, 4 tools (definition, references, hover, diagnostics)
+  mcp_client.py      MCP client — stdio JSON-RPC, tool discovery at startup
+  _json_rpc_shared.py  Shared subprocess drain_stderr + is_subprocess_connected
+tests/
+  40 test files, 817 tests
+```
 
-## Key State (2025-07-17)
+## Key State
 
-### API Keys & Security
-- NO hardcoded keys in source. All keys via .env file (DEEPSEEK_API_KEY, EXA_API_KEY, OPENAI_API_KEY).
-- .env is .gitignore'd. Priority: CLI > env var > .env > TOML > default.
-- max_tokens lowered 800k → 200k for cost savings.
+### Models & API
+- Orchestrator: DeepSeek V4 Pro. Sub-agents: DeepSeek V4 Flash.
+- Separate API keys supported via DEEPSEEK_API_KEY and SUB_AGENT_API_KEY env vars.
+- max_tokens = 200k. max_messages = 500. Priority: CLI > env var > .env > TOML > default.
 
-### Inter-Agent Communication (FULLY IMPLEMENTED)
-- 9 message types: text, handoff.result, handoff.request, handoff.ack, status.heartbeat, status.error, coord.fan_out, coord.fan_in, coord.sync
-- Tools: agent_message, agent_read, agent_handoff, agent_inbox, agent_subscribe
-- Routing: direct target delivery, subscription-based, broadcast
-- Sub-agents instructed to send heartbeats every ~3 turns + check inbox each turn
-- Shared file coordination rules in sub-agent system prompt
+### Multi-Agent System
+- Max 10 concurrent sub-agents (configurable via sub_agent_max_concurrent in TOML).
+- Sub-agents auto-prune memory every 5 turns when >20 messages to avoid 400 errors.
+- Streaming snapshots at 200-token granularity.
+- 5 coordination patterns: fan_out, fan_in, pipeline, barrier, scatter_gather.
+- 9 inter-agent message types with validation, routing (direct, subscription, broadcast).
+- FILE_RESERVATIONS with threading.Lock prevents cross-agent write collisions.
 
-### File Reservation System (FULLY IMPLEMENTED)
-- _FILE_RESERVATIONS dict (path → task_id) with threading.Lock
-- _current_agent_id (threading.local) set per sub-agent
-- write_file and edit_file BOTH check reservations and block cross-agent collisions
-- reserve_file(), release_file(), release_all_files() in tools/__init__.py
-- AgentRuntime releases all files on task completion
+### Memory & Learning
+- SQLite-backed conversation store with token-aware pruning and progressive compression.
+- project_knowledge table persists learnings across sessions in same workspace.
+- remember tool for manual capture; edit_file mismatches auto-captured.
+- Workspace tree cached in project_knowledge (mtime-gated, skips os.walk on restart).
+- Inbox ring-buffer cap at 1000 messages prevents memory leaks.
+- Background test output persisted to test_output table.
 
-### Electron App
-- Working JSON-RPC bridge (init, chat, cancel methods)
-- Token streaming from backend to frontend
-- CommonJS preload.cjs (ESM preload.js did not load)
-- Uses venv/bin/python3 (system python3 lacked deps)
-- CSP allows unsafe-inline scripts
+### Performance
+- Symbol index persisted to .mini_agent_index.json (mtime-gated, incremental reindex).
+- Semantic search with per-file mtime invalidation.
+- Incremental message cleaning cache (survives across turns via id(messages) key).
+- _pipe dependency detection short-circuits before JSON parse when not present.
+- Circuit breaker uses deque.popleft() for O(1) window management.
 
-### Configuration
-- .env file for API keys (recommended, gitignored)
-- .mini_agent.toml for advanced settings (MCP servers, overwrite flags)
-- Priority: CLI flags > env vars > .env file > .mini_agent.toml > defaults
-
-## Recent Sessions
-
-### 2025-07-17
-- Electron app fully wired (JSON-RPC bridge, init/chat/token streaming)
-- API key security: removed hardcoded key, added .env loading, lowered max_tokens
-- Sub-agent system prompt enhanced with shared file coordination rules
-- FILE_RESERVATIONS system confirmed fully wired into write_file/edit_file
-- Multiple Electron fixes: CSP, preload.cjs, venv python, dict unpacking, stdout buffering
-
-### 2025-07-17 (Session 2 — Memory Compression/Pruning Review)
-- Comprehensive review of memory.py compression/pruning pipeline
-- Added 3 new test files: test_memory_compression.py (39 tests), test_memory_internals.py (29 tests), test_memory_summarize.py (22 tests)
-- Total memory tests: 25 → 115 (25 original + 90 new)
-- BUG FIX: _prune_by_tokens `range(start, len(messages))` → `range(start + 1, len(messages))` — was breaking immediately when first message was a user, preventing ALL token-budget pruning
-- Updated prompt.py Orchestrator mode: added "LLM generation is SLOW — wait MINUTES" rule to prevent premature sub-agent cancellation
-- Bumped prompt length test limit 17500 → 18500
-- All 115 memory + 14 prompt tests pass (4 pre-existing unrelated failures in agent_loop + TUI)
-
-### 2025-07-17 (Session 3 — Architecture Audit + Fixes)
-- Full architecture audit across 4 reports (audit_core.md, audit_tools.md, audit_agent_system.md, audit_io.md)
-- CRITICAL fixes: scatter_gather param name, read_image workspace bypass
-- HIGH fixes: electron_bridge handler try/except, fan_in timeout starvation, subscription edge case, file reservation leak on crash, stream.py timeout doc
-- MEDIUM/LOW: deleted _inject_token_budget no-op from 3 files, deleted dead imports from llm/api, used named constants in _summarize_pruned, extracted _SKIP_REF_NAMES module constant, deleted _sem_chunk_py dead code
-- New test files from session 2: test_memory_compression.py (39), test_memory_internals.py (29), test_memory_summarize.py (22) — 115 total memory tests
-- Memory bug fixed: _prune_by_tokens range(start) → range(start+1)
-- Prompt updated: LLM generation patience rule for sub-agents
-
-### 2025-07-17 (Session 4 — Test Fixes + Sub-agent Pruning)
-- Fixed 3 pre-existing test failures: agent_loop budget injection (now no-op, removed from tests), TUI handle_clear (now 2 system messages)
-- CRITICAL: Added periodic compression+pruning to sub-agent loop — sub-agents previously grew unbounded messages causing API 400 errors. Now calls _compress_tool_results + _prune_by_tokens every 5 turns when >20 messages, with summary injection.
-- Full suite: 817 passed, 0 failed
+### Interfaces
+- Textual TUI with terminal REPL and Electron desktop app.
+- LSP integration via pylsp (auto-started on first use).
+- MCP client discovers external tools at startup via stdio JSON-RPC.
+- User interjection queue with /cancel support.
+- Streaming token-by-token with live tool output.
