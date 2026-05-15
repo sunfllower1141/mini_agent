@@ -948,6 +948,10 @@ def run_agent_turn(
             if not continue_loop:
                 continue
 
+        # Auto-extend when close to budget (like sub-agent auto-extend)
+        if turn_count >= max_turns - 3 and turn_count < max_turns + 10:
+            max_turns += 10
+
         # Exceeded max_turns — return last assistant message (still has tool_calls)
         if 'msg' not in locals():
             return None  # max_turns was 0, no API call made

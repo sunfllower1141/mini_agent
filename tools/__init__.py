@@ -500,6 +500,20 @@ def execute_tool(
         else:
             result.hint = standard_hint
 
+    # --- Win 3: Auto-remember on tool failures ---
+    if not result.success:
+        try:
+            memory = getattr(_TOOL_CONTEXT, "_memory_store", None)
+            if memory is not None:
+                detail = result.content[:200] if result.content else "unknown error"
+                memory.add_knowledge(
+                    category="error",
+                    summary=f"Tool failure: {name} - {detail[:80]}",
+                    detail=f"Tool '{name}' failed with: {detail}",
+                )
+        except Exception:
+            pass  # Never let auto-remember crash tool execution
+
     # Cache successful read-only results (only when not streaming)
     if cache_key and result.success:
         _TOOL_CACHE[cache_key] = result

@@ -42,16 +42,53 @@ def build_system_prompt(config: "AgentConfig") -> str:
     )
 
     prompt = header + _STATIC_PROMPT
-    # Inject .mini_agent.rules if present
-    rules_path = os.path.join(config.workspace, ".mini_agent.rules")
-    if os.path.isfile(rules_path):
-        try:
-            with open(rules_path) as f:
-                rules = f.read().strip()
-        except OSError:
-            rules = ""
-        if rules:
-            prompt += "\n\nPROJECT RULES (.mini_agent.rules):\n" + rules + "\n"
+    # --- Win 2: Hierarchical .mini_agent.rules ---
+    # Walk directory tree upward from workspace, merging all rules files
+    rules_parts: list[str] = []
+    search_dir = os.path.abspath(config.workspace)
+    seen: set[str] = set()
+    while True:
+        rules_path = os.path.join(search_dir, ".mini_agent.rules")
+        if os.path.isfile(rules_path) and rules_path not in seen:
+            seen.add(rules_path)
+            try:
+                with open(rules_path) as f:
+                    rules = f.read().strip()
+            except OSError:
+                rules = ""
+            if rules:
+                rules_parts.append(f"# From: {rules_path}\n{rules}")
+        parent = os.path.dirname(search_dir)
+        if parent == search_dir:
+            break
+        search_dir = parent
+    if rules_parts:
+        prompt += "\n\nPROJECT RULES:\n" + "\n\n".join(rules_parts) + "\n"
+
+    # --- Win 1: Git context ---
+    try:
+        import subprocess
+        branch = subprocess.check_output(
+            ["git", "branch", "--show-current"], cwd=config.workspace,
+            stderr=subprocess.DEVNULL, text=True
+        ).strip()
+        if branch:
+            git_info = [f"Current branch: {branch}"]
+            status = subprocess.check_output(
+                ["git", "status", "--porcelain"], cwd=config.workspace,
+                stderr=subprocess.DEVNULL, text=True
+            ).strip()
+            if status:
+                changed = status.split("\n")[:15]
+                git_info.append("\n".join(changed))
+                if len(status.split("\n")) > 15:
+                    git_info.append(f"... and {len(status.split(chr(10))) - 15} more files")
+            else:
+                git_info.append("(working tree clean)")
+            prompt += "\n\nREPOSITORY STATUS (git):\n" + "\n".join(git_info) + "\n"
+    except Exception:
+        pass
+
     return prompt
 
 

@@ -15,21 +15,21 @@
 
 ---
 
-## Quick Wins (Ship Today — ~200 lines total)
+## Quick Wins ✅ ALL DONE (Ship Today — ~200 lines total)
 
-### 1. Git context in system prompt
+### 1. Git context ✅ in system prompt
 - **What**: Include `git status`, current branch, recent commits in the system prompt
 - **Effort**: ~10 lines in `prompt.py`
 - **Competitor**: Claude Code does this
 - **Impact**: Agent knows repo state without searching
 
-### 2. Directory-walking rules (hierarchical `.mini_agent.rules`)
+### 2. Directory-walking ✅ rules (hierarchical `.mini_agent.rules`)
 - **What**: Walk directory tree upward, merge all `.mini_agent.rules` files
 - **Effort**: ~30 lines in `prompt.py`
 - **Competitor**: Claude Code's `CLAUDE.md` hierarchy
 - **Impact**: Teams get org/project/team-level conventions
 
-### 3. Post-failure auto-remember
+### 3. Post-failure auto-remember ✅
 - **What**: When `edit_file` fails or `run_shell` returns error, auto-call `remember()`
 - **Effort**: ~50 lines hook into `execute_tool` result processing
 - **Competitor**: Claude Code's auto-memory
@@ -41,7 +41,7 @@
 - **Competitor**: Claude Code's `/init`
 - **Impact**: Zero-config onboarding
 
-### 5. Auto-extend for orchestrator
+### 5. Auto-extend for orchestrator ✅
 - **What**: Same auto-extend logic that sub-agents have, applied to parent
 - **Effort**: ~20 lines in `llm.py`
 - **Competitor**: None have this
