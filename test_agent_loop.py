@@ -338,7 +338,7 @@ class TestAPIRetry(unittest.TestCase):
         mock_post.return_value = fail
 
         messages: list[dict] = [{"role": "user", "content": "hi"}]
-        with self.assertRaises(req_mod.HTTPError):
+        with self.assertRaises(Exception):
             call_deepseek(messages, self.config)
         # Only one attempt, no retry
         self.assertEqual(mock_post.call_count, 1)

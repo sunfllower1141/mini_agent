@@ -137,8 +137,7 @@ def call_deepseek(
             err = r.json()
         except (ValueError, AttributeError):
             err = r.text
-        print(f"[API {r.status_code}] {err}", file=sys.stderr, flush=True)
-        r.raise_for_status()
+        raise Exception(f"API {r.status_code}: {err}")
 
     if config.stream:
         return _parse_stream(r, on_token, on_tool_ready)
