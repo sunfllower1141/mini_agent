@@ -397,16 +397,25 @@ def build_startup_context(
 
     # 4. Project knowledge (cross-session learnings, if available)
     if knowledge:
-        lines = ["\n## Project Learnings (from past sessions)"]
-        for entry in knowledge:
-            cat = entry.get("category", "general")
-            summary = entry.get("summary", "")
-            detail = entry.get("detail", "")
-            tags = f"[{cat}]"
+        lines = []
+        # Session summary first (if present)
+        session_entries = [e for e in knowledge if e.get("category") == "session_summary"]
+        other_entries = [e for e in knowledge if e.get("category") != "session_summary"]
+        if session_entries:
+            summary = session_entries[0].get("summary", "")
+            detail = session_entries[0].get("detail", "")
+            lines.append("\n## Last Session Summary")
+            lines.append(f"{summary}")
             if detail:
-                lines.append(f"- {tags} {summary} — {detail}")
-            else:
-                lines.append(f"- {tags} {summary}")
+                lines.append(f"{detail}")
+        if other_entries:
+            lines.append("\n## Project Learnings (from past sessions)")
+            for entry in other_entries:
+                cat = entry.get("category", "general")
+                s = entry.get("summary", "")
+                d = entry.get("detail", "")
+                tags = f"[{cat}]"
+                lines.append(f"- {tags} {s}" + (f" — {d}" if d else ""))
         parts.append("\n".join(lines))
 
     return "\n".join(parts) + "\n"
@@ -468,6 +477,8 @@ def switch_session(
                 saved.insert(0, {"role": "user", "content": summary})
 
     knowledge = memory.get_top_knowledge(limit=15) if not memory._skip_load else []
+    # Also inject the latest session summary for context
+    session_summary = memory.get_latest_session_summary() if not memory._skip_load else None
     startup_ctx = build_startup_context(workspace, knowledge=knowledge)
     messages: list[dict] = [
         {"role": "system", "content": build_system_prompt(current_config)},
@@ -549,6 +560,8 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
             if summary:
                 saved.insert(0, {"role": "user", "content": summary})
     knowledge = memory.get_top_knowledge(limit=15) if memory else []
+    # Also inject the latest session summary for context
+    session_summary = memory.get_latest_session_summary() if memory else None
     startup_ctx = build_startup_context(workspace, knowledge=knowledge)
     messages: list[dict] = [
         {"role": "system", "content": build_system_prompt(config)},

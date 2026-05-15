@@ -118,7 +118,21 @@ def _task_status(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolR
         return ToolResult(success=True, content=f"Task {task_id}: still running.")
     # Clean up completed tasks from the registry
     del _TASK_REGISTRY[task_id]
-    return ToolResult(success=True, content=f"Task {task_id}: completed with exit_code={returncode}.")
+    # Try to retrieve persisted test output for background runs
+    output_msg = ""
+    try:
+        from memory import MemoryStore
+        import os as _os
+        mem = MemoryStore(_os.path.join(_os.getcwd(), ".mini_agent_memory.db"), max_messages=500)
+        test_out = mem.get_test_output()
+        if test_out and test_out.strip():
+            lines = test_out.split("\n")
+            if len(lines) > 100:
+                test_out = "\n".join(lines[:100]) + f"\n... (truncated - {len(lines)} total lines)"
+            output_msg = f"\n\n--- Test Output ---\n{test_out}"
+    except Exception:
+        pass
+    return ToolResult(success=True, content=f"Task {task_id}: completed with exit_code={returncode}.{output_msg}")
 
 
 @_summarize("task_status")
@@ -506,6 +520,33 @@ def _verify(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
     root = rg.workspace_root
 
     results: list[str] = []
+
+    # Step 0: dead import detection (ruff if available, else pyflakes)
+    import shutil
+    if shutil.which("ruff"):
+        r = subprocess.run(
+            ["ruff", "check", "--select", "F401,F811",
+             "--output-format", "concise", root],
+            capture_output=True, text=True, timeout=15,
+        )
+        if r.returncode == 0 and not r.stdout.strip():
+            results.append("ruff: no unused/redefined imports found")
+        elif r.stdout.strip():
+            out = r.stdout.strip()[:500]
+            results.append(f"ruff found issues:\n{out}")
+    elif shutil.which("pyflakes"):
+        r = subprocess.run(
+            ["pyflakes", root],
+            capture_output=True, text=True, timeout=15,
+        )
+        stdout = r.stdout
+        if (r.returncode == 0
+                and "undefined" not in stdout
+                and "unused import" not in stdout):
+            results.append("pyflakes: no dead imports found")
+        elif stdout.strip():
+            out = stdout.strip()[:500]
+            results.append(f"pyflakes found issues:\n{out}")
 
     # Step 1: tests for modified files
     from tools import get_modified_files

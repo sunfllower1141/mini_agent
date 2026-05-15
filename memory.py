@@ -728,6 +728,40 @@ class MemoryStore:
         except sqlite3.Error:
             warnings.warn("Failed to bump project knowledge", stacklevel=2)
 
+    def capture_session_summary(
+        self, summary: str, detail: str = "",
+    ) -> None:
+        """Store a session summary for next startup injection."""
+        try:
+            conn = self._get_conn()
+            conn.execute(
+                "DELETE FROM project_knowledge WHERE category = 'session_summary'"
+            )
+            conn.execute(
+                "INSERT INTO project_knowledge (category, summary, detail, importance)"
+                " VALUES ('session_summary', ?, ?, 3)",
+                (summary, detail),
+            )
+            conn.commit()
+        except sqlite3.Error:
+            warnings.warn("Failed to capture session summary", stacklevel=2)
+
+    def get_latest_session_summary(self) -> dict | None:
+        """Return the most recent session summary, or None."""
+        try:
+            conn = self._get_conn()
+            row = conn.execute(
+                "SELECT summary, detail FROM project_knowledge"
+                " WHERE category = 'session_summary'"
+                " ORDER BY updated_at DESC LIMIT 1"
+            ).fetchone()
+            if row:
+                return {"summary": row[0], "detail": row[1]}
+            return None
+        except sqlite3.Error:
+            warnings.warn("Failed to query session summary", stacklevel=2)
+            return None
+
     # TODO: MemoryStore.save is ~50 lines — consider splitting compression,
     #       pruning, summarization, and SQL writes into separate helpers.
     def save(self, messages: list[dict]) -> None:
