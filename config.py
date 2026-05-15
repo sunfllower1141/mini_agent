@@ -560,8 +560,6 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
             if summary:
                 saved.insert(0, {"role": "user", "content": summary})
     knowledge = memory.get_top_knowledge(limit=15) if memory else []
-    # Also inject the latest session summary for context
-    session_summary = memory.get_latest_session_summary() if memory else None
     startup_ctx = build_startup_context(workspace, knowledge=knowledge)
     messages: list[dict] = [
         {"role": "system", "content": build_system_prompt(config)},
