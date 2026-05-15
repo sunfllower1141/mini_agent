@@ -737,6 +737,11 @@ class MemoryStore:
         if self._conn is None:
             self._conn = sqlite3.connect(self._db_path)
             self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA synchronous=NORMAL")
+            self._conn.execute("PRAGMA cache_size=-8000")
+            self._conn.execute("PRAGMA temp_store=MEMORY")
+            self._conn.execute("PRAGMA busy_timeout=5000")
+            self._conn.execute("PRAGMA foreign_keys=ON")
         return self._conn
 
     def close(self) -> None:
