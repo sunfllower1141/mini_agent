@@ -179,21 +179,6 @@ def run_sub_agent(
             )
 
 
-        # --- Communication nudge: every 3 turns, force the agent to coordinate ---
-        if turn_count % 3 == 0:
-            messages.append({
-                "role": "user",
-                "content": (
-                    "[COMMUNICATION NUDGE] You have been working for {t} turns.\n"
-                    "1. Check your **agent_inbox** for messages from the orchestrator or siblings.\n"
-                    "2. Check **agent_read** for broadcast messages from sibling agents.\n"
-                    "3. Send a **status.heartbeat** via agent_handoff summarizing what you're doing.\n"
-                    "4. If you are editing a shared file, broadcast your intent via **agent_message**.\n"
-                    "5. If a sibling is working on the same file, coordinate via **agent_handoff**.\n"
-                ).format(t=turn_count),
-                "_transient": True,
-            })
-
         # --- Pre-call snapshot: tell the orchestrator we're about to call the LLM ---
         _pre_snap = getattr(_TOOL_CONTEXT, "_agent_runtime", None)
         if _pre_snap is not None and task_id:
@@ -280,7 +265,7 @@ def run_sub_agent(
                 roles = [m.get("role", "?") for m in messages]
                 tc_ids = [m.get("tool_call_id", "-")[:12] if m.get("role") == "tool" else "-" for m in messages]
                 detail += f" | Roles: {roles}"
-                detail += f" | ToolIDs: {tc_ids[:20]}"
+                detail += f" | ToolIDs: {tc_ids}"
             return SubAgentResult(
                 success=False,
                 content=detail,
