@@ -185,6 +185,33 @@ class TestRetryableStatusCodes(unittest.TestCase):
         self.assertEqual(mock_post.call_count, 1)
 
 
+class TestCancelDuringNetworkErrorDelay(unittest.TestCase):
+    """Test cancellation during retry-wait after a RequestException (line 84)."""
+
+    def test_cancel_during_network_error_delay_returns_none(self):
+        """When cancel fires during retry delay after a network error, return None."""
+        cancel = threading.Event()
+
+        exc = requests.ConnectionError("connection refused")
+
+        def side_effect(*args, **kwargs):
+            # Set cancel during the post call so cancel_event.wait() returns True
+            cancel.set()
+            raise exc
+
+        mock_post = MagicMock(side_effect=side_effect)
+        with patch.object(requests, "post", mock_post):
+            result = _request_with_retry(
+                requests,
+                "http://api.example.com",
+                json={"messages": []},
+                cancel_event=cancel,
+            )
+        self.assertIsNone(result)
+        # Only one attempt — cancelled during first retry delay
+        self.assertEqual(mock_post.call_count, 1)
+
+
 class TestExhaustedRetries(unittest.TestCase):
     """Tests for exhausted retry behaviour."""
 
