@@ -108,7 +108,7 @@ class TestBuildSystemPrompt(unittest.TestCase):
         length = len(prompt)
         # Prompt is substantial (~11-12k chars) but should not grow unbounded
         self.assertLess(length, 21000,
-                        f"Prompt is {length} chars, expected < 21000")
+                        f"Prompt is {length} chars (expected ~20600, adjust if content changed)")
         self.assertGreater(length, 4000,
                            f"Prompt is only {length} chars, expected > 4000")
 
