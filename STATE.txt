@@ -1,7 +1,7 @@
 # mini_agent — Architecture & State
 
 A coding agent powered by DeepSeek V4 Pro (orchestrator) + Flash (sub-agents).
-Terminal REPL + Textual TUI + Electron app. 817 tests, 44 tools, SQLite memory.
+Terminal REPL + Textual TUI + Electron app. 827 tests, 45 tools, SQLite memory.
 
 ## Architecture
 

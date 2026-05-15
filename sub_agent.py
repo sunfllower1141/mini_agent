@@ -31,7 +31,9 @@ _TASK_CAP = 8_000                    # max chars for task description
 _SUB_MAX_TOKENS = 32_000             # max tokens before pruning sub-agent context
 _SUB_MAX_MESSAGES = 50               # max messages before pruning sub-agent context
 _SUB_COMPRESSION_THRESHOLD = 8       # start compressing when messages exceed this
-_SUB_COMPRESSION_KEEP_RECENT = 4     # keep this many recent messages uncompressed
+_SUB_COMPRESSION_KEEP_RECENT = 3     # keep this many recent messages uncompressed
+_SUB_SAFETY_TOKEN_CEILING = 24_000   # hard cap: force-prune before API call if over this
+_MAX_TOOL_RESULT_CHARS = 5_000       # max chars in a single tool result before truncation
 _STREAM_SNAP_EVERY = 200             # tokens between streaming-snapshot updates
 _TURN_INTERVAL_COMM_NUDGE = 3        # turns between communication nudges
 
@@ -245,6 +247,22 @@ def run_sub_agent(
             config.model = config.sub_agent_model
             if config.sub_agent_api_key:
                 config.api_key = config.sub_agent_api_key
+
+                        # --- Pre-call token budget check ---
+            # Estimate total tokens and force-prune if over safety ceiling.
+            from memory import _total_tokens, _compress_tool_results, _prune_by_tokens
+            est = _total_tokens(messages)
+            if est > _SUB_SAFETY_TOKEN_CEILING:
+                messages, _ = _compress_tool_results(messages, keep_recent=_SUB_COMPRESSION_KEEP_RECENT)
+                messages, pruned = _prune_by_tokens(
+                    messages, max_tokens=_SUB_SAFETY_TOKEN_CEILING, max_messages=_SUB_MAX_MESSAGES,
+                )
+                if pruned:
+                    from memory import _summarize_pruned
+                    summary = _summarize_pruned(pruned)
+                    if summary:
+                        messages.insert(0, {"role": "user", "content": summary})
+
             msg = call_deepseek(
                 messages, config,
                 session=requests,
@@ -363,11 +381,14 @@ def run_sub_agent(
                         content=f"Tool execution error: {exc}",
                     )
 
-            # Append tool result message
+            # Append tool result message (truncate oversized content)
+            r_content = result.content
+            if len(r_content) > _MAX_TOOL_RESULT_CHARS:
+                r_content = r_content[:_MAX_TOOL_RESULT_CHARS] + f"\n… (truncated at {_MAX_TOOL_RESULT_CHARS} chars)"
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc["id"],
-                "content": result.to_json(),
+                "content": json.dumps({"success": result.success, "content": r_content}),
             })
             # Stream tool end to TUI
             if tui_queue is not None:

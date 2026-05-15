@@ -120,10 +120,10 @@ class TestAllToolsDispatchable(unittest.TestCase):
                           f"Tool '{name}' has no summary handler in _TOOL_SUMMARIES")
 
     def test_tool_count_matches_state_txt(self):
-        """Sanity check: 44 tools expected per STATE.txt."""
+        """Sanity check: 45 tools expected per STATE.txt."""
         from tools.schema import TOOLS
-        self.assertEqual(len(TOOLS), 44,
-                         f"Expected 44 tools, got {len(TOOLS)}. Update STATE.txt if changed.")
+        self.assertEqual(len(TOOLS), 45,
+                         f"Expected 45 tools, got {len(TOOLS)}. Update STATE.txt if changed.")
 
 
 class TestProjectKnowledgeMethods(unittest.TestCase):
