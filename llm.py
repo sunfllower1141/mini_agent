@@ -350,10 +350,15 @@ def _inject_scratchpad_nudge(messages: list[dict], *, turn_count: int) -> None:
 
 
 def _inject_plan_status(messages: list[dict]) -> None:
-    """Inject active plan status if a plan is in progress."""
+    """Inject active plan status if a plan is in progress and no sub-agents are running."""
     plan_steps = _TOOL_CONTEXT._plan_steps
     if not plan_steps:
         return
+    # Suppress plan when sub-agents are running — avoids confusion
+    runtime = getattr(_TOOL_CONTEXT, "_agent_runtime", None)
+    if runtime is not None:
+        if runtime.get_running_ids():
+            return
     plan_done = _TOOL_CONTEXT._plan_done
     lines = [f"Active plan ({len(plan_done)}/{len(plan_steps)} done):"]
     for i, s in enumerate(plan_steps, 1):
