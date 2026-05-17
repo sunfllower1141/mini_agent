@@ -450,6 +450,31 @@ def _search_single_file(
     return ToolResult(success=True, content="\n".join(results))
 
 
+def _search_with_rg(root_dir: str, pattern: str, use_regex: bool, ignore_case: bool, offset: int) -> ToolResult:
+    """Run ripgrep for fast file search, falling back to Python on failure."""
+    import subprocess
+    cmd = ["rg", "--no-heading", "--with-filename", "--line-number",
+           "--max-count", str(_SEARCH_MAX_RESULTS + offset)]
+    if not use_regex:
+        cmd.append("--fixed-strings")
+    if ignore_case:
+        cmd.append("--ignore-case")
+    cmd.extend(["--", pattern, root_dir])
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        lines = result.stdout.splitlines()
+        if not lines:
+            return ToolResult(success=True, content=f"No matches for '{pattern}' in {root_dir}")
+        if offset > 0:
+            lines = lines[offset:]
+        output = "\n".join(lines[:_SEARCH_MAX_RESULTS])
+        if len(lines) > _SEARCH_MAX_RESULTS:
+            output += f"\n\u2026 (capped at {_SEARCH_MAX_RESULTS} results)"
+        return ToolResult(success=True, content=output)
+    except (subprocess.TimeoutExpired, Exception):
+        return ToolResult(success=False, content="rg search failed or timed out")
+
+
 @_register("search_files")
 def _search_files(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
     pattern = args["pattern"]
@@ -479,6 +504,11 @@ def _search_files(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolR
             success=False,
             content=f"Search blocked by safety layer: {safety_result.reason}",
         )
+
+    # --- Ripgrep fast path: use rg if available ---
+    import shutil as _shutil
+    if _shutil.which("rg") and not file_path:
+        return _search_with_rg(safety_result.resolved_path, pattern, use_regex, ignore_case, offset)
 
     if use_regex:
         import re

@@ -11,6 +11,37 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "todo_write",
+            "description": "Create or update a todo item for tracking progress. Set content to empty string to delete. Use this to track your own progress on complex multi-step tasks.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "description": "Optional: existing todo id to update. Omit to create new."},
+                    "content": {"type": "string", "description": "Todo text. Set to empty string to delete this todo."},
+                    "status": {"type": "string", "description": "Optional: 'pending' or 'done'. Default: 'pending'."}
+                },
+                "required": ["content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "todo_read",
+            "description": "Read current todo list. Filter by id or status. Use this to check remaining work.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "description": "Optional: filter to a specific todo id."},
+                    "status": {"type": "string", "description": "Optional: filter by 'pending' or 'done'."}
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "remember",
             "description": "Manually capture a learning or observation to project_knowledge for cross-session persistence. Use this when you discover a pattern, workaround, or convention worth remembering in future sessions.",
             "parameters": {
