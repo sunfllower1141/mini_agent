@@ -192,8 +192,6 @@ def _inject_git_diff(
                 ),
                 "_transient": True,
             })
-    except APIError as exc:
-        print(f"  ⚠ git diff failed: {exc}", file=sys.stderr, flush=True)
     except Exception as exc:
         print(f"  ⚠ git diff failed: {exc}", file=sys.stderr, flush=True)
 
