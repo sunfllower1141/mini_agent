@@ -12,6 +12,7 @@ Both ``llm.py`` and ``sub_agent.py`` import from here — no cycle.
 from __future__ import annotations
 
 import json
+import re
 import sys
 import threading
 from collections.abc import Callable
@@ -89,6 +90,30 @@ def _clean_message(msg: dict, index: int) -> dict:
     return m2
 
 
+# Simple-prompt keywords for model routing.
+_ROUTE_SIMPLE_KEYWORDS = re.compile(
+    r"\b(write|edit|delete|create|modify|refactor|implement|build|fix|patch|"
+    r"restructure|rewrite|replace|change|update|rename|move|remove|add)\b",
+    re.IGNORECASE,
+)
+
+
+def _compute_complexity(messages: list[dict]) -> str:
+    """Return 'simple' or 'complex' for the last user message, for model routing."""
+    if not messages:
+        return "complex"
+    # Check the last 2 user messages
+    user_text = ""
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            user_text += " " + str(m.get("content", ""))
+            if len(user_text) > 2000:
+                break
+    if len(user_text) < 300 and not _ROUTE_SIMPLE_KEYWORDS.search(user_text):
+        return "simple"
+    return "complex"
+
+
 def call_deepseek(
     messages: list[dict],
     config: AgentConfig,
@@ -137,7 +162,7 @@ def call_deepseek(
             "User-Agent": "mini_agent/1.0",
         },
         json={
-            "model": config.model,
+            "model": config.routing_model if (config.routing_model and _compute_complexity(messages) == "simple") else config.model,
             "messages": clean_messages,
             "tools": TOOLS,
             "stream": config.stream,

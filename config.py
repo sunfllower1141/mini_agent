@@ -32,6 +32,7 @@ DEFAULT_API_KEY      = ""  # set via DEEPSEEK_API_KEY env var, .env file, or .mi
 DEFAULT_MAX_MESSAGES = 500
 DEFAULT_MAX_TOKENS   = 200_000
 DEFAULT_SUB_AGENT_MAX_TURNS = 25
+DEFAULT_ROUTING_MODEL = ""  # disabled by default; set to "deepseek-v4-flash" to enable
 DEFAULT_EXA_API_KEY = ""  # set via EXA_API_KEY env var or .mini_agent.toml
 DEFAULT_OPENAI_API_KEY = ""  # set via OPENAI_API_KEY env var or .mini_agent.toml
 
@@ -107,6 +108,7 @@ class AgentConfig:
     max_messages: int = DEFAULT_MAX_MESSAGES
     max_tokens: int = DEFAULT_MAX_TOKENS
     sub_agent_max_turns: int = DEFAULT_SUB_AGENT_MAX_TURNS
+    routing_model: str = DEFAULT_ROUTING_MODEL  # cheaper model for simple read/search prompts; "" = disabled
     temperature: float = 0.0
     frequency_penalty: float = 0.3
     presence_penalty: float = 0.1
@@ -177,6 +179,7 @@ _TOML_SCHEMA: dict[str, type] = {
     "max_messages": int,
     "max_tokens": int,
     "sub_agent_max_turns": int,
+    "routing_model": str,
     "temperature": float,
     "frequency_penalty": float,
     "presence_penalty": float,

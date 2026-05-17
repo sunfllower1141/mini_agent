@@ -478,6 +478,31 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "fetch_url",
+            "description": "Fetch a web page URL and return its text content (truncated). Supports text/html and text/plain content types. Use this to read documentation, API references, or any web page.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "URL to fetch (must be http:// or https://)"
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Optional: request timeout in seconds (default 15, max 30)."
+                    },
+                    "max_chars": {
+                        "type": "integer",
+                        "description": "Optional: max characters to return (default 10000)."
+                    }
+                },
+                "required": ["url"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "plan",
             "description": "Declare a structured task plan with numbered steps. Overwrites any previous plan. Use this before starting multi-step work so progress can be tracked. The plan will be shown at the start of each turn until all steps are complete.",
             "parameters": {

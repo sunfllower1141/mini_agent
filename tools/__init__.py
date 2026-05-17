@@ -642,6 +642,47 @@ def _fingerprint_error(name: str, content: str) -> str:
     return content[:60].strip().lower()
 
 
+# Mapping of (tool_name, fingerprint) -> recovery hint injected on repeated failure.
+# Fingerprints come from _fingerprint_error() above.
+_FAILURE_PATTERNS: dict[str, dict[str, str]] = {
+    "edit_file": {
+        "not found": "The string must match exactly -- check whitespace, indentation, and line endings. Try read_file first to see the exact text.",
+        "whitespace": "Whitespace mismatch. Try copying the exact text from read_file output, including all leading/trailing spaces.",
+        "ambiguous": "Multiple matches found. Use a more specific old_string or set count=-1 to replace all.",
+        "count": "Invalid count value. Use count=1 (first only) or count=-1 (all occurrences).",
+    },
+    "write_file": {
+        "blocked": "Use force=True to bypass overwrite protection, or write to a different path.",
+        "exists": "File already exists. Use force=True to overwrite, or write to a different path.",
+    },
+    "read_file": {
+        "not found": "File does not exist. Check the path with list_directory or file_info first.",
+        "offset": "Offset exceeds file length. Use file_info to check the file size, then reduce offset.",
+    },
+    "run_shell": {
+        "not found": "Command not found. Check the spelling and that it is installed.",
+        "blocked": "Command blocked by safety guard. Use force=True to bypass, or rephrase to use only safe operations.",
+        "timed out": "Command timed out. Try breaking the work into smaller steps, or increase timeout.",
+    },
+    "search_files": {
+        "not found": "No matches found. Try broadening the search pattern, or search in a parent directory.",
+        "invalid regex": "Invalid regex pattern. Check escaping -- use raw strings or double-escape backslashes.",
+    },
+    "find_symbol": {
+        "not found": "Symbol not found. Try find_usages instead, or search_files for the function name as text.",
+    },
+    "find_usages": {
+        "not found": "No usages found. The symbol may not be referenced anywhere, or try search_files for a substring match.",
+    },
+    "run_tests": {
+        "failures": "Tests failed. Use diagnose_failures to get structured failure details, then read the failing test files and fix them.",
+    },
+    "verify": {
+        "failures": "Verification found issues. Review the lint output and test failures above, fix them, then re-run verify.",
+    },
+}
+
+
 def _learn_from_failure(name: str, result: "ToolResult | None") -> None:
     """Detect failure patterns, escalate knowledge, and inject recovery hints.
 
@@ -832,6 +873,18 @@ def execute_tool(
     else:
         # Clear failure counters on success — the agent recovered
         _TOOL_CONTEXT.__dict__.pop("_failure_patterns", None)
+
+    # --- Post-edit auto-verification: run LSP diagnostics after file writes ---
+    if result.success and name in ("write_file", "edit_file"):
+        try:
+            file_path = args.get("path", "")
+            if file_path:
+                from tools.lsp import _lsp_diagnostics
+                diag_result = _lsp_diagnostics({"file_path": file_path}, write_gate, read_gate)
+                if diag_result.success and diag_result.content:
+                    result.content += "\n\n[auto-verify] LSP diagnostics:\n" + diag_result.content[:500]
+        except Exception:
+            pass  # Never let auto-verify crash a successful edit
 
     # Cache successful read-only results (only when not streaming)
     if cache_key and result.success:

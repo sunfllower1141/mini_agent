@@ -829,3 +829,47 @@ def _find_usages_summary(args: dict) -> str:
 @_summarize("recall_turn")
 def _recall_turn_summary(args: dict) -> str:
     return f"recall_turn({args.get('turn', '?')})"
+
+
+# ---------------------------------------------------------------------------
+# fetch_url -- fetch a web page and return its content
+# ---------------------------------------------------------------------------
+
+@_register("fetch_url")
+@_summarize("fetch_url")
+def _fetch_url(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
+    """Fetch a URL and return its text content (truncated)."""
+    import urllib.request
+    import urllib.error
+    url = args["url"]
+    timeout = min(args.get("timeout", 15), 30)
+    max_chars = args.get("max_chars", 10000)
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "mini_agent/1.0"}
+        )
+        resp = urllib.request.urlopen(req, timeout=timeout)
+        content_type = resp.headers.get("Content-Type", "")
+        if "text/html" not in content_type and "text/plain" not in content_type:
+            return ToolResult(
+                success=False,
+                content=f"Cannot read content type: {content_type}. fetch_url only supports text/html and text/plain.",
+            )
+        data = resp.read().decode("utf-8", errors="replace")
+        truncated = data[:max_chars]
+        status = f"HTTP {resp.status}, {len(data)} chars"
+        if len(data) > max_chars:
+            status += f" (showing first {max_chars})"
+        return ToolResult(success=True, content=f"[{status}]\n\n{truncated}")
+    except urllib.error.URLError as e:
+        return ToolResult(success=False, content=f"Failed to fetch URL: {e}")
+    except Exception as e:
+        return ToolResult(success=False, content=f"Error fetching URL: {e}")
+
+
+@_summarize("fetch_url")
+def _fetch_url_summary(args: dict) -> str:
+    url = args.get("url", "?")
+    short = url[:50] + "..." if len(url) > 50 else url
+    return f"fetch_url({short})"
