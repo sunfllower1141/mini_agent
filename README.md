@@ -1,11 +1,11 @@
 # mini_agent
 
-A coding agent powered by DeepSeek V4 Pro with **49 tools**. Terminal REPL, Textual TUI, or Electron desktop app. SQLite-backed memory with cross-session project knowledge. Cross-platform: macOS, Linux, and Windows.
+A coding agent powered by DeepSeek V4 Pro with **50 tools**. Terminal REPL, Textual TUI, or Electron desktop app. SQLite-backed memory with cross-session project knowledge. Cross-platform: macOS, Linux, and Windows.
 
 ## Features
 
 ### Core
-- **49 tools**: file operations, shell commands, search, git, web search, semantic search, symbol lookup, test running, LSP integration (pylsp), MCP client for external tool servers, read_image (GPT-4o vision), diff, verify, diagnose_failures, find_usages, restore_file, remember, init, wait_for_agent, agent_cancel, session_stats, recall_turn, and more
+- **50 tools**: file operations, shell commands, search, git, web search, semantic search, symbol lookup, test running, LSP integration (pylsp), MCP client for external tool servers, read_image (GPT-4o vision), diff, verify, diagnose_failures, find_usages, restore_file, remember, init, wait_for_agent, agent_cancel, session_stats, recall_turn, fetch_url, and more
 - **Two models**: orchestrator and sub-agents both use DeepSeek V4 Pro. Separate API keys supported via `SUB_AGENT_API_KEY` to isolate quota
 - **Cross-platform**: macOS, Linux, and full Windows support — ANSI terminal, Git Bash/PowerShell/cmd.exe shell execution, LSP queue-based reader, safe path resolution for non-existent paths
 - **Streaming**: token-by-token responses with live tool output
@@ -135,33 +135,87 @@ tui.py               Textual TUI (AgentWorker, themes, tree, diff preview)
 electron_app/        Electron desktop app (main.js, preload.cjs, index.html)
 electron_bridge.py   JSON-RPC bridge for Electron (stdin/stdout)
 llm.py               LLM turn orchestration, circuit breaker, tool piping/grouping
-api.py               API calls (call_deepseek, incremental message cleaning cache)
+api.py               API calls (call_deepseek), message cleaning cache, complexity routing
 prompt.py            System prompt + .mini_agent.rules injection
-config.py            AgentConfig (.env + TOML + env + CLI priority)
+config.py            AgentConfig (.env + TOML + env + CLI), build_startup_context
 memory.py            SQLite conversation store + pruning + project_knowledge table
-safety.py            Read/Write safety gates + diff preview
+safety.py            Read/Write safety gates + diff preview + _safe_resolve
 interject.py         Thread-safe user interjection queue
 terminal.py          ANSI colour helpers
-retry.py             HTTP retry with jitter and exponential backoff
+retry.py             HTTP retry with jitter + exponential backoff (408, 429, 5xx)
 stream.py            SSE stream parser
 agent_runtime.py     Sub-agent lifecycle, file reservations, inboxes, subscriptions, snapshots
 sub_agent.py         Sub-agent loop with turn budget, pruning, streaming, heartbeats
 tools/
-  __init__.py        Tool dispatch, cache, JSON repair, FILE_RESERVATIONS
-  schema.py          TOOLS definitions (49 tools)
-  file_ops.py        read/write/edit/list/info — cross-agent collision detection
-  shell_ops.py       run_shell, search_files, run_tests, git, task_status, verify — cross-platform
-  search_ops.py      find_symbol, find_usages, semantic_search, web_search
-  agent_ops.py       spawn/status/collect/message/read/extend/handoff/inbox/subscribe/cancel
+  __init__.py        Tool dispatch, cache, JSON repair, FILE_RESERVATIONS,
+                     auto-learn failure patterns, post-edit LSP auto-verify
+  schema.py          TOOLS definitions (50 tools)
+  file_ops.py        read/write/edit/list/info — cross-agent collision detection,
+                     cascading fuzzy whitespace match (3-pass: exact→trailing→indent)
+  shell_ops.py       run_shell, search_files, run_tests, git, task_status, verify,
+                     diagnose_failures, cross-platform shell + python detection
+  search_ops.py      find_symbol, find_usages, semantic_search, web_search,
+                     recall_turn, fetch_url
+  agent_ops.py       spawn/status/collect/message/read/extend/handoff/inbox/subscribe/cancel + remember
   agent_messages.py  AgentMessage, 9 message types, validation, routing
   agent_patterns.py  fan_out, fan_in, pipeline, barrier, scatter_gather
-  lsp.py             LSP client — pylsp integration, cross-platform (select + queue-based reader)
-  mcp_client.py      MCP client — stdio JSON-RPC, tool discovery
-  _json_rpc_shared.py  Shared subprocess management for LSP and MCP clients
+  lsp.py             LSP client — pylsp integration, 4 tools (definition, references, hover, diagnostics),
+                     cross-platform (select + queue-based reader)
+  mcp_client.py      MCP client — stdio JSON-RPC, tool discovery at startup
+  _json_rpc_shared.py  Shared subprocess drain_stderr + is_subprocess_connected
 tests/
   test_*.py          31 test files, 910 tests
 ```
 
-## License
+## Key State
 
-MIT
+### Models & API
+- Orchestrator: DeepSeek V4 Pro. Sub-agents: DeepSeek V4 Pro.
+- Separate API keys via `DEEPSEEK_API_KEY` and `SUB_AGENT_API_KEY` env vars.
+- `max_tokens = 200k`, `max_messages = 500`. Priority: CLI > env > `.env` > TOML > default.
+- `temperature` (0.0), `frequency_penalty` (0.3), `presence_penalty` (0.1), `stop_sequences`, `response_format` configurable via TOML.
+- Prompt caching: static identity content first for DeepSeek cache hits (~2,000 tokens never change).
+- Multi-model routing: `routing_model` config routes simple prompts to cheaper model (disabled by default).
+
+### Multi-Agent System
+- Max 10 concurrent sub-agents (configurable via `sub_agent_max_concurrent` in TOML).
+- Auto-wake: completions injected as user messages before `input()` blocks — no missed finishes.
+- Sub-agents auto-extend when ≤3 turns remaining and making progress (max 35 turns).
+- Stale agent GC: threads from previous sessions cleaned up on startup.
+- Sub-agents auto-prune memory every 5 turns when >20 messages to avoid 400 errors.
+- Streaming snapshots at 200-token granularity.
+- 5 coordination patterns: fan_out, fan_in, pipeline, barrier, scatter_gather.
+- 9 inter-agent message types with validation, routing (direct, subscription, broadcast).
+- FILE_RESERVATIONS with `threading.Lock` prevents cross-agent write collisions.
+
+### Memory & Learning
+- SQLite-backed conversation store with token-aware pruning and progressive compression.
+- `project_knowledge` table persists learnings across sessions in same workspace.
+- `remember` tool for manual capture; `edit_file` mismatches auto-captured.
+- Workspace tree cached in project_knowledge (mtime-gated, skips `os.walk` on restart).
+- Inbox ring-buffer cap at 1000 messages prevents memory leaks.
+- Background test output persisted to `test_output` table.
+- Auto-learn: `_FAILURE_PATTERNS` dict injects recovery hints on repeated tool failures.
+
+### Performance
+- Symbol index persisted to `.mini_agent_index.json` (mtime-gated, incremental reindex).
+- Semantic search with per-file mtime invalidation.
+- Incremental message cleaning cache (survives across turns via `id(messages)` key).
+- `_pipe` dependency detection short-circuits before JSON parse when not present.
+- Circuit breaker uses `deque.popleft()` for O(1) window management.
+
+### Cross-Platform
+- Windows ANSI support via `SetConsoleMode` (Windows 10+).
+- Cross-platform shell: Git Bash → PowerShell → `cmd.exe` fallback chain.
+- LSP client uses queue-based reader on Windows (select works on pipes only on Unix).
+- `_safe_resolve` in safety.py handles Windows non-existent path resolution.
+- Python detection: `py -3` → `python3` → `python` fallback chain.
+- Windows destructive patterns: `del /f`, `diskpart`, `rmdir /s`, `rd /s`, `reg delete`.
+- HTTP 408 (Request Timeout) added to retryable statuses.
+
+### Interfaces
+- Textual TUI with terminal REPL and Electron desktop app.
+- LSP integration via pylsp (auto-started on first use).
+- MCP client discovers external tools at startup via stdio JSON-RPC.
+- User interjection queue with `/cancel` support.
+- Streaming token-by-token with live tool output.
