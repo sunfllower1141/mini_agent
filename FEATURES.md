@@ -1,8 +1,8 @@
 # mini_agent — Feature Audit
 
-> Auto-generated audit. 906 tests, 49 tools, 0 failures. 2025-06-30.
+> Auto-generated audit. 1,083 tests, 63 tools, 0 failures. 2025-07-14.
 
-## Tool System (49 tools)
+## Tool System (63 tools)
 
 ### File Operations (9)
 | Tool | Description | Key Feature |
@@ -50,6 +50,16 @@
 |------|-------------|
 | `mcp_discover` | List all MCP tools from connected servers |
 | `mcp_call` | Call an MCP tool by server/tool/arguments |
+
+### Browser Automation (6) — NEW
+| Tool | Description |
+|------|-------------|
+| `browser_navigate` | Navigate headless Chromium to a URL |
+| `browser_snapshot` | Capture accessibility tree (structured, LLM-friendly) |
+| `browser_click` | Click element by accessibility role + name |
+| `browser_type` | Type text into an input by role + name |
+| `browser_screenshot` | Full-page PNG screenshot |
+| `open_url` | Open URL in user's default browser |
 
 ### Verification (2)
 | Tool | Description |
@@ -143,10 +153,6 @@
 - Tree view, themes, diff preview
 - Sub-agent streaming panes
 
-### Electron Desktop (`electron_bridge.py`)
-- JSON-RPC bridge over stdin/stdout
-- Electron app at `electron_app/`
-
 ### LSP Integration (`tools/lsp.py`)
 - pylsp auto-started on first use
 - 4 LSP tools: definition, references, hover, diagnostics
@@ -206,7 +212,7 @@
 
 | Total | Pass | Fail | Skip |
 |-------|------|------|------|
-| 906 | 906 | 0 | 4 |
+| 1083 | 1083 | 0 | 4 |
 
 28 test files covering:
 - File operations (fuzzy matching, safety gates, diffs)
@@ -218,230 +224,6 @@
 - MCP (client, JSON-RPC)
 - LSP (pylsp integration)
 - Retry, stream, safety, config, prompt
-
----
-
-## Electron Desktop App — Agent Audit (65522338)
-
-# Electron Bridge Audit — mini_agent
-
-## 1. JSON-RPC Bridge (`electron_bridge.py`)
-
-### 1.1 Protocol Design
-- **Wire format**: JSON-RPC 2.0 over newline-delimited JSON (one JSON object per line on stdout/stdin).
-- **Message types**:
-  - Standard JSON-RPC request/response (`jsonrpc`, `id`, `method`/`result`).
-  - Streaming token messages (`{"type": "token", "content": "..."}`) — these are NOT JSON-RPC, just in-band JSON lines interleaved with RPC responses during an active `chat` call.
-- **No keep-alive or heartbeat**. The bridge is fire-and-forget on stdin lines; no retry or acknowledgement at the protocol layer.
-
-### 1.2 State Management
-- Module-level globals: `_config`, `_write_gate`, `_read_gate`, `_memory`, `_messages`.
-- All are `None` until `init` is called.
-- A single `threading.Event` (`_cancel_event`) gates cancellation — set by `cancel`, checked by `run_agent_turn`.
-- **Single-session**: only one init call per process. Re-initializing overwrites globals with no cleanup of the previous session's memory.
-
-### 1.3 RPC Methods
-
-| Method   | Handler            | Description |
-|----------|--------------------|-------------|
-| `init`   | `_handle_init`     | Bootstraps session: calls `init_session(workspace)`, stores config/gates/memory/messages. |
-| `chat`   | `_handle_chat`     | Appends user message, calls `run_agent_turn()`, streams tokens via `on_token` callback, returns final assistant content. |
-| `cancel` | `_handle_cancel`   | Sets `_cancel_event`. |
-
-### 1.4 Error Codes
-| Code   | Meaning |
-|--------|---------|
-| -1     | Init failed (exception during `init_session`) |
-| -2     | Not initialized (chat/cancel called before init) |
-| -3     | Empty message |
-| -4     | Turn error (exception in `run_agent_turn`) |
-| -5     | Generic handler exception |
-| -32601 | Method not found |
-| -32700 | JSON parse error |
-
-### 1.5 Concerns
-- **No concurrent chat sessions.** `_messages` is a single shared list. Two parallel `chat` calls would corrupt state.
-- **No idempotency or deduplication.** If the renderer retries a chat message (duplicate `id`), it gets appended again.
-- **Token streaming is fire-and-forget.** If stdout is not consumed fast enough, writes will block the Python process (no buffer/drop logic).
-- **Error responses may be missing `jsonrpc` field** — `_error()` does include it, verified. ✅
-- **`main()` blocks on `sys.stdin` iteration**. No graceful shutdown signal other than EOF on stdin.
-
----
-
-## 2. stdin/stdout Protocol
-
-### 2.1 Parsing (Python side)
-```
-main() → for line in sys.stdin: → json.loads(line.strip())
-```
-- Blank lines are silently skipped.
-- JSON parse errors return `-32700` with `id: None` (since the request couldn't be parsed).
-- No max line length limit — a deliberately large line could OOM.
-
-### 2.2 Writing (Python side)
-```
-_write_line(obj) → sys.stdout.write(json.dumps(obj) + "\n") + sys.stdout.flush()
-```
-- Every JSON object is a single line (no embedded newlines — safe).
-- `flush()` is called on every write — good for real-time streaming, but could be chatty under high throughput (though throughput is inherently low for LLM tokens).
-
-### 2.3 Consuming (Electron main process side)
-```js
-pythonProcess.stdout.on("data", (data) => {
-    mainWindow.webContents.send("bridge:stdout", data.toString().trim());
-});
-```
-- **Problem**: `data` chunks may contain partial lines or multiple lines. `trim()` strips whitespace but does NOT split on newlines. If two JSON objects arrive in one chunk, the renderer receives a single string with an embedded newline, which will fail `JSON.parse()`.
-- **Fix needed**: Buffer stdout and split on `\n`, emitting one line per `bridge:stdout` message.
-
-### 2.4 Sending (Electron main process side)
-```js
-ipcMain.handle("bridge:send", (_event, message) => {
-    pythonProcess.stdin.write(message + "\n");
-});
-```
-- Assumes `message` is already a JSON string (one line). No validation that it contains no newlines.
-- If `pythonProcess` is null or stdin is not writable, returns `{ ok: false }` — handled cleanly.
-
----
-
-## 3. IPC Setup (`main.js` ↔ `preload.cjs` ↔ Renderer)
-
-### 3.1 Architecture
-```
-Renderer (index.html)
-    ↕  window.bridge.*  (via contextBridge)
-Preload (preload.cjs)
-    ↕  ipcRenderer.invoke / ipcRenderer.on
-Main Process (main.js)
-    ↕  child_process.spawn stdin/stdout
-Python Bridge (electron_bridge.py)
-```
-
-### 3.2 Context Bridge API (`preload.cjs`)
-```js
-window.bridge = {
-    send(message),       // → ipcRenderer.invoke("bridge:send", message)
-    stop(),              // → ipcRenderer.invoke("bridge:stop")
-    onStdout(callback),  // → ipcRenderer.on("bridge:stdout", ...)  returns unsubscribe fn
-    onStderr(callback),  // → ipcRenderer.on("bridge:stderr", ...)  returns unsubscribe fn
-    onClose(callback),   // → ipcRenderer.on("bridge:closed", ...)  returns unsubscribe fn
-}
-```
-- `contextIsolation: true`, `nodeIntegration: false` — **secure defaults**. ✅
-- Each listener returns an unsubscribe function — clean cleanup pattern. ✅
-- No `removeAllListeners` exposed — renderer can only unsubscribe its own callbacks. ✅
-
-### 3.3 IPC Channels
-| Channel          | Direction         | Handler                        |
-|------------------|-------------------|--------------------------------|
-| `bridge:send`    | Renderer → Main   | Writes to Python stdin         |
-| `bridge:stop`    | Renderer → Main   | Kills Python process           |
-| `bridge:stdout`  | Main → Renderer   | Forwarded Python stdout lines  |
-| `bridge:stderr`  | Main → Renderer   | Forwarded Python stderr lines  |
-| `bridge:closed`  | Main → Renderer   | Python process exit code       |
-
-### 3.4 Concerns
-- **No event for Python process startup.** The renderer just calls `init` and hopes the bridge is ready. If Python starts slowly, the `init` write will fail (`{ ok: false }`) and the renderer gets "Send error: Python bridge not ready". No retry or readiness signal.
-- **No reconnection logic.** If Python crashes, `bridge:closed` fires, but the renderer must manually call `init` again after a restart — which the main process doesn't support (no `startPythonBridge` re-invoke).
-- **`bridge:stderr` is not used by the renderer** (no listener registered in `index.html`). Diagnostics from Python stderr are silently lost.
-
----
-
-## 4. Window Creation (`main.js`)
-
-### 4.1 BrowserWindow Config
-```js
-new BrowserWindow({
-    width: 900,
-    height: 700,
-    webPreferences: {
-        preload: path.join(__dirname, "preload.cjs"),
-        contextIsolation: true,
-        nodeIntegration: false,
-    },
-});
-```
-- Fixed size, no `minWidth`/`minHeight` — resizable by default but no lower bound.
-- No `title` set — defaults to "mini_agent" (from `<title>` in HTML).
-- No icon set.
-- **No `sandbox: true`** — preload script runs unsandboxed (defaults to false). For a chat app this is acceptable since `contextIsolation` is enabled.
-
-### 4.2 Lifecycle
-```
-app.whenReady()
-    → createWindow()           // synchronous
-    → startPythonBridge()      // spawns Python child process
-    → app.on("activate", ...)  // macOS dock re-click → recreate window
-app.on("window-all-closed", ...)
-    → stopPythonBridge()
-    → app.quit()
-```
-- **Race condition**: `createWindow()` and `startPythonBridge()` are called sequentially but both are async (window creation is deferred, process spawn is immediate). The Python process may be ready before the window finishes loading, or vice versa. The renderer's `DOMContentLoaded` handler calls `init` immediately — if Python isn't ready, it fails silently (see §3.4).
-- **`activate` handler** only recreates the window, does NOT restart the Python bridge. If the bridge died while the window was closed, the new window connects to a dead process.
-
-### 4.3 Shutdown
-- `stopPythonBridge()` checks `!pythonProcess.killed` before killing — good.
-- On window close, `mainWindow = null` and bridge is killed. Clean.
-
----
-
-## 5. Renderer Architecture (`index.html`)
-
-### 5.1 Structure
-- Pure HTML + vanilla JS (no framework). Single-file.
-- CSS: Custom Catppuccin Mocha theme, flexbox layout.
-- Three DOM regions: `#messages` (scrollable), `#status` (status bar), `#input-area` (form).
-
-### 5.2 State Machine
-```
-[Loading] → init RPC → [Ready] → user types → chat RPC → [Streaming] → result → [Ready]
-                                                                           → error → [Ready]
-```
-- `initialized` boolean guards transition from Loading → Ready.
-- `assistantMsgEl` tracks the currently-streaming message element (appended to as tokens arrive).
-
-### 5.3 Message Processing (`handleBridgeLine` / `processMessage`)
-1. Attempt `JSON.parse(line)`.
-2. If parse fails → display as system message (startup banner, etc.).
-3. If `jsonrpc` result with `status: "ok"` and not yet initialized → setReady().
-4. If `type: "token"` → append to `assistantMsgEl` (create if needed).
-5. If `jsonrpc` result with content → finalize assistant message (clear `assistantMsgEl`, add persistent message).
-6. If `jsonrpc` error → display error message.
-
-### 5.4 Concerns
-- **Line splitting bug** (from §2.3): `bridge.onStdout(handleBridgeLine)` passes the raw chunk. If Python flushes multiple lines in one write (e.g., a token + a log line), `JSON.parse` fails and the entire chunk is shown as a system message.
-- **No message deduplication by `id`.** If the Python bridge echoes a response twice (unlikely but possible with buffering), the renderer processes both.
-- **`sendPending` flag** is declared but never set/checked — dead code.
-- **CSP policy**: `script-src 'self' 'unsafe-inline'` — needed for the inline `<script>` block. `style-src 'self' 'unsafe-inline'` — needed for inline `<style>`. Reasonable for a local-only Electron app. ✅
-- **`max-width: 80%` on messages** — long tokens (code blocks) may look cramped. No horizontal scroll for overflow.
-- **No error recovery UI.** If init fails, the user sees "Send error: Python bridge not ready" but gets no retry button or guidance.
-- **No disconnect indicator.** If `bridge:closed` fires, there's no visible UI change (no listener registered for it yet — code was truncated but the section showing it may be in the full file).
-
----
-
-## 6. Summary of Findings
-
-| Severity | Finding | Location |
-|----------|---------|----------|
-| **HIGH** | stdout chunk not split on newlines — multi-line chunks break JSON parse | `main.js:29` |
-| **HIGH** | No readiness signal from Python → renderer init races process startup | `main.js:15-38`, `index.html` DOMContentLoaded handler |
-| **MEDIUM** | No reconnection or bridge restart capability | `main.js` (missing `restartPythonBridge`) |
-| **MEDIUM** | Python stderr never surfaced to user | `index.html` (no `bridge.onStderr` listener) |
-| **LOW** | `sendPending` variable declared but unused | `index.html` script |
-| **LOW** | No max line length limit on stdin parser | `electron_bridge.py:109` |
-| **LOW** | Single-session design with no concurrency guard | `electron_bridge.py` globals |
-
----
-
-## 7. Recommended Fixes (Priority Order)
-
-1. **Buffer stdout by lines in `main.js`**: Accumulate chunks, split on `\n`, emit complete lines one at a time.
-2. **Add a `bridge:ready` IPC event**: Python process writes a ready signal on stdout after `main()` starts; main process forwards it to renderer; renderer waits for it before calling `init`.
-3. **Add `restartPythonBridge()`** and expose it via IPC (`bridge:restart`) for recovery after crashes.
-4. **Wire up `bridge.onStderr`** in the renderer to show Python errors in the UI (at least log to console).
-5. **Remove dead `sendPending`** variable or implement send queueing.
-
 
 ---
 

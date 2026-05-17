@@ -7,11 +7,10 @@
 | Feature | Competitors | Our Edge |
 |---------|------------|----------|
 | **Multi-agent system** | Claude Code (1 sub-agent), Cursor (explore sub-agent) | 11 tools, 5 coordination patterns, recursive sub-agents, typed handoffs |
-| **Tool count** | 8-15 per competitor | **48 tools** |
+| **Tool count** | 8-15 per competitor | **63 tools** |
 | **Inter-agent communication** | None have typed handoffs | 8 message types, subscription filtering, inboxes |
-| **Safety architecture** | Basic permissions | Read/write gates, approval callback, snapshots, backup-before-delete |
-| **MCP support** | Claude Code only | `mcp_discover` + `mcp_call` |
-| **Electron bridge** | Terminal-only competitors | JSON-RPC bridge ready for desktop GUI |
+| **Inter-agent communication** | None have typed handoffs | 8 message types, subscription filtering, inboxes |
+| **Browser automation** | Claude Code only | 6 Playwright tools — navigate, snapshot, click, type, screenshot, open_url |
 
 ---
 
@@ -76,7 +75,7 @@
 | 11 | Multi-root workspace support | Medium | Cursor |
 | 12 | Multi-format editing (diff/udiff/search-replace) | Medium | Aider (5 formats) |
 | 13 | Ripgrep-backed `search_files` | Medium | Cursor Instant Grep |
-| 14 | Browser automation tool | Medium | Claude Code |
+| 14 | Browser automation tool | Medium | Claude Code | ✅ **DONE** — `tools/browser_ops.py` with 6 tools (navigate, snapshot, click, type, screenshot, open_url) |
 | 15 | Multi-language LSP (not just pylsp) | High | Cursor, Copilot |
 
 ---
@@ -110,7 +109,7 @@
 
 ## Bottom Line
 
-**Our multi-agent system is genuinely ahead of every competitor.** Recursive sub-agents with structured handoffs and 5 coordination patterns is unmatched. Combined with 48 tools, MCP, and the Electron bridge, this is a strong foundation.
+**Our multi-agent system is genuinely ahead of every competitor.** Recursive sub-agents with structured handoffs and 5 coordination patterns is unmatched. Combined with 63 tools and MCP, this is a strong foundation.
 
 **The largest UX gap: memory that actually learns.** Claude Code remembers your preferences without you lifting a finger. We have the infrastructure but no automation. Closing this gap (auto-learn + `/init`) makes mini_agent a 2025 product.
 

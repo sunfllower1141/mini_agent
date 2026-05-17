@@ -1,15 +1,15 @@
 # mini_agent
 
-A coding agent powered by DeepSeek V4 Pro with **50 tools**. Terminal REPL, Textual TUI, or Electron desktop app. SQLite-backed memory with cross-session project knowledge. Cross-platform: macOS, Linux, and Windows.
+A coding agent powered by DeepSeek V4 Pro with **63 tools**. Terminal REPL or Textual TUI. SQLite-backed memory with cross-session project knowledge. Headless browser automation via Playwright. Cross-platform: macOS, Linux, and Windows.
 
 ## Features
 
 ### Core
-- **50 tools**: file operations, shell commands, search, git, web search, semantic search, symbol lookup, test running, LSP integration (pylsp), MCP client for external tool servers, read_image (GPT-4o vision), diff, verify, diagnose_failures, find_usages, restore_file, remember, init, wait_for_agent, agent_cancel, session_stats, recall_turn, fetch_url, and more
+- **63 tools**: file operations, shell commands, search, git, web search, semantic search, symbol lookup, test running, LSP integration (pylsp), MCP client for external tool servers, headless browser automation (Playwright — navigate, snapshot, click, type, screenshot), read_image (GPT-4o vision), diff, verify, diagnose_failures, find_usages, restore_file, remember, init, open_url, wait_for_agent, agent_cancel, session_stats, recall_turn, fetch_url, and more
 - **Two models**: orchestrator and sub-agents both use DeepSeek V4 Pro. Separate API keys supported via `SUB_AGENT_API_KEY` to isolate quota
-- **Cross-platform**: macOS, Linux, and full Windows support — ANSI terminal, Git Bash/PowerShell/cmd.exe shell execution, LSP queue-based reader, safe path resolution for non-existent paths
+- **Cross-platform**: macOS, Linux, and full Windows support — ANSI terminal, Git Bash/PowerShell/cmd.exe shell execution, LSP queue-based reader
 - **Streaming**: token-by-token responses with live tool output
-- **Safety**: workspace isolation, destructive command guard, overwrite protection (opt-in), file reservation system preventing cross-agent write collisions
+- **File reservations**: threading.Lock prevents cross-agent write collisions
 
 ### Multi-Agent
 - **10 concurrent sub-agents** (configurable up to 15) running in background threads
@@ -27,7 +27,6 @@ A coding agent powered by DeepSeek V4 Pro with **50 tools**. Terminal REPL, Text
 ### Interfaces
 - **Textual TUI** (`python tui.py`) — rich terminal UI with themes, diff preview, file tree
 - **Terminal REPL** (`python mini_agent.py`) — lightweight CLI
-- **Electron desktop app** (`electron_app/`) — JSON-RPC bridge with token streaming
 
 ### Dev Tools
 - **LSP integration**: definition, references, hover, diagnostics via pylsp (auto-started on first use)
@@ -124,7 +123,7 @@ args = ["-m", "my_mcp_server"]
 
 ```bash
 python -m pytest
-# 910 tests in ~23 seconds
+# 1,083 tests in ~23 seconds
 ```
 
 ## Architecture
@@ -132,8 +131,6 @@ python -m pytest
 ```
 mini_agent.py        Terminal REPL entry point
 tui.py               Textual TUI (AgentWorker, themes, tree, diff preview)
-electron_app/        Electron desktop app (main.js, preload.cjs, index.html)
-electron_bridge.py   JSON-RPC bridge for Electron (stdin/stdout)
 llm.py               LLM turn orchestration, circuit breaker, tool piping/grouping
 api.py               API calls (call_deepseek), message cleaning cache, complexity routing
 prompt.py            System prompt + .mini_agent.rules injection
@@ -149,7 +146,7 @@ sub_agent.py         Sub-agent loop with turn budget, pruning, streaming, heartb
 tools/
   __init__.py        Tool dispatch, cache, JSON repair, FILE_RESERVATIONS,
                      auto-learn failure patterns, post-edit LSP auto-verify
-  schema.py          TOOLS definitions (50 tools)
+  schema.py          TOOLS definitions (63 tools)
   file_ops.py        read/write/edit/list/info — cross-agent collision detection,
                      cascading fuzzy whitespace match (3-pass: exact→trailing→indent)
   shell_ops.py       run_shell, search_files, run_tests, git, task_status, verify,
@@ -159,12 +156,14 @@ tools/
   agent_ops.py       spawn/status/collect/message/read/extend/handoff/inbox/subscribe/cancel + remember
   agent_messages.py  AgentMessage, 9 message types, validation, routing
   agent_patterns.py  fan_out, fan_in, pipeline, barrier, scatter_gather
+  browser_ops.py     Headless browser automation — navigate, snapshot, click, type,
+                     screenshot via Playwright Chromium
   lsp.py             LSP client — pylsp integration, 4 tools (definition, references, hover, diagnostics),
                      cross-platform (select + queue-based reader)
   mcp_client.py      MCP client — stdio JSON-RPC, tool discovery at startup
   _json_rpc_shared.py  Shared subprocess drain_stderr + is_subprocess_connected
 tests/
-  test_*.py          31 test files, 910 tests
+  test_*.py          34 test files, 1,083 tests
 ```
 
 ## Key State
@@ -214,7 +213,7 @@ tests/
 - HTTP 408 (Request Timeout) added to retryable statuses.
 
 ### Interfaces
-- Textual TUI with terminal REPL and Electron desktop app.
+- Textual TUI with terminal REPL.
 - LSP integration via pylsp (auto-started on first use).
 - MCP client discovers external tools at startup via stdio JSON-RPC.
 - User interjection queue with `/cancel` support.
