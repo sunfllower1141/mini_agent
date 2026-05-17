@@ -702,7 +702,8 @@ def _verify(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
     # Run lint + all test targets in parallel
     jobs: list = []
     # Lint job
-    lint_cmd = _get_python_cmd() + ["-m", "flake8", "--count", "--select=E,F,W", "."]
+    lint_cmd = _get_python_cmd() + ["-m", "flake8", "--count", "--select=E,F,W",
+                 "--exclude=.git,__pycache__,venv,.venv,.egg-info,node_modules,build,dist", "."]
     try:
         lint_proc = subprocess.Popen(
             lint_cmd, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
