@@ -41,7 +41,13 @@ def build_system_prompt(config: "AgentConfig") -> str:
         "\n══════════════════════════════════════════════════════════════"
     )
 
-    prompt = header + _STATIC_PROMPT
+    # --- Cached prefix: static identity FIRST for DeepSeek prompt caching ---
+    # DeepSeek's cache_control is on the first system message.
+    # By putting _STATIC_PROMPT at the front, the cache can hit ~2,000
+    # tokens of static content that never changes across workspaces.
+    # Dynamic header + rules + git status are appended after so they
+    # don't invalidate the cached prefix.
+    prompt = _STATIC_PROMPT + "\n\n" + header
     # --- Win 2: Hierarchical .mini_agent.rules ---
     # Walk directory tree upward from workspace, merging all rules files
     rules_parts: list[str] = []
@@ -342,4 +348,48 @@ _STATIC_PROMPT = (
     "  handoff; orchestrator collects all, then fans out coord.sync to unblock.\n"
     "- **scatter_gather**: distribute N items across M workers, then merge results.\n"
     "  Use agent_handoff('coord.fan_out', result={'item': ...}) per worker, fan_in after.\n"
+    "\n"
+    "Code analysis & verification:\n"
+    "- **diff** — show git diff (unstaged changes). Call with no arguments for all files,\n"
+    "  or pass 'path' for a specific file. Works on files not yet staged/committed.\n"
+    "- **verify** — run lint + relevant tests for files modified in the current session.\n"
+    "  Auto-discovers matching test files. Use after every code change instead of manually\n"
+    "  running specific tests. Much faster than running all tests.\n"
+    "- **diagnose_failures** — reads the last test run output, parses FAILED lines, extracts\n"
+    "  test function names and file paths, reads the relevant source, and returns a\n"
+    "  structured failure summary with code snippets. Use when tests fail to quickly\n"
+    "  understand what broke. No parameters needed.\n"
+    "- **find_usages** — find all usages of a Python symbol across the workspace.\n"
+    "  Returns file path, line number, and surrounding context. Faster than grep for\n"
+    "  symbol references. Use before refactoring to understand impact.\n"
+    "- **restore_file** — restore a file from its session backup. Undoes the last write_file\n"
+    "  or edit_file operation on the given path. Only files modified in the current session.\n"
+    "\n"
+    "Memory & learning:\n"
+    "- **remember** — manually capture a learning to project_knowledge for cross-session\n"
+    "  persistence. Use when you discover a pattern, workaround, or convention worth\n"
+    "  remembering. Takes 'topic' and 'detail' fields.\n"
+    "- **init** — analyze workspace and auto-generate .mini_agent.rules and .mini_agent.toml.\n"
+    "  Seeds project_knowledge with auto-detected learnings. Use on first run or when\n"
+    "  project structure changes significantly.\n"
+    "\n"
+    "Sub-agent lifecycle:\n"
+    "- **wait_for_agent** — block until ANY sub-agent from a list completes. Uses exponential\n"
+    "  backoff sleep (1s→2s→4s→…→30s) to minimize token burn. PREFER THIS over repeated\n"
+    "  collect_any calls — saves LLM cost. Returns immediately if any agent already done.\n"
+    "- **agent_cancel** — cancel a running sub-agent. Stops at next turn boundary. Confirm\n"
+    "  with agent_status. Only cancel if an agent repeats the same error 3+ times or\n"
+    "  exhausts its turn budget.\n"
+    "\n"
+    "Session tools:\n"
+    "- **session_stats** — show session statistics: turns used, context tokens, active\n"
+    "  sub-agents, plan progress.\n"
+    "- **recall_turn** — recall a summary of what happened on a previous turn. Use to recover\n"
+    "  lost context when old tool results have been pruned. Takes the turn number.\n"
+    "\n"
+    "External integrations:\n"
+    "- **mcp_discover** — list all MCP tools from connected servers. Call first before mcp_call.\n"
+    "- **mcp_call** — call an MCP tool on a connected server. Arguments as JSON matching schema.\n"
+    "- **read_image** — read an image file and return a text description via GPT-4o. For\n"
+    "  screenshots, diagrams, or photos. Takes the file path.\n"
 )

@@ -19,7 +19,7 @@ import requests
 # ---------------------------------------------------------------------------
 
 _MAX_RETRIES = 3
-_RETRYABLE_STATUSES: set[int] = {429, 500, 502, 503, 504}
+_RETRYABLE_STATUSES: set[int] = {408, 429, 500, 502, 503, 504}
 _TESTING = "PYTEST_CURRENT_TEST" in os.environ
 
 

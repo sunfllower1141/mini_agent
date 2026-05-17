@@ -18,6 +18,23 @@ from dataclasses import dataclass
 # Shared helpers
 # ---------------------------------------------------------------------------
 
+def _safe_resolve(root: str, path: str) -> str:
+    """Resolve *path* relative to *root* to a canonical absolute path.
+
+    Uses ``os.path.realpath`` on Unix and existing files; on Windows,
+    ``os.path.realpath`` fails for paths that do not yet exist (it requires
+    the file to exist to resolve the final component).  We fall back to
+    ``os.path.abspath`` + normalisation when ``realpath`` raises OSError.
+    """
+    joined = os.path.join(root, path)
+    try:
+        return os.path.realpath(joined)
+    except OSError:
+        # Windows: realpath fails on non-existent paths.
+        # abspath + normpath gives a safe canonical form.
+        return os.path.normpath(os.path.abspath(joined))
+
+
 def _is_within_workspace(resolved: str, root: str, root_prefix: str) -> bool:
     """Return True if *resolved* is within the workspace *root*."""
     return resolved.startswith(root_prefix) or resolved == root
@@ -78,7 +95,7 @@ class ReadSafetyGate:
                 reason="Path is empty.",
                 resolved_path="",
             )
-        resolved = os.path.realpath(os.path.join(self._root, path))
+        resolved = _safe_resolve(self._root, path)
 
         # NOTE: There is an inherent TOCTOU race between this realpath check
         # and the actual open() call — a symlink could be swapped after this
@@ -163,7 +180,7 @@ class WriteSafetyGate:
             )
 
         # Resolve the intended absolute path
-        resolved = os.path.realpath(os.path.join(self._root, path))
+        resolved = _safe_resolve(self._root, path)
 
         # 1. Workspace boundary check (skipped when unrestricted)
         if not self._unrestricted and not _is_within_workspace(resolved, self._root, self._root_prefix):
@@ -192,7 +209,7 @@ class WriteSafetyGate:
         shows a unified diff using :mod:`difflib`.
         """
         path = args.get("path", "")
-        resolved = os.path.realpath(os.path.join(self._root, path))
+        resolved = _safe_resolve(self._root, path)
         exists = os.path.isfile(resolved)
 
         if tool_name == "write_file":

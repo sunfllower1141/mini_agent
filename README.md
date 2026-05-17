@@ -1,12 +1,13 @@
 # mini_agent
 
-A coding agent powered by DeepSeek V4 Pro with **48 tools**. Terminal REPL, Textual TUI, or Electron desktop app. SQLite-backed memory with cross-session project knowledge.
+A coding agent powered by DeepSeek V4 Pro with **49 tools**. Terminal REPL, Textual TUI, or Electron desktop app. SQLite-backed memory with cross-session project knowledge. Cross-platform: macOS, Linux, and Windows.
 
 ## Features
 
 ### Core
-- **44 tools**: file operations, shell commands, search, git, web search, semantic search, symbol lookup, test running, LSP integration (pylsp), MCP client for external tool servers, read_image (GPT-4o vision), and more
-- **Two models**: orchestrator uses DeepSeek V4 Pro; sub-agents use Flash (cheaper, faster workers). Separate API keys supported via `SUB_AGENT_API_KEY`
+- **49 tools**: file operations, shell commands, search, git, web search, semantic search, symbol lookup, test running, LSP integration (pylsp), MCP client for external tool servers, read_image (GPT-4o vision), diff, verify, diagnose_failures, find_usages, restore_file, remember, init, wait_for_agent, agent_cancel, session_stats, recall_turn, and more
+- **Two models**: orchestrator and sub-agents both use DeepSeek V4 Pro. Separate API keys supported via `SUB_AGENT_API_KEY` to isolate quota
+- **Cross-platform**: macOS, Linux, and full Windows support — ANSI terminal, Git Bash/PowerShell/cmd.exe shell execution, LSP queue-based reader, safe path resolution for non-existent paths
 - **Streaming**: token-by-token responses with live tool output
 - **Safety**: workspace isolation, destructive command guard, overwrite protection (opt-in), file reservation system preventing cross-agent write collisions
 
@@ -90,7 +91,13 @@ sub_agent_max_concurrent = 10
 sub_agent_max_turns = 25
 max_messages = 500
 max_tokens = 200_000
+temperature = 0.0
+frequency_penalty = 0.3
+presence_penalty = 0.1
+# stop_sequences = ["```"]
+# response_format = "json_object"
 allow_overwrites = false
+stream = true
 stream = false
 
 [[mcp_server]]
@@ -117,7 +124,7 @@ args = ["-m", "my_mcp_server"]
 
 ```bash
 python -m pytest
-# 817 tests in ~13 seconds
+# 910 tests in ~23 seconds
 ```
 
 ## Architecture
@@ -141,18 +148,18 @@ agent_runtime.py     Sub-agent lifecycle, file reservations, inboxes, subscripti
 sub_agent.py         Sub-agent loop with turn budget, pruning, streaming, heartbeats
 tools/
   __init__.py        Tool dispatch, cache, JSON repair, FILE_RESERVATIONS
-  schema.py          TOOLS definitions (44 tools)
+  schema.py          TOOLS definitions (49 tools)
   file_ops.py        read/write/edit/list/info — cross-agent collision detection
-  shell_ops.py       run_shell, search_files, run_tests, git, task_status, verify
+  shell_ops.py       run_shell, search_files, run_tests, git, task_status, verify — cross-platform
   search_ops.py      find_symbol, find_usages, semantic_search, web_search
   agent_ops.py       spawn/status/collect/message/read/extend/handoff/inbox/subscribe/cancel
   agent_messages.py  AgentMessage, 9 message types, validation, routing
   agent_patterns.py  fan_out, fan_in, pipeline, barrier, scatter_gather
-  lsp.py             LSP client — pylsp integration, 4 tools
+  lsp.py             LSP client — pylsp integration, cross-platform (select + queue-based reader)
   mcp_client.py      MCP client — stdio JSON-RPC, tool discovery
   _json_rpc_shared.py  Shared subprocess management for LSP and MCP clients
 tests/
-  test_*.py          40 test files, 817 tests
+  test_*.py          31 test files, 910 tests
 ```
 
 ## License

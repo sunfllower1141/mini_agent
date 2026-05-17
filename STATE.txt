@@ -18,7 +18,7 @@ memory.py            SQLite conversation store + pruning + project_knowledge tab
 safety.py            Read/Write safety gates + diff preview
 interject.py         Thread-safe user interjection queue
 terminal.py          ANSI colour helpers
-retry.py             HTTP retry with jitter and exponential backoff
+retry.py             HTTP retry with jitter + exponential backoff (408, 429, 5xx)
 stream.py            SSE stream parser
 agent_runtime.py     Sub-agent lifecycle, file reservations, inboxes, subscriptions, snapshots
 sub_agent.py         Sub-agent loop with turn budget, pruning, streaming, Pro model
@@ -28,7 +28,7 @@ tools/
   file_ops.py        read/write/edit/list/info — cross-agent collision detection,
                      cascading fuzzy whitespace match (3-pass: exact→trailing→indent)
   shell_ops.py       run_shell, search_files, run_tests, git, task_status, verify,
-                     auto-backup before rm commands
+                     cross-platform shell + python detection
   search_ops.py      find_symbol, find_usages, semantic_search, web_search, recall_turn
   agent_ops.py       spawn/status/collect/message/read/extend/handoff/inbox/subscribe/cancel + remember
   agent_messages.py  AgentMessage, 9 message types, validation, routing
@@ -38,7 +38,7 @@ tools/
                      mcp_discover + mcp_call tools registered
   _json_rpc_shared.py  Shared subprocess drain_stderr + is_subprocess_connected
 tests/
-  28 test files, 904 tests
+  31 test files, 910 tests
 ```
 
 ## Key State
@@ -47,6 +47,8 @@ tests/
 - Orchestrator: DeepSeek V4 Pro. Sub-agents: DeepSeek V4 Pro.
 - Separate API keys supported via DEEPSEEK_API_KEY and SUB_AGENT_API_KEY env vars.
 - max_tokens = 200k. max_messages = 500. Priority: CLI > env var > .env > TOML > default.
+- temperature (0.0), frequency_penalty (0.3), presence_penalty (0.1), stop_sequences, response_format configurable via TOML.
+- Prompt caching: static identity content first for DeepSeek cache hits (~2,000 tokens never change).
 
 ### Multi-Agent System
 - Max 10 concurrent sub-agents (configurable via sub_agent_max_concurrent in TOML).
@@ -73,6 +75,15 @@ tests/
 - Incremental message cleaning cache (survives across turns via id(messages) key).
 - _pipe dependency detection short-circuits before JSON parse when not present.
 - Circuit breaker uses deque.popleft() for O(1) window management.
+
+### Cross-Platform
+- Windows ANSI support via SetConsoleMode (Windows 10+).
+- Cross-platform shell: Git Bash → PowerShell → cmd.exe fallback chain.
+- LSP client uses queue-based reader on Windows (select works on pipes only on Unix).
+- _safe_resolve in safety.py handles Windows non-existent path resolution.
+- Python detection: py -3 → python3 → python fallback chain.
+- Windows destructive patterns: del /f, diskpart, rmdir /s, rd /s, reg delete.
+- HTTP 408 (Request Timeout) added to retryable statuses.
 
 ### Interfaces
 - Textual TUI with terminal REPL and Electron desktop app.

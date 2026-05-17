@@ -17,6 +17,7 @@ import subprocess
 import sys
 import threading
 import json
+import queue
 from pathlib import Path
 
 from tools import ToolResult, _register, _summarize, _TOOL_DISPATCH, _TOOL_SUMMARIES
@@ -78,6 +79,10 @@ class LspConnection:
     notifications and cached per-URI.
 
     Thread safety: a ``threading.Lock`` serialises stdin writes.
+
+    On Windows, ``select.select`` cannot be used with pipes, so a
+    background reader thread feeds a ``queue.Queue``.  On Unix,
+    ``select.select`` is used directly for efficiency.
     """
 
     def __init__(self, language_id: str, server_command: str,
@@ -91,6 +96,8 @@ class LspConnection:
         self._connected: bool = False
         # Cache diagnostics per URI
         self._diagnostics: dict[str, list[dict]] = {}
+        # Windows stdout reader (None on Unix, threading.Thread on Windows)
+        self._stdout_queue: "queue.Queue | None" = None
 
     # ------------------------------------------------------------------
     # Connection lifecycle
@@ -163,6 +170,55 @@ class LspConnection:
     # Process management
     # ------------------------------------------------------------------
 
+    def _os_readline(self, timeout: float = 15.0) -> bytes:
+        """Read one line from stdout, platform-aware.
+
+        On Unix, blocks with ``select.select`` + ``readline``.
+        On Windows, reads from the background queue (``select`` doesn't
+        work with pipes on Windows).
+        """
+        if self._stdout_queue is not None:
+            # Windows — background thread feeds the queue
+            try:
+                data = self._stdout_queue.get(timeout=timeout)
+                if data is None:
+                    self._connected = False
+                    raise LspConnectionError(
+                        f"LSP server '{self.language_id}' closed stdout unexpectedly"
+                    )
+                return data
+            except queue.Empty:
+                self._connected = False
+                raise LspConnectionError(
+                    f"LSP server '{self.language_id}' timed out waiting for response"
+                )
+        else:
+            # Unix — select + readline
+            import select
+            ready, _, _ = select.select([self.process.stdout], [], [], timeout)
+            if not ready:
+                self._connected = False
+                raise LspConnectionError(
+                    f"LSP server '{self.language_id}' timed out waiting for response"
+                )
+            raw = self.process.stdout.readline()
+            if not raw:
+                self._connected = False
+                raise LspConnectionError(
+                    f"LSP server '{self.language_id}' closed stdout unexpectedly"
+                )
+            return raw
+
+    def _stdout_reader_thread(self) -> None:
+        """Background thread: read stdout lines into _stdout_queue (Windows)."""
+        try:
+            for raw_line in iter(self.process.stdout.readline, b''):
+                self._stdout_queue.put(raw_line)
+        except Exception:
+            pass
+        finally:
+            self._stdout_queue.put(None)  # EOF sentinel
+
     def _start_process(self) -> None:
         """Launch the LSP server subprocess."""
         cmd = [self.server_command] + list(self.server_args)
@@ -172,6 +228,13 @@ class LspConnection:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
+        # On Windows, start a background reader thread since select doesn't work on pipes
+        if os.name == 'nt':
+            self._stdout_queue = queue.Queue()
+            threading.Thread(
+                target=self._stdout_reader_thread, daemon=True,
+                name=f"lsp-stdout-{self.language_id}"
+            ).start()
         threading.Thread(
             target=self._drain_stderr, daemon=True, name=f"lsp-stderr-{self.language_id}"
         ).start()
@@ -220,29 +283,28 @@ class LspConnection:
                 ) from exc
 
             while True:
-                import select
-                ready, _, _ = select.select([self.process.stdout], [], [], 15.0)
-                if not ready:
-                    self._connected = False
-                    raise LspConnectionError(
-                        f"LSP server '{self.language_id}' timed out waiting for response to '{method}'"
-                    )
-                # Read Content-Length header
-                raw = self.process.stdout.readline().decode("utf-8")
+                raw_line = self._os_readline(15.0)
+                raw = raw_line.decode("utf-8")
                 if raw.startswith("Content-Length:"):
                     clen = int(raw.split(":")[1].strip())
                     # Skip all header lines until blank \r\n separator
                     while True:
-                        header_line = self.process.stdout.readline()
+                        header_line = self._os_readline(5.0)
                         if header_line == b"\r\n" or header_line == b"\n":
                             break
-                    # Read exactly clen bytes (read() may return less)
+                    # Read exactly clen bytes
                     raw_bytes = b""
                     while len(raw_bytes) < clen:
-                        chunk = self.process.stdout.read(clen - len(raw_bytes))
-                        if not chunk:
-                            break
-                        raw_bytes += chunk
+                        # Use _os_readline to get remaining bytes if on Windows queue,
+                        # or read directly from stdout on Unix
+                        if self._stdout_queue is not None:
+                            chunk = self._os_readline(5.0)
+                            raw_bytes += chunk
+                        else:
+                            chunk = self.process.stdout.read(clen - len(raw_bytes))
+                            if not chunk:
+                                break
+                            raw_bytes += chunk
                     raw = raw_bytes.decode("utf-8")
                 if not raw:
                     self._connected = False
@@ -276,12 +338,12 @@ class LspConnection:
         """
         if self.process is None or self.process.stdout is None:
             return
-        import select
         while True:
-            ready, _, _ = select.select([self.process.stdout], [], [], 0.05)
-            if not ready:
-                break
-            raw = self.process.stdout.readline().decode("utf-8")
+            try:
+                raw_line = self._os_readline(0.05)
+            except LspConnectionError:
+                break  # timeout or EOF — no more notifications
+            raw = raw_line.decode("utf-8")
             if not raw:
                 self._connected = False
                 break

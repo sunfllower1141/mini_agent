@@ -339,7 +339,7 @@ class TestRetryableStatusesSet(unittest.TestCase):
 
     def test_all_expected_statuses_present(self):
         """Verify _RETRYABLE_STATUSES contains exactly the expected codes."""
-        expected = {429, 500, 502, 503, 504}
+        expected = {408, 429, 500, 502, 503, 504}
         self.assertEqual(_RETRYABLE_STATUSES, expected)
 
     def test_400_not_in_retryable(self):

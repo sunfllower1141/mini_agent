@@ -107,6 +107,11 @@ class AgentConfig:
     max_messages: int = DEFAULT_MAX_MESSAGES
     max_tokens: int = DEFAULT_MAX_TOKENS
     sub_agent_max_turns: int = DEFAULT_SUB_AGENT_MAX_TURNS
+    temperature: float = 0.0
+    frequency_penalty: float = 0.3
+    presence_penalty: float = 0.1
+    stop_sequences: list[str] = field(default_factory=list)
+    response_format: str = ""  # "" = default, "json_object" for JSON mode
     exa_api_key: str = DEFAULT_EXA_API_KEY
     openai_api_key: str = DEFAULT_OPENAI_API_KEY
     approve_write_ops: bool = False
@@ -172,6 +177,9 @@ _TOML_SCHEMA: dict[str, type] = {
     "max_messages": int,
     "max_tokens": int,
     "sub_agent_max_turns": int,
+    "temperature": float,
+    "frequency_penalty": float,
+    "presence_penalty": float,
     "exa_api_key": str,
     "openai_api_key": str,
     "approve_write_ops": bool,
@@ -576,7 +584,7 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     startup_ctx = build_startup_context(workspace, knowledge=knowledge)
     messages: list[dict] = [
         {"role": "system", "content": build_system_prompt(config)},
-        {"role": "system", "content": startup_ctx},
+        {"role": "user", "content": startup_ctx},
     ]
     if saved:
         messages.extend(saved)

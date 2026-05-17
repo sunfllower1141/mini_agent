@@ -7,13 +7,89 @@ Tools: run_shell, task_status, search_files, run_tests, verify, git
 from __future__ import annotations
 
 import os
+import platform
 import re
+import shutil
 import subprocess
 import threading
 import uuid
 
 from safety import ReadSafetyGate, WriteSafetyGate
 from tools import _register, _summarize, ToolResult, _TASK_REGISTRY
+
+
+# ---------------------------------------------------------------------------
+# Platform helpers for cross-platform shell execution
+# ---------------------------------------------------------------------------
+
+def _get_shell_command() -> list[str]:
+    """Return the best available shell command on this platform.
+    
+    On Windows: prefers Git Bash, then PowerShell, fallback to cmd.exe.
+    On Unix: returns /bin/sh.
+    """
+    if platform.system() == "Windows":
+        # Prefer Git Bash if available
+        bash_paths = [
+            r"C:\Program Files\Git\bin\bash.exe",
+            r"C:\Program Files (x86)\Git\bin\bash.exe",
+            r"C:\Git\bin\bash.exe",
+        ]
+        for bp in bash_paths:
+            if os.path.isfile(bp):
+                return [bp]
+        # Try shutil.which for bash on PATH
+        bash_on_path = shutil.which("bash")
+        if bash_on_path:
+            return [bash_on_path]
+        # Next, PowerShell
+        ps_path = shutil.which("powershell.exe") or shutil.which("pwsh.exe")
+        if ps_path:
+            return [ps_path, "-Command"]
+        # Fallback to cmd.exe
+        return [os.environ.get("COMSPEC", "cmd.exe"), "/C"]
+    else:
+        return ["/bin/sh"]
+
+
+def _is_bash_available() -> bool:
+    """Check if bash is available on this system."""
+    if platform.system() == "Windows":
+        bash_paths = [
+            r"C:\Program Files\Git\bin\bash.exe",
+            r"C:\Program Files (x86)\Git\bin\bash.exe",
+            r"C:\Git\bin\bash.exe",
+        ]
+        for bp in bash_paths:
+            if os.path.isfile(bp):
+                return True
+        return shutil.which("bash") is not None
+    else:
+        return True  # /bin/sh is always present
+
+
+_PYTHON_CMD: list[str] = []
+def _get_python_cmd() -> list[str]:
+    """Return the best available python command as a list.
+    
+    On Windows: tries 'py -3', then 'python3', then 'python'.
+    On Unix: tries 'python3', then 'python'.
+    Results are memoised in _PYTHON_CMD.
+    """
+    global _PYTHON_CMD
+    if _PYTHON_CMD:
+        return _PYTHON_CMD
+    if platform.system() == "Windows":
+        candidates = [["py", "-3"], ["python3"], ["python"]]
+    else:
+        candidates = [["python3"], ["python"]]
+    for cmd in candidates:
+        if shutil.which(cmd[0]):
+            _PYTHON_CMD = cmd
+            return _PYTHON_CMD
+    # Ultimate fallback
+    _PYTHON_CMD = ["python"]
+    return _PYTHON_CMD
 
 
 def _persist_test_output(output: str) -> None:
@@ -103,6 +179,13 @@ _DESTRUCTIVE_PATTERNS = [
     r"\bfdisk\b",          # partition table
     r":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:",  # fork bomb
     r">/dev/null\s*&&\s*rm\b",  # rm disguised after suppression
+    # Windows destructive patterns
+    r"\bdel\s+/[fF]\b",       # del /f (force delete)
+    r"\bformat\b",            # format disk (also matches Unix, already above)
+    r"\bdiskpart\b",          # Windows disk partition tool
+    r"\brmdir\s+/[sS]\b",     # rmdir /s (recursive remove directory)
+    r"\brd\s+/[sS]\b",        # rd /s (same as rmdir /s, shorthand)
+    r"\breg\s+delete\b",      # registry key deletion
 ]
 
 
@@ -162,6 +245,17 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
         block = _check_destructive(command)
         if block is not None:
             return ToolResult(success=False, content=block)
+    # Windows: prefer bash for safer, more compatible command execution
+    _windows_cmd_note = ""
+    if platform.system() == "Windows":
+        if _is_bash_available():
+            bash = _get_shell_command()[0]
+            command = f'{bash} -c "{command}"'
+        elif not force:
+            _windows_cmd_note = (
+                "\nNote: Running on Windows cmd.exe. "
+                "Some shell commands (pipes, redirects, etc.) may behave differently than on Unix."
+            )
     # Auto-backup files before any rm command (prevents permanent data loss)
     if force and re.search(r'\brm\b', command):
         from tools.file_ops import _backup_before_write
@@ -267,6 +361,8 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
                 err_output += f"\n… (stderr truncated at 100 lines — {len(err_lines)} total)"
             parts.append(f"stderr:\n{err_output}")
         content = "\n".join(parts)
+        if _windows_cmd_note:
+            content += _windows_cmd_note
         if proc.returncode == 127:
             content += "\nHint: Command not found. Check the spelling and that it is installed."
         return ToolResult(
@@ -275,7 +371,7 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
         )
     except Exception as e:
         hint = "\nHint: Check the command and flag spelling. Try with --help first, or use search_files to find the right syntax."
-        return ToolResult(success=False, content=f"Error running command: {e}{hint}")
+        return ToolResult(success=False, content=f"Error running command: {e}{hint}{_windows_cmd_note}")
 
 
 @_summarize("run_shell")
@@ -464,7 +560,7 @@ def _run_tests(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
     target = args.get("path", "").strip()
     background = args.get("background", False)
     timeout = args.get("timeout", 120)
-    cmd = ["python", "-m", "pytest", "-q"]
+    cmd = _get_python_cmd() + ["-m", "pytest", "-q"]
     if target:
         cmd.append(target)
 
@@ -606,7 +702,7 @@ def _verify(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
     # Run lint + all test targets in parallel
     jobs: list = []
     # Lint job
-    lint_cmd = ["python", "-m", "flake8", "--count", "--select=E,F,W", "."]
+    lint_cmd = _get_python_cmd() + ["-m", "flake8", "--count", "--select=E,F,W", "."]
     try:
         lint_proc = subprocess.Popen(
             lint_cmd, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
@@ -619,7 +715,7 @@ def _verify(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
     for target in test_targets:
         try:
             proc = subprocess.Popen(
-                ["python", "-m", "pytest", target, "-q"],
+                _get_python_cmd() + ["-m", "pytest", target, "-q"],
                 cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             )
             jobs.append(("test", (target, proc)))
