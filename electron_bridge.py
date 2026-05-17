@@ -50,8 +50,31 @@ def _handle_init(id_: Any, params: dict) -> None:
         _memory      = session["memory"]
         _messages    = session["messages"]
         _write_line({"jsonrpc": "2.0", "id": id_, "result": {"status": "ok"}})
+        # Emit session metadata for the frontend status bar
+        _emit_session_info()
     except Exception as exc:
         _error(id_, -1, f"init failed: {exc}")
+
+
+def _emit_session_info() -> None:
+    """Emit a session_info event with workspace, model, git branch, etc."""
+    import subprocess as _sp
+    info = {
+        "type": "session_info",
+        "workspace": _config.workspace if _config else "",
+        "model": _config.model if _config else "unknown",
+    }
+    # Git branch
+    try:
+        branch = _sp.check_output(
+            ["git", "branch", "--show-current"],
+            cwd=_config.workspace, text=True, stderr=_sp.DEVNULL
+        ).strip()
+        if branch:
+            info["git_branch"] = branch
+    except Exception:
+        pass
+    _write_line(info)
 
 
 def _handle_chat(id_: Any, params: dict) -> None:
@@ -67,10 +90,35 @@ def _handle_chat(id_: Any, params: dict) -> None:
     _messages.append({"role": "user", "content": user_content})
     _cancel_event.clear()
 
-    result_container: dict = {}
-
     def on_token(token: str) -> None:
-        _write_line({"type": "token", "content": token})
+        import stream as _s
+        if token == _s.THINKING_START:
+            _write_line({"type": "thinking_start"})
+        elif token == _s.THINKING_END:
+            _write_line({"type": "thinking_end"})
+        elif token.startswith("\n[") and token.endswith("]"):
+            # Any other delimiter-like token with embedded newline — skip the newline
+            pass
+        else:
+            _write_line({"type": "token", "content": token})
+
+    def on_tool_start(summary: str, parallel: bool = False) -> None:
+        # Extract tool name from summary like "read_file(path='foo.py')"
+        tool_name = summary.split("(")[0].strip() if "(" in summary else summary
+        _write_line({
+            "type": "tool_start",
+            "summary": summary,
+            "tool_name": tool_name,
+            "parallel": parallel,
+        })
+
+    def on_tool_end(success: bool, detail: str, diff_preview: str | None = None) -> None:
+        _write_line({
+            "type": "tool_end",
+            "success": success,
+            "detail": detail,
+            "diff_preview": diff_preview,
+        })
 
     try:
         result = run_agent_turn(
@@ -79,6 +127,8 @@ def _handle_chat(id_: Any, params: dict) -> None:
             _write_gate,
             _read_gate,
             on_token=on_token,
+            on_tool_start=on_tool_start,
+            on_tool_end=on_tool_end,
             cancel_event=_cancel_event,
             memory_store=_memory,
         )

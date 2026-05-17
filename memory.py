@@ -687,6 +687,7 @@ class MemoryStore:
         self._conn: Optional[sqlite3.Connection] = None
         self._token_count: int = 0  # running accumulator for saved messages
         self._vacuum_thread: Optional[threading.Thread] = None  # background VACUUM
+        self._skip_load: bool = False  # set True to skip loading knowledge/summaries (used by switch_session)
 
         # Migrate from old paths if needed
         _migrate_old_paths(filepath, self._db_path)
@@ -879,6 +880,29 @@ class MemoryStore:
             conn.commit()
         except sqlite3.Error:
             warnings.warn("Failed to bump project knowledge", stacklevel=2)
+
+    def find_knowledge(self, category: str, summary: str) -> dict | None:
+        """Find a knowledge entry by category + summary prefix match.
+        Returns the row dict or None. Used by auto-learn to bump existing entries."""
+        try:
+            conn = self._get_conn()
+            rows = conn.execute(
+                "SELECT id, category, summary, detail, importance, hits"
+                " FROM project_knowledge"
+                " WHERE category = ? AND summary LIKE ?"
+                " LIMIT 1",
+                (category, summary + "%"),
+            ).fetchall()
+            if rows:
+                r = rows[0]
+                return {
+                    "id": r[0], "category": r[1], "summary": r[2],
+                    "detail": r[3], "importance": r[4], "hits": r[5],
+                }
+            return None
+        except sqlite3.Error:
+            warnings.warn("Failed to query project knowledge", stacklevel=2)
+            return None
 
     def capture_session_summary(
         self, summary: str, detail: str = "",

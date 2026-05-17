@@ -28,6 +28,11 @@ Config file (.mini_agent.toml) can set model, stream, and other defaults.
 Session commands (type at the prompt):
   quit                Save memory and exit
   clear               Reset conversation memory
+  /init               Reinitialize .mini_agent.rules + .mini_agent.toml
+  /workspace <path>   Switch to a different workspace directory
+  /export             Export conversation to a markdown file
+  /stats              Show session statistics (turns, tool calls, messages)
+  /session <cmd>      Manage named sessions: new, switch, delete, list
 
 Configuration:
   Set EXA_API_KEY in your environment or .mini_agent.toml for web search.
@@ -179,6 +184,17 @@ def main() -> None:
                 print(f"Exported to {path}")
                 continue
 
+            if user_input.lower() in ("/help", "/h", "-h", "--help"):
+                print("Session commands:")
+                print("  quit                Save memory and exit")
+                print("  clear               Reset conversation memory")
+                print("  /init               Reinitialize .mini_agent.rules + .mini_agent.toml")
+                print("  /workspace <path>   Switch to a different workspace directory")
+                print("  /export             Export conversation to a markdown file")
+                print("  /stats              Show session statistics (turns, tool calls, messages)")
+                print("  /session <cmd>      Manage named sessions: new, switch, delete, list")
+                continue
+
             if user_input.lower() == "/stats":
                 print(f"Turns: {stats['turns']}  Tool calls: {stats['tool_calls']}  Messages: {len(messages)}")
                 continue
@@ -213,6 +229,37 @@ def main() -> None:
                     print(msg)
                 else:
                     print("Usage: /session new <name> | switch <name> | delete <name> | list")
+                continue
+
+            if user_input.lower().startswith("/workspace"):
+                parts = user_input.split(maxsplit=1)
+                new_path = parts[1].strip() if len(parts) > 1 else ""
+                if not new_path:
+                    print("Usage: /workspace <path>")
+                    continue
+                new_workspace = os.path.abspath(new_path)
+                if not os.path.isdir(new_workspace):
+                    print(f"Not a directory: {new_workspace}")
+                    continue
+                # Save current session, then reinitialize at new workspace
+                messages = memory.save(messages)
+                from config import init_session as _init_session
+                try:
+                    new_data = _init_session(new_workspace, cli_args=cli)
+                except Exception as exc:
+                    print(f"Error switching workspace: {exc}")
+                    continue
+                # Replace all session state
+                config = new_data["config"]
+                write_gate = new_data["write_gate"]
+                read_gate = new_data["read_gate"]
+                memory = new_data["memory"]
+                messages = new_data["messages"]
+                session.close()
+                session = new_data["session"]
+                workspace = new_workspace
+                stats = {"turns": 0, "tool_calls": 0}
+                print(f"Workspace switched to: {workspace}")
                 continue
 
             if not user_input:

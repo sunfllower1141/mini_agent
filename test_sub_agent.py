@@ -66,8 +66,14 @@ def configured_context(tmp_path, monkeypatch):
     config = MockConfig()
     set_context(_agent_runtime=runtime, _agent_config=config, workspace=str(tmp_path))
     yield
-    # Cleanup — cancel any sub-agent threads that may still be running
+    # Clean up all sub-agents so background threads don't pollute
+    # _AGENT_MSGS for subsequent tests (e.g. heartbeat handoffs).
     runtime.cancel_all()
+    for t in list(runtime.tasks.values()):
+        t.join(timeout=2)
+    from tools.agent_ops import _AGENT_MSGS, _AGENT_MSGS_LOCK
+    with _AGENT_MSGS_LOCK:
+        _AGENT_MSGS.clear()
     set_context(_agent_runtime=None, _agent_config=None)
 
 

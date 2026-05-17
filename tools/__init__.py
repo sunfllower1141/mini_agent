@@ -32,6 +32,31 @@ from dataclasses import dataclass
 from safety import ReadSafetyGate, WriteSafetyGate
 from tools.schema import TOOLS
 
+# Hardcoded core schema for remember — always present even if schema.py is missing
+_REMEMBER_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "remember",
+        "description": "Manually capture a learning or observation to project_knowledge for cross-session persistence. Use this when you discover a pattern, workaround, or convention worth remembering in future sessions.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "topic": {
+                    "type": "string",
+                    "description": "Short topic label for this learning (e.g. 'edit_file whitespace', 'module import pattern')"
+                },
+                "detail": {
+                    "type": "string",
+                    "description": "The learning itself — what to remember, the pattern, workaround, or convention."
+                }
+            },
+            "required": ["topic", "detail"]
+        }
+    }
+}
+if not any(td["function"]["name"] == "remember" for td in TOOLS):
+    TOOLS.insert(0, _REMEMBER_SCHEMA)
+
 # ---------------------------------------------------------------------------
 # TOOL_SCHEMA_MAP — O(1) name→schema lookup for execute_tool() validation
 # ---------------------------------------------------------------------------
@@ -219,6 +244,97 @@ def _summarize(name: str):
     return decorator
 
 
+# ---------------------------------------------------------------------------
+# remember — hardcoded core tool (not dependent on workspace files)
+# ---------------------------------------------------------------------------
+
+
+def _remember(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
+    """Store a project-level learning that persists across sessions.
+
+    Saved to the ``project_knowledge`` table in the session SQLite DB.
+    Returns a summary of what was stored.
+    """
+    topic = args.get("topic", "")
+    detail = args.get("detail", "")
+    if not topic.strip():
+        return ToolResult(
+            success=False,
+            content="Missing required parameter: 'topic' (short topic label for this learning).",
+        )
+
+    memory_store = getattr(_TOOL_CONTEXT, "_memory_store", None)
+    topic_preview = topic[:200] + ("..." if len(topic) > 200 else "")
+    detail_preview = detail[:200] + ("..." if len(detail) > 200 else "")
+    if memory_store is not None:
+        try:
+            conn = memory_store._get_conn()
+            conn.execute(
+                "INSERT INTO project_knowledge (category, summary, detail) VALUES (?, ?, ?)",
+                (topic, topic, detail),
+            )
+            conn.commit()
+        except Exception as e:
+            return ToolResult(
+                success=True,
+                content=f"Remember noted, but DB insert failed: {e}",
+            )
+        return ToolResult(
+            success=True,
+            content=(
+                f"Stored in project knowledge:\\n"
+                f"  Topic: {topic_preview}\\n"
+                f"  Detail: {detail_preview}"
+            ),
+        )
+
+    # Fallback: try SQLite directly via scratchpad_path
+    db_path = getattr(_TOOL_CONTEXT, "scratchpad_path", None)
+    if db_path:
+        try:
+            import sqlite3
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                "INSERT INTO project_knowledge (category, summary, detail) VALUES (?, ?, ?)",
+                (topic, topic, detail),
+            )
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            return ToolResult(
+                success=True,
+                content=f"Remember noted, but DB fallback failed: {e}",
+            )
+        return ToolResult(
+            success=True,
+            content=(
+                f"Stored in project knowledge (DB fallback):\\n"
+                f"  Topic: {topic_preview}\\n"
+                f"  Detail: {detail_preview}"
+            ),
+        )
+
+    return ToolResult(
+        success=True,
+        content=(
+            f"Remember noted (no persistent storage available):\\n"
+            f"  Topic: {topic_preview}"
+        ),
+    )
+
+
+def _remember_summary(args: dict) -> str:
+    topic = args.get("topic", "?")
+    preview = topic[:60]
+    if len(topic) > 60:
+        preview += "\u2026"
+    return f"remember(\"{preview}\")"
+
+
+_TOOL_DISPATCH["remember"] = _remember
+_TOOL_SUMMARIES["remember"] = _remember_summary
+
+
 def clear_tool_cache() -> None:
     """Clear the per-turn tool cache. Called at the start of each agent turn."""
     _TOOL_CACHE.clear()
@@ -391,6 +507,213 @@ def _build_error_hint(name: str, exc: Exception = None, error_msg: str = "") -> 
     return "\n".join(hint_parts)
 
 
+# ---------------------------------------------------------------------------
+# Auto-learn from tool failures — pattern detection, escalation, and hints
+# ---------------------------------------------------------------------------
+
+# Known failure fingerprints mapped to actionable recovery advice.
+# These are injected into result.hint AND persisted as knowledge when repeated.
+_FAILURE_PATTERNS: dict[str, dict[str, str]] = {
+    "edit_file": {
+        "not found": (
+            "edit_file 'string not found': read the file first with read_file, "
+            "copy the exact text (including whitespace/indentation), then retry."
+        ),
+        "whitespace": (
+            "edit_file whitespace mismatch: use read_file to copy the exact "
+            "indentation (tabs vs spaces) from the file."
+        ),
+        "ambiguous": (
+            "edit_file ambiguous match: the old_string appears multiple times; "
+            "include more surrounding context to make it unique, or use count=."
+        ),
+        "count": (
+            "edit_file count parameter: use count=-1 to replace all occurrences, "
+            "or count=N to replace only the Nth match."
+        ),
+    },
+    "write_file": {
+        "blocked": (
+            "write_file blocked by safety: use a path inside the workspace "
+            "or enable unrestricted mode."
+        ),
+        "exists": (
+            "write_file overwrite: use restore_file to undo, or edit_file to "
+            "modify in place instead of replacing the whole file."
+        ),
+    },
+    "read_file": {
+        "not found": (
+            "read_file 'No such file': try list_directory to find the correct "
+            "path, or search_files to locate the file."
+        ),
+        "offset": (
+            "read_file offset error: check the file length with file_info first."
+        ),
+    },
+    "search_files": {
+        "not found": (
+            "search_files no matches: try a simpler pattern, enable regex with "
+            "regex=True, or use find_symbol for symbol lookup."
+        ),
+        "invalid regex": (
+            "search_files invalid regex: escape special chars like ( ) [ ] { } + * ?"
+        ),
+    },
+    "run_shell": {
+        "not found": (
+            "run_shell 'command not found': check that the tool is installed "
+            "and on PATH, or try an alternative approach."
+        ),
+        "blocked": (
+            "run_shell blocked (destructive): use force=True to bypass the guard, "
+            "or break the operation into smaller safe commands."
+        ),
+        "timed out": (
+            "run_shell timed out: increase the timeout parameter, or split "
+            "the work into smaller commands."
+        ),
+    },
+    "find_symbol": {
+        "not found": (
+            "find_symbol no matches: try search_files with regex or grep for "
+            "text patterns instead."
+        ),
+    },
+    "find_usages": {
+        "not found": (
+            "find_usages no usages: try search_files with regex for the symbol name."
+        ),
+    },
+    "run_tests": {
+        "failures": (
+            "run_tests had failures: use diagnose_failures to get a structured "
+            "summary of which tests failed, then read the failing test files."
+        ),
+    },
+}
+
+
+def _fingerprint_error(name: str, content: str) -> str:
+    """Extract a stable, short fingerprint from a tool error message.
+
+    Returns one of: 'not found', 'whitespace', 'ambiguous', 'count',
+    'blocked', 'exists', 'offset', 'invalid regex', 'timed out',
+    'failures', or a truncated version of the first 60 chars of content.
+    """
+    cl = content.lower()
+    if name == "edit_file":
+        if "not found" in cl or "does not exist" in cl:
+            return "not found"
+        if "whitespace" in cl or "indentation" in cl or "tab" in cl or "trailing" in cl:
+            return "whitespace"
+        if "ambiguous" in cl or "multiple" in cl or "appears" in cl:
+            return "ambiguous"
+        if "count" in cl or "invalid count" in cl:
+            return "count"
+    elif name == "write_file":
+        if "blocked" in cl or "safety" in cl:
+            return "blocked"
+        if "exists" in cl or "overwrite" in cl:
+            return "exists"
+    elif name == "read_file":
+        if "not found" in cl or "no such file" in cl:
+            return "not found"
+        if "offset" in cl or "exceeds" in cl:
+            return "offset"
+    elif name == "search_files":
+        if "no matches" in cl or "not found" in cl:
+            return "not found"
+        if "invalid" in cl and "regex" in cl:
+            return "invalid regex"
+    elif name == "run_shell":
+        if "not found" in cl or "command not found" in cl:
+            return "not found"
+        if "blocked" in cl or "destructive" in cl:
+            return "blocked"
+        if "timed out" in cl or "timeout" in cl:
+            return "timed out"
+    elif name in ("find_symbol", "find_usages"):
+        if "no match" in cl or "not found" in cl:
+            return "not found"
+    elif name in ("run_tests", "verify"):
+        if "fail" in cl or "FAILED" in cl:
+            return "failures"
+    return content[:60].strip().lower()
+
+
+def _learn_from_failure(name: str, result: "ToolResult | None") -> None:
+    """Detect failure patterns, escalate knowledge, and inject recovery hints.
+
+    On first failure: store a low-importance knowledge entry.
+    On repeated failure (same fingerprint): escalate to importance=2 and
+    inject a specific recovery hint into result.hint for same-turn correction.
+
+    Mutates *result* in-place to add recovery hints.
+    """
+    if result is None:
+        return
+
+    content = result.content or ""
+    fingerprint = _fingerprint_error(name, content)
+
+    # Track failures per (name, fingerprint) in process memory
+    patterns = _TOOL_CONTEXT.__dict__.setdefault("_failure_patterns", {})
+    key = f"{name}:{fingerprint}"
+    count = patterns.get(key, 0) + 1
+    patterns[key] = count
+
+    # --- Inject same-turn recovery hint ---
+    recovery = _FAILURE_PATTERNS.get(name, {}).get(fingerprint)
+    if recovery and count >= 2:
+        if result.hint:
+            result.hint += "\nRecovery: " + recovery
+        else:
+            result.hint = recovery
+    elif count >= 3 and not recovery:
+        # Generic escalating hint for unclassified patterns
+        generic = f"Tool '{name}' failed {count} times with: {fingerprint}. Try a different approach."
+        if result.hint:
+            result.hint += "\nRecovery: " + generic
+        else:
+            result.hint = generic
+
+    # --- Persist to cross-session knowledge ---
+    try:
+        memory = getattr(_TOOL_CONTEXT, "_memory_store", None)
+        if memory is None:
+            return
+
+        summary = f"Tool failure: {name} [{fingerprint}]"
+        detail = (
+            f"Tool '{name}' failed {count} time(s) with pattern '{fingerprint}': "
+            f"{content[:200]}"
+        )
+        existing = memory.find_knowledge(category="error", summary=summary)
+
+        if existing is not None:
+            # Repeated pattern: bump hit count and escalate importance
+            memory.bump_knowledge(existing["id"])
+            if existing["importance"] < 2:
+                conn = memory._get_conn()
+                conn.execute(
+                    "UPDATE project_knowledge SET importance = 2"
+                    " WHERE id = ?",
+                    (existing["id"],),
+                )
+                conn.commit()
+        else:
+            importance = 1 if count < 2 else 2
+            memory.add_knowledge(
+                category="error",
+                summary=summary,
+                detail=detail,
+                importance=importance,
+            )
+    except Exception:
+        pass  # Never let auto-learn crash tool execution
+
+
 def execute_tool(
     tool_call: dict,
     write_gate: WriteSafetyGate,
@@ -500,38 +823,12 @@ def execute_tool(
         else:
             result.hint = standard_hint
 
-    # --- #7 Error recovery patterns ---
+    # --- Auto-learn from tool failures (pattern detection + escalation) ---
     if not result.success:
-        recent = _TOOL_CONTEXT.__dict__.setdefault("_recent_tool_failures", {})
-        recent[name] = recent.get(name, 0) + 1
-        if recent[name] >= 2:
-            hints = {
-                "edit_file": "Try read_file first to verify exact whitespace. Use Python script via run_shell for structural edits.",
-                "find_symbol": "Try search_files with regex or grep for text patterns instead.",
-                "search_files": "Try find_symbol for symbols, semantic_search for meaning.",
-                "run_shell": "Check the command syntax. Use force=True for destructive ops.",
-            }
-            rh = hints.get(name, f"Tool '{name}' failed {recent[name]} times. Try a different approach.")
-            if result.hint:
-                result.hint += "\nRecovery: " + rh
-            else:
-                result.hint = rh
+        _learn_from_failure(name, result)
     else:
-        _TOOL_CONTEXT.__dict__.get("_recent_tool_failures", {}).pop(name, None)
-
-    # --- Win 3: Auto-remember on tool failures ---
-    if not result.success:
-        try:
-            memory = getattr(_TOOL_CONTEXT, "_memory_store", None)
-            if memory is not None:
-                detail = result.content[:200] if result.content else "unknown error"
-                memory.add_knowledge(
-                    category="error",
-                    summary=f"Tool failure: {name} - {detail[:80]}",
-                    detail=f"Tool '{name}' failed with: {detail}",
-                )
-        except Exception:
-            pass  # Never let auto-remember crash tool execution
+        # Clear failure counters on success — the agent recovered
+        _TOOL_CONTEXT.__dict__.pop("_failure_patterns", None)
 
     # Cache successful read-only results (only when not streaming)
     if cache_key and result.success:

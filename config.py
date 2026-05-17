@@ -270,6 +270,9 @@ def _load_dotenv(workspace: str) -> None:
                 key, _, value = line.partition("=")
                 key = key.strip()
                 value = value.strip()
+                # Strip inline comments (e.g. KEY="val"# comment)
+                if '#' in value:
+                    value = value.split('#')[0].strip()
                 # Remove optional surrounding quotes
                 if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
                     value = value[1:-1]
@@ -457,6 +460,7 @@ def switch_session(
 ) -> dict:
     """Save current session and load a new one. Returns new session dict."""
     from memory import MemoryStore
+    from prompt import build_system_prompt
 
     # Save current session
     if current_memory is not None:
@@ -467,8 +471,7 @@ def switch_session(
                          max_tokens=current_config.max_tokens)
     saved = memory.load()
     if saved:
-        from memory import _clean_messages, _compress_tool_results, _prune_by_tokens, _summarize_pruned
-        saved = _clean_messages(saved)
+        from memory import _compress_tool_results, _prune_by_tokens, _summarize_pruned
         saved, _ = _compress_tool_results(saved, keep_recent=6)
         saved, pruned = _prune_by_tokens(saved, current_config.max_tokens, current_config.max_messages)
         if pruned:
@@ -551,8 +554,7 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     saved = memory.load()
     # Prune loaded conversation to avoid massive first-turn payload
     if saved:
-        from memory import _clean_messages, _compress_tool_results, _prune_by_tokens, _summarize_pruned
-        saved = _clean_messages(saved)
+        from memory import _compress_tool_results, _prune_by_tokens, _summarize_pruned
         saved, _ = _compress_tool_results(saved, keep_recent=6)
         saved, pruned = _prune_by_tokens(saved, config.max_tokens, config.max_messages)
         if pruned:

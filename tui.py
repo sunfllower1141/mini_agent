@@ -796,9 +796,11 @@ class MiniAgentTUI(App):
             log.write(f"[{t.dim}]  /clear     Reset conversation memory[/]")
             log.write(f"[{t.dim}]  /export    Write conversation to a markdown file[/]")
             log.write(f"[{t.dim}]  /help      Show this help[/]")
+            log.write(f"[{t.dim}]  /init      Reinitialize .mini_agent.rules + .mini_agent.toml[/]")
             log.write(f"[{t.dim}]  /theme     Switch theme (dawn, sepia, ember, slate, midnight, cobalt, neon, forest)[/]")
             log.write(f"[{t.dim}]  /session   Manage sessions (new | switch | delete | list)[/]")
             log.write(f"[{t.dim}]  /stats     Show session stats[/]")
+            log.write(f"[{t.dim}]  /workspace Switch to a different workspace directory[/]")
             return
 
         if cmd == "/stats":
@@ -865,6 +867,66 @@ class MiniAgentTUI(App):
                 names = ", ".join(THEMES.keys())
                 log.write(f"[{t.yellow}]Available themes: {names}[/]")
                 log.write(f"[{t.dim}]Usage: /theme <name>[/]")
+            self.query_one("#input", TextArea).focus()
+            return
+
+        if cmd.startswith("/workspace"):
+            parts = text.split(maxsplit=1)
+            new_path = parts[1].strip() if len(parts) > 1 else ""
+            if not new_path:
+                log.write(f"[{t.yellow}]Usage: /workspace <path>[/]")
+                self.query_one("#input", TextArea).focus()
+                return
+            new_workspace = os.path.abspath(new_path)
+            if not os.path.isdir(new_workspace):
+                log.write(f"[{t.yellow}]Not a directory: {new_workspace}[/]")
+                self.query_one("#input", TextArea).focus()
+                return
+            # Save current session, then reinitialize at new workspace
+            self.messages = self.memory.save(self.messages)
+            self.memory.close()
+            from config import init_session as _init_session
+            try:
+                new_data = _init_session(new_workspace)
+            except Exception as exc:
+                log.write(f"[{t.red}]Error switching workspace: {exc}[/]")
+                self.query_one("#input", TextArea).focus()
+                return
+            self.config = new_data["config"]
+            self.config.verbose = "--quiet" not in sys.argv
+            self.write_gate = new_data["write_gate"]
+            self.read_gate = new_data["read_gate"]
+            self.memory = new_data["memory"]
+            self.messages = new_data["messages"]
+            self.session.close()
+            self.session = new_data["session"]
+            # Reset UI state
+            self.worker = None
+            self._buf = ""
+            self._chat_buf = ""
+            self._tools_buf = ""
+            self._thinking_buf = ""
+            self._thinking_flush_pos = 0
+            self._in_thinking = False
+            self._turn_finished = True
+            self._active_tool = ""
+            self._total_turns = 0
+            self._total_tokens = 0
+            self._turn_id += 1
+            self._history = []
+            self._history_pos = 0
+            self.query_one("#input", TextArea).focus()
+            self._refresh_git_status()
+            log.write(f"[{t.green}]Workspace switched to: {_safe(new_workspace)}[/]")
+            chat = self.query_one("#chat-pane", RichLog)
+            chat.write(f"[{t.dim}]\u2500 workspace changed \u2500[/]")
+            return
+
+        if cmd == "/init":
+            from tools.file_ops import _init_rules
+            rg = ReadSafetyGate(self.config.workspace)
+            result = _init_rules({}, None, rg)
+            log.write(f"[{t.dim}]{_safe(result.content)}[/]")
             self.query_one("#input", TextArea).focus()
             return
 
