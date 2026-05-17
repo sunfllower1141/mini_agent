@@ -558,6 +558,7 @@ def _file_info_summary(args: dict) -> str:
 
 
 @_register("init")
+@_summarize("init")
 def _init_rules(args: dict, _wg, read_gate: ReadSafetyGate) -> ToolResult:
     """Analyze the workspace and auto-generate .mini_agent.rules + .mini_agent.toml
     and seed project_knowledge with auto-detected learnings."""

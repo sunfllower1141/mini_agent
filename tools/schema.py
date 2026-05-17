@@ -1034,5 +1034,54 @@ TOOLS = [
                 "required": []
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mcp_discover",
+            "description": "List all MCP (Model Context Protocol) tools discovered from connected servers. Use this to see what external tools are available before calling them with mcp_call. Returns server name, connection state, tool names, and descriptions.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mcp_call",
+            "description": "Call an MCP (Model Context Protocol) tool on a connected server. Use mcp_discover first to see available tools and their shapes. Arguments are passed as a JSON object matching the tool's input schema.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "server": {
+                        "type": "string",
+                        "description": "MCP server name as shown by mcp_discover."
+                    },
+                    "tool": {
+                        "type": "string",
+                        "description": "Tool name on that server as shown by mcp_discover."
+                    },
+                    "arguments": {
+                        "type": "object",
+                        "description": "Arguments to pass to the MCP tool (dict matching the tool's input schema)."
+                    }
+                },
+                "required": ["server", "tool", "arguments"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "init",
+            "description": "Analyze the workspace and auto-generate .mini_agent.rules (coding conventions, module map) and .mini_agent.toml (if missing). Also seed project_knowledge with auto-detected learnings about the codebase structure. Use this on first run or when the project structure has changed significantly.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
     }
 ]

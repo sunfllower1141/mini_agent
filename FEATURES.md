@@ -1,8 +1,8 @@
 # mini_agent — Feature Audit
 
-> Auto-generated audit. 904 tests, 48 tools, 0 failures. 2025-05-15.
+> Auto-generated audit. 906 tests, 49 tools, 0 failures. 2025-06-30.
 
-## Tool System (48 tools)
+## Tool System (49 tools)
 
 ### File Operations (9)
 | Tool | Description | Key Feature |
@@ -206,7 +206,7 @@
 
 | Total | Pass | Fail | Skip |
 |-------|------|------|------|
-| 904 | 904 | 0 | 4 |
+| 906 | 906 | 0 | 4 |
 
 28 test files covering:
 - File operations (fuzzy matching, safety gates, diffs)

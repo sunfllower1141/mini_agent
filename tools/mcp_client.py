@@ -637,10 +637,11 @@ def _make_mcp_summary(server_name: str, tool_name: str):
 
 # ---- Registered MCP orchestration tools ----
 
-from tools import _register, _TOOL_CONTEXT, ToolResult
+from tools import _register, _summarize, _TOOL_CONTEXT, ToolResult
 
 
 @_register("mcp_discover")
+@_summarize("mcp_discover")
 def _mcp_discover(args: dict, _write_gate, _read_gate) -> "ToolResult":
     """List all MCP tools discovered from connected servers."""
     manager = getattr(_TOOL_CONTEXT, "_mcp_manager", None)
@@ -663,6 +664,7 @@ def _mcp_discover(args: dict, _write_gate, _read_gate) -> "ToolResult":
 
 
 @_register("mcp_call")
+@_summarize("mcp_call")
 def _mcp_call(args: dict, _write_gate, _read_gate) -> "ToolResult":
     """Call an MCP tool on a connected server.
 

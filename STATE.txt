@@ -1,7 +1,7 @@
 # mini_agent — Architecture & State
 
 A coding agent powered by DeepSeek V4 Pro (orchestrator) + V4 Pro (sub-agents).
-Terminal REPL + Textual TUI + Electron app. 904 tests, 48 tools, SQLite memory.
+Terminal REPL + Textual TUI + Electron app. 904 tests, 49 tools, SQLite memory.
 
 ## Architecture
 
@@ -24,7 +24,7 @@ agent_runtime.py     Sub-agent lifecycle, file reservations, inboxes, subscripti
 sub_agent.py         Sub-agent loop with turn budget, pruning, streaming, Pro model
 tools/
   __init__.py        Tool dispatch, cache, JSON repair, FILE_RESERVATIONS
-  schema.py          TOOLS definitions (48 tools)
+  schema.py          TOOLS definitions (49 tools)
   file_ops.py        read/write/edit/list/info — cross-agent collision detection,
                      cascading fuzzy whitespace match (3-pass: exact→trailing→indent)
   shell_ops.py       run_shell, search_files, run_tests, git, task_status, verify,

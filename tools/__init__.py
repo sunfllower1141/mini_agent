@@ -864,4 +864,5 @@ from tools import agent_ops   # noqa: E402, F401
 from tools import agent_patterns  # noqa: E402, F401
 from tools import agent_messages  # noqa: E402, F401
 from tools import lsp         # noqa: E402, F401
+from tools import mcp_client  # noqa: E402, F401  # MCP tool discovery + calling
 from tools.search_ops import build_symbol_index  # noqa: E402, F401
