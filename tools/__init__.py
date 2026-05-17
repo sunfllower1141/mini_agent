@@ -685,10 +685,13 @@ def _learn_from_failure(name: str, result: "ToolResult | None") -> None:
             return
 
         summary = f"Tool failure: {name} [{fingerprint}]"
+        recovery = _FAILURE_PATTERNS.get(name, {}).get(fingerprint)
         detail = (
             f"Tool '{name}' failed {count} time(s) with pattern '{fingerprint}': "
             f"{content[:200]}"
         )
+        if recovery:
+            detail += f"\nFix: {recovery}"
         existing = memory.find_knowledge(category="error", summary=summary)
 
         if existing is not None:

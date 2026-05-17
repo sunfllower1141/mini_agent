@@ -363,7 +363,7 @@ def build_startup_context(
         dirnames[:] = sorted(d for d in dirnames if d not in SKIP and not d.startswith("."))
         depth = dirpath[len(workspace):].count(os.sep)
         indent = "  " * depth
-        label = os.path.basename(dirpath) or workspace.rstrip("/").rsplit("/", 1)[-1]
+        label = os.path.basename(dirpath) or workspace.rstrip(os.sep).rsplit(os.sep, 1)[-1]
         tree_lines.append(f"{indent}[d] {label}/")
         for fname in sorted(filenames):
             if fname.startswith("."):
@@ -533,6 +533,17 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     set_context(_agent_config=config, _agent_runtime=runtime)
     
     build_symbol_index(workspace)
+
+    # Auto-init .mini_agent.rules and .mini_agent.toml if they don't exist yet
+    rules_path = os.path.join(workspace, ".mini_agent.rules")
+    if not os.path.isfile(rules_path):
+        try:
+            from tools.file_ops import _init_rules
+            result = _init_rules({}, None, read_gate)
+            if result.success:
+                print(f"  \u2728 Auto-init: {result.content[:120]}", file=sys.stderr)
+        except OSError as exc:
+            print(f"  \u26a0 Auto-init skipped: {exc}", file=sys.stderr)
 
     # Start MCP connections if configured
     mcp_manager = None
