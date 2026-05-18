@@ -359,24 +359,45 @@ def _sem_preload() -> None:
     _SEM_PRELOAD_THREAD.start()
 
 
+_SEM_MODEL_TIMEOUT = 120  # max seconds to wait for model load before failing
+
+
 def _sem_get_model():
+    """Return the SentenceTransformer model, loading it if needed.
+
+    Never hangs indefinitely: if the preload thread or synchronous load
+    takes more than _SEM_MODEL_TIMEOUT seconds, raises TimeoutError so the
+    tool returns a clean error instead of deadlocking the agent.
+    """
     global _SEM_MODEL, _SEM_PRELOAD_EVENT
     if _SEM_MODEL is not None:
         return _SEM_MODEL
-    # If a background preload is in progress, wait for it
+    # If a background preload is in progress, wait for it (with timeout)
     if _SEM_PRELOAD_EVENT is not None:
         import sys
         print('  ⏳ Embedding model still loading (preloaded at startup)...',
               file=sys.stderr, flush=True)
-        _SEM_PRELOAD_EVENT.wait()
+        if not _SEM_PRELOAD_EVENT.wait(timeout=_SEM_MODEL_TIMEOUT):
+            raise TimeoutError(
+                f"Embedding model preload timed out after {_SEM_MODEL_TIMEOUT}s. "
+                "Check network connectivity and retry, or avoid semantic_search."
+            )
         if _SEM_MODEL is not None:
             return _SEM_MODEL
+        # Preload finished but model is None — load failed silently.
+        # Fall through to synchronous load below.
     # Fallback: synchronous load (preload was never called or failed)
     import sys
     print('  ⏳ Loading embedding model (first use, ~9s)...',
           file=sys.stderr, end='', flush=True)
-    from sentence_transformers import SentenceTransformer
-    _SEM_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+    try:
+        from sentence_transformers import SentenceTransformer
+        _SEM_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+    except Exception as e:
+        raise TimeoutError(
+            f"Failed to load embedding model: {e}. "
+            "Check network connectivity and retry, or avoid semantic_search."
+        ) from e
     print(' done.', file=sys.stderr)
     return _SEM_MODEL
 
@@ -555,8 +576,16 @@ def _sem_index(root: str) -> None:
                 _SEMANTIC_STORE[fpath] = (mtime, [])
                 continue
             texts = [t for _, _, t in chunks]
-            model = _sem_get_model()
-            embeddings = model.encode(texts, show_progress_bar=False)
+            try:
+                model = _sem_get_model()
+                embeddings = model.encode(texts, show_progress_bar=False)
+            except (TimeoutError, OSError) as e:
+                import sys
+                print(f"  ⚠ semantic index: model load failed ({e}), "
+                      "skipping semantic encoding. Symbol/reference index still built.",
+                      file=sys.stderr, flush=True)
+                _SEMANTIC_STORE[fpath] = (mtime, [])
+                continue
             # Pre-normalize embeddings for fast cosine via dot product later
             norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
             embeddings = embeddings / (norms + 1e-9)
@@ -606,8 +635,15 @@ def _semantic_search(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> To
     root = safety_result.resolved_path
     _sem_index(root)
 
-    model = _sem_get_model()
-    query_emb = model.encode([query], show_progress_bar=False)[0]
+    try:
+        model = _sem_get_model()
+        query_emb = model.encode([query], show_progress_bar=False)[0]
+    except (TimeoutError, OSError) as e:
+        return ToolResult(
+            success=False,
+            content=f"Semantic search unavailable: {e}. "
+                    "Check network connectivity and retry, or use search_files / find_symbol instead.",
+        )
     # Normalize query embedding for cosine via dot product
     query_emb = query_emb / (np.linalg.norm(query_emb) + 1e-9)
 

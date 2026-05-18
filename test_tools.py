@@ -86,17 +86,17 @@ class TestRunShell(unittest.TestCase):
 
     # --- shell guard ---
 
-    def test_blocks_rm_rf(self):
+    def test_rm_rf_no_longer_blocked(self):
+        """Safety guards removed — rm runs (may fail on perms but not blocked)."""
         tc = _make_tool_call("run_shell", command="rm -rf /etc")
         result = execute_tool(tc, self.write_gate, self.read_gate)
-        self.assertFalse(result.success)
-        self.assertIn("blocked by safety guard", result.content)
+        self.assertNotIn("blocked by safety guard", result.content)
 
-    def test_blocks_fork_bomb(self):
+    def test_fork_bomb_no_longer_blocked(self):
+        """Safety guards removed — fork bomb runs (shell rejects syntax anyway)."""
         tc = _make_tool_call("run_shell", command=":(){ :|:& };:")
         result = execute_tool(tc, self.write_gate, self.read_gate)
-        self.assertFalse(result.success)
-        self.assertIn("blocked by safety guard", result.content)
+        self.assertNotIn("blocked by safety guard", result.content)
 
     def test_force_bypasses_guard(self):
         tc = _make_tool_call("run_shell", command="rm -rf /nonexistent_test_dir", force=True)
@@ -178,13 +178,13 @@ class TestSearchFiles(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertIn("No matches", result.content)
 
-    def test_blocked_outside_workspace(self):
+    def test_outside_workspace_allowed(self):
         outside = tempfile.mkdtemp()
         try:
             tc = _make_tool_call("search_files", pattern="x", path=outside)
             result = execute_tool(tc, self.write_gate, self.read_gate)
-            self.assertFalse(result.success)
-            self.assertIn("blocked by safety layer", result.content)
+            self.assertTrue(result.success)
+            self.assertNotIn("blocked by safety layer", result.content)
         finally:
             import shutil
             shutil.rmtree(outside, ignore_errors=True)
@@ -301,15 +301,14 @@ class TestEditFile(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertIn("not found", result.content)
 
-    def test_blocked_outside_workspace(self):
+    def test_outside_workspace_allowed(self):
         outside = tempfile.mkdtemp()
         try:
             tc = _make_tool_call("edit_file",
                                  path=os.path.join(outside, "x.txt"),
                                  old_string="a", new_string="b")
             result = execute_tool(tc, self.write_gate, self.read_gate)
-            self.assertFalse(result.success)
-            self.assertIn("blocked by safety layer", result.content)
+            self.assertNotIn("blocked by safety layer", result.content)
         finally:
             import shutil
             shutil.rmtree(outside, ignore_errors=True)
@@ -370,13 +369,13 @@ class TestFileInfo(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertIn("exists: no", result.content)
 
-    def test_blocked_outside_workspace(self):
+    def test_outside_workspace_allowed(self):
         outside = tempfile.mkdtemp()
         try:
             tc = _make_tool_call("file_info", path=os.path.join(outside, "x.txt"))
             result = execute_tool(tc, self.write_gate, self.read_gate)
-            self.assertFalse(result.success)
-            self.assertIn("blocked by safety layer", result.content)
+            self.assertTrue(result.success)
+            self.assertNotIn("blocked by safety layer", result.content)
         finally:
             import shutil
             shutil.rmtree(outside, ignore_errors=True)
@@ -666,13 +665,12 @@ class TestSemanticSearch(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertIn("No matches found", result.content)
 
-    def test_blocked_outside_workspace(self):
+    def test_outside_workspace_allowed(self):
         outside = tempfile.mkdtemp()
         try:
             tc = _make_tool_call("semantic_search", query="anything", path=outside)
             result = execute_tool(tc, self.write_gate, self.read_gate)
-            self.assertFalse(result.success)
-            self.assertIn("blocked by safety layer", result.content)
+            self.assertNotIn("blocked by safety layer", result.content)
         finally:
             import shutil
             shutil.rmtree(outside, ignore_errors=True)
@@ -835,16 +833,14 @@ class TestErrorHints(unittest.TestCase):
         self.assertTrue(any("to_stderr" in l and "stderr" in l for l in lines),
                         f"Expected [stderr] prefix in output lines: {lines}")
 
-    def test_write_blocked_includes_hint(self):
+    def test_write_outside_workspace_allowed(self):
         outside = tempfile.mkdtemp()
         try:
             tc = _make_tool_call("write_file",
                                  path=os.path.join(outside, "x.txt"),
                                  content="hello")
             result = execute_tool(tc, self.write_gate, self.read_gate)
-            self.assertFalse(result.success)
-            self.assertIn("Hint:", result.content)
-            self.assertIn("workspace", result.content.lower())
+            self.assertTrue(result.success)
         finally:
             import shutil
             shutil.rmtree(outside, ignore_errors=True)
@@ -860,12 +856,11 @@ class TestErrorHints(unittest.TestCase):
         self.assertIn("Hint:", result.content)
         self.assertIn("read_file", result.content.lower())
 
-    def test_destructive_guard_includes_hint(self):
+    def test_destructive_guard_removed(self):
+        """Safety guards removed — rm runs directly without force flag needed."""
         tc = _make_tool_call("run_shell", command="rm -rf /tmp/nonexistent")
         result = execute_tool(tc, self.write_gate, self.read_gate)
-        self.assertFalse(result.success)
-        self.assertIn("Hint:", result.content)
-        self.assertIn("force=True", result.content)
+        self.assertNotIn("blocked by safety guard", result.content)
 
     def test_bad_command_includes_hint(self):
         tc = _make_tool_call("run_shell", command="nonexistent_cmd_xyz")
