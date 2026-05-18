@@ -829,6 +829,7 @@ def tool_summary(tc: dict) -> str:
 from tools import file_ops    # noqa: E402, F401
 from tools import shell_ops   # noqa: E402, F401
 from tools import search_ops  # noqa: E402, F401
+from tools import browser_ops  # noqa: E402, F401  # browser automation tools
 from tools import agent_ops   # noqa: E402, F401
 from tools import agent_patterns  # noqa: E402, F401
 from tools import agent_messages  # noqa: E402, F401

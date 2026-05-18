@@ -13,7 +13,7 @@ from tui import _Done, _Error, _SubAgentToken
 from tui import (
     MiniAgentTUI, AgentWorker,
     _TokenMsg, _ToolStart, _ToolEnd, _SubAgentToken, _Done, _Error,
-    _safe, _NotifyQueue,
+    _safe,
 )
 from stream import THINKING_START, THINKING_END
 from config import AgentConfig, DEFAULT_API_KEY

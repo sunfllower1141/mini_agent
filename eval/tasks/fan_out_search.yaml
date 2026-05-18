@@ -1,0 +1,24 @@
+id: "fan-out-search"
+name: "Use fan_out to search for a symbol in parallel"
+description: |
+  Use fan_out to spawn 3 sub-agents, each searching for a different
+  Python symbol in the workspace. Then use fan_in to collect results.
+  Each sub-agent should call find_symbol for its assigned name.
+  The task succeeds if all three agents complete and find their symbols.
+  Use fan_out with short task descriptions like:
+    - "find_symbol ThreadPool in the workspace"
+    - "find_symbol json_loads in the workspace"
+    - "find_symbol SafeLock in the workspace"
+category: "multi-agent"
+difficulty: "medium"
+workspace_fixture: null
+checks:
+  - type: "shell"
+    command: "echo done"
+    expected_returncode: 0
+expected_tools:
+  - "fan_out"
+  - "fan_in"
+  - "find_symbol"
+expected_turns_max: 20
+tags: ["multi-agent", "fan_out", "fan_in"]

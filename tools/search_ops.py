@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re as _re
+import threading
 
 from safety import ReadSafetyGate, WriteSafetyGate
 from tools import _register, _summarize, ToolResult, _TOOL_CONTEXT
@@ -319,16 +320,64 @@ _SEMANTIC_LRU: list[str] = []  # tracks access order for eviction
 _SEMANTIC_MAX_ENTRIES = 500    # per-file entries before eviction kicks in
 _SEMANTIC_MAX_MTIME: float = 0.0  # max mtime across all indexed files (separate from store)
 _SEM_MODEL = None
+_SEM_PRELOAD_EVENT = None  # threading.Event: set when model is ready
+_SEM_PRELOAD_THREAD = None  # daemon thread reference
+_SEM_PRELOAD_LOCK = threading.Lock()  # guards preload state
+
+
+def _sem_preload() -> None:
+    """Start loading the embedding model in a background thread.
+
+    Call this at session startup so the model is ready (or nearly ready)
+    by the time anyone calls semantic_search.  Safe to call multiple times
+    — subsequent calls are no-ops if the model is already loading or loaded.
+
+    The preload is non-blocking: _sem_get_model() will still block only if
+    the model hasn't finished loading yet.  But with typical app startup
+    (user typing first query, LLM thinking), the 8s load time hides
+    completely behind the initial turn.
+    """
+    global _SEM_PRELOAD_EVENT, _SEM_PRELOAD_THREAD, _SEM_MODEL
+    with _SEM_PRELOAD_LOCK:
+        if _SEM_MODEL is not None:
+            return  # already loaded
+        if _SEM_PRELOAD_EVENT is not None:
+            return  # already preloading
+        _SEM_PRELOAD_EVENT = threading.Event()
+
+    def _loader() -> None:
+        global _SEM_MODEL, _SEM_PRELOAD_EVENT
+        try:
+            from sentence_transformers import SentenceTransformer
+            _SEM_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+        except Exception:
+            pass  # model load failed — _sem_get_model() will retry on demand
+        finally:
+            _SEM_PRELOAD_EVENT.set()
+
+    _SEM_PRELOAD_THREAD = threading.Thread(target=_loader, daemon=True)
+    _SEM_PRELOAD_THREAD.start()
 
 
 def _sem_get_model():
-    global _SEM_MODEL
-    if _SEM_MODEL is None:
+    global _SEM_MODEL, _SEM_PRELOAD_EVENT
+    if _SEM_MODEL is not None:
+        return _SEM_MODEL
+    # If a background preload is in progress, wait for it
+    if _SEM_PRELOAD_EVENT is not None:
         import sys
-        print('  ⏳ Loading embedding model (first use, ~5s)...', file=sys.stderr, end='', flush=True)
-        from sentence_transformers import SentenceTransformer
-        _SEM_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
-        print(' done.', file=sys.stderr)
+        print('  ⏳ Embedding model still loading (preloaded at startup)...',
+              file=sys.stderr, flush=True)
+        _SEM_PRELOAD_EVENT.wait()
+        if _SEM_MODEL is not None:
+            return _SEM_MODEL
+    # Fallback: synchronous load (preload was never called or failed)
+    import sys
+    print('  ⏳ Loading embedding model (first use, ~9s)...',
+          file=sys.stderr, end='', flush=True)
+    from sentence_transformers import SentenceTransformer
+    _SEM_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+    print(' done.', file=sys.stderr)
     return _SEM_MODEL
 
 

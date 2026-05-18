@@ -19,15 +19,9 @@ from queue import Queue, Empty
 from dataclasses import dataclass
 
 
-class _NotifyQueue(Queue):
-    """Queue that triggers the TUI drain on every put (event-driven, no polling)."""
-    def __init__(self, app: "MiniAgentTUI | None" = None, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._app = app
-    def put(self, item, *args, **kwargs):
-        super().put(item, *args, **kwargs)
-        if self._app is not None:
-            self._app.call_from_thread(self._app._drain)
+# NOTE: Per-token call_from_thread was burning CPU (one async dispatch per token,
+# hundreds/sec).  Now the TUI drains the queue on a 60 fps timer instead,
+# batching up to ~16 ms of tokens into one UI update.  Massive battery win.
 
 
 # Escape user content for Rich markup.  rich.markup.escape() skips
@@ -525,7 +519,7 @@ class MiniAgentTUI(App):
         # Last assistant response for clipboard copy
         self._last_response: str = ""
         self.query_one("#input", TextArea).focus()
-        self.queue: Queue = _NotifyQueue(app=self)
+        self.queue: Queue = Queue()
         self.worker: AgentWorker | None = None
         self._buf = ""
         self._chat_buf = ""
@@ -550,7 +544,8 @@ class MiniAgentTUI(App):
 
         self._apply_theme()
         self._refresh_git_status()
-        self.set_interval(2.0, self._update_status_bar)
+        self.set_interval(1/60, self._drain)          # 60 fps token drain (battery-friendly)
+        self.set_interval(30.0, self._update_status_bar)
 
     # ------------------------------------------------------------------
     # Status bar — stolen from Agent Terminal
@@ -629,7 +624,15 @@ class MiniAgentTUI(App):
         this copies from a dedicated buffer that tracks the last
         assistant response.
         """
-        import pyperclip
+        try:
+            import pyperclip
+        except ImportError:
+            self.notify(
+                "pyperclip not installed — run: pip install pyperclip",
+                severity="error",
+                timeout=4,
+            )
+            return
         text = getattr(self, "_last_response", "")
         if text:
             pyperclip.copy(text)

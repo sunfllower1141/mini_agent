@@ -674,29 +674,35 @@ def _verify(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
     # Step 0: dead import detection (ruff if available, else pyflakes)
     import shutil
     if shutil.which("ruff"):
-        r = subprocess.run(
-            ["ruff", "check", "--select", "F401,F811",
-             "--output-format", "concise", root],
-            capture_output=True, text=True, timeout=15,
-        )
-        if r.returncode == 0 and not r.stdout.strip():
-            results.append("ruff: no unused/redefined imports found")
-        elif r.stdout.strip():
-            out = r.stdout.strip()[:500]
-            results.append(f"ruff found issues:\n{out}")
+        try:
+            r = subprocess.run(
+                ["ruff", "check", "--select", "F401,F811",
+                 "--output-format", "concise", root],
+                capture_output=True, text=True, timeout=10,
+            )
+            if r.returncode == 0 and not r.stdout.strip():
+                results.append("ruff: no unused/redefined imports found")
+            elif r.stdout.strip():
+                out = r.stdout.strip()[:500]
+                results.append(f"ruff found issues:\n{out}")
+        except subprocess.TimeoutExpired:
+            results.append("ruff: timed out")
     elif shutil.which("pyflakes"):
-        r = subprocess.run(
-            ["pyflakes", root],
-            capture_output=True, text=True, timeout=15,
-        )
-        stdout = r.stdout
-        if (r.returncode == 0
-                and "undefined" not in stdout
-                and "unused import" not in stdout):
-            results.append("pyflakes: no dead imports found")
-        elif stdout.strip():
-            out = stdout.strip()[:500]
-            results.append(f"pyflakes found issues:\n{out}")
+        try:
+            r = subprocess.run(
+                ["pyflakes", root],
+                capture_output=True, text=True, timeout=10,
+            )
+            stdout = r.stdout
+            if (r.returncode == 0
+                    and "undefined" not in stdout
+                    and "unused import" not in stdout):
+                results.append("pyflakes: no dead imports found")
+            elif stdout.strip():
+                out = stdout.strip()[:500]
+                results.append(f"pyflakes found issues:\n{out}")
+        except subprocess.TimeoutExpired:
+            results.append("pyflakes: timed out")
 
     # Step 1: tests for modified files
     from tools import get_modified_files
@@ -758,9 +764,9 @@ def _verify(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
         if kind == "lint":
             proc = payload
             try:
-                out, err = proc.communicate(timeout=60)
-                out = out.strip()
-                err = err.strip() if err else ""
+                out, err = proc.communicate(timeout=10)
+                out = (out or "").strip()
+                err = (err or "").strip()
                 if proc.returncode == 0:
                     results.append("Lint: passed")
                 elif "No module named" in err or "No module named" in out:

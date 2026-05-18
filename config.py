@@ -545,6 +545,14 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     
     build_symbol_index(workspace)
 
+    # Preload semantic search model in background (non-blocking)
+    # so the ~9s cold start hides behind the first user interaction.
+    try:
+        from tools.search_ops import _sem_preload
+        _sem_preload()
+    except Exception:
+        pass  # sentence-transformers may not be installed — tolerate
+
     # Auto-init .mini_agent.rules and .mini_agent.toml if they don't exist yet
     rules_path = os.path.join(workspace, ".mini_agent.rules")
     if not os.path.isfile(rules_path):

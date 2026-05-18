@@ -317,7 +317,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "semantic_search",
-            "description": "Search code by meaning using embeddings. Finds code chunks semantically similar to the query, even if they don't share keywords. Good for finding related functionality, similar patterns, or code that 'feels like' something. Indexes files live — no pre-indexing needed. Returns top 10 matches.",
+            "description": "Search code by meaning using embeddings. Finds code chunks semantically similar to the query, even if they don't share keywords. Good for finding related functionality, similar patterns, or code that 'feels like' something. Indexes files live — no pre-indexing needed. Returns top 10 matches.\n\n⚠️ PERFORMANCE NOTE: The embedding model is preloaded at session startup in a background thread (~9s, ~80MB RAM) so it's typically ready before you need it. If you call semantic_search very early in a session you may see a brief \"still loading\" message while the background thread finishes. Still, prefer find_symbol (instant, indexed) or search_files (instant, grep) for exact name/text queries. Use semantic_search only when you don't know the function/variable name and grep won't work — e.g. 'find code that validates user input' or 'locate retry logic patterns'.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1136,6 +1136,119 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "open_url",
+            "description": "Open the user's default browser to the given URL. Opens in a new tab and returns immediately — does not wait for the page to load. For programmatic browser interaction, use the browser_* tools instead.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "URL to open. Must start with http:// or https://."
+                    }
+                },
+                "required": ["url"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_navigate",
+            "description": "Navigate a headless browser (Playwright Chromium) to a URL. Returns the page title and final URL after redirects. Requires playwright to be installed.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "URL to navigate to. Must start with http:// or https://."
+                    }
+                },
+                "required": ["url"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_snapshot",
+            "description": "Capture the accessibility tree of the current browser page. Returns a structured text representation of interactive elements (roles, names, states) — much more compact and LLM-friendly than raw HTML or a screenshot. Use this to understand what's on the page before clicking or typing.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_click",
+            "description": "Click an element on the current browser page identified by its accessibility role and name. Use browser_snapshot first to see available elements.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "role": {
+                        "type": "string",
+                        "description": "ARIA role of the element (e.g. 'button', 'link', 'textbox', 'checkbox')"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Accessible name of the element (visible text or aria-label)"
+                    }
+                },
+                "required": ["role", "name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_type",
+            "description": "Type text into an input element on the current browser page identified by its role and name.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "role": {
+                        "type": "string",
+                        "description": "ARIA role (typically 'textbox' or 'searchbox')"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Accessible name (label text, placeholder, or aria-label)"
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "Text to type into the element"
+                    }
+                },
+                "required": ["name", "text"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_screenshot",
+            "description": "Capture a full-page PNG screenshot of the current browser page. Saves to the workspace so it can be inspected with read_image.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Path within workspace to save the screenshot (default: browser_screenshot.png)"
+                    },
+                    "full_page": {
+                        "type": "boolean",
+                        "description": "Capture the full scrollable page (default: true)"
+                    }
+                },
                 "required": []
             }
         }

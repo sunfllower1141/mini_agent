@@ -1,0 +1,30 @@
+id: "semantic-search-refactor"
+name: "Use semantic_search to find similar patterns and deduplicate"
+description: |
+  The workspace contains several Python files with similar-looking
+  helper functions. Use semantic_search with a query like
+  "function that validates input parameters" to find duplicate patterns.
+  
+  Then use find_usages to confirm which patterns are actually used,
+  and create a single shared utility function in utils.py to replace
+  the duplicates. Use edit_file to update imports in the original files.
+  
+  The task succeeds if:
+  - semantic_search is called and returns results
+  - At least one file is edited to use the shared utility
+category: "refactor"
+difficulty: "hard"
+workspace_fixture: "mini_repo"
+checks:
+  - type: "file_exists"
+    path: "utils.py"
+  - type: "file_contains"
+    path: "utils.py"
+    pattern: "def "
+expected_tools:
+  - "semantic_search"
+  - "find_usages"
+  - "write_file"
+  - "edit_file"
+expected_turns_max: 30
+tags: ["refactor", "semantic_search", "find_usages"]
