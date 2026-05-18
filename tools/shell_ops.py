@@ -273,6 +273,7 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
         _INTERACTIVE_PATTERNS = [
             r'\bsudo\b', r'\bssh\b', r'\bsu\b', r'\bpasswd\b',
             r'\blogin\b', r'\bhg\s+commit\b', r'\bpkexec\b',
+            r'\bgit\s+push\b', r'\bgit\s+pull\b', r'\bgit\s+clone\b',
         ]
         _interactive = (
             not args.get("background", False)
