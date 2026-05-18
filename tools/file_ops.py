@@ -118,7 +118,7 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
             pass  # fall through to normal read on stat error
 
     try:
-        with open(resolved, "r") as f:
+        with open(resolved, "r", encoding="utf-8") as f:
             # Use enumerate + early break to avoid reading the whole file
             collected: list[str] = []
             total_lines = 0
@@ -212,7 +212,7 @@ def _write_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
         if parent:
             os.makedirs(parent, exist_ok=True)
         _backup_before_write(safety_result.resolved_path)
-        with open(safety_result.resolved_path, "w") as f:
+        with open(safety_result.resolved_path, "w", encoding="utf-8") as f:
             f.write(content)
         from tools import add_modified_file
         add_modified_file(safety_result.resolved_path)
@@ -330,7 +330,7 @@ def _apply_single_edit(
             ))
     resolved = safety_result.resolved_path
     try:
-        with open(resolved, "r") as f:
+        with open(resolved, "r", encoding="utf-8") as f:
             original = f.read()
         diff = wg.generate_diff("edit_file", args)
         _backup_before_write(resolved)
@@ -382,7 +382,7 @@ def _apply_single_edit(
                 content=f"Preview: proposed edit to {resolved}\n{raw_diff}",
             ))
 
-        with open(resolved, "w") as f:
+        with open(resolved, "w", encoding="utf-8") as f:
             f.write(updated)
 
         from tools import add_modified_file
@@ -601,7 +601,7 @@ def _init_rules(args: dict, _wg, read_gate: ReadSafetyGate) -> ToolResult:
         ]
         for pf in py_files[:25]:
             rules.append(f"  {os.path.basename(pf)}  # auto-detected")
-        with open(rules_path, "w") as f:
+        with open(rules_path, "w", encoding="utf-8") as f:
             f.write("\n".join(rules))
         created.append(f".mini_agent.rules ({len(rules)} lines, {len(py_files)} modules)")
 
@@ -618,7 +618,7 @@ def _init_rules(args: dict, _wg, read_gate: ReadSafetyGate) -> ToolResult:
                 "# allow_overwrites = false",
                 "# unrestricted = false",
             ]
-            with open(toml_path, "w") as f:
+            with open(toml_path, "w", encoding="utf-8") as f:
                 f.write("\n".join(toml))
             created.append(".mini_agent.toml (template)")
         else:
@@ -654,7 +654,7 @@ def _init_rules(args: dict, _wg, read_gate: ReadSafetyGate) -> ToolResult:
         sample = py_files[:min(20, len(py_files))]
         for pf in sample:
             try:
-                with open(pf) as f:
+                with open(pf, encoding="utf-8") as f:
                     content = f.read(4096)
                 for line in content.split('\n')[:80]:
                     line_stripped = line.strip()

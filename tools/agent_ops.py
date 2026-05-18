@@ -1207,7 +1207,7 @@ def _write_scratchpad(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> 
     if not sr.allowed:
         return ToolResult(success=False, content=f"Scratchpad blocked: {sr.reason}")
     try:
-        with open(fallback, "w") as f:
+        with open(fallback, "w", encoding="utf-8") as f:
             f.write(content_text)
         return ToolResult(
             success=True,

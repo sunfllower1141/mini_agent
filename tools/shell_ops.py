@@ -424,7 +424,7 @@ def _search_single_file(
     results: list[str] = []
     skipped = 0
     try:
-        with open(filepath, "r", errors="replace") as f:
+        with open(filepath, "r", errors="replace", encoding="utf-8") as f:
             for lineno, line in enumerate(f, 1):
                 if match_fn(line):
                     if skipped < offset:
@@ -536,7 +536,7 @@ def _search_files(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolR
                     pass
                 fpath = os.path.join(root, fname)
                 try:
-                    with open(fpath, "r", errors="replace") as f:
+                    with open(fpath, "r", errors="replace", encoding="utf-8") as f:
                         for lineno, line in enumerate(f, 1):
                             if match_fn(line):
                                 if skipped < offset:
@@ -999,7 +999,7 @@ def _diagnose_failures(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> 
 
         # Extract lines around the function definition
         try:
-            with open(resolved) as fh:
+            with open(resolved, encoding="utf-8") as fh:
                 src_lines = fh.readlines()
         except Exception as e:
             snippets.append(f"\n--- {fpath}::{func} (error reading: {e}) ---")

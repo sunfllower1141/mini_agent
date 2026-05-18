@@ -271,7 +271,7 @@ def _load_dotenv(workspace: str) -> None:
     if not os.path.isfile(env_path):
         return
     try:
-        with open(env_path) as f:
+        with open(env_path, encoding="utf-8") as f:
             for raw_line in f:
                 line = raw_line.strip()
                 if not line or line.startswith("#"):
@@ -389,7 +389,7 @@ def build_startup_context(
     state_path = os.path.join(workspace, "STATE.txt")
     if os.path.isfile(state_path):
         try:
-            with open(state_path) as f:
+            with open(state_path, encoding="utf-8") as f:
                 state_content = f.read()
             # Only include last ~50 lines to keep it brief
             state_lines = state_content.split("\n")

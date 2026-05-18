@@ -104,7 +104,7 @@ def _open_url(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResul
                           content="URL must start with http:// or https://")
 
     try:
-        opened = _webbrowser.open(url, new=2)  # new=2 → new tab if possible
+        opened = _webbrowser.open(url, new=2, encoding="utf-8")  # new=2 → new tab if possible
         if opened:
             return ToolResult(success=True,
                               content=f"Opened {url} in default browser.")

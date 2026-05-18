@@ -1228,7 +1228,7 @@ def _migrate_old_paths(new_filepath: str, db_path: str) -> None:
 def _migrate_json(json_path: str, db_path: str) -> None:
     """Migrate an existing JSON memory file to SQLite."""
     try:
-        with open(json_path, "r") as f:
+        with open(json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except (json.JSONDecodeError, OSError):
         return

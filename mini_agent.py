@@ -93,7 +93,7 @@ def _export_conversation(messages: list[dict], workspace: str) -> str:
     path = os.path.join(workspace, fname)
     md = export_conversation_markdown(messages)
     md = md.replace("mini_agent conversation", f"mini_agent conversation — {ts}", 1)
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         f.write(md)
     return path
 
