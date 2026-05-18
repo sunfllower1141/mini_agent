@@ -358,6 +358,7 @@ class MiniAgentTUI(App):
     BINDINGS = [
         Binding("ctrl+c", "cancel", "Cancel"),
         Binding("ctrl+q", "quit", "Quit"),
+        Binding("ctrl+z", "suspend_process", "Suspend", show=False),
         Binding("ctrl+shift+c", "copy", "Copy"),
         Binding("enter", "submit", "Submit", priority=True),
     ]
@@ -594,6 +595,48 @@ class MiniAgentTUI(App):
     # Actions
     # ------------------------------------------------------------------
 
+    def action_shell(self) -> None:
+        """Suspend the TUI and drop the user into their $SHELL.  Exit the shell
+        (Ctrl+D or 'exit') to resume the TUI.
+
+        Kills any running agent worker and its subprocesses first to release
+        terminal control, then suspends cleanly so the shell has exclusive
+        /dev/tty access."""
+        import os as _os
+        # Kill the hanging worker so its subprocesses release /dev/tty
+        if self.worker is not None and self.worker.is_alive():
+            self.worker.cancel.set()
+        # Also kill the active subprocess directly (handles sudo /dev/tty reads)
+        from tools import _TOOL_CONTEXT
+        ap = getattr(_TOOL_CONTEXT, "_active_proc", None)
+        if ap is not None:
+            try:
+                ap.kill()
+            except Exception:
+                pass
+        shell = _os.environ.get("SHELL", "/bin/sh")
+        with self.suspend():
+            _os.system(shell)
+
+    def action_suspend_process(self) -> None:
+        """Kill worker + subprocess, then let Textual's native SIGTSTP
+        handler do the terminal restore + SIGSTOP suspend."""
+        import signal, os as _os
+        # Kill the hanging worker so its subprocesses release /dev/tty
+        if self.worker is not None and self.worker.is_alive():
+            self.worker.cancel.set()
+        # Also kill the active subprocess directly
+        from tools import _TOOL_CONTEXT
+        ap = getattr(_TOOL_CONTEXT, "_active_proc", None)
+        if ap is not None:
+            try:
+                ap.kill()
+            except Exception:
+                pass
+        # Let Textual's native SIGTSTP handler (suspend_application_mode
+        # + SIGSTOP) restore the terminal and suspend cleanly.
+        _os.kill(_os.getpid(), signal.SIGTSTP)
+
     def action_cancel(self) -> None:
         if self.worker is not None and self.worker.is_alive():
             self.worker.cancel.set()
@@ -800,6 +843,7 @@ class MiniAgentTUI(App):
             log.write(f"[{t.dim}]  /export    Write conversation to a markdown file[/]")
             log.write(f"[{t.dim}]  /help      Show this help[/]")
             log.write(f"[{t.dim}]  /init      Reinitialize .mini_agent.rules + .mini_agent.toml[/]")
+            log.write(f"[{t.dim}]  /shell     Drop to a real shell (Ctrl+D/exit to return)[/]")
             log.write(f"[{t.dim}]  /theme     Switch theme (dawn, sepia, ember, slate, midnight, cobalt, neon, forest)[/]")
             log.write(f"[{t.dim}]  /session   Manage sessions (new | switch | delete | list)[/]")
             log.write(f"[{t.dim}]  /stats     Show session stats[/]")
@@ -930,6 +974,11 @@ class MiniAgentTUI(App):
             rg = ReadSafetyGate(self.config.workspace)
             result = _init_rules({}, None, rg)
             log.write(f"[{t.dim}]{_safe(result.content)}[/]")
+            self.query_one("#input", TextArea).focus()
+            return
+
+        if cmd == "/shell":
+            self.action_shell()
             self.query_one("#input", TextArea).focus()
             return
 

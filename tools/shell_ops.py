@@ -268,7 +268,53 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
         except Exception:
             pass  # best-effort, don't block the rm
     try:
-        stdin_kw = {}
+        # Commands that need a real terminal (sudo, ssh, etc.) get spawned
+        # in a separate terminal window so the user can interact with them.
+        _INTERACTIVE_PATTERNS = [
+            r'\bsudo\b', r'\bssh\b', r'\bsu\b', r'\bpasswd\b',
+            r'\blogin\b', r'\bhg\s+commit\b', r'\bpkexec\b',
+        ]
+        _interactive = (
+            not args.get("background", False)
+            and stdin_text is None
+            and not platform.system() == "Windows"
+            and any(re.search(p, command) for p in _INTERACTIVE_PATTERNS)
+        )
+        if _interactive:
+            import shutil
+            # Prefer terminals that support -e; cosmic-term (Pop!_OS) does not.
+            # x-terminal-emulator on COSMIC points to cosmic-term, so check xterm first.
+            term = (shutil.which("xterm") or shutil.which("gnome-terminal")
+                    or shutil.which("konsole") or shutil.which("kitty"))
+            # Only use x-terminal-emulator if it's NOT cosmic-term
+            xte = shutil.which("x-terminal-emulator")
+            if term is None and xte:
+                if os.path.islink(xte):
+                    link = os.readlink(xte)
+                    if "cosmic" not in link.lower():
+                        term = xte
+                else:
+                    term = xte
+            if term:
+                wrap = command + '; echo; read -p "[Enter to close]"'
+                term_cmd = [term]
+                if "gnome-terminal" in term:
+                    term_cmd += ["--", "bash", "-c", wrap]
+                elif "konsole" in term:
+                    term_cmd += ["-e", "bash", "-c", wrap]
+                elif "kitty" in term:
+                    term_cmd += ["bash", "-c", wrap]
+                else:
+                    term_cmd += ["-e", "bash", "-c", wrap]
+                proc = subprocess.run(term_cmd, cwd=rg.workspace_root,
+                                      timeout=timeout)
+                return ToolResult(success=(proc.returncode == 0),
+                                  content=f"exit_code={proc.returncode}")
+            # fall through to normal subprocess if no terminal found
+
+        # Default to DEVNULL so interactive prompts don't hang the TUI.
+        # Callers that need stdin pass stdin_text which switches to PIPE.
+        stdin_kw = {"stdin": subprocess.DEVNULL}
         if stdin_text is not None:
             stdin_kw["stdin"] = subprocess.PIPE
         proc = subprocess.Popen(
@@ -315,13 +361,19 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
             t_out.start()
             t_err.start()
 
+            # Register this proc so the TUI can kill it on Ctrl+Z
+            from tools import _TOOL_CONTEXT
+            _TOOL_CONTEXT._active_proc = proc
             try:
-                proc.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                t_out.join(timeout=2)
-                t_err.join(timeout=2)
-                return ToolResult(success=False, content=f"Command timed out after {timeout}s")
+                try:
+                    proc.wait(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    t_out.join(timeout=2)
+                    t_err.join(timeout=2)
+                    return ToolResult(success=False, content=f"Command timed out after {timeout}s")
+            finally:
+                _TOOL_CONTEXT._active_proc = None
 
             t_out.join(timeout=2)
             t_err.join(timeout=2)
@@ -330,12 +382,18 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
             stderr = "\n".join(stderr_lines)
         else:
             # No streaming: use communicate() to avoid thread overhead
+            # Register this proc so the TUI can kill it on Ctrl+Z
+            from tools import _TOOL_CONTEXT
+            _TOOL_CONTEXT._active_proc = proc
             try:
                 out, err = proc.communicate(input=stdin_text, timeout=timeout)
             except subprocess.TimeoutExpired:
                 proc.kill()
                 out, err = proc.communicate()
+                _TOOL_CONTEXT._active_proc = None
                 return ToolResult(success=False, content=f"Command timed out after {timeout}s")
+            finally:
+                _TOOL_CONTEXT._active_proc = None
             stdout = out
             stderr = err
 

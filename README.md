@@ -25,7 +25,7 @@ A coding agent powered by DeepSeek V4 Pro with **63 tools**. Terminal REPL or Te
 - **Background test output**: persisted to DB, not discarded
 
 ### Interfaces
-- **Textual TUI** (`python tui.py`) — rich terminal UI with themes, diff preview, file tree
+- **Textual TUI** (`python tui.py`) — rich terminal UI with themes, diff preview, file tree, Ctrl+Z suspend to shell (`/shell`), and interactive sudo/ssh commands open in a real terminal window
 - **Terminal REPL** (`python mini_agent.py`) — lightweight CLI
 
 ### Dev Tools
