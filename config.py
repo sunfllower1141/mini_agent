@@ -24,7 +24,7 @@ except ImportError:
 CONFIG_FILENAME = ".mini_agent.toml"
 MEMORY_FILENAME = ".mini_agent_memory.db"
 
-DEFAULT_API_PROVIDER = "deepseek"  # "deepseek" or "claude"
+DEFAULT_API_PROVIDER = "deepseek"  # "deepseek", "claude", or "xai"
 
 # DeepSeek defaults
 DEEPSEEK_DEFAULT_MODEL         = "deepseek-v4-pro"
@@ -40,6 +40,13 @@ CLAUDE_DEFAULT_API_URL         = "https://api.anthropic.com/v1/chat/completions"
 CLAUDE_DEFAULT_MAX_TOKENS      = 32_000
 # Claude has no cheap routing model; leave disabled
 CLAUDE_DEFAULT_ROUTING_MODEL   = ""
+
+# xAI / Grok defaults (OpenAI-compatible endpoint)
+XAI_DEFAULT_MODEL              = "grok-4.3"
+XAI_DEFAULT_SUB_AGENT_MODEL    = "grok-4.3"
+XAI_DEFAULT_API_URL            = "https://api.x.ai/v1/chat/completions"
+XAI_DEFAULT_MAX_TOKENS         = 200_000
+XAI_DEFAULT_ROUTING_MODEL      = ""  # xAI has no cheap routing model; leave disabled
 
 DEFAULT_MODEL        = DEEPSEEK_DEFAULT_MODEL
 DEFAULT_SUB_AGENT_MODEL = DEEPSEEK_DEFAULT_SUB_AGENT_MODEL
@@ -66,11 +73,14 @@ HTTP_POOL_MAXSIZE       = 4    # max total pool size
 # Environment variable names used during config loading
 ENV_DEEPSEEK_API_KEY = "DEEPSEEK_API_KEY"
 ENV_CLAUDE_API_KEY   = "CLAUDE_API_KEY"
+ENV_XAI_API_KEY      = "XAI_API_KEY"
 ENV_SUB_AGENT_API_KEY = "SUB_AGENT_API_KEY"
 ENV_DEEPSEEK_API_URL = "DEEPSEEK_API_URL"
 ENV_CLAUDE_API_URL   = "CLAUDE_API_URL"
+ENV_XAI_API_URL      = "XAI_API_URL"
 ENV_CLAUDE_MODEL     = "CLAUDE_MODEL"
-ENV_API_PROVIDER     = "API_PROVIDER"  # "deepseek" or "claude" — overrides auto-detection
+ENV_XAI_MODEL        = "XAI_MODEL"
+ENV_API_PROVIDER     = "API_PROVIDER"  # "deepseek", "claude", or "xai" — overrides auto-detection
 ENV_AGENT_WORKSPACE  = "AGENT_WORKSPACE"
 ENV_EXA_API_KEY      = "EXA_API_KEY"
 ENV_OPENAI_API_KEY   = "OPENAI_API_KEY"
@@ -326,8 +336,11 @@ def _apply_env_overrides(config: AgentConfig) -> None:
     # --- auto-detect provider from available keys (if not explicitly set) ---
     has_deepseek = bool(os.environ.get(ENV_DEEPSEEK_API_KEY))
     has_claude = bool(os.environ.get(ENV_CLAUDE_API_KEY))
+    has_xai = bool(os.environ.get(ENV_XAI_API_KEY))
     if not os.environ.get(ENV_API_PROVIDER):
-        if has_claude and not has_deepseek:
+        if has_xai and not has_deepseek and not has_claude:
+            config.api_provider = "xai"
+        elif has_claude and not has_deepseek:
             config.api_provider = "claude"
         elif has_deepseek:
             config.api_provider = "deepseek"
@@ -344,12 +357,25 @@ def _apply_env_overrides(config: AgentConfig) -> None:
             config.max_tokens = CLAUDE_DEFAULT_MAX_TOKENS
         if config.routing_model == DEEPSEEK_DEFAULT_ROUTING_MODEL:
             config.routing_model = CLAUDE_DEFAULT_ROUTING_MODEL
+    elif config.api_provider == "xai":
+        if not os.environ.get(ENV_XAI_API_URL) and config.api_url == DEEPSEEK_DEFAULT_API_URL:
+            config.api_url = XAI_DEFAULT_API_URL
+        if config.model == DEEPSEEK_DEFAULT_MODEL:
+            config.model = XAI_DEFAULT_MODEL
+        if config.sub_agent_model == DEEPSEEK_DEFAULT_SUB_AGENT_MODEL:
+            config.sub_agent_model = XAI_DEFAULT_SUB_AGENT_MODEL
+        if config.max_tokens == DEEPSEEK_DEFAULT_MAX_TOKENS:
+            config.max_tokens = XAI_DEFAULT_MAX_TOKENS
+        if config.routing_model == DEEPSEEK_DEFAULT_ROUTING_MODEL:
+            config.routing_model = XAI_DEFAULT_ROUTING_MODEL
 
     # --- API keys ---
     if has_deepseek:
         config.api_key = os.environ[ENV_DEEPSEEK_API_KEY]
     if has_claude:
         config.api_key = os.environ[ENV_CLAUDE_API_KEY]
+    if has_xai:
+        config.api_key = os.environ[ENV_XAI_API_KEY]
     if os.environ.get(ENV_SUB_AGENT_API_KEY):
         config.sub_agent_api_key = os.environ[ENV_SUB_AGENT_API_KEY]
     elif has_claude and not os.environ.get(ENV_SUB_AGENT_API_KEY):
@@ -362,11 +388,16 @@ def _apply_env_overrides(config: AgentConfig) -> None:
         config.api_url = os.environ[ENV_DEEPSEEK_API_URL]
     if os.environ.get(ENV_CLAUDE_API_URL):
         config.api_url = os.environ[ENV_CLAUDE_API_URL]
+    if os.environ.get(ENV_XAI_API_URL):
+        config.api_url = os.environ[ENV_XAI_API_URL]
 
     # --- model override ---
     if os.environ.get(ENV_CLAUDE_MODEL):
         config.model = os.environ[ENV_CLAUDE_MODEL]
         config.sub_agent_model = os.environ[ENV_CLAUDE_MODEL]
+    if os.environ.get(ENV_XAI_MODEL):
+        config.model = os.environ[ENV_XAI_MODEL]
+        config.sub_agent_model = os.environ[ENV_XAI_MODEL]
 
     # --- workspace ---
     if os.environ.get(ENV_AGENT_WORKSPACE):

@@ -164,6 +164,16 @@ def _build_payload(
         if config.stop_sequences:
             payload["stop"] = config.stop_sequences
 
+    elif provider == "xai":
+        # xAI/Grok is fully OpenAI-compatible — supports the same parameters as DeepSeek.
+        payload["temperature"] = config.temperature
+        payload["frequency_penalty"] = config.frequency_penalty
+        payload["presence_penalty"] = config.presence_penalty
+        if config.stop_sequences:
+            payload["stop"] = config.stop_sequences
+        if config.response_format:
+            payload["response_format"] = {"type": config.response_format}
+
     return payload
 
 
