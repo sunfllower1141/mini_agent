@@ -130,13 +130,16 @@ Header {{
 }}
 
 Footer {{
-    background: {theme.bg};
+    background: {theme.surface};
     color: {theme.dim};
+    height: 1;
+    padding: 0 2;
     transition: background 300ms;
 }}
 
 Footer.pulse {{
     background: {theme.pulse};
+    color: {theme.bg};
 }}
 
 #main-area {{
@@ -146,14 +149,15 @@ Footer.pulse {{
 
 #left-pane {{
     width: 42%;
-    background: {theme.bg};
-    border-right: solid {theme.border};
+    background: {theme.surface};
 }}
 
 #right-pane {{
     width: 1fr;
     background: {theme.bg};
 }}
+
+/* --- Tools panel (left) --- */
 
 #tools-log {{
     background: {theme.bg};
@@ -167,7 +171,7 @@ Footer.pulse {{
 
 #agent-tree {{
     display: block;
-    background: {theme.bg};
+    background: {theme.surface};
     color: {theme.dim};
     border: none;
     border-top: solid {theme.border};
@@ -180,7 +184,7 @@ Footer.pulse {{
 }}
 
 #subagent-pane {{
-    background: {theme.bg};
+    background: {theme.surface};
     border: none;
     border-top: solid {theme.border};
     padding: 0 1;
@@ -199,6 +203,8 @@ Footer.pulse {{
     scrollbar-size: 0 0;
     border: solid {theme.border};
 }}
+
+/* --- Chat view (right) --- */
 
 #chat-view {{
     background: {theme.bg};
@@ -249,9 +255,11 @@ MsgError {{
     display: none;
 }}
 
+/* --- Input area --- */
+
 #input-area {{
-    background: {theme.bg};
-    border-top: solid {theme.dim};
+    background: {theme.surface};
+    border-top: solid {theme.accent} 30%;
     padding: 1 2;
     height: auto;
     min-height: 3;
@@ -259,11 +267,16 @@ MsgError {{
 }}
 
 #input {{
-    background: {theme.bg};
+    background: {theme.surface};
     color: {theme.text};
     border: none;
     width: 100%;
     height: auto;
+}}
+
+#input:focus {{
+    border-left: solid {theme.accent};
+    padding-left: 1;
 }}
 """
 
