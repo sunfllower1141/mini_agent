@@ -224,7 +224,7 @@ MsgAgent {{
 
 MsgThinking {{
     color: {theme.thinking};
-    margin: 0 8 1 0;
+    margin: 0 8 2 0;
     padding: 0 2;
 }}
 
@@ -980,6 +980,9 @@ class MiniAgentTUI(App):
         # Streaming content — update (or create) current MsgAgent widget
         self._current_response_text += text
         if self._current_response is None:
+            # Insert a thin separator when transitioning from thinking to content
+            if not self._in_thinking and self._thinking_buf.strip():
+                self._chat_view.mount(Static(""))
             self._current_response = MsgAgent("")
             self._chat_view.mount(self._current_response)
         self._current_response.update(self._current_response_text)
