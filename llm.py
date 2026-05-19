@@ -759,15 +759,6 @@ def _api_call_phase(
     # --- Wrap on_token to also emit stream tokens to WebSocket ---
     _outer_on_token = on_token
 
-    def _ws_on_token(token: str) -> None:
-        if _outer_on_token is not None:
-            _outer_on_token(token)
-        try:
-            from ws_server import emitter
-            emitter.emit("stream.token", {"token": token, "agent_id": agent_id})
-        except Exception:
-            pass
-
     def _on_tool_ready(tc: dict) -> None:
         """Execute a tool immediately when its args form valid JSON."""
         idx = tc.pop("_index", -1)
@@ -786,7 +777,7 @@ def _api_call_phase(
         if on_tool_end is not None:
             on_tool_end(result.success, detail, diff_preview=result.diff_preview)
 
-    msg = call_llm(messages, config, on_token=_ws_on_token,
+    msg = call_llm(messages, config, on_token=_outer_on_token,
                         session=session, on_tool_ready=_on_tool_ready,
                         cancel_event=cancel_event)
 
