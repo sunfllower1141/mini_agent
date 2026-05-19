@@ -32,7 +32,7 @@ def _safe(text: str) -> str:
 
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, HorizontalScroll
-from textual.widgets import Header, Footer, RichLog, TextArea, Tree
+from textual.widgets import Header, Footer, RichLog, TextArea, Tree, Markdown
 from textual.binding import Binding
 
 import requests
@@ -244,6 +244,18 @@ Footer.pulse {{
     display: none;
 }}
 
+#response-md {{
+    background: {theme.bg};
+    color: {theme.text};
+    border: none;
+    padding: 0 1;
+    height: auto;
+    max-height: 50%;
+    overflow-y: auto;
+    scrollbar-size: 0 0;
+    display: none;
+}}
+
 #input {{
     background: {theme.bg};
     color: {theme.text};
@@ -370,6 +382,8 @@ class MiniAgentTUI(App):
         Binding("ctrl+z", "suspend_process", "Suspend", show=False),
         Binding("ctrl+shift+c", "copy", "Copy"),
         Binding("ctrl+l", "clear_pane", "Clear Chat"),
+        Binding("ctrl+h", "help_overlay", "Help"),
+        Binding("question_mark", "help_overlay", "Help", show=False),
         Binding("enter", "submit", "Submit", priority=True),
     ]
 
@@ -382,6 +396,7 @@ class MiniAgentTUI(App):
             pass
         yield RichLog(id="chat-pane", highlight=True, markup=True, wrap=True)
         yield RichLog(id="spinner-bar", highlight=False, markup=True, wrap=False)
+        yield Markdown("", id="response-md")
         with Container(id="input-area"):
             yield TextArea("", id="input")
         yield Footer()
@@ -491,6 +506,9 @@ class MiniAgentTUI(App):
             pass
         if hasattr(self, "_spinner_bar"):
             self._spinner_bar.styles.color = t.pulse
+        if hasattr(self, "_response_md"):
+            self._response_md.styles.background = t.bg
+            self._response_md.styles.color = t.text
 
     # ------------------------------------------------------------------
     # Mount
@@ -529,12 +547,18 @@ class MiniAgentTUI(App):
         # Cache spinner-bar ref for thinking indicator
         self._spinner_bar = self.query_one("#spinner-bar", RichLog)
 
+        # Cache markdown response pane
+        self._response_md = self.query_one("#response-md", Markdown)
+
         # Flat task_id → tree node map for O(1) status updates (avoid recursive tree walks)
         self._tree_node_map: dict[str, object] = {}
         # Pending children whose parent hasn't arrived yet (race condition)
         self._pending_children: dict[str, list] = {}
         # Last assistant response for clipboard copy
         self._last_response: str = ""
+        # Session start time for elapsed timer
+        import time as _time
+        self._session_start: float = _time.monotonic()
         self.query_one("#input", TextArea).focus()
         self.queue: Queue = Queue()
         self.worker: AgentWorker | None = None
@@ -610,6 +634,15 @@ class MiniAgentTUI(App):
         if self._total_tokens:
             tok = f"{self._total_tokens / 1000:.1f}k" if self._total_tokens >= 1000 else str(self._total_tokens)
             parts.append(f"⬡ {tok}")
+        # Session elapsed time
+        import time as _time
+        elapsed = _time.monotonic() - self._session_start
+        if elapsed >= 3600:
+            parts.append(f"{elapsed/3600:.1f}h")
+        elif elapsed >= 60:
+            parts.append(f"{int(elapsed/60)}m{int(elapsed%60)}s")
+        else:
+            parts.append(f"{int(elapsed)}s")
         parts.append(self.config.model)
         label = " │ ".join(parts) if parts else self.config.model
         footer._label = label
@@ -636,6 +669,38 @@ class MiniAgentTUI(App):
             self._accumulated_content = []
         if hasattr(self, "_table_buf"):
             self._table_buf = []
+        # Hide markdown response pane
+        self._response_md.styles.display = "none"
+        self._response_md.update("")
+
+    def action_help_overlay(self) -> None:
+        """Show keyboard shortcuts and commands in tools-log (Ctrl+H / ?)."""
+        t = self._tui_theme
+        log = self.query_one("#tools-log", RichLog)
+        log.write("")
+        log.write(f"[bold {t.accent}]Keyboard Shortcuts[/]")
+        log.write(f"[{t.dim}]  Ctrl+C          Cancel agent[/]")
+        log.write(f"[{t.dim}]  Ctrl+Q          Quit[/]")
+        log.write(f"[{t.dim}]  Ctrl+Z          Suspend to shell (Ctrl+D/exit to return)[/]")
+        log.write(f"[{t.dim}]  Ctrl+Shift+C    Copy last response to clipboard[/]")
+        log.write(f"[{t.dim}]  Ctrl+L          Clear chat pane (visual only)[/]")
+        log.write(f"[{t.dim}]  Ctrl+H / ?      Show this help[/]")
+        log.write(f"[{t.dim}]  Enter           Submit message[/]")
+        log.write(f"[{t.dim}]  Shift+Enter     Newline in input[/]")
+        log.write(f"[{t.dim}]  Up/Down         Browse input history (empty input)[/]")
+        log.write("")
+        log.write(f"[bold {t.accent}]Commands[/]")
+        log.write(f"[{t.dim}]  /clear          Reset conversation memory[/]")
+        log.write(f"[{t.dim}]  /export         Write conversation to markdown file[/]")
+        log.write(f"[{t.dim}]  /help           Show commands[/]")
+        log.write(f"[{t.dim}]  /init           Reinitialize .mini_agent.rules + .mini_agent.toml[/]")
+        log.write(f"[{t.dim}]  /shell          Drop to a real shell[/]")
+        log.write(f"[{t.dim}]  /theme <name>   Switch theme[/]")
+        log.write(f"[{t.dim}]  /session <cmd>  Manage sessions (new|switch|delete|list)[/]")
+        log.write(f"[{t.dim}]  /stats          Show session stats[/]")
+        log.write(f"[{t.dim}]  /workspace <path> Switch workspace[/]")
+        log.write(f"[{t.dim}]Themes: {', '.join(THEMES.keys())}[/]")
+        log.write(f"[{t.accent}]─ help ─[/]")
 
     def action_shell(self) -> None:
         """Suspend the TUI and drop the user into their $SHELL.  Exit the shell
@@ -1127,8 +1192,9 @@ class MiniAgentTUI(App):
         desc = msg[5] if len(msg) > 5 else ""
         if hasattr(self, "_tree_node_map") and task_id in self._tree_node_map:
             return  # Dedup
+        t = self._tui_theme
         tree = self.query_one("#agent-tree", Tree)
-        label = f"[RUN] {name}"
+        label = f"[{t.yellow}]▶ {name}[/]"
         parent_node = tree.root
         if parent_id and parent_id in self._tree_node_map:
             parent_node = self._tree_node_map[parent_id]
@@ -1142,7 +1208,7 @@ class MiniAgentTUI(App):
         parent_node.expand()
         tree.styles.display = "block"
         for child_id, child_name, child_desc in self._pending_children.pop(task_id, []):
-            child_node = node.add(f"[RUN] {child_name}")
+            child_node = node.add(f"[{t.yellow}]▶ {child_name}[/]")
             child_node.data = {"id": child_id, "label": child_name, "desc": child_desc}
             self._tree_node_map[child_id] = child_node
             node.expand()
@@ -1153,17 +1219,19 @@ class MiniAgentTUI(App):
         node = self._tree_node_map.get(task_id)
         if node is None:
             return
+        t = self._tui_theme
         ol = str(node.label)
-        for old_tag in ("[RUN]", "[OK]", "[ERR]"):
-            if ol.startswith(old_tag + " "):
-                ol = ol[len(old_tag) + 1:]
+        # Strip any existing Rich markup tags to get raw name
+        for old_tag in (f"[{t.yellow}]▶ ", f"[{t.green}]✓ ", f"[{t.red}]✗ "):
+            if old_tag in ol:
+                ol = ol.replace(old_tag, "")
                 break
         if status == "running":
-            node.set_label(f"[RUN] {ol}")
+            node.set_label(f"[{t.yellow}]▶ {ol}[/]")
         elif status == "completed":
-            node.set_label(f"[OK] {ol}")
+            node.set_label(f"[{t.green}]✓ {ol}[/]")
         else:
-            node.set_label(f"[ERR] {ol}")
+            node.set_label(f"[{t.red}]✗ {ol}[/]")
 
     def _drain_sub_tool(self, msg: tuple) -> None:
         """Log a sub-agent tool call to the tools pane."""
@@ -1420,17 +1488,17 @@ class MiniAgentTUI(App):
         self._active_tool = ""
         self._approval_active = False
         self._hide_spinner()
+        self._refresh_git_status()
 
         # Close the agent box in chat pane
         self._close_agent_box()
 
-        # Promote final content to static pane in a box
+        # Promote final content to markdown response pane
         accumulated = getattr(self, "_accumulated_content", [])
         if accumulated:
-            self._box_open(self._tools_log, "Agent", t.accent)
-            for line in accumulated:
-                self._box_line(self._tools_log, _safe(line), t.accent)
-            self._box_close(self._tools_log, t.accent)
+            md_text = "\n".join(accumulated)
+            self._response_md.styles.display = "block"
+            self._response_md.update(md_text)
         self._accumulated_content = []
 
         self.messages = self.memory.save(self.messages)
