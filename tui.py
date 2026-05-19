@@ -142,9 +142,9 @@ def _build_css(theme: TuiTheme) -> str:
 
     Layout (top to bottom):
       Header
-      #static-pane   — Horizontal: #tools-log (left) + #agent-tree (right)  (35%)
-      #chat-pane     — user input, streaming assistant     (1fr)
-      #input-area    — TextArea for user typing
+      #main-area      — Horizontal: #left-pane (tools+tree+subagents) + #right-pane (chat+md)
+      #spinner-bar    — thinking indicator
+      #input-area     — TextArea for user typing
       Footer
     """
     return f"""
@@ -168,17 +168,28 @@ Footer.pulse {{
     background: {theme.pulse};
 }}
 
-#static-pane {{
-    height: 35%;
-    min-height: 5;
+#main-area {{
+    height: 1fr;
+    min-height: 6;
+}}
+
+#left-pane {{
+    width: 45%;
+    background: {theme.bg};
+    border-right: solid {theme.border};
+}}
+
+#right-pane {{
+    width: 1fr;
+    background: {theme.bg};
 }}
 
 #tools-log {{
     background: {theme.bg};
     color: {theme.text};
     border: none;
-    border-bottom: solid {theme.border};
     padding: 0 1;
+    height: 1fr;
     overflow-y: auto;
     scrollbar-size: 0 0;
 }}
@@ -188,12 +199,13 @@ Footer.pulse {{
     background: {theme.bg};
     color: {theme.dim};
     border: none;
-    border-left: solid {theme.border};
-    border-bottom: solid {theme.border};
+    border-top: solid {theme.border};
     padding: 0 1;
+    height: auto;
+    max-height: 12;
+    min-height: 0;
     overflow-y: auto;
     scrollbar-size: 0 0;
-    min-width: 25;
 }}
 
 #subagent-pane {{
@@ -248,6 +260,7 @@ Footer.pulse {{
     background: {theme.bg};
     color: {theme.text};
     border: none;
+    border-top: solid {theme.border};
     padding: 0 1;
     height: auto;
     max-height: 50%;
@@ -389,14 +402,16 @@ class MiniAgentTUI(App):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        with Horizontal(id="static-pane"):
-            yield RichLog(id="tools-log", highlight=True, markup=True, wrap=True)
-            yield Tree("agent", id="agent-tree")
-        with HorizontalScroll(id="subagent-pane"):
-            pass
-        yield RichLog(id="chat-pane", highlight=True, markup=True, wrap=True)
+        with Horizontal(id="main-area"):
+            with Vertical(id="left-pane"):
+                yield RichLog(id="tools-log", highlight=True, markup=True, wrap=True)
+                yield Tree("agent", id="agent-tree")
+                with HorizontalScroll(id="subagent-pane"):
+                    pass
+            with Vertical(id="right-pane"):
+                yield RichLog(id="chat-pane", highlight=True, markup=True, wrap=True)
+                yield Markdown("", id="response-md")
         yield RichLog(id="spinner-bar", highlight=False, markup=True, wrap=False)
-        yield Markdown("", id="response-md")
         with Container(id="input-area"):
             yield TextArea("", id="input")
         yield Footer()
@@ -486,7 +501,7 @@ class MiniAgentTUI(App):
             header.styles.color = t.accent
         except Exception:
             pass
-        for pane_id in ("static-pane", "chat-pane"):
+        for pane_id in ("left-pane", "right-pane", "chat-pane", "tools-log"):
             try:
                 log = self.query_one(f"#{pane_id}", RichLog)
                 log.styles.background = t.bg
