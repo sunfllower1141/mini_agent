@@ -236,6 +236,14 @@ Footer.pulse {{
     max-height: 12;
 }}
 
+#spinner-bar {{
+    background: {theme.bg};
+    color: {theme.pulse};
+    height: 1;
+    padding: 0 2;
+    display: none;
+}}
+
 #input {{
     background: {theme.bg};
     color: {theme.text};
@@ -361,6 +369,7 @@ class MiniAgentTUI(App):
         Binding("ctrl+q", "quit", "Quit"),
         Binding("ctrl+z", "suspend_process", "Suspend", show=False),
         Binding("ctrl+shift+c", "copy", "Copy"),
+        Binding("ctrl+l", "clear_pane", "Clear Chat"),
         Binding("enter", "submit", "Submit", priority=True),
     ]
 
@@ -372,6 +381,7 @@ class MiniAgentTUI(App):
         with HorizontalScroll(id="subagent-pane"):
             pass
         yield RichLog(id="chat-pane", highlight=True, markup=True, wrap=True)
+        yield RichLog(id="spinner-bar", highlight=False, markup=True, wrap=False)
         with Container(id="input-area"):
             yield TextArea("", id="input")
         yield Footer()
@@ -479,6 +489,8 @@ class MiniAgentTUI(App):
             inp.styles.color = t.text
         except Exception:
             pass
+        if hasattr(self, "_spinner_bar"):
+            self._spinner_bar.styles.color = t.pulse
 
     # ------------------------------------------------------------------
     # Mount
@@ -514,6 +526,9 @@ class MiniAgentTUI(App):
         # Cache footer ref to avoid query_one DOM walk every 2s
         self._footer = self.query_one(Footer)
 
+        # Cache spinner-bar ref for thinking indicator
+        self._spinner_bar = self.query_one("#spinner-bar", RichLog)
+
         # Flat task_id → tree node map for O(1) status updates (avoid recursive tree walks)
         self._tree_node_map: dict[str, object] = {}
         # Pending children whose parent hasn't arrived yet (race condition)
@@ -547,11 +562,22 @@ class MiniAgentTUI(App):
         self._apply_theme()
         self._refresh_git_status()
         self.set_interval(1/60, self._drain)          # 60 fps token drain (battery-friendly)
-        self.set_interval(30.0, self._update_status_bar)
+        self.set_interval(2.0, self._update_status_bar)
 
     # ------------------------------------------------------------------
     # Status bar — stolen from Agent Terminal
     # ------------------------------------------------------------------
+
+    def _show_spinner(self) -> None:
+        """Show thinking indicator between chat pane and input area."""
+        t = self._tui_theme
+        self._spinner_bar.styles.display = "block"
+        self._spinner_bar.write(f"[{t.pulse}]  ⠼ thinking…[/]")
+
+    def _hide_spinner(self) -> None:
+        """Hide the thinking indicator."""
+        self._spinner_bar.styles.display = "none"
+        self._spinner_bar.clear()
 
     def _refresh_git_status(self) -> None:
         """Read git branch and dirty status for the workspace."""
@@ -595,6 +621,21 @@ class MiniAgentTUI(App):
     # ------------------------------------------------------------------
     # Actions
     # ------------------------------------------------------------------
+
+    def action_clear_pane(self) -> None:
+        """Clear chat pane visually without touching memory (Ctrl+L)."""
+        chat = self.query_one("#chat-pane", RichLog)
+        chat.clear()
+        self._chat_buf = ""
+        self._buf = ""
+        self._thinking_buf = ""
+        self._thinking_flush_pos = 0
+        self._in_thinking = False
+        self._agent_box_open = False
+        if hasattr(self, "_accumulated_content"):
+            self._accumulated_content = []
+        if hasattr(self, "_table_buf"):
+            self._table_buf = []
 
     def action_shell(self) -> None:
         """Suspend the TUI and drop the user into their $SHELL.  Exit the shell
@@ -652,6 +693,7 @@ class MiniAgentTUI(App):
             log = self.query_one("#chat-pane", RichLog)
             t = self._tui_theme
             log.write(f"[{t.yellow}]  ╼ Cancelled.[/]")
+            self._hide_spinner()
             self.query_one("#input", TextArea).focus()
             self._active_tool = ""
             self._approval_active = False
@@ -807,6 +849,7 @@ class MiniAgentTUI(App):
         self._active_tool = ""
 
         self._turn_id += 1
+        self._show_spinner()
         self.worker = AgentWorker(
             self.messages, self.config,
             self.write_gate, self.read_gate,
@@ -910,7 +953,8 @@ class MiniAgentTUI(App):
             if theme_name in THEMES:
                 self._tui_theme = THEMES[theme_name]
                 self._apply_theme()
-                log.write(f"[{t.green}]Theme switched to {self._tui_theme.name}[/]")
+                os.environ["MINI_AGENT_THEME"] = theme_name
+                log.write(f"[{t.green}]Theme switched to {self._tui_theme.name}[/] (persisted)")
             else:
                 names = ", ".join(THEMES.keys())
                 log.write(f"[{t.yellow}]Available themes: {names}[/]")
@@ -989,195 +1033,52 @@ class MiniAgentTUI(App):
     # Drain queue (called on-demand via _NotifyQueue.put)
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Drain queue — dispatcher + typed handlers
+    # ------------------------------------------------------------------
+
     def _drain(self) -> None:
-        """Pull messages off the queue and route to the correct pane."""
+        """Pull messages off the queue and route to typed handlers."""
         if self.queue.empty():
             return
-        t = self._tui_theme
-        chat = self._chat
-        tools_log = self._tools_log
         try:
             while True:
                 msg = self.queue.get_nowait()
 
-                # Sub-agent streaming (checked first — tuples, not dataclass instances)
-                if isinstance(msg, tuple) and len(msg) == 3 and msg[0] == "sub_token":
-                    _tag, task_id, text = msg
-                    if not hasattr(self, "_sub_panes"):
-                        self._sub_panes = {}
-                        self._sub_count = 0
-                    if task_id not in self._sub_panes:
-                        sap = self.query_one("#subagent-pane", HorizontalScroll)
-                        sap.styles.display = "block"
-                        self._sub_count += 1
-                        rlog = RichLog(highlight=True, markup=True, wrap=True, max_lines=12)
-                        color = _AGENT_COLORS[(self._sub_count - 1) % len(_AGENT_COLORS)]
-                        ac = getattr(t, color)
-                        if not hasattr(self, "_sub_colors"):
-                            self._sub_colors = {}
-                        self._sub_colors[task_id] = ac
-                        # Agent name in top border
-                        rlog.border_title = f"{color} Agent {self._sub_count} ({task_id[:8]}...)"
-                        self._write_to_log(rlog, f"[{ac}]Agent {self._sub_count}  ({task_id})[/]")
-                        sap.mount(rlog)
-                        self._sub_panes[task_id] = rlog
-                    sublog = self._sub_panes[task_id]
-                    if not hasattr(self, "_sub_bufs"):
-                        self._sub_bufs = {}
-                    buf = self._sub_bufs.get(task_id, "")
-                    buf += text
-                    ac = self._sub_colors[task_id]
-                    for line in buf.split("\n")[:-1]:
-                        if line:
-                            self._write_to_log(sublog, f"[{ac}][/] {_safe(line)}")
-                    self._sub_bufs[task_id] = buf.split("\n")[-1]
-                    continue
-
-                # Sub-agent tree: spawn event
-                if isinstance(msg, tuple) and len(msg) >= 5 and msg[0] == "sub_tree" and msg[1] == "spawn":
-                    _tag, _action, _task_id, _parent_id = msg[0], msg[1], msg[2], msg[3]
-                    _name = msg[4] if len(msg) > 4 else _task_id
-                    _desc = msg[5] if len(msg) > 5 else ""
-                    # Dedup: if this task_id already has a tree node, skip
-                    if hasattr(self, "_tree_node_map") and _task_id in self._tree_node_map:
+                # Sub-agent tuples (checked first — speed path)
+                if isinstance(msg, tuple):
+                    if msg[0] == "sub_token" and len(msg) == 3:
+                        self._drain_sub_token(*msg[1:])
                         continue
-                    tree = self.query_one("#agent-tree", Tree)
-                    label = f"[RUN] {_name}"
-                    parent_node = tree.root
-                    if _parent_id and _parent_id in self._tree_node_map:
-                        parent_node = self._tree_node_map[_parent_id]
-                    elif _parent_id:
-                        # Parent not yet in tree (race: child spawn msg arrived first)
-                        self._pending_children.setdefault(_parent_id, []).append(
-                            (_task_id, _name, _desc)
-                        )
-                        continue
-                    node = parent_node.add(label)
-                    node.data = {"id": _task_id, "label": _name, "desc": _desc}
-                    self._tree_node_map[_task_id] = node
-                    tree.root.expand()
-                    parent_node.expand()
-                    # Only show tree AFTER a real node is added
-                    tree.styles.display = "block"
-                    # Attach any children that arrived before this parent
-                    for child_id, child_name, child_desc in self._pending_children.pop(_task_id, []):
-                        child_node = node.add(f"[RUN] {child_name}")
-                        child_node.data = {"id": child_id, "label": child_name, "desc": child_desc}
-                        self._tree_node_map[child_id] = child_node
-                        node.expand()
-                    continue
-
-                # Sub-agent tree: status update
-                if isinstance(msg, tuple) and len(msg) >= 4 and msg[0] == "sub_tree" and msg[1] == "status":
-                    _tag, _action, _task_id, _status = msg[0], msg[1], msg[2], msg[3]
-                    tree = self.query_one("#agent-tree", Tree)
-                    node = self._tree_node_map.get(_task_id)
-                    if node is not None:
-                        ol = str(node.label)
-                        for old_tag in ("[RUN]", "[OK]", "[ERR]"):
-                            if ol.startswith(old_tag + " "):
-                                ol = ol[len(old_tag)+1:]
-                                break
-                        if _status == "running":
-                            node.set_label(f"[RUN] {ol}")
-                        elif _status == "completed":
-                            node.set_label(f"[OK] {ol}")
-                        else:
-                            node.set_label(f"[ERR] {ol}")
-                    # Keep tree visible even when all done (so user can see structure).
-                    continue
-
-                # Sub-agent tool streaming to tools-log
-                if isinstance(msg, tuple) and len(msg) >= 3 and msg[0] == "sub_tool":
-                    _tag, _action = msg[0], msg[1]
-                    name = msg[2] if len(msg) > 2 else "?"
-                    if _action == "start":
-                        task_id = msg[3] if len(msg) > 3 else ""
-                        # Dedup: skip if this sub-agent already has an open tool box
-                        if not hasattr(self, "_active_sub_tools"):
-                            self._active_sub_tools = set()
-                        key = (task_id, name)
-                        if key in self._active_sub_tools:
+                    if msg[0] == "sub_tree":
+                        if msg[1] == "spawn" and len(msg) >= 5:
+                            self._drain_sub_tree_spawn(msg)
                             continue
-                        self._active_sub_tools.add(key)
-                        # Find color for this agent
-                        ac = t.dim
-                        if hasattr(self, "_sub_colors") and task_id in self._sub_colors:
-                            ac = self._sub_colors[task_id]
-                        label = task_id[:8] if task_id else "sub"
-                        self._box_open(tools_log, _safe(f"[{label}] {name}"), ac)
-                    elif _action == "end":
-                        ok = msg[3] if len(msg) > 3 else True
-                        detail = msg[4] if len(msg) > 4 else ""
-                        task_id_e = msg[3] if len(msg) > 3 else ""
-                        name_e = msg[2] if len(msg) > 2 else "?"
-                        if hasattr(self, "_active_sub_tools"):
-                            self._active_sub_tools.discard((task_id_e, name_e))
-                        symbol = "✓" if ok else "✗"
-                        color = t.green if ok else t.red
-                        self._box_close(tools_log, color, f"{symbol} {_safe(detail[:60])}")
-                    continue
+                        if msg[1] == "status" and len(msg) >= 4:
+                            self._drain_sub_tree_status(msg)
+                            continue
+                    if msg[0] == "sub_tool" and len(msg) >= 3:
+                        self._drain_sub_tool(msg)
+                        continue
+                    if msg[0] == "sub_done" and len(msg) == 2:
+                        self._drain_sub_done(msg)
+                        continue
 
-                # Sub-agent done — hide its pane
-                if isinstance(msg, tuple) and len(msg) == 2 and msg[0] == "sub_done":
-                    _tag, task_id = msg
-                    if hasattr(self, "_sub_panes") and task_id in self._sub_panes:
-                        sublog = self._sub_panes.pop(task_id)
-                        sublog.remove()
-                        self._sub_colors.pop(task_id, None)
-                        self._sub_bufs.pop(task_id, None)
-                    continue
-
+                # Dataclass messages
                 if isinstance(msg, _TokenMsg):
-                    self._handle_token(msg, chat)
+                    self._handle_token(msg, self._chat)
                 elif isinstance(msg, _ToolStart):
-                    if msg.turn_id != self._turn_id:
-                        continue
-                    self._flush_buf()
-                    if self._in_thinking:
-                        # Close thinking box before opening tool box
-                        remaining = self._thinking_buf[self._thinking_flush_pos:].strip()
-                        if remaining:
-                            self._box_line(chat, f"[dim]{_safe(remaining)}[/]", f"dim {t.thinking}")
-                        self._box_close(chat, f"dim {t.thinking}")
-                        self._in_thinking = False
-                        self._thinking_buf = ""
-                        self._thinking_flush_pos = 0
-                    self._close_agent_box()
-                    self._active_tool = msg.summary.split("(")[0].strip() if "(" in msg.summary else msg.summary[:20]
-                    self._box_open(tools_log, _safe(f"[tool] {msg.summary}"), t.yellow)
+                    self._drain_tool_start(msg)
                 elif isinstance(msg, _ToolEnd):
-                    if msg.turn_id != self._turn_id:
-                        continue
-                    symbol = "✓" if msg.ok else "✗"
-                    color = t.green if msg.ok else t.red
-                    detail = _safe(msg.detail)
-                    if len(detail) > 120:
-                        detail = detail[:120] + "..."
-                    self._box_close(tools_log, color, f"{symbol} {detail}")
-                    self._active_tool = ""
-                    # Render diff_preview if present
-                    if msg.diff_preview:
-                        self._box_open(tools_log, "diff", t.accent)
-                        for line in msg.diff_preview.split("\n"):
-                            self._box_line(tools_log, _safe(line), t.dim)
-                        self._box_close(tools_log, t.accent)
+                    self._drain_tool_end(msg)
                 elif isinstance(msg, _ToolOutput):
-                    if msg.turn_id != self._turn_id:
-                        continue
                     pass  # Tool start/end already summarize; suppress raw output clutter
                 elif isinstance(msg, _Error):
-                    self._close_agent_box()
-                    self._box_open(chat, "✗ Error", t.red)
-                    self._box_line(chat, _safe(msg.msg), t.red)
-                    self._box_close(chat, t.red)
+                    self._drain_error(msg)
                 elif isinstance(msg, _Done):
-                    # Ignore stale _Done from a cancelled/previous turn
-                    if msg.turn_id != self._turn_id:
-                        continue
-                    self._finish_turn(usage=msg.usage, turn_count=msg.turn_count)
-                    return
-
+                    if msg.turn_id == self._turn_id:
+                        self._finish_turn(usage=msg.usage, turn_count=msg.turn_count)
+                        return
         except Empty:
             pass
 
@@ -1186,6 +1087,168 @@ class MiniAgentTUI(App):
         # Worker finished without sending Done (cancelled or crashed)
         if not self._turn_finished and (self.worker is None or not self.worker.is_alive()):
             self._finish_turn()
+
+    # --- Sub-agent handlers ---
+
+    def _drain_sub_token(self, task_id: str, text: str) -> None:
+        """Stream sub-agent token output to its RichLog pane."""
+        if not hasattr(self, "_sub_panes"):
+            self._sub_panes = {}
+            self._sub_count = 0
+        if task_id not in self._sub_panes:
+            sap = self.query_one("#subagent-pane", HorizontalScroll)
+            sap.styles.display = "block"
+            self._sub_count += 1
+            rlog = RichLog(highlight=True, markup=True, wrap=True, max_lines=12)
+            color = _AGENT_COLORS[(self._sub_count - 1) % len(_AGENT_COLORS)]
+            ac = getattr(self._tui_theme, color)
+            if not hasattr(self, "_sub_colors"):
+                self._sub_colors = {}
+            self._sub_colors[task_id] = ac
+            rlog.border_title = f"{color} Agent {self._sub_count} ({task_id[:8]}...)"
+            self._write_to_log(rlog, f"[{ac}]Agent {self._sub_count}  ({task_id})[/]")
+            sap.mount(rlog)
+            self._sub_panes[task_id] = rlog
+        sublog = self._sub_panes[task_id]
+        if not hasattr(self, "_sub_bufs"):
+            self._sub_bufs = {}
+        buf = self._sub_bufs.get(task_id, "")
+        buf += text
+        ac = self._sub_colors[task_id]
+        for line in buf.split("\n")[:-1]:
+            if line:
+                self._write_to_log(sublog, f"[{ac}][/] {_safe(line)}")
+        self._sub_bufs[task_id] = buf.split("\n")[-1]
+
+    def _drain_sub_tree_spawn(self, msg: tuple) -> None:
+        """Add a sub-agent node to the agent tree."""
+        _, _, task_id, parent_id = msg[0], msg[1], msg[2], msg[3]
+        name = msg[4] if len(msg) > 4 else task_id
+        desc = msg[5] if len(msg) > 5 else ""
+        if hasattr(self, "_tree_node_map") and task_id in self._tree_node_map:
+            return  # Dedup
+        tree = self.query_one("#agent-tree", Tree)
+        label = f"[RUN] {name}"
+        parent_node = tree.root
+        if parent_id and parent_id in self._tree_node_map:
+            parent_node = self._tree_node_map[parent_id]
+        elif parent_id:
+            self._pending_children.setdefault(parent_id, []).append((task_id, name, desc))
+            return
+        node = parent_node.add(label)
+        node.data = {"id": task_id, "label": name, "desc": desc}
+        self._tree_node_map[task_id] = node
+        tree.root.expand()
+        parent_node.expand()
+        tree.styles.display = "block"
+        for child_id, child_name, child_desc in self._pending_children.pop(task_id, []):
+            child_node = node.add(f"[RUN] {child_name}")
+            child_node.data = {"id": child_id, "label": child_name, "desc": child_desc}
+            self._tree_node_map[child_id] = child_node
+            node.expand()
+
+    def _drain_sub_tree_status(self, msg: tuple) -> None:
+        """Update a sub-agent tree node's status label."""
+        _, _, task_id, status = msg[0], msg[1], msg[2], msg[3]
+        node = self._tree_node_map.get(task_id)
+        if node is None:
+            return
+        ol = str(node.label)
+        for old_tag in ("[RUN]", "[OK]", "[ERR]"):
+            if ol.startswith(old_tag + " "):
+                ol = ol[len(old_tag) + 1:]
+                break
+        if status == "running":
+            node.set_label(f"[RUN] {ol}")
+        elif status == "completed":
+            node.set_label(f"[OK] {ol}")
+        else:
+            node.set_label(f"[ERR] {ol}")
+
+    def _drain_sub_tool(self, msg: tuple) -> None:
+        """Log a sub-agent tool call to the tools pane."""
+        t = self._tui_theme
+        _, action = msg[0], msg[1]
+        name = msg[2] if len(msg) > 2 else "?"
+        if action == "start":
+            task_id = msg[3] if len(msg) > 3 else ""
+            if not hasattr(self, "_active_sub_tools"):
+                self._active_sub_tools = set()
+            key = (task_id, name)
+            if key in self._active_sub_tools:
+                return
+            self._active_sub_tools.add(key)
+            ac = t.dim
+            if hasattr(self, "_sub_colors") and task_id in self._sub_colors:
+                ac = self._sub_colors[task_id]
+            label = task_id[:8] if task_id else "sub"
+            self._box_open(self._tools_log, _safe(f"[{label}] {name}"), ac)
+        elif action == "end":
+            ok = msg[3] if len(msg) > 3 else True
+            detail = msg[4] if len(msg) > 4 else ""
+            task_id_e = msg[3] if len(msg) > 3 else ""
+            name_e = msg[2] if len(msg) > 2 else "?"
+            if hasattr(self, "_active_sub_tools"):
+                self._active_sub_tools.discard((task_id_e, name_e))
+            symbol = "✓" if ok else "✗"
+            color = t.green if ok else t.red
+            self._box_close(self._tools_log, color, f"{symbol} {_safe(detail[:60])}")
+
+    def _drain_sub_done(self, msg: tuple) -> None:
+        """Remove a completed sub-agent's output pane."""
+        _, task_id = msg
+        if hasattr(self, "_sub_panes") and task_id in self._sub_panes:
+            sublog = self._sub_panes.pop(task_id)
+            sublog.remove()
+            self._sub_colors.pop(task_id, None)
+            self._sub_bufs.pop(task_id, None)
+
+    # --- Agent message handlers ---
+
+    def _drain_tool_start(self, msg: _ToolStart) -> None:
+        """Open a tool-call box in the tools log."""
+        if msg.turn_id != self._turn_id:
+            return
+        t = self._tui_theme
+        chat = self._chat
+        self._flush_buf()
+        if self._in_thinking:
+            remaining = self._thinking_buf[self._thinking_flush_pos:].strip()
+            if remaining:
+                self._box_line(chat, f"[dim]{_safe(remaining)}[/]", f"dim {t.thinking}")
+            self._box_close(chat, f"dim {t.thinking}")
+            self._in_thinking = False
+            self._thinking_buf = ""
+            self._thinking_flush_pos = 0
+        self._close_agent_box()
+        self._active_tool = msg.summary.split("(")[0].strip() if "(" in msg.summary else msg.summary[:20]
+        self._box_open(self._tools_log, _safe(f"[tool] {msg.summary}"), t.yellow)
+
+    def _drain_tool_end(self, msg: _ToolEnd) -> None:
+        """Close a tool-call box with success/failure and optional diff."""
+        if msg.turn_id != self._turn_id:
+            return
+        t = self._tui_theme
+        symbol = "✓" if msg.ok else "✗"
+        color = t.green if msg.ok else t.red
+        detail = _safe(msg.detail)
+        if len(detail) > 120:
+            detail = detail[:120] + "..."
+        self._box_close(self._tools_log, color, f"{symbol} {detail}")
+        self._active_tool = ""
+        if msg.diff_preview:
+            self._box_open(self._tools_log, "diff", t.accent)
+            for line in msg.diff_preview.split("\n"):
+                self._box_line(self._tools_log, _safe(line), t.dim)
+            self._box_close(self._tools_log, t.accent)
+
+    def _drain_error(self, msg: _Error) -> None:
+        """Display an error box in the chat pane."""
+        t = self._tui_theme
+        self._close_agent_box()
+        self._box_open(self._chat, "✗ Error", t.red)
+        self._box_line(self._chat, _safe(msg.msg), t.red)
+        self._box_close(self._chat, t.red)
 
     def _close_agent_box(self) -> None:
         """Close the agent content box if it's currently open."""
@@ -1356,6 +1419,7 @@ class MiniAgentTUI(App):
         self._buf = ""
         self._active_tool = ""
         self._approval_active = False
+        self._hide_spinner()
 
         # Close the agent box in chat pane
         self._close_agent_box()

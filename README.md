@@ -29,9 +29,9 @@ A coding agent powered by DeepSeek V4 Pro with **63 tools**. Terminal REPL or Te
 - **Background test output**: persisted to DB, not discarded
 
 ### Interfaces
-- **Ink CLI** (`python mini_agent.py`) — default React-for-terminal UI (Node 20+ required). 25 themes, live token streaming, tool log with syntax-highlighted diffs, sub-agent panes, agent tree, input history, approval dialogs. JSON-line IPC over stdio — no network dependency.
-- **--legacy-tui** — fall back to the original Textual TUI (`python tui.py`) with diff preview, file tree, Ctrl+Z suspend to shell
-- **--no-ui** — plain stdin/stdout REPL for headless/piped usage (no Node required)
+- **Textual TUI** (`python tui.py`) — rich terminal UI with 9 themes, live token streaming, tool log with diffs, sub-agent panes, agent tree, input history, Ctrl+Z suspend to shell
+- **Terminal REPL** (`python mini_agent.py`) — ANSI-coloured REPL for headless/piped usage, stdin/stdout streaming
+- **--legacy-tui** — runs the Textual TUI from `mini_agent.py` (same as `python tui.py`)
 
 ### Dev Tools
 - **LSP integration**: definition, references, hover, diagnostics via pylsp (auto-started on first use)
@@ -72,14 +72,11 @@ OPENAI_API_KEY="sk-your-key-here"          # optional — https://platform.opena
 EXA_API_KEY="your-exa-key-here"            # optional — https://exa.ai
 EOF
 
-# 5. Build the Ink CLI (Node 20+ required)
-cd ui && npm install && npm run build && cd ..
-
-# 6. Run
-python mini_agent.py   # Ink CLI (default — recommended)
+# 5. Run
+python tui.py              # Textual TUI (recommended)
 # or
-python mini_agent.py --legacy-tui  # Textual TUI
-python mini_agent.py --no-ui       # Plain terminal REPL
+python mini_agent.py       # Plain terminal REPL
+python mini_agent.py --tui # Same as python tui.py
 ```
 
 ## Configuration
@@ -225,7 +222,8 @@ tests/
 - HTTP 408 (Request Timeout) added to retryable statuses.
 
 ### Interfaces
-- Textual TUI with terminal REPL.
+- Textual TUI (`python tui.py`) with 9 themes, live token streaming, tool log, sub-agent panes, agent tree.
+- Terminal REPL (`python mini_agent.py`) for headless/piped usage.
 - LSP integration via pylsp (auto-started on first use).
 - MCP client discovers external tools at startup via stdio JSON-RPC.
 - User interjection queue with `/cancel` support.
