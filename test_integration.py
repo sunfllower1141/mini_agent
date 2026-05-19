@@ -138,7 +138,7 @@ class TestFullSpawnCollectVerify:
         wg, rg = gates
         test_file = tmp_path / "agent_output.txt"
 
-        with patch("sub_agent.call_deepseek") as mock_llm:
+        with patch("sub_agent.call_llm") as mock_llm:
             mock_llm.side_effect = [
                 _make_llm_response(
                     content="",
@@ -176,7 +176,7 @@ class TestFullSpawnCollectVerify:
         """If the sub-agent produces text, collect returns it."""
         wg, rg = gates
 
-        with patch("sub_agent.call_deepseek") as mock_llm:
+        with patch("sub_agent.call_llm") as mock_llm:
             mock_llm.side_effect = [
                 _make_llm_response(content="Something went wrong."),
             ]
@@ -205,7 +205,7 @@ class TestFanOut:
     def test_fan_out_three_agents_collect_any(self, configured_context, gates):
         wg, rg = gates
 
-        with patch("sub_agent.call_deepseek") as mock_llm:
+        with patch("sub_agent.call_llm") as mock_llm:
             mock_llm.return_value = _make_llm_response(content="result from agent")
 
             spawn = _TOOL_DISPATCH["spawn_agent"]
@@ -226,7 +226,7 @@ class TestFanOut:
     def test_fan_out_collect_any_with_specific_ids(self, configured_context, gates):
         wg, rg = gates
 
-        with patch("sub_agent.call_deepseek") as mock_llm:
+        with patch("sub_agent.call_llm") as mock_llm:
             mock_llm.return_value = _make_llm_response(content="done")
 
             spawn = _TOOL_DISPATCH["spawn_agent"]
@@ -247,7 +247,7 @@ class TestFanOut:
         """Batch spawn should not exceed _MAX_CONCURRENT (5)."""
         wg, rg = gates
 
-        with patch("sub_agent.call_deepseek") as mock_llm:
+        with patch("sub_agent.call_llm") as mock_llm:
             mock_llm.return_value = _make_llm_response(content="ok")
 
             spawn = _TOOL_DISPATCH["spawn_agent"]
@@ -483,7 +483,7 @@ class TestParentPolling:
     def test_poll_running_then_completed(self, configured_context, gates):
         wg, rg = gates
 
-        with patch("sub_agent.call_deepseek") as mock_llm:
+        with patch("sub_agent.call_llm") as mock_llm:
             mock_llm.side_effect = [
                 _make_llm_response(
                     content="",
@@ -536,7 +536,7 @@ class TestMultipleCollectAny:
     def test_collect_any_multiple_agents(self, configured_context, gates):
         wg, rg = gates
 
-        with patch("sub_agent.call_deepseek") as mock_llm:
+        with patch("sub_agent.call_llm") as mock_llm:
             mock_llm.return_value = _make_llm_response(content="quick result")
 
             spawn = _TOOL_DISPATCH["spawn_agent"]
@@ -564,7 +564,7 @@ class TestMultipleCollectAny:
         """After all agents complete, collect_any should return one immediately."""
         wg, rg = gates
 
-        with patch("sub_agent.call_deepseek") as mock_llm:
+        with patch("sub_agent.call_llm") as mock_llm:
             mock_llm.return_value = _make_llm_response(content="done")
 
             spawn = _TOOL_DISPATCH["spawn_agent"]
@@ -650,7 +650,7 @@ class TestMultiAgentE2EWorkflow:
         # Stage A writes a file; Stage B reads it and appends.
         stage_a_file = tmp_path / "pipeline_stage_a.txt"
 
-        with patch("sub_agent.call_deepseek") as mock_llm:
+        with patch("sub_agent.call_llm") as mock_llm:
             # Stage A: write a file with initial content
             # Stage B: read and confirm
             mock_llm.side_effect = [
@@ -703,7 +703,7 @@ class TestMultiAgentE2EWorkflow:
 
         items = ["alpha", "beta", "gamma"]
 
-        with patch("sub_agent.call_deepseek") as mock_llm:
+        with patch("sub_agent.call_llm") as mock_llm:
             # Each worker returns its item processed
             mock_llm.return_value = _make_llm_response(
                 content="processed: alpha"

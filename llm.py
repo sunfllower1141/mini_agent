@@ -23,7 +23,7 @@ from typing import Any, Callable
 import requests
 
 
-from api import APIError, format_tool_detail, call_deepseek, clear_api_cache
+from api import APIError, format_tool_detail, call_llm, call_deepseek, clear_api_cache
 
 from config import AgentConfig
 from tools import execute_tool, tool_summary, clear_tool_cache, _TOOL_CONTEXT, get_modified_files
@@ -786,7 +786,7 @@ def _api_call_phase(
         if on_tool_end is not None:
             on_tool_end(result.success, detail, diff_preview=result.diff_preview)
 
-    msg = call_deepseek(messages, config, on_token=_ws_on_token,
+    msg = call_llm(messages, config, on_token=_ws_on_token,
                         session=session, on_tool_ready=_on_tool_ready,
                         cancel_event=cancel_event)
 

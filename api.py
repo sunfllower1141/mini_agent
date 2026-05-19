@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
-api.py — DeepSeek API communication for mini_agent.
+api.py — LLM API communication for mini_agent.
 
-Provides ``call_deepseek()`` for non-streaming and streaming API
-requests.  Extracted from llm.py to break the circular dependency
-chain: llm.py → tools → agent_ops → sub_agent → llm.py.
+Provides ``call_llm()`` for non-streaming and streaming API
+requests, with provider dispatch for DeepSeek and Claude (via
+Anthropic's OpenAI-compatible endpoint).  Extracted from llm.py
+to break the circular dependency chain:
+llm.py -> tools -> agent_ops -> sub_agent -> llm.py.
 
 Both ``llm.py`` and ``sub_agent.py`` import from here — no cycle.
 """
@@ -31,7 +33,7 @@ from tools.schema import TOOLS
 # ---------------------------------------------------------------------------
 
 class APIError(Exception):
-    """Raised when the DeepSeek API returns a non-OK HTTP status."""
+    """Raised when the LLM API returns a non-OK HTTP status."""
 
     def __init__(self, status_code: int, body: str) -> None:
         self.status_code = status_code
@@ -47,17 +49,17 @@ class APIError(Exception):
 # ---------------------------------------------------------------------------
 
 def truncate_content(content: str, max_len: int = 300) -> str:
-    """Truncate a string to *max_len* chars, appending '…' if truncated."""
+    """Truncate a string to *max_len* chars, appending '...' if truncated."""
     if len(content) <= max_len:
         return content
-    return content[:max_len] + "…"
+    return content[:max_len] + "\u2026"
 
 
 def format_tool_detail(result: "ToolResult", max_len: int = 300) -> str:
     """Format a ToolResult's content for display, truncated to *max_len*."""
     detail = result.content[:max_len]
     if len(result.content) > max_len:
-        detail += "…"
+        detail += "\u2026"
     return detail
 
 
@@ -66,17 +68,18 @@ def format_tool_detail(result: "ToolResult", max_len: int = 300) -> str:
 # ---------------------------------------------------------------------------
 
 # Incremental message cleaning cache: keyed by id(messages), stores a tuple
-# of (last_cleaned_len, clean_messages) so repeated calls within a turn
-# only clean newly appended messages rather than the entire list.
-_clean_messages_cache: dict[int, tuple[int, list[dict]]] = {}
+# of (last_cleaned_len, provider, clean_messages) so repeated calls within a
+# turn only clean newly appended messages rather than the entire list.
+_clean_messages_cache: dict[int, tuple[int, str, list[dict]]] = {}
 
 
-def _clean_message(msg: dict, index: int) -> dict:
+def _clean_message(msg: dict, index: int, provider: str = "deepseek") -> dict:
     """Clean a single message dict for sending to the API.
 
     Strips internal tracking fields (keys starting with '_'), removes the
-    ``index`` field from tool_calls, and marks the first system message
-    with ``cache_control`` for prompt caching.
+    ``index`` field from tool_calls.  For DeepSeek, marks the first system
+    message with ``cache_control`` for prompt caching (not supported by
+    Claude's OpenAI-compatible endpoint).
     """
     m2 = {k: v for k, v in msg.items()
           if not k.startswith("_")}
@@ -85,7 +88,7 @@ def _clean_message(msg: dict, index: int) -> dict:
             {k: v for k, v in tc.items() if k != "index"}
             for tc in m2["tool_calls"]
         ]
-    if index == 0 and m2.get("role") == "system":
+    if index == 0 and m2.get("role") == "system" and provider == "deepseek":
         m2["cache_control"] = {"type": "ephemeral"}
     return m2
 
@@ -114,7 +117,55 @@ def _compute_complexity(messages: list[dict]) -> str:
     return "complex"
 
 
-def call_deepseek(
+def _build_payload(
+    config: AgentConfig,
+    messages: list[dict],
+    clean_messages: list[dict],
+) -> dict:
+    """Build the JSON payload for an API request, adapting to the provider.
+
+    Claude's OpenAI-compatible endpoint does not support:
+    - ``frequency_penalty``
+    - ``presence_penalty``
+    - ``response_format``
+    - ``cache_control`` (handled in ``_clean_message``)
+    """
+    provider = config.api_provider
+
+    # Model selection (routing model for simple prompts, if configured)
+    model = config.model
+    if config.routing_model and _compute_complexity(messages) == "simple":
+        model = config.routing_model
+
+    payload: dict = {
+        "model": model,
+        "messages": clean_messages,
+        "tools": TOOLS,
+        "stream": config.stream,
+        "temperature": config.temperature,
+        "max_tokens": config.max_tokens,
+    }
+
+    # --- provider-specific parameters ---
+    if provider == "deepseek":
+        payload["frequency_penalty"] = config.frequency_penalty
+        payload["presence_penalty"] = config.presence_penalty
+        if config.stop_sequences:
+            payload["stop"] = config.stop_sequences
+        if config.response_format:
+            payload["response_format"] = {"type": config.response_format}
+
+    elif provider == "claude":
+        # Claude OpenAI-compat: no freq/presence penalties, no response_format
+        # top_p is supported and often useful for Claude
+        payload["top_p"] = 0.9  # sensible default; could be configurable
+        if config.stop_sequences:
+            payload["stop"] = config.stop_sequences
+
+    return payload
+
+
+def call_llm(
     messages: list[dict],
     config: AgentConfig,
     on_token: Callable[[str], Any] | None = None,
@@ -122,11 +173,11 @@ def call_deepseek(
     on_tool_ready: Callable[[dict], Any] | None = None,
     cancel_event: threading.Event | None = None,
 ) -> dict | None:
-    """Send messages to DeepSeek, return the assistant message dict.
+    """Send messages to the LLM, return the assistant message dict.
 
-    DeepSeek thinking mode requires ``reasoning_content`` to be passed back
-    on subsequent requests. The ``index`` field inside tool_calls must be
-    stripped (it is an output-only artefact).
+    Dispatches to the configured provider (DeepSeek or Claude via
+    Anthropic's OpenAI-compatible endpoint).  Both use the same
+    OpenAI-compatible JSON format, so no message translation is needed.
 
     Returns a message dict with ``content`` and optionally ``tool_calls``.
     When *stream* is True, text content is printed chunk-by-chunk as it
@@ -139,20 +190,36 @@ def call_deepseek(
     if session is None:
         session = requests  # use module-level .post (testable via mock)
 
+    provider = config.api_provider
+
     # Incremental cleaning: only clean messages appended since last call.
     # This avoids O(n) deep-copy of the entire message list on every API call.
     list_id = id(messages)
-    cached_len, clean_messages = _clean_messages_cache.get(list_id, (0, []))
+    cached_entry = _clean_messages_cache.get(list_id)
+    if cached_entry is not None:
+        cached_len, cached_provider, clean_messages = cached_entry
+    else:
+        cached_len, cached_provider, clean_messages = 0, provider, []
+
     current_len = len(messages)
-    if list_id in _clean_messages_cache and cached_len >= current_len:
+
+    # Invalidate cache if provider changed mid-session
+    if cached_provider != provider:
+        _clean_messages_cache.clear()
+        cached_len, cached_provider, clean_messages = 0, provider, []
+
+    if cached_len >= current_len:
         # Same list, no new messages — reuse cache as-is
         pass
     else:
         # Clean any new messages beyond the cached length
         for i in range(cached_len, current_len):
-            clean_messages.append(_clean_message(messages[i], i))
-        _clean_messages_cache[list_id] = (current_len, clean_messages)
+            clean_messages.append(_clean_message(messages[i], i, provider))
+        _clean_messages_cache[list_id] = (current_len, provider, clean_messages)
 
+    payload = _build_payload(config, messages, clean_messages)
+
+    # Anthropic's OpenAI-compatible endpoint uses Bearer auth (same as DeepSeek)
     r = _request_with_retry(
         session,
         config.api_url,
@@ -161,18 +228,7 @@ def call_deepseek(
             "Content-Type": "application/json",
             "User-Agent": "mini_agent/1.0",
         },
-        json={
-            "model": config.routing_model if (config.routing_model and _compute_complexity(messages) == "simple") else config.model,
-            "messages": clean_messages,
-            "tools": TOOLS,
-            "stream": config.stream,
-            "temperature": config.temperature,
-            "max_tokens": config.max_tokens,
-            "frequency_penalty": config.frequency_penalty,
-            "presence_penalty": config.presence_penalty,
-            **({"stop": config.stop_sequences} if config.stop_sequences else {}),
-            **({"response_format": {"type": config.response_format}} if config.response_format else {}),
-        },
+        json=payload,
         stream=config.stream,
         cancel_event=cancel_event,
     )
@@ -191,6 +247,10 @@ def call_deepseek(
         return _parse_stream(r, on_token, on_tool_ready)
     else:
         return r.json()["choices"][0]["message"]
+
+
+# Backward-compatible alias
+call_deepseek = call_llm
 
 
 def clear_api_cache() -> None:

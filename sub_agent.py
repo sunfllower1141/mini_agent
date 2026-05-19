@@ -21,7 +21,7 @@ import uuid
 
 from safety import ReadSafetyGate, WriteSafetyGate
 from agent_runtime import SubAgentResult, AgentRuntime
-from api import APIError, call_deepseek, truncate_content
+from api import APIError, call_llm, truncate_content
 
 
 # ---------------------------------------------------------------------------
@@ -372,7 +372,7 @@ def run_sub_agent(
                     "_transient": True,
                 })
 
-            msg = call_deepseek(
+            msg = call_llm(
                 messages, config,
                 session=requests,
                 cancel_event=cancel_event,

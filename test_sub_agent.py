@@ -404,7 +404,7 @@ class TestRecursionGuard:
             mcp_servers = []
 
         for tool_name in blocked:
-            with patch("sub_agent.call_deepseek") as mock_llm:
+            with patch("sub_agent.call_llm") as mock_llm:
                 # Response 1: blocked tool call; Response 2: text (exits loop)
                 mock_llm.side_effect = [
                     {

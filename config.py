@@ -24,15 +24,32 @@ except ImportError:
 CONFIG_FILENAME = ".mini_agent.toml"
 MEMORY_FILENAME = ".mini_agent_memory.db"
 
-DEFAULT_MODEL        = "deepseek-v4-pro"
-DEFAULT_SUB_AGENT_MODEL = "deepseek-v4-pro"
+DEFAULT_API_PROVIDER = "deepseek"  # "deepseek" or "claude"
+
+# DeepSeek defaults
+DEEPSEEK_DEFAULT_MODEL         = "deepseek-v4-pro"
+DEEPSEEK_DEFAULT_SUB_AGENT_MODEL = "deepseek-v4-pro"
+DEEPSEEK_DEFAULT_API_URL       = "https://api.deepseek.com/v1/chat/completions"
+DEEPSEEK_DEFAULT_MAX_TOKENS    = 200_000
+DEEPSEEK_DEFAULT_ROUTING_MODEL = ""  # disabled by default; set to "deepseek-v4-flash" to enable
+
+# Claude defaults (via OpenAI-compatible endpoint)
+CLAUDE_DEFAULT_MODEL           = "claude-sonnet-4-5"
+CLAUDE_DEFAULT_SUB_AGENT_MODEL = "claude-sonnet-4-5"
+CLAUDE_DEFAULT_API_URL         = "https://api.anthropic.com/v1/chat/completions"
+CLAUDE_DEFAULT_MAX_TOKENS      = 32_000
+# Claude has no cheap routing model; leave disabled
+CLAUDE_DEFAULT_ROUTING_MODEL   = ""
+
+DEFAULT_MODEL        = DEEPSEEK_DEFAULT_MODEL
+DEFAULT_SUB_AGENT_MODEL = DEEPSEEK_DEFAULT_SUB_AGENT_MODEL
 DEFAULT_SUB_AGENT_MAX_CONCURRENT = 10
-DEFAULT_API_URL      = "https://api.deepseek.com/v1/chat/completions"
-DEFAULT_API_KEY      = ""  # set via DEEPSEEK_API_KEY env var, .env file, or .mini_agent.toml
+DEFAULT_API_URL      = DEEPSEEK_DEFAULT_API_URL
+DEFAULT_API_KEY      = ""  # set via DEEPSEEK_API_KEY/CLAUDE_API_KEY env var, .env file, or .mini_agent.toml
 DEFAULT_MAX_MESSAGES = 500
-DEFAULT_MAX_TOKENS   = 200_000
+DEFAULT_MAX_TOKENS   = DEEPSEEK_DEFAULT_MAX_TOKENS
 DEFAULT_SUB_AGENT_MAX_TURNS = 25
-DEFAULT_ROUTING_MODEL = ""  # disabled by default; set to "deepseek-v4-flash" to enable
+DEFAULT_ROUTING_MODEL = ""  # disabled by default; set to provider-specific cheap model
 DEFAULT_EXA_API_KEY = ""  # set via EXA_API_KEY env var or .mini_agent.toml
 DEFAULT_OPENAI_API_KEY = ""  # set via OPENAI_API_KEY env var or .mini_agent.toml
 
@@ -48,11 +65,15 @@ HTTP_POOL_MAXSIZE       = 4    # max total pool size
 
 # Environment variable names used during config loading
 ENV_DEEPSEEK_API_KEY = "DEEPSEEK_API_KEY"
+ENV_CLAUDE_API_KEY   = "CLAUDE_API_KEY"
 ENV_SUB_AGENT_API_KEY = "SUB_AGENT_API_KEY"
 ENV_DEEPSEEK_API_URL = "DEEPSEEK_API_URL"
-ENV_AGENT_WORKSPACE   = "AGENT_WORKSPACE"
-ENV_EXA_API_KEY       = "EXA_API_KEY"
-ENV_OPENAI_API_KEY    = "OPENAI_API_KEY"
+ENV_CLAUDE_API_URL   = "CLAUDE_API_URL"
+ENV_CLAUDE_MODEL     = "CLAUDE_MODEL"
+ENV_API_PROVIDER     = "API_PROVIDER"  # "deepseek" or "claude" — overrides auto-detection
+ENV_AGENT_WORKSPACE  = "AGENT_WORKSPACE"
+ENV_EXA_API_KEY      = "EXA_API_KEY"
+ENV_OPENAI_API_KEY   = "OPENAI_API_KEY"
 
 # CLI flag strings (matched against sys.argv or argparse namespace)
 CLI_STREAM           = "--stream"
@@ -94,6 +115,7 @@ class AgentConfig:
     4. Hard-coded defaults
     """
 
+    api_provider: str = DEFAULT_API_PROVIDER  # "deepseek" or "claude"
     model: str = DEFAULT_MODEL
     sub_agent_model: str = DEFAULT_SUB_AGENT_MODEL
     sub_agent_api_key: str = DEFAULT_API_KEY  # separate key for sub-agents
@@ -167,6 +189,7 @@ AgentConfig._toml_cache = {}
 
 # Keys recognised in TOML and their expected types
 _TOML_SCHEMA: dict[str, type] = {
+    "api_provider": str,
     "model": str,
     "sub_agent_model": str,
     "sub_agent_api_key": str,
@@ -296,14 +319,60 @@ def _load_dotenv(workspace: str) -> None:
 
 def _apply_env_overrides(config: AgentConfig) -> None:
     """Phase 2: apply environment variable overrides on top of TOML/defaults."""
-    if os.environ.get(ENV_DEEPSEEK_API_KEY):
+    # --- explicit provider override ---
+    if os.environ.get(ENV_API_PROVIDER):
+        config.api_provider = os.environ[ENV_API_PROVIDER]
+
+    # --- auto-detect provider from available keys (if not explicitly set) ---
+    has_deepseek = bool(os.environ.get(ENV_DEEPSEEK_API_KEY))
+    has_claude = bool(os.environ.get(ENV_CLAUDE_API_KEY))
+    if not os.environ.get(ENV_API_PROVIDER):
+        if has_claude and not has_deepseek:
+            config.api_provider = "claude"
+        elif has_deepseek:
+            config.api_provider = "deepseek"
+
+    # --- apply provider-specific defaults if switching ---
+    if config.api_provider == "claude":
+        if not os.environ.get(ENV_DEEPSEEK_API_URL) and config.api_url == DEEPSEEK_DEFAULT_API_URL:
+            config.api_url = CLAUDE_DEFAULT_API_URL
+        if config.model == DEEPSEEK_DEFAULT_MODEL:
+            config.model = CLAUDE_DEFAULT_MODEL
+        if config.sub_agent_model == DEEPSEEK_DEFAULT_SUB_AGENT_MODEL:
+            config.sub_agent_model = CLAUDE_DEFAULT_SUB_AGENT_MODEL
+        if config.max_tokens == DEEPSEEK_DEFAULT_MAX_TOKENS:
+            config.max_tokens = CLAUDE_DEFAULT_MAX_TOKENS
+        if config.routing_model == DEEPSEEK_DEFAULT_ROUTING_MODEL:
+            config.routing_model = CLAUDE_DEFAULT_ROUTING_MODEL
+
+    # --- API keys ---
+    if has_deepseek:
         config.api_key = os.environ[ENV_DEEPSEEK_API_KEY]
+    if has_claude:
+        config.api_key = os.environ[ENV_CLAUDE_API_KEY]
     if os.environ.get(ENV_SUB_AGENT_API_KEY):
         config.sub_agent_api_key = os.environ[ENV_SUB_AGENT_API_KEY]
+    elif has_claude and not os.environ.get(ENV_SUB_AGENT_API_KEY):
+        config.sub_agent_api_key = os.environ[ENV_CLAUDE_API_KEY]
+    elif has_deepseek and not os.environ.get(ENV_SUB_AGENT_API_KEY):
+        config.sub_agent_api_key = os.environ[ENV_DEEPSEEK_API_KEY]
+
+    # --- API URL overrides ---
     if os.environ.get(ENV_DEEPSEEK_API_URL):
         config.api_url = os.environ[ENV_DEEPSEEK_API_URL]
+    if os.environ.get(ENV_CLAUDE_API_URL):
+        config.api_url = os.environ[ENV_CLAUDE_API_URL]
+
+    # --- model override ---
+    if os.environ.get(ENV_CLAUDE_MODEL):
+        config.model = os.environ[ENV_CLAUDE_MODEL]
+        config.sub_agent_model = os.environ[ENV_CLAUDE_MODEL]
+
+    # --- workspace ---
     if os.environ.get(ENV_AGENT_WORKSPACE):
         config.workspace = os.environ[ENV_AGENT_WORKSPACE]
+
+    # --- third-party keys ---
     if os.environ.get(ENV_EXA_API_KEY):
         config.exa_api_key = os.environ[ENV_EXA_API_KEY]
     if os.environ.get(ENV_OPENAI_API_KEY):
