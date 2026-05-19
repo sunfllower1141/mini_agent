@@ -1163,30 +1163,14 @@ def _agent_cancel_summary(args: dict) -> str:
 @_register("write_scratchpad")
 def _write_scratchpad(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
     """Write content to the agent's persistent working scratchpad."""
-    import os as _os
     content_text = args["content"]
 
-    # Find the MemoryStore instance via _TOOL_CONTEXT
-    # The scratchpad is stored in the SQLite DB alongside messages
-    scratchpad_path = _TOOL_CONTEXT.scratchpad_path or ""
-    if scratchpad_path:
+    # Use the shared MemoryStore connection to avoid SQLite "database is locked"
+    # errors caused by opening a second connection to the same WAL-mode file.
+    memory_store = getattr(_TOOL_CONTEXT, "_memory_store", None)
+    if memory_store is not None:
         try:
-            import sqlite3
-            conn = sqlite3.connect(scratchpad_path)
-            # Ensure the table exists (DB may not have been through MemoryStore.__init__)
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS scratchpad ("
-                "id INTEGER PRIMARY KEY CHECK (id = 1),"
-                "content TEXT NOT NULL DEFAULT ''"
-                ")"
-            )
-            conn.execute("INSERT OR IGNORE INTO scratchpad (id, content) VALUES (1, '')")
-            conn.execute(
-                "INSERT OR REPLACE INTO scratchpad (id, content) VALUES (1, ?)",
-                (content_text,),
-            )
-            conn.commit()
-            conn.close()
+            memory_store.set_scratchpad(content_text)
             _TOOL_CONTEXT._scratchpad_updated = True
             return ToolResult(
                 success=True,
@@ -1198,7 +1182,8 @@ def _write_scratchpad(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> 
                 content=f"Failed to update scratchpad: {e}",
             )
 
-    # Fallback: store in a file
+    # Fallback: file-based scratchpad (no MemoryStore available)
+    import os as _os
     fallback = _os.path.join(
         _TOOL_CONTEXT.workspace or ".", ".mini_agent_scratchpad.md"
     )
