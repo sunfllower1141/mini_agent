@@ -45,6 +45,7 @@ import json
 import os
 import sys
 import time
+import threading
 
 import requests
 
@@ -55,8 +56,8 @@ from safety import ReadSafetyGate, WriteSafetyGate
 from memory import MemoryStore
 from terminal import c, DIM, _CYAN, _YELLOW, _GREEN, _RED
 from tools import set_context, build_symbol_index
-import tools  # for auto-wake sub-agent check
-import tools  # for auto-wake sub-agent check
+from tools import _WS_AGENT_ID as _ws_agent_id
+import ws_server
 
 
 # ---------------------------------------------------------------------------
@@ -116,6 +117,16 @@ def main() -> None:
 
     _log(config.verbose, f"mini_agent — workspace: {write_gate.workspace_root}")
 
+    # --- Start WebSocket server for Electron UI ---
+    try:
+        ws_server.start()
+        _ws_agent_id = "orchestrator"
+        # Emit initial workspace tree
+        ws_server.emit_graph_init(workspace)
+        _log(config.verbose, "WebSocket server started on ws://127.0.0.1:8765")
+    except Exception:
+        _log(config.verbose, "WebSocket server not started (websockets may not be installed)")
+
     # Session stats
     stats = {"turns": 0, "tool_calls": 0}
     _log(config.verbose, f"model: {config.model}  stream: {config.stream}")
@@ -145,17 +156,59 @@ def main() -> None:
         return False
 
     session = session_data["session"]
+    
+    # --- Non-blocking stdin: background thread reads lines into a queue ---
+    import queue as _q
+    _stdin_queue: _q.Queue = _q.Queue()
+    def _read_stdin():
+        while True:
+            try:
+                line = sys.stdin.readline()
+                if not line:
+                    _stdin_queue.put(None)  # EOF
+                    return
+                _stdin_queue.put(line.strip())
+            except Exception:
+                _stdin_queue.put(None)
+                return
+    _stdin_thread = threading.Thread(target=_read_stdin, daemon=True, name="stdin-reader")
+    _stdin_thread.start()
+
     try:
         while True:
             # --- Auto-wake: check sub-agents before blocking on input ---
             if _auto_wake_subagents(messages):
                 continue
-            try:
-                user_input = input("> ").strip()
-            except (EOFError, KeyboardInterrupt):
-                print("\nGoodbye.")
-                messages = memory.save(messages)
-                break
+
+            # --- Check both stdin and WS inbox (non-blocking poll with sleep) ---
+            user_input = ""
+            while not user_input:
+                # Check WS inbox first
+                try:
+                    ws_input = ws_server.ui_inbox.get_nowait()
+                    event_type, data = ws_input
+                    if event_type == "ui.send_message":
+                        user_input = data.get("text", "").strip()
+                    elif event_type == "ui.click_node":
+                        user_input = f"Can you look at {data.get('file_path', '')} and tell me what it does?"
+                    if user_input:
+                        print(f"\n  [Electron] {user_input}")
+                        break
+                except Exception:
+                    pass
+
+                # Check stdin
+                try:
+                    stdin_line = _stdin_queue.get(timeout=0.5)
+                    if stdin_line is None:  # EOF
+                        print("\nGoodbye.")
+                        messages = memory.save(messages)
+                        return
+                    if stdin_line:
+                        user_input = stdin_line
+                        break
+                except _q.Empty:
+                    pass
 
             if user_input == "/init":
                 from tools.file_ops import _init_rules

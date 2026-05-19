@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>cosmos.gl Graph MVP</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; background: #0d1117; }
+  #graph { width: 100%; height: 100%; }
+  #status { position: fixed; bottom: 12px; left: 12px; color: #8b949e; font: 12px monospace; }
+</style>
+</head>
+<body>
+<div id="graph"></div>
+<div id="status">loading…</div>
+<script type="module">
+  import { Graph } from './node_modules/@cosmos.gl/graph/dist/index.js';
+
+  const status = document.getElementById('status');
+  function log(msg) { status.textContent = msg; console.log(msg); }
+
+  try {
+    // --- Build test data: 8 nodes, 10 edges ---
+    const n = 8;
+    const positions = new Float32Array([
+      0,   0,
+      60, -30,
+      120, 0,
+      180,-30,
+      60,  60,
+      120, 60,
+      180, 60,
+      240, 30,
+    ]);
+
+    const links = new Float32Array([
+      0,1, 1,2, 2,3,
+      0,4, 4,5, 5,3,
+      1,4, 2,5,
+      5,6, 6,3,
+    ]);
+
+    // Colors: 0-255 RGB, 0-1 alpha
+    const colors = new Float32Array([
+      88,166,255,1.0,
+      88,166,255,1.0,
+      88,166,255,1.0,
+      88,166,255,1.0,
+      255,136,62,1.0,
+      63,185,80,1.0,
+      188,140,255,1.0,
+      255,100,100,1.0,
+    ]);
+
+    const sizes = new Float32Array([8,8,8,8,6,6,6,6]);
+
+    log('creating Graph...');
+
+    const graph = new Graph(document.getElementById('graph'), {
+      backgroundColor: '#0d1117',
+      spaceSize: 4096,
+      simulationDecay: 3000,
+      simulationGravity: 0.12,
+      simulationRepulsion: 0.6,
+      simulationLinkSpring: 0.3,
+      simulationLinkDistance: 40,
+      simulationFriction: 0.88,
+      enableDrag: true,
+      curvedLinks: true,
+      curvedLinkSegments: 12,
+      curvedLinkWeight: 0.4,
+      renderLinks: true,
+      fitViewOnInit: true,
+      fitViewDelay: 400,
+      fitViewPadding: 0.2,
+      pointSizeScale: 1.0,
+      linkWidthScale: 0.6,
+      onClick: (index) => {
+        log(index !== undefined ? `clicked node ${index}` : 'clicked background');
+      },
+    });
+
+    log('setting data...');
+    graph.setPointPositions(positions);
+    graph.setPointColors(colors);
+    graph.setPointSizes(sizes);
+    graph.setLinks(links);
+
+    log('rendering...');
+    graph.render();
+
+    log('✅ graph rendered — 8 nodes, 10 edges');
+  } catch (err) {
+    log('❌ ERROR: ' + err.message);
+    console.error(err);
+  }
+</script>
+</body>
+</html>

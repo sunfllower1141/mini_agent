@@ -165,6 +165,10 @@ _TASK_REGISTRY: dict[str, subprocess.Popen] = {}  # background shell task regist
 _FILE_RESERVATIONS: dict[str, str] = {}
 _FILE_RESERVATIONS_LOCK = threading.Lock()
 
+# WebSocket agent ID — set by the agent loop before each turn.
+# execute_tool reads this to tag events with the originating agent.
+_WS_AGENT_ID: str = ""
+
 # Sub-agent runtime registry (lazy init in config.init_session)
 _AGENT_RUNTIME = None  # AgentRuntime — set by init_session
 _MCP_MANAGER = None    # McpClientManager — set by init_session
@@ -727,6 +731,22 @@ def execute_tool(
     if isinstance(args, dict):
         pipe_config = args.pop("_pipe", None)
 
+    # --- WebSocket event: tool.start (try to extract file_path from args) ---
+    _file_path = ""
+    if isinstance(args, dict):
+        _file_path = str(args.get("path", args.get("file_path", "")))
+    if _file_path:
+        try:
+            from ws_server import emitter
+            emitter.emit("tool.start", {
+                "name": name,
+                "args_preview": json.dumps(args, default=str)[:200],
+                "file_path": _file_path,
+                "agent_id": _WS_AGENT_ID,
+            })
+        except Exception:
+            pass  # Never let emitter fail a tool call
+
     # Check cache for read-only tools (skip if on_output is streaming)
     cache_key = ""
     if on_output is None and name in _CACHEABLE:
@@ -835,6 +855,22 @@ def execute_tool(
     # Cache successful read-only results (only when not streaming)
     if cache_key and result.success:
         _TOOL_CACHE[cache_key] = result
+
+    # --- WebSocket event: tool.result ---
+    if _file_path:
+        try:
+            from ws_server import emitter, emit_agent_position
+            emitter.emit("tool.result", {
+                "name": name,
+                "success": result.success,
+                "summary": result.content[:300],
+                "file_path": _file_path,
+                "agent_id": _WS_AGENT_ID,
+            })
+            # Update persistent agent position (cwd pulsing)
+            emit_agent_position(_WS_AGENT_ID, _file_path)
+        except Exception:
+            pass
 
     return result
 

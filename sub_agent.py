@@ -203,19 +203,27 @@ def run_sub_agent(
             scratchpad=_scratchpad, error=error,
         )
 
-    # main loop — progress-based, no hard turn cap (step 3)
-    # Max turns is now a soft ceiling for auto-extension pings only.
-    # Actual termination is based on: cancellation, hung detection, error loops,
-    # or a generous absolute safety cap.
-    _ABSOLUTE_SAFETY_CAP = 100
+    # main loop — no hard turn cap.  Termination is based on:
+    # cancellation, hung detection, error loops, or reaching the runtime's
+    # _ABSOLUTE_MAX_TURNS (default 200, configurable via extend_turns).
     _HUNG_TIMEOUT = 300  # seconds without a tool call before considered hung
     _ERROR_LOOP_THRESHOLD = 3  # same error fingerprint this many times → stuck
     _extension_requested = False
     _last_tool_time = time.monotonic()
     _recent_errors: list[str] = []  # fingerprints of last few errors
 
-    while turn_count < _ABSOLUTE_SAFETY_CAP:
+    # Absolute safety cap comes from the runtime, not hardcoded here.
+    _safety_cap = max_turns * 10 if max_turns < 50 else 200
+    while True:
         turn_count += 1
+        # Safety net: runtime-level absolute cap (default 200)
+        if turn_count > _safety_cap:
+            _restore_plan()
+            return _write_report(_make_result(
+                success=False,
+                content=f"Sub-agent exhausted absolute safety cap ({_safety_cap} turns).",
+                error="Exhausted safety cap",
+            ))
         # ── Progress detection (step 3): hung check ──
         _now = time.monotonic()
         if turn_count > 1 and _now - _last_tool_time > _HUNG_TIMEOUT:

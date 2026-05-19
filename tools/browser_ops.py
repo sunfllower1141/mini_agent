@@ -104,7 +104,7 @@ def _open_url(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResul
                           content="URL must start with http:// or https://")
 
     try:
-        opened = _webbrowser.open(url, new=2, encoding="utf-8")  # new=2 → new tab if possible
+        opened = _webbrowser.open(url, new=2)  # new=2 → new tab if possible
         if opened:
             return ToolResult(success=True,
                               content=f"Opened {url} in default browser.")
@@ -212,13 +212,48 @@ def _extract_interactive_elements(page) -> list[dict]:
             '[onclick]', '[tabindex]', '[contenteditable="true"]'
         ];
         const selector = interactive.join(',');
+
+        function resolveName(el) {
+            // 1. aria-label (explicit)
+            let name = el.getAttribute('aria-label') || '';
+            if (name) return name;
+
+            // 2. placeholder
+            name = el.getAttribute('placeholder') || '';
+            if (name) return name;
+
+            // 3. associated <label for="..."> for form elements with an id
+            if (el.id) {
+                const label = document.querySelector('label[for="' + CSS.escape(el.id) + '"]');
+                if (label) {
+                    name = label.textContent.trim().slice(0, 80);
+                    if (name) return name;
+                }
+            }
+
+            // 4. wrapping <label> parent
+            const parentLabel = el.closest('label');
+            if (parentLabel) {
+                // Get label text excluding the element's own text
+                const clone = parentLabel.cloneNode(true);
+                const child = clone.querySelector(el.tagName);
+                if (child) child.remove();
+                name = clone.textContent.trim().slice(0, 80);
+                if (name) return name;
+            }
+
+            // 5. fallback to element's own text content
+            return el.textContent.trim().slice(0, 80) || '';
+        }
+
         const seen = new Set();
         return Array.from(document.querySelectorAll(selector))
             .filter(el => {
                 const rect = el.getBoundingClientRect();
                 const visible = rect.width > 0 && rect.height > 0;
                 if (!visible) return false;
-                const key = el.tagName + '|' + (el.getAttribute('aria-label') || el.textContent || '').trim();
+                const name = resolveName(el);
+                const key = el.tagName + '|' + name;
                 if (seen.has(key)) return false;
                 seen.add(key);
                 return true;
@@ -226,10 +261,7 @@ def _extract_interactive_elements(page) -> list[dict]:
             .map(el => ({
                 tag: el.tagName.toLowerCase(),
                 role: el.getAttribute('role') || el.tagName.toLowerCase(),
-                name: (el.getAttribute('aria-label')
-                    || el.getAttribute('placeholder')
-                    || el.textContent.trim().slice(0, 80)
-                    || ''),
+                name: resolveName(el),
                 type: el.getAttribute('type') || '',
                 disabled: !!el.disabled,
                 checked: el.getAttribute('aria-checked') || '',

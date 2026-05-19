@@ -35,3 +35,4 @@ $HOME/
 .mini_agent.toml
 *.toml
 reports/
+electron-ui/node_modules/

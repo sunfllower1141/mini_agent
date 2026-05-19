@@ -44,6 +44,8 @@ from prompt import build_system_prompt
 from safety import ReadSafetyGate, WriteSafetyGate
 from memory import MemoryStore
 from tools import set_context, build_symbol_index
+from tools import _WS_AGENT_ID as _ws_agent_id
+import ws_server
 
 
 # ---------------------------------------------------------------------------
@@ -498,6 +500,14 @@ class MiniAgentTUI(App):
         self.messages = data["messages"]
         self.session = data["session"]
 
+        # --- Start WebSocket server for Electron UI ---
+        try:
+            ws_server.start()
+            _ws_agent_id = "orchestrator"
+            ws_server.emit_graph_init(workspace)
+        except Exception:
+            pass  # WebSocket is optional
+
         t = self._tui_theme
         tools_log = self.query_one("#tools-log", RichLog)
         tools_log.write(f"[bold {t.accent}]mini_agent[/]  —  {self.config.model}")
@@ -547,6 +557,7 @@ class MiniAgentTUI(App):
         self._refresh_git_status()
         self.set_interval(1/60, self._drain)          # 60 fps token drain (battery-friendly)
         self.set_interval(30.0, self._update_status_bar)
+        self.set_interval(0.5, self._poll_ws_inbox)    # Check Electron UI messages
 
     # ------------------------------------------------------------------
     # Status bar — stolen from Agent Terminal
@@ -568,6 +579,26 @@ class MiniAgentTUI(App):
         except Exception:
             self._git_branch = ""
             self._git_dirty = False
+
+    def _poll_ws_inbox(self) -> None:
+        """Check for messages from the Electron UI via WebSocket."""
+        try:
+            from ws_server import ui_inbox
+            event_type, data = ui_inbox.get_nowait()
+            if event_type == "ui.send_message":
+                user_input = data.get("text", "").strip()
+            elif event_type == "ui.click_node":
+                file_path = data.get("file_path", "")
+                user_input = f"Can you look at {file_path} and tell me what it does?"
+            else:
+                return
+
+            if user_input:
+                input_widget = self.query_one("#input", TextArea)
+                input_widget.text = user_input
+                self._submit()
+        except Exception:
+            pass  # Queue empty or other transient error
 
     def _update_status_bar(self) -> None:
         """Refresh the Footer with live metrics every 2 seconds."""

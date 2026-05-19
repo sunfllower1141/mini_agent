@@ -1,0 +1,25 @@
+{
+  "name": "electron-ui",
+  "version": "1.0.0",
+  "description": "",
+  "main": "main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "start": "./node_modules/.bin/electron .",
+    "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && ./node_modules/.bin/electron . --dev\""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@cosmos.gl/graph": "^2.6.4",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.0.2",
+    "electron": "^42.1.0",
+    "vite": "^8.0.13"
+  }
+}
