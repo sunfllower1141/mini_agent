@@ -564,6 +564,7 @@ class MiniAgentTUI(App):
             child.remove()
         self._thinking_buf = ""
         self._in_thinking = False
+        self._current_thinking = None
         self._current_response = None
         self._current_response_text = ""
         self._response_md.styles.display = "none"
@@ -962,16 +963,18 @@ class MiniAgentTUI(App):
         if text.startswith(THINKING_START):
             self._in_thinking = True
             self._thinking_buf = ""
+            self._current_thinking = MsgThinking("")
+            self._chat_view.mount(self._current_thinking)
             return
         if text == THINKING_END:
             self._in_thinking = False
-            if self._thinking_buf.strip():
-                self._chat_view.mount(MsgThinking(self._thinking_buf.strip()))
-                self._chat_view.scroll_end(animate=False)
-            self._thinking_buf = ""
+            self._current_thinking = None
             return
         if self._in_thinking:
             self._thinking_buf += text
+            if self._current_thinking is not None:
+                self._current_thinking.update(self._thinking_buf.strip())
+                self._chat_view.scroll_end(animate=False)
             return
 
         # Streaming content — update (or create) current MsgAgent widget
