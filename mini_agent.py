@@ -103,9 +103,81 @@ def _export_conversation(messages: list[dict], workspace: str) -> str:
 # Main loop
 # ---------------------------------------------------------------------------
 
+def _launch_ink_ui(cli) -> int:
+    """Spawn the Ink CLI as a child process and replace ourselves with it.
+
+    Returns the child exit code.  Falls back to the plain REPL if Node
+    or the bundle isn't available (caller should check the return value).
+    Pass through the argparse namespace so flags like --workspace / --approve
+    flow into the Python backend.
+    """
+    import shutil
+    import subprocess as _sp
+
+    root = os.path.dirname(os.path.abspath(__file__))
+    bundle = os.path.join(root, "ui", "dist", "cli.js")
+    if not os.path.isfile(bundle):
+        return 127      # signal "build me first"
+
+    node = shutil.which("node")
+    if not node:
+        return 127      # signal "install node"
+
+    # Forward the user's argv to the Ink CLI verbatim, minus --legacy-tui/--no-ui
+    # (those would re-enter the dispatcher in a loop).
+    forward = []
+    skip_next = False
+    for arg in sys.argv[1:]:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg in ("--no-ui", "--legacy-tui"):
+            continue
+        forward.append(arg)
+
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    if getattr(cli, "theme", None):
+        env.setdefault("MINI_AGENT_THEME", cli.theme)
+
+    try:
+        proc = _sp.run([node, bundle, *forward], env=env)
+        return proc.returncode
+    except KeyboardInterrupt:
+        return 130
+
+
+def _launch_legacy_tui() -> int:
+    """Hand off to the old Textual TUI (tui.py)."""
+    try:
+        import tui as _tui
+    except ImportError as exc:
+        print(f"Legacy TUI unavailable: {exc}", file=sys.stderr)
+        return 1
+    app = _tui.MiniAgentTUI()
+    app.run()
+    return 0
+
+
 def main() -> None:
     # Parse with argparse (gives --help for free)
     cli = parse_args()
+
+    # ----- UI dispatch -----
+    if getattr(cli, "legacy_tui", None):
+        sys.exit(_launch_legacy_tui())
+
+    if not getattr(cli, "no_ui", None):
+        rc = _launch_ink_ui(cli)
+        if rc == 127:
+            print("[mini_agent] Ink UI not available "
+                  "(missing Node or ui/dist/cli.js). "
+                  "Run 'cd ui && npm install && npm run build', "
+                  "or pass --no-ui to use the plain REPL.",
+                  file=sys.stderr)
+            # Fall through to the plain REPL so the user is never blocked.
+        else:
+            sys.exit(rc)
 
     workspace = resolve_workspace(override=cli.workspace)
     session_data = init_session(workspace, cli_args=cli)

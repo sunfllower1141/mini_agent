@@ -48,6 +48,11 @@ _VACUUM  = "VACUUM"
 # page count.  Avoids running VACUUM on every full-rewrite save.
 _VACUUM_FREELIST_THRESHOLD = 1000
 
+# Save retry: when the database is locked, retry with backoff before
+# surfacing the warning to the user.
+_SAVE_MAX_RETRIES = 3
+_SAVE_RETRY_DELAY = 0.25  # seconds, multiplied by attempt number
+
 
 # ---------------------------------------------------------------------------
 # Named constants (extracted from magic numbers)
@@ -993,48 +998,62 @@ class MemoryStore:
                 self._token_count += _estimate_tokens(summary_msg)
 
         self._ensure_parent()
-        try:
-            conn = self._get_conn()
-            conn.execute("BEGIN IMMEDIATE")
-            # Incremental save: if no pruning happened and we only
-            # appended messages, INSERT just the new rows instead of
-            # rewriting everything.
-            need_full_rewrite = (bool(pruned) or compressed
-                                 or len(kept) < self._last_saved_count)
-            if need_full_rewrite:
-                conn.execute(_DELETE)
-                conn.executemany(
-                    _INSERT,
-                    [(m["role"], json.dumps(m)) for m in kept],
-                )
-            else:
-                new_msgs = kept[self._last_saved_count:]
-                if new_msgs:
+        last_exc = None
+        for attempt in range(_SAVE_MAX_RETRIES):
+            try:
+                conn = self._get_conn()
+                conn.execute("BEGIN IMMEDIATE")
+                # Incremental save: if no pruning happened and we only
+                # appended messages, INSERT just the new rows instead of
+                # rewriting everything.
+                need_full_rewrite = (bool(pruned) or compressed
+                                     or len(kept) < self._last_saved_count)
+                if need_full_rewrite:
+                    conn.execute(_DELETE)
                     conn.executemany(
                         _INSERT,
-                        [(m["role"], json.dumps(m)) for m in new_msgs],
+                        [(m["role"], json.dumps(m)) for m in kept],
                     )
-            conn.commit()
-            # After a full rewrite, check freelist bloat and VACUUM if needed.
-            # Avoids VACUUM on every save — only when free pages exceed threshold.
-            if need_full_rewrite:
+                else:
+                    new_msgs = kept[self._last_saved_count:]
+                    if new_msgs:
+                        conn.executemany(
+                            _INSERT,
+                            [(m["role"], json.dumps(m)) for m in new_msgs],
+                        )
+                conn.commit()
+                # After a full rewrite, check freelist bloat and VACUUM if needed.
+                # Avoids VACUUM on every save — only when free pages exceed threshold.
+                if need_full_rewrite:
+                    try:
+                        row = conn.execute("PRAGMA freelist_count").fetchone()
+                        if row and row[0] > _VACUUM_FREELIST_THRESHOLD:
+                            self._start_background_vacuum()
+                    except sqlite3.Error:
+                        pass  # VACUUM is opportunistic; ignore failures
+                self._last_saved_count = len(kept)
+                return kept
+            except sqlite3.Error as exc:
+                last_exc = exc
                 try:
-                    row = conn.execute("PRAGMA freelist_count").fetchone()
-                    if row and row[0] > _VACUUM_FREELIST_THRESHOLD:
-                        self._start_background_vacuum()
-                except sqlite3.Error:
-                    pass  # VACUUM is opportunistic; ignore failures
-            self._last_saved_count = len(kept)
-        except sqlite3.Error as exc:
-            try:
-                conn.rollback()
-            except (sqlite3.Error, AttributeError):
-                pass
-            import sys
-            print(f"Warning: memory save failed: {exc}", file=sys.stderr)
-            return messages  # return original on failure so caller doesn't lose data
+                    conn.rollback()
+                except (sqlite3.Error, AttributeError):
+                    pass
+                if attempt < _SAVE_MAX_RETRIES - 1:
+                    import time
+                    time.sleep(_SAVE_RETRY_DELAY * (attempt + 1))
+                    # Force a fresh connection on retry — the old one
+                    # may still be tangled in the failed transaction.
+                    if self._conn is not None:
+                        try:
+                            self._conn.close()
+                        except sqlite3.Error:
+                            pass
+                        self._conn = None
 
-        return kept
+        import sys
+        print(f"Warning: memory save failed: {last_exc}", file=sys.stderr)
+        return messages  # return original on failure so caller doesn't lose data
 
     def clear(self) -> None:
         """Remove all messages and reclaim disk space."""

@@ -38,6 +38,7 @@ from textual.binding import Binding
 import requests
 
 from config import AgentConfig, resolve_workspace, init_session, parse_args, build_startup_context
+from api import APIError
 from llm import run_agent_turn
 from stream import THINKING_START, THINKING_END
 from prompt import build_system_prompt
@@ -334,7 +335,7 @@ class AgentWorker(threading.Thread):
                 session=self.session,
                 approve_callback=self.approve_callback,
             )
-        except (requests.RequestException, RuntimeError, ValueError) as e:
+        except (APIError, requests.RequestException, RuntimeError, ValueError) as e:
             self.out.put(_Error(str(e)))
             self.out.put(_Done(turn_id=self.turn_id))
             return

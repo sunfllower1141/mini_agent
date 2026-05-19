@@ -127,6 +127,7 @@ def _build_payload(
     Claude's OpenAI-compatible endpoint does not support:
     - ``frequency_penalty``
     - ``presence_penalty``
+    - ``top_p`` (rejected by Claude 4.x models; Opus 4.7 rejects all sampling params)
     - ``response_format``
     - ``cache_control`` (handled in ``_clean_message``)
     """
@@ -142,12 +143,12 @@ def _build_payload(
         "messages": clean_messages,
         "tools": TOOLS,
         "stream": config.stream,
-        "temperature": config.temperature,
         "max_tokens": config.max_tokens,
     }
 
     # --- provider-specific parameters ---
     if provider == "deepseek":
+        payload["temperature"] = config.temperature
         payload["frequency_penalty"] = config.frequency_penalty
         payload["presence_penalty"] = config.presence_penalty
         if config.stop_sequences:
@@ -156,9 +157,10 @@ def _build_payload(
             payload["response_format"] = {"type": config.response_format}
 
     elif provider == "claude":
-        # Claude OpenAI-compat: no freq/presence penalties, no response_format
-        # top_p is supported and often useful for Claude
-        payload["top_p"] = 0.9  # sensible default; could be configurable
+        # Claude OpenAI-compat: no temperature, top_p, freq/presence penalties,
+        # or response_format. Claude 4.x models reject top_p + temperature combos,
+        # and Opus 4.7 rejects all sampling parameters entirely.
+        # Rely on Anthropic's defaults for sampling behaviour.
         if config.stop_sequences:
             payload["stop"] = config.stop_sequences
 
