@@ -421,26 +421,29 @@ class MiniAgentTUI(App):
     # ------------------------------------------------------------------
 
     # ------------------------------------------------------------------
-    # Message rendering — left-border bars, self-closing tags, no leakage
+    # Message rendering — │ left-border, self-closing lines
     # ------------------------------------------------------------------
 
     def _box_open(self, log: RichLog, label: str, color: str) -> None:
-        """Open a message block with a colored left-border bar."""
-        # "  [dim color]│[/color][/dim] [color]label[/color]"
-        self._write_to_log(log, f"  [dim {color}]\u2502[/{color}][/dim] [{color}]{label}[/{color}]")
+        """Open a message block with a colored left-border bar.
+        
+        Rich treats [dim #hex] as a single combined style, so a single [/]
+        closes it cleanly.  No nesting, no leakage.
+        """
+        self._write_to_log(log, f"  [dim {color}]\u2502[/] [{color}]{label}[/]")
 
     def _box_line(self, log: RichLog, text: str, color: str) -> None:
         """Content line with continuing left-border bar."""
-        self._write_to_log(log, f"  [dim {color}]\u2502[/{color}][/dim] {text}")
+        self._write_to_log(log, f"  [dim {color}]\u2502[/] {text}")
 
     def _box_empty(self, log: RichLog, color: str) -> None:
         """Empty line preserving the left-border bar."""
-        self._write_to_log(log, f"  [dim {color}]\u2502[/{color}][/dim]")
+        self._write_to_log(log, f"  [dim {color}]\u2502[/]")
 
     def _box_close(self, log: RichLog, color: str, label: str = "") -> None:
         """Close a message block."""
-        suffix = f" [dim]{label}[/dim]" if label else ""
-        self._write_to_log(log, f"  [dim {color}]\u2502[/{color}][/dim]{suffix}")
+        suffix = f" [dim]{label}[/]" if label else ""
+        self._write_to_log(log, f"  [dim {color}]\u2502[/]{suffix}")
 
     def _write_to_log(self, log: RichLog, text: str) -> None:
         """Buffer text for a given RichLog instead of writing immediately.
