@@ -421,25 +421,26 @@ class MiniAgentTUI(App):
     # ------------------------------------------------------------------
 
     # ------------------------------------------------------------------
-    # Box-drawing helpers — consistent dim borders, accent labels
+    # Message rendering — left-border bars, self-closing tags, no leakage
     # ------------------------------------------------------------------
 
     def _box_open(self, log: RichLog, label: str, color: str) -> None:
-        """Buffer the top border of a message box."""
-        self._write_to_log(log, f"[dim {color}]▎ [{color}]{label}[/]")
+        """Open a message block with a colored left-border bar."""
+        # "  [dim color]│[/color][/dim] [color]label[/color]"
+        self._write_to_log(log, f"  [dim {color}]\u2502[/{color}][/dim] [{color}]{label}[/{color}]")
 
     def _box_line(self, log: RichLog, text: str, color: str) -> None:
-        """Buffer a single content line inside a message box."""
-        self._write_to_log(log, f"[dim {color}]▎[/] {text}")
+        """Content line with continuing left-border bar."""
+        self._write_to_log(log, f"  [dim {color}]\u2502[/{color}][/dim] {text}")
 
     def _box_empty(self, log: RichLog, color: str) -> None:
-        """Buffer an empty line inside a message box (side border only)."""
-        self._write_to_log(log, f"[dim {color}]▎[/]")
+        """Empty line preserving the left-border bar."""
+        self._write_to_log(log, f"  [dim {color}]\u2502[/{color}][/dim]")
 
     def _box_close(self, log: RichLog, color: str, label: str = "") -> None:
-        """Buffer the bottom border of a message box."""
-        suffix = f" [dim]{label}[/]" if label else ""
-        self._write_to_log(log, f"[dim {color}]▎[/]{suffix}")
+        """Close a message block."""
+        suffix = f" [dim]{label}[/dim]" if label else ""
+        self._write_to_log(log, f"  [dim {color}]\u2502[/{color}][/dim]{suffix}")
 
     def _write_to_log(self, log: RichLog, text: str) -> None:
         """Buffer text for a given RichLog instead of writing immediately.
