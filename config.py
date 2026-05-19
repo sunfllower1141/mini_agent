@@ -62,7 +62,6 @@ DEFAULT_OPENAI_API_KEY = ""  # set via OPENAI_API_KEY env var or .mini_agent.tom
 
 # Truncation / timeout / connection-pool constants
 TREE_TRUNCATION_LINES   = 60   # max lines in workspace tree before truncating
-STATE_TAIL_LINES        = 50   # last N lines of STATE.txt shown on startup
 GIT_LOG_TIMEOUT         = 5    # seconds to wait for git log
 GIT_LOG_COUNT            = 5    # number of recent commits to show on startup
 HTTP_CONNECT_TIMEOUT    = 30   # seconds to establish HTTP connection
@@ -485,23 +484,7 @@ def build_startup_context(
             break
     parts.append("```\n" + "\n".join(tree_lines) + "\n```")
 
-    # 2. STATE.txt content (if it exists)
-    state_path = os.path.join(workspace, "STATE.txt")
-    if os.path.isfile(state_path):
-        try:
-            with open(state_path, encoding="utf-8") as f:
-                state_content = f.read()
-            # Only include last ~50 lines to keep it brief
-            state_lines = state_content.split("\n")
-            if len(state_lines) > STATE_TAIL_LINES:
-                state_content = "\n".join(state_lines[-STATE_TAIL_LINES:])
-                parts.append("\n## Latest STATE.txt (last 50 lines)\n" + state_content)
-            else:
-                parts.append("\n## STATE.txt\n" + state_content)
-        except OSError:
-            pass
-
-    # 3. Recent git log (last 5 commits, if this is a git repo)
+    # 2. Recent git log (last 5 commits, if this is a git repo)
     try:
         r = _sp.run(["git", "-C", workspace, "log", "--oneline", f"-{GIT_LOG_COUNT}"],
                     capture_output=True, text=True, timeout=GIT_LOG_TIMEOUT)

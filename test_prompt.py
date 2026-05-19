@@ -86,7 +86,6 @@ class TestBuildSystemPrompt(unittest.TestCase):
         self.assertIn("memory.py", prompt)
         self.assertIn("tools/", prompt)
         self.assertIn("safety.py", prompt)
-        self.assertIn("STATE.txt", prompt)
 
     def test_static_prompt_has_behavior_section(self):
         prompt = build_system_prompt(self._config())

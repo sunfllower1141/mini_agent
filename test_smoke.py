@@ -18,9 +18,6 @@ class TestStartupSessionNoCrash(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="mini_agent_smoke_")
-        # Create a minimal STATE.txt so build_startup_context doesn't fail
-        with open(os.path.join(self.tmp, "STATE.txt"), "w") as f:
-            f.write("# test state\n")
 
     def tearDown(self):
         import shutil

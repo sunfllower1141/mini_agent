@@ -165,12 +165,11 @@ def _build_payload(
             payload["stop"] = config.stop_sequences
 
     elif provider == "xai":
-        # xAI/Grok is fully OpenAI-compatible — supports the same parameters as DeepSeek.
+        # xAI/Grok reasoning models (grok-4.3, etc.) do not support
+        # frequency_penalty, presence_penalty, or stop.
+        # Sending them returns an error.
+        # https://docs.x.ai/docs/guides/reasoning
         payload["temperature"] = config.temperature
-        payload["frequency_penalty"] = config.frequency_penalty
-        payload["presence_penalty"] = config.presence_penalty
-        if config.stop_sequences:
-            payload["stop"] = config.stop_sequences
         if config.response_format:
             payload["response_format"] = {"type": config.response_format}
 
