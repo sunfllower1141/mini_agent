@@ -421,25 +421,25 @@ class MiniAgentTUI(App):
     # ------------------------------------------------------------------
 
     # ------------------------------------------------------------------
-    # Box-drawing helpers
+    # Box-drawing helpers — consistent dim borders, accent labels
     # ------------------------------------------------------------------
 
     def _box_open(self, log: RichLog, label: str, color: str) -> None:
-        """Buffer the top border of a message box (rendered on next flush)."""
-        self._write_to_log(log, f"[{color}]╭── {label} ──[/]")
+        """Buffer the top border of a message box."""
+        self._write_to_log(log, f"[dim {color}]▎ [{color}]{label}[/]")
 
     def _box_line(self, log: RichLog, text: str, color: str) -> None:
         """Buffer a single content line inside a message box."""
-        self._write_to_log(log, f"[{color}]│ {text}[/]")
+        self._write_to_log(log, f"[dim {color}]▎[/] {text}")
 
     def _box_empty(self, log: RichLog, color: str) -> None:
         """Buffer an empty line inside a message box (side border only)."""
-        self._write_to_log(log, f"[{color}]│[/]")
+        self._write_to_log(log, f"[dim {color}]▎[/]")
 
     def _box_close(self, log: RichLog, color: str, label: str = "") -> None:
-        """Buffer the bottom border of a message box (rendered on next flush)."""
-        suffix = f" {label}" if label else ""
-        self._write_to_log(log, f"[{color}]╰──[/]{suffix}")
+        """Buffer the bottom border of a message box."""
+        suffix = f" [dim]{label}[/]" if label else ""
+        self._write_to_log(log, f"[dim {color}]▎[/]{suffix}")
 
     def _write_to_log(self, log: RichLog, text: str) -> None:
         """Buffer text for a given RichLog instead of writing immediately.
@@ -607,14 +607,29 @@ class MiniAgentTUI(App):
     # Status bar — stolen from Agent Terminal
     # ------------------------------------------------------------------
 
+    _SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
     def _show_spinner(self) -> None:
-        """Show thinking indicator between chat pane and input area."""
-        t = self._tui_theme
+        """Show animated thinking indicator between chat pane and input area."""
         self._spinner_bar.styles.display = "block"
-        self._spinner_bar.write(f"[{t.pulse}]  ⠼ thinking…[/]")
+        self._spinner_frame = 0
+        self._spinner_timer = self.set_interval(1/8, self._animate_spinner)
+
+    def _animate_spinner(self) -> None:
+        """Cycle to the next braille spinner frame."""
+        if not hasattr(self, "_spinner_frame"):
+            return
+        t = self._tui_theme
+        frame = self._SPINNER_FRAMES[self._spinner_frame % len(self._SPINNER_FRAMES)]
+        self._spinner_frame += 1
+        self._spinner_bar.clear()
+        self._spinner_bar.write(f"[{t.pulse}]{frame} thinking…[/]")
 
     def _hide_spinner(self) -> None:
-        """Hide the thinking indicator."""
+        """Hide and stop the thinking indicator."""
+        if hasattr(self, "_spinner_timer"):
+            self._spinner_timer.stop()
+            del self._spinner_timer
         self._spinner_bar.styles.display = "none"
         self._spinner_bar.clear()
 
@@ -915,7 +930,6 @@ class MiniAgentTUI(App):
         self._history_pos = len(self._history)
         t = self._tui_theme
         chat = self.query_one("#chat-pane", RichLog)
-        chat.write("")
         self._box_open(chat, "You", t.accent)
         self._box_line(chat, _safe(text), t.green)
         self._box_close(chat, t.accent)
