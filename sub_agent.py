@@ -16,6 +16,7 @@ communication (inboxes), dependency tracking, and persistent agents.
 from __future__ import annotations
 
 import threading
+import time
 import uuid
 
 from safety import ReadSafetyGate, WriteSafetyGate
@@ -77,6 +78,12 @@ def run_sub_agent(
         execute_tool, clear_tool_cache, tool_summary,
         _TOOL_CACHE, _MODIFIED_FILES, _CACHEABLE, _TOOL_CONTEXT,
     )
+
+    # ── Plan isolation (step 1): save parent plan, give sub-agent clean slate ──
+    _saved_plan_steps = getattr(_TOOL_CONTEXT, '_plan_steps', [])
+    _saved_plan_done = getattr(_TOOL_CONTEXT, '_plan_done', set())
+    _TOOL_CONTEXT._plan_steps = []
+    _TOOL_CONTEXT._plan_done = set()
     from tools.schema import TOOLS
     from prompt import build_system_prompt
 
@@ -159,17 +166,81 @@ def run_sub_agent(
     import json
     import requests
 
-    # main loop — uses while + dynamic max_turns re-read so parent can extend budget
-    _extension_requested = False  # only ping once when running low
-    while turn_count < max_turns:
+    # ── Helper: restore parent plan state on exit (step 1) ──
+    def _restore_plan():
+        _TOOL_CONTEXT._plan_steps = _saved_plan_steps
+        _TOOL_CONTEXT._plan_done = _saved_plan_done
+
+    # ── Helper: write sub-agent report to file (step 4) ──
+    def _write_report(result: SubAgentResult) -> SubAgentResult:
+        import os as _os
+        _os.makedirs("reports", exist_ok=True)
+        _label = task_id  # unique per sub-agent
+        _path = f"reports/{_label}.md"
+        try:
+            with open(_path, "w", encoding="utf-8") as _f:
+                _f.write(f"# Sub-agent report: {_label}\n\n")
+                _f.write(f"**Task**: {task[:200]}\n\n")
+                _f.write(f"**Success**: {result.success}\n")
+                _f.write(f"**Turns**: {result.turns_used}\n")
+                _f.write(f"**Tool calls**: {result.tool_calls_made}\n")
+                if result.error:
+                    _f.write(f"**Error**: {result.error}\n\n")
+                _f.write(f"\n## Result\n\n{result.content}\n")
+                if result.scratchpad:
+                    _f.write(f"\n## Scratchpad\n\n{result.scratchpad}\n")
+            # Truncate inline content, point to file
+            result.content = f"[report: {_path}] {result.content[:300]}{'...' if len(result.content) > 300 else ''}"
+        except OSError:
+            pass  # can't write report; return inline as fallback
+        return result
+
+    # ── Helper: build SubAgentResult with current local state ──
+    def _make_result(success: bool, content: str, error: str | None = None) -> SubAgentResult:
+        return SubAgentResult(
+            success=success, content=content,
+            turns_used=turn_count, tool_calls_made=tool_calls_made,
+            scratchpad=_scratchpad, error=error,
+        )
+
+    # main loop — progress-based, no hard turn cap (step 3)
+    # Max turns is now a soft ceiling for auto-extension pings only.
+    # Actual termination is based on: cancellation, hung detection, error loops,
+    # or a generous absolute safety cap.
+    _ABSOLUTE_SAFETY_CAP = 100
+    _HUNG_TIMEOUT = 300  # seconds without a tool call before considered hung
+    _ERROR_LOOP_THRESHOLD = 3  # same error fingerprint this many times → stuck
+    _extension_requested = False
+    _last_tool_time = time.monotonic()
+    _recent_errors: list[str] = []  # fingerprints of last few errors
+
+    while turn_count < _ABSOLUTE_SAFETY_CAP:
         turn_count += 1
-        # Re-read max_turns from runtime (parent may have extended it)
+        # ── Progress detection (step 3): hung check ──
+        _now = time.monotonic()
+        if turn_count > 1 and _now - _last_tool_time > _HUNG_TIMEOUT:
+            _restore_plan()
+            return _write_report(_make_result(
+                success=False,
+                content=f"Sub-agent hung: no tool calls for {_HUNG_TIMEOUT}s.",
+                error="Hung (no tool calls)",
+            ))
+        # ── Progress detection: error loop ──
+        if len(_recent_errors) >= _ERROR_LOOP_THRESHOLD and len(set(_recent_errors[-_ERROR_LOOP_THRESHOLD:])) == 1:
+            _restore_plan()
+            return _write_report(_make_result(
+                success=False,
+                content=f"Sub-agent stuck: same error '{_recent_errors[-1]}' {_ERROR_LOOP_THRESHOLD}x consecutively.",
+                error=f"Error loop: {_recent_errors[-1]}",
+            ))
+        # Re-read max_turns from runtime (parent may have extended it) — used
+        # only for the soft budget warning, not as a hard cap.
         runtime_ctx = getattr(_TOOL_CONTEXT, "_agent_runtime", None)
         if runtime_ctx is not None and task_id:
             updated = runtime_ctx.get_max_turns(task_id)
             if updated is not None and updated > max_turns:
                 max_turns = updated
-                _extension_requested = False  # reset so we can ping again if needed
+                _extension_requested = False
 
         # --- Budget warning: auto-ping orchestrator when running low ---
         if not _extension_requested and max_turns - turn_count <= 2:
@@ -354,13 +425,11 @@ def run_sub_agent(
         if not tool_calls:
             messages.append(msg)
             content = msg.get("content", "")
-            return SubAgentResult(
+            _restore_plan()
+            return _write_report(_make_result(
                 success=True,
-                content=content[:2000],  # cap to avoid blowing parent context
-                turns_used=turn_count,
-                tool_calls_made=tool_calls_made,
-                scratchpad=_scratchpad,
-            )
+                content=content[:2000],
+            ))
 
         # Execute tool calls
         messages.append(msg)
@@ -402,6 +471,16 @@ def run_sub_agent(
                             local_cache[cache_key] = result
                     else:
                         result = execute_tool(tc, write_gate, read_gate)
+
+                    # ── Progress tracking (step 3) ──
+                    _last_tool_time = time.monotonic()
+                    if not result.success and result.content:
+                        _fingerprint = result.content[:60].strip().lower()
+                        _recent_errors.append(_fingerprint)
+                        if len(_recent_errors) > 20:
+                            _recent_errors[:] = _recent_errors[-20:]
+                    else:
+                        _recent_errors.clear()  # success resets error streak
 
                     # Track files modified
                     if name in ("write_file", "edit_file") and result.success:
@@ -488,15 +567,13 @@ def run_sub_agent(
                 if summary:
                     messages.insert(0, {"role": "user", "content": summary})
 
-    # Exhausted turns
-    return SubAgentResult(
+    # ── Safety cap exhausted (step 3: should only happen if hung/loop detection fails) ──
+    _restore_plan()
+    return _write_report(_make_result(
         success=False,
-        content="Sub-agent exceeded turn budget.",
-        turns_used=turn_count,
-        tool_calls_made=tool_calls_made,
-        scratchpad=_scratchpad,
-        error="Turn budget exhausted",
-    )
+        content=f"Sub-agent hit safety cap ({_ABSOLUTE_SAFETY_CAP} turns).",
+        error="Safety cap exhausted",
+    ))
 
 
 # ---------------------------------------------------------------------------

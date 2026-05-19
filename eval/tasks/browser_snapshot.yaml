@@ -1,0 +1,19 @@
+id: "browser-snapshot"
+name: "Navigate to a page and capture a snapshot"
+description: |
+  Use browser_navigate to visit `https://example.com`, then use browser_snapshot
+  to capture the accessibility tree of the page.  Confirm the snapshot contains
+  the page title "Example Domain" or a similar heading.
+  No other tools are needed.
+category: "browser"
+difficulty: "easy"
+workspace_fixture: null
+checks:
+  - type: "shell"
+    command: "echo done"
+    expected_returncode: 0
+expected_tools:
+  - "browser_navigate"
+  - "browser_snapshot"
+expected_turns_max: 5
+tags: ["browser", "snapshot", "basics"]

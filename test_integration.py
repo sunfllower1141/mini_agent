@@ -634,3 +634,102 @@ class TestMessageBroadcastIntegration:
         assert "msg-0" not in r.content
         assert "msg-1" not in r.content
         assert "msg-2" not in r.content
+
+
+# ---------------------------------------------------------------------------
+# 8. Multi-agent E2E workflow patterns (pipeline + scatter_gather)
+# ---------------------------------------------------------------------------
+
+class TestMultiAgentE2EWorkflow:
+    """Integration: pipeline pattern and scatter_gather pattern end-to-end."""
+
+    def test_pipeline_pattern(self, configured_context, gates, tmp_path):
+        """Spawn agent A, agent A spawns agent B, collect both via pipeline."""
+        wg, rg = gates
+
+        # Stage A writes a file; Stage B reads it and appends.
+        stage_a_file = tmp_path / "pipeline_stage_a.txt"
+
+        with patch("sub_agent.call_deepseek") as mock_llm:
+            # Stage A: write a file with initial content
+            # Stage B: read and confirm
+            mock_llm.side_effect = [
+                # Stage A responses
+                _make_llm_response(
+                    content="",
+                    tool_calls=[
+                        _make_tool_call(
+                            "write_file",
+                            f'{{"path": "{stage_a_file}", "content": "stage-a-output"}}',
+                        )
+                    ],
+                ),
+                _make_llm_response(content="Stage A complete."),
+                # Stage B responses
+                _make_llm_response(
+                    content="",
+                    tool_calls=[
+                        _make_tool_call(
+                            "read_file",
+                            f'{{"path": "{stage_a_file}"}}',
+                        )
+                    ],
+                ),
+                _make_llm_response(content="Stage B complete. Found stage-a-output."),
+            ]
+
+            pipeline_dispatch = _TOOL_DISPATCH["pipeline"]
+            result = pipeline_dispatch(
+                {
+                    "stages": [
+                        {"task": "Write a file with stage A output", "subscriptions": []},
+                        {"task": "Read the file from stage A and confirm", "subscriptions": ["handoff.result"]},
+                    ],
+                    "max_turns": 4,
+                },
+                wg, rg,
+            )
+            assert result.success, f"pipeline failed: {result.content}"
+            assert "Stage B complete" in result.content or "success=True" in result.content
+            assert "stage-a-output" in result.content
+
+        # Verify file on disk
+        assert stage_a_file.exists(), f"File {stage_a_file} was not created"
+        assert stage_a_file.read_text() == "stage-a-output"
+
+    def test_scatter_gather_pattern(self, configured_context, gates, tmp_path):
+        """Use scatter_gather to process a list of items concurrently."""
+        wg, rg = gates
+
+        items = ["alpha", "beta", "gamma"]
+
+        with patch("sub_agent.call_deepseek") as mock_llm:
+            # Each worker returns its item processed
+            mock_llm.return_value = _make_llm_response(
+                content="processed: alpha"
+            )
+
+            sg_dispatch = _TOOL_DISPATCH["scatter_gather"]
+            result = sg_dispatch(
+                {
+                    "items": items,
+                    "worker_task_template": "Process the item '{item}' and report the result.",
+                    "max_turns": 2,
+                },
+                wg, rg,
+            )
+            assert result.success, f"scatter_gather failed: {result.content}"
+            # At least one worker processed an item
+            content_lower = result.content.lower()
+            assert "processed" in content_lower or "alpha" in content_lower or "success" in content_lower
+
+    def test_scatter_gather_empty_items(self, configured_context, gates):
+        """scatter_gather with no items should return a clear error."""
+        wg, rg = gates
+        sg_dispatch = _TOOL_DISPATCH["scatter_gather"]
+        result = sg_dispatch(
+            {"items": [], "worker_task_template": "Process {item}"},
+            wg, rg,
+        )
+        assert result.success is False
+        assert "items" in result.content.lower() or "No items" in result.content

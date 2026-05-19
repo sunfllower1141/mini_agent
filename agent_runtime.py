@@ -65,7 +65,7 @@ class AgentRuntime:
         - keep_alive: set[str]         (persistent agents)
     """
 
-    _ABSOLUTE_MAX_TURNS: int = 35  # hard cap for extend_turns()
+    _ABSOLUTE_MAX_TURNS: int = 200  # generous hard cap for extend_turns()
 
     def __init__(self) -> None:
         self._lock = threading.Lock()

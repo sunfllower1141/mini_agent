@@ -192,7 +192,7 @@ def _inject_git_diff(
                 ),
                 "_transient": True,
             })
-    except Exception as exc:
+    except (OSError, subprocess.TimeoutExpired) as exc:
         print(f"  ⚠ git diff failed: {exc}", file=sys.stderr, flush=True)
 
 
@@ -260,9 +260,7 @@ def _inject_orchestration_context(messages: list[dict]) -> None:
                 "content": "\n".join(parts),
                 "_transient": True,
             })
-    except APIError as exc:
-        print(f"  ⚠ orchestration context failed: {exc}", file=sys.stderr, flush=True)
-    except Exception as exc:
+    except (APIError, AttributeError, KeyError, ValueError, TypeError) as exc:
         print(f"  ⚠ orchestration context failed: {exc}", file=sys.stderr, flush=True)
 
 
@@ -394,7 +392,7 @@ def _inject_strategy_hint(messages: list[dict]) -> None:
             hint = "[Hint: Use semantic_search for meaning-based code search.]"
         if hint and not any(m["role"] == "system" and m["content"] == hint for m in messages):
             messages.insert(1, {"role": "system", "content": hint})
-    except Exception:
+    except (KeyError, IndexError, TypeError, ValueError):
         pass
 
 def _inject_context(
@@ -473,9 +471,7 @@ def _extract_pipe_deps(
         raw = tc["function"].get("arguments", "{}")
         try:
             ad = json.loads(raw) if isinstance(raw, str) else dict(raw)
-        except APIError:
-            continue
-        except Exception:
+        except (APIError, json.JSONDecodeError, KeyError, ValueError, TypeError):
             continue
         pipe_cfg = ad.pop("_pipe", None)
         if isinstance(pipe_cfg, dict) and "from" in pipe_cfg:

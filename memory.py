@@ -251,6 +251,18 @@ def _compress_tool_results(
     if len(messages) <= keep_recent:
         return messages, changed
 
+    # P0.3: Build forward tool_call_id -> name map in one pass (O(n))
+    # instead of calling _find_tool_call_name (O(n²)) per tool message.
+    _tool_id_to_name: dict[str, str] = {}
+    for msg in messages:
+        if msg.get("role") == "assistant":
+            for tc in msg.get("tool_calls") or []:
+                tcid = tc.get("id")
+                fn = tc.get("function", {})
+                tname = fn.get("name", "").strip()
+                if tcid and tname:
+                    _tool_id_to_name[tcid] = tname
+
     # Messages that are "recent" (within the tail window) stay untouched
     cutoff = len(messages) - keep_recent
     for i, m in enumerate(messages):
@@ -270,8 +282,9 @@ def _compress_tool_results(
 
         lines = text.split("\n")
 
-        # Detect tool type from the preceding assistant message
-        tool_name = _find_tool_call_name(messages, i) or ""
+        # Detect tool type from the forward-built map (P0.3: O(1) lookup)
+        tcid = m.get("tool_call_id", "")
+        tool_name = _tool_id_to_name.get(tcid, "")
 
         if tool_name == "read_file":
             kept = _compress_read_file(lines, messages, i)

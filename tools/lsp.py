@@ -21,6 +21,7 @@ import queue
 from pathlib import Path
 
 from tools import ToolResult, _register, _summarize, _TOOL_DISPATCH, _TOOL_SUMMARIES
+from tools._json_rpc_shared import drain_stderr
 
 # ---------------------------------------------------------------------------
 # Error types
@@ -214,7 +215,7 @@ class LspConnection:
         try:
             for raw_line in iter(self.process.stdout.readline, b''):
                 self._stdout_queue.put(raw_line)
-        except Exception:
+        except (OSError, ValueError, AttributeError):
             pass
         finally:
             self._stdout_queue.put(None)  # EOF sentinel
@@ -235,18 +236,7 @@ class LspConnection:
                 target=self._stdout_reader_thread, daemon=True,
                 name=f"lsp-stdout-{self.language_id}"
             ).start()
-        threading.Thread(
-            target=self._drain_stderr, daemon=True, name=f"lsp-stderr-{self.language_id}"
-        ).start()
-
-    def _drain_stderr(self) -> None:
-        """Read and discard stderr lines to prevent pipe buffer from filling."""
-        try:
-            if self.process and self.process.stderr:
-                for _line in self.process.stderr:
-                    pass
-        except Exception:
-            pass
+        drain_stderr(self.process, f"lsp-stderr-{self.language_id}")
 
     # ------------------------------------------------------------------
     # JSON-RPC

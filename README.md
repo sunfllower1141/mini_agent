@@ -13,6 +13,10 @@ A coding agent powered by DeepSeek V4 Pro with **63 tools**. Terminal REPL or Te
 
 ### Multi-Agent
 - **10 concurrent sub-agents** (configurable up to 15) running in background threads
+- **Progress-based termination**: sub-agents self-govern via hung detection (300s no tool calls), error loop detection (3 consecutive identical failures), and generous safety cap (100 turns). No hard turn limits.
+- **Orchestrator sleep/wake**: `wait_for_agent` blocks with exponential backoff (1s→2s→4s→30s), waking on completion, hung detection, or inbox messages — zero tokens consumed while idle
+- **Sub-agent reports**: results written to `reports/<task_id>.md` files (unique per agent) instead of bloating inline context
+- **Plan isolation**: sub-agents get a clean plan state; parent plan is restored on exit — no cross-agent corruption
 - **5 coordination patterns**: fan_out, fan_in, pipeline, barrier, scatter_gather
 - **9 inter-agent message types**: text, handoff.result, handoff.request, handoff.ack, status.heartbeat, status.error, coord.fan_out, coord.fan_in, coord.sync
 - Sub-agents auto-prune memory every 5 turns to prevent API errors
@@ -40,6 +44,9 @@ A coding agent powered by DeepSeek V4 Pro with **63 tools**. Terminal REPL or Te
 - **Tool piping**: JSON parse short-circuit when no `_pipe` deps exist
 - **Deque circuit breaker**: O(1) pop vs O(n) list pop(0)
 - **Workspace tree cache**: skips `os.walk` on unchanged workspaces
+- **Cached dispatch signatures**: `inspect.signature()` computed once at registration, not per call (~3x speedup)
+- **Pre-built error hints**: `_build_error_hint` param lookup is O(1) dict, not O(n) TOOLS scan
+- **Forward tool-call name map**: memory compression builds `tool_call_id→name` map in one pass (O(n²)→O(n))
 
 ## Quick Start
 
@@ -142,10 +149,11 @@ terminal.py          ANSI colour helpers
 retry.py             HTTP retry with jitter + exponential backoff (408, 429, 5xx)
 stream.py            SSE stream parser
 agent_runtime.py     Sub-agent lifecycle, file reservations, inboxes, subscriptions, snapshots
-sub_agent.py         Sub-agent loop with turn budget, pruning, streaming, heartbeats
+sub_agent.py         Sub-agent loop — progress-based termination (hung/error-loop detection),
+                     streaming snapshots, heartbeats, reports to reports/<id>.md
 tools/
-  __init__.py        Tool dispatch, cache, JSON repair, FILE_RESERVATIONS,
-                     auto-learn failure patterns, post-edit LSP auto-verify
+  __init__.py        Tool dispatch, cached signatures, per-tool timeout (120s),
+                     auto-learn failure patterns, JSON repair, file reservations
   schema.py          TOOLS definitions (63 tools)
   file_ops.py        read/write/edit/list/info — cross-agent collision detection,
                      cascading fuzzy whitespace match (3-pass: exact→trailing→indent)
@@ -178,14 +186,13 @@ tests/
 
 ### Multi-Agent System
 - Max 10 concurrent sub-agents (configurable via `sub_agent_max_concurrent` in TOML).
-- Auto-wake: completions injected as user messages before `input()` blocks — no missed finishes.
-- Sub-agents auto-extend when ≤3 turns remaining and making progress (max 35 turns).
+- **No hard turn limits**: sub-agents self-govern via hung detection (300s), error loop detection (3x), and safety cap (100 turns). Extension no longer clamps to 35.
+- **Orchestrator sleep**: `wait_for_agent` blocks with exponential backoff (1s→30s), wakes on completion, hung detection, or inbox messages.
+- Sub-agent reports written to `reports/<task_id>.md` — unique per agent, persists across sessions.
+- Plan state isolated per sub-agent — parent plan restored on exit.
 - Stale agent GC: threads from previous sessions cleaned up on startup.
 - Sub-agents auto-prune memory every 5 turns when >20 messages to avoid 400 errors.
 - Streaming snapshots at 200-token granularity.
-- 5 coordination patterns: fan_out, fan_in, pipeline, barrier, scatter_gather.
-- 9 inter-agent message types with validation, routing (direct, subscription, broadcast).
-- FILE_RESERVATIONS with `threading.Lock` prevents cross-agent write collisions.
 
 ### Memory & Learning
 - SQLite-backed conversation store with token-aware pruning and progressive compression.

@@ -97,12 +97,11 @@ def _todo_read_summary(args: dict) -> str:
 # ---------------------------------------------------------------------------
 
 _MAX_CONCURRENT = 10         # hard cap on concurrent sub-agents
-_DEFAULT_MAX_TURNS = 15      # default turn budget per sub-agent
-_ABSOLUTE_MAX_TURNS = 35     # never allow more than this
+_DEFAULT_MAX_TURNS = 15      # default turn budget per sub-agent (soft — sub-agent loop self-governs via hung/error detection)
 
 
 def _parse_max_turns(raw) -> "int | ToolResult":
-    """Parse and clamp max_turns from args."""
+    """Parse max_turns from args (soft cap — loop self-governs)."""
     try:
         mt = int(raw)
     except (TypeError, ValueError):
@@ -110,7 +109,7 @@ def _parse_max_turns(raw) -> "int | ToolResult":
             success=False,
             content=f"max_turns must be an integer, got: {raw}",
         )
-    return max(1, min(mt, _ABSOLUTE_MAX_TURNS))
+    return max(1, mt)
 
 
 def _spawn_one(
@@ -1695,8 +1694,14 @@ def _wait_for_agent(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> To
                 if result is not None:
                     runtime._collected.add(tid)
                     return "completed:" + tid
-            elif s == "turn_budget_exhausted":
-                return "budget_exhausted:" + tid
+            # Check for hung/error agents via snapshot timestamps
+            snap = runtime.get_snapshot(tid)
+            if snap and s == "running":
+                age_s = time.monotonic() - snap["timestamp"]
+                if age_s > 300:  # 5 min since last snapshot → likely hung
+                    return "hung:" + tid
+                if snap.get("last_error") and snap["turn"] > 3:
+                    return "error:" + tid
         # Check for new inbox messages
         if len(runtime.messages) > last_inbox_count:
             last_inbox_count = len(runtime.messages)
@@ -1709,9 +1714,15 @@ def _wait_for_agent(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> To
         if reason.startswith("completed:"):
             tid = reason.split(":", 1)[1]
             return _format_collect_any(tid, runtime.get_result(tid))
+        if reason.startswith("hung:") or reason.startswith("error:"):
+            tid = reason.split(":", 1)[1]
+            return ToolResult(
+                success=False,
+                content=f"Agent '{tid}' may be stuck ({reason.split(':',1)[0]}). Check agent_status for details. Use agent_extend or agent_cancel.",
+            )
         return ToolResult(
             success=False,
-            content=f"Agent {reason.split(':',1)[1]} needs attention ({reason.split(':',1)[0]}). Use agent_extend or collect_agent.",
+            content=f"Agent needs attention: {reason}. Use agent_status to check.",
         )
 
     deadline = time.time() + timeout
@@ -1723,17 +1734,16 @@ def _wait_for_agent(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> To
             if reason.startswith("completed:"):
                 tid = reason.split(":", 1)[1]
                 return _format_collect_any(tid, runtime.get_result(tid))
-            if reason.startswith("budget_exhausted:"):
-                tid = reason.split(":", 1)[1]
+            if reason in ("new_message",):
                 return ToolResult(
                     success=False,
-                    content=f"Agent '{tid}' exhausted turn budget. Use agent_extend then retry.",
+                    content="New message(s) in inbox. Check agent_inbox.",
                 )
-            if reason == "new_message":
-                return ToolResult(
-                    success=False,
-                    content=f"New message(s) in inbox. Check agent_inbox.",
-                )
+            tid = reason.split(":", 1)[1] if ":" in reason else ""
+            return ToolResult(
+                success=False,
+                content=f"Agent '{tid}' needs attention: {reason}. Use agent_status to check.",
+            )
 
         time.sleep(min(delay, deadline - time.time()))
         delay = min(delay * 2, 30.0)

@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import textwrap
 import threading
 import time
 from pathlib import Path
@@ -617,6 +618,199 @@ class TestErrorHandling:
         """McpConnectionError carries message."""
         error = McpConnectionError("server gone")
         assert "server gone" in str(error)
+
+
+# ---------------------------------------------------------------------------
+# 7. Edge-case / robustness tests
+# ---------------------------------------------------------------------------
+
+
+class TestMcpEdgeCases:
+    """Edge-case and robustness tests for the MCP client."""
+
+    # ------------------------------------------------------------------
+    # Helpers for creating one-off server scripts
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _write_temp_server(script_text: str) -> str:
+        """Write *script_text* to a temp .py file and return its path."""
+        fd, path = tempfile.mkstemp(suffix=".py", prefix="mcp_test_")
+        with os.fdopen(fd, "w") as fh:
+            fh.write(script_text)
+        return path
+
+    @staticmethod
+    def _slow_server_script() -> str:
+        """Return a server script that sleeps 0.5 s before each tools/call."""
+        return textwrap.dedent("""\
+        import json, sys, time
+        TOOLS = [{"name":"slow_echo","description":"Echo after delay",
+                  "inputSchema":{"type":"object","properties":{"msg":{"type":"string"}},
+                                 "required":["msg"]}}]
+        for line in sys.stdin:
+            line = line.strip()
+            if not line: continue
+            try: req = json.loads(line)
+            except json.JSONDecodeError: continue
+            rid = req.get("id")
+            if rid is None: continue
+            method = req.get("method","")
+            if method == "initialize":
+                sys.stdout.write(json.dumps({"jsonrpc":"2.0","id":rid,
+                    "result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},
+                              "serverInfo":{"name":"slow","version":"1.0"}}})+"\\n")
+            elif method == "tools/list":
+                sys.stdout.write(json.dumps({"jsonrpc":"2.0","id":rid,
+                    "result":{"tools":TOOLS}})+"\\n")
+            elif method == "tools/call":
+                time.sleep(0.5)
+                msg = req.get("params",{}).get("arguments",{}).get("msg","")
+                sys.stdout.write(json.dumps({"jsonrpc":"2.0","id":rid,
+                    "result":{"content":[{"type":"text","text":msg}],"isError":False}})+"\\n")
+            else:
+                sys.stdout.write(json.dumps({"jsonrpc":"2.0","id":rid,
+                    "error":{"code":-32601,"message":"Not found"}})+"\\n")
+            sys.stdout.flush()
+        """)
+
+    @staticmethod
+    def _stderr_server_script() -> str:
+        """Return a server script that writes diagnostic lines to stderr."""
+        return textwrap.dedent("""\
+        import json, sys
+        TOOLS = [{"name":"echo","description":"Echo back","inputSchema":{
+            "type":"object","properties":{"msg":{"type":"string"}},"required":["msg"]}}]
+        for line in sys.stdin:
+            line = line.strip()
+            if not line: continue
+            try: req = json.loads(line)
+            except json.JSONDecodeError: continue
+            rid = req.get("id")
+            if rid is None: continue
+            method = req.get("method","")
+            # Write diagnostic noise to stderr before every response
+            sys.stderr.write(f"DEBUG: handling {method}\\n")
+            sys.stderr.flush()
+            if method == "initialize":
+                sys.stdout.write(json.dumps({"jsonrpc":"2.0","id":rid,
+                    "result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},
+                              "serverInfo":{"name":"noisy","version":"1.0"}}})+"\\n")
+            elif method == "tools/list":
+                sys.stdout.write(json.dumps({"jsonrpc":"2.0","id":rid,
+                    "result":{"tools":TOOLS}})+"\\n")
+            elif method == "tools/call":
+                msg = req.get("params",{}).get("arguments",{}).get("msg","")
+                sys.stdout.write(json.dumps({"jsonrpc":"2.0","id":rid,
+                    "result":{"content":[{"type":"text","text":msg}],"isError":False}})+"\\n")
+            else:
+                sys.stdout.write(json.dumps({"jsonrpc":"2.0","id":rid,
+                    "error":{"code":-32601,"message":"Not found"}})+"\\n")
+            sys.stdout.flush()
+        """)
+
+    @staticmethod
+    def _junk_stdout_server_script() -> str:
+        """Return a server script that writes a junk line to stdout before the
+        real JSON-RPC response."""
+        return textwrap.dedent("""\
+        import json, sys
+        TOOLS = [{"name":"echo","description":"Echo back","inputSchema":{
+            "type":"object","properties":{"msg":{"type":"string"}},"required":["msg"]}}]
+        for line in sys.stdin:
+            line = line.strip()
+            if not line: continue
+            try: req = json.loads(line)
+            except json.JSONDecodeError: continue
+            rid = req.get("id")
+            if rid is None: continue
+            method = req.get("method","")
+            if method == "initialize":
+                sys.stdout.write("bootstrap v1.0 ready\\n")  # junk line
+                sys.stdout.write(json.dumps({"jsonrpc":"2.0","id":rid,
+                    "result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},
+                              "serverInfo":{"name":"junk","version":"1.0"}}})+"\\n")
+            elif method == "tools/list":
+                sys.stdout.write("# listing tools...\\n")  # junk line
+                sys.stdout.write(json.dumps({"jsonrpc":"2.0","id":rid,
+                    "result":{"tools":TOOLS}})+"\\n")
+            elif method == "tools/call":
+                msg = req.get("params",{}).get("arguments",{}).get("msg","")
+                sys.stdout.write(f"tool_call({msg})\\n")  # junk line
+                sys.stdout.write(json.dumps({"jsonrpc":"2.0","id":rid,
+                    "result":{"content":[{"type":"text","text":msg}],"isError":False}})+"\\n")
+            else:
+                sys.stdout.write(json.dumps({"jsonrpc":"2.0","id":rid,
+                    "error":{"code":-32601,"message":"Not found"}})+"\\n")
+            sys.stdout.flush()
+        """)
+
+    # ------------------------------------------------------------------
+    # Tests
+    # ------------------------------------------------------------------
+
+    def test_slow_server_response(self):
+        """MCP client handles a server that takes ~0.5 s to respond.
+
+        Verifies that the client does not have an artificial timeout
+        that cuts off slow-but-responsive servers.  The call should
+        succeed and the elapsed wall-clock time should be >= the
+        server's artificial delay.
+        """
+        script = self._slow_server_script()
+        path = self._write_temp_server(script)
+        try:
+            cfg = McpServerConfig(name="slow", command=sys.executable, args=[path])
+            conn = McpConnection(cfg)
+            try:
+                conn.connect()
+                t0 = time.time()
+                result = conn.call_tool("slow_echo", {"msg": "hello"})
+                elapsed = time.time() - t0
+                assert result.success is True
+                assert result.content == "hello"
+                # Must have waited at least the 0.5 s server sleep
+                assert elapsed >= 0.4, f"Expected >= 0.4 s, got {elapsed:.3f}"
+            finally:
+                conn.disconnect()
+        finally:
+            os.unlink(path)
+
+    def test_stderr_noise_does_not_break_stdout(self):
+        """Server that writes diagnostic lines to stderr still communicates
+        correctly over stdout."""
+        script = self._stderr_server_script()
+        path = self._write_temp_server(script)
+        try:
+            cfg = McpServerConfig(name="noisy", command=sys.executable, args=[path])
+            conn = McpConnection(cfg)
+            try:
+                conn.connect()
+                result = conn.call_tool("echo", {"msg": "hello"})
+                assert result.success is True
+                assert result.content == "hello"
+            finally:
+                conn.disconnect()
+        finally:
+            os.unlink(path)
+
+    def test_junk_stdout_lines_skipped(self):
+        """Client skips non-JSON junk lines on stdout before the valid
+        JSON-RPC response arrives."""
+        script = self._junk_stdout_server_script()
+        path = self._write_temp_server(script)
+        try:
+            cfg = McpServerConfig(name="junk", command=sys.executable, args=[path])
+            conn = McpConnection(cfg)
+            try:
+                conn.connect()
+                result = conn.call_tool("echo", {"msg": "hello"})
+                assert result.success is True
+                assert result.content == "hello"
+            finally:
+                conn.disconnect()
+        finally:
+            os.unlink(path)
 
 
 # ---------------------------------------------------------------------------

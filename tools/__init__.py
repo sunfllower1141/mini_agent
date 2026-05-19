@@ -24,6 +24,7 @@ Submodules:
 
 import json
 import re
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -106,6 +107,12 @@ class ToolResult:
 
 _TOOL_DISPATCH: dict[str, callable] = {}
 _TOOL_SUMMARIES: dict[str, callable] = {}
+# Cache: dispatch function signature inspection (P0.1 perf)
+# Maps tool name -> bool (whether dispatch fn accepts on_output kwarg)
+_DISPATCH_SIGNATURES: dict[str, bool] = {}
+# Cache: pre-built valid params strings for _build_error_hint (P0.2 perf)
+# Maps tool name -> (valid_params_str, required_set)
+_TOOL_PARAM_CACHE: dict[str, tuple[str, set[str]]] = {}
 # Context keys used across tools and llm
 CTX_SCRATCHPAD_PATH = "scratchpad_path"
 CTX_SCRATCHPAD_UPDATED = "_scratchpad_updated"
@@ -166,23 +173,26 @@ _CACHEABLE = frozenset({
     "search_files", "semantic_search", "web_search",
     "lsp_definition", "lsp_references", "lsp_hover", "lsp_diagnostics",
 })
+_TOOL_TIMEOUT = 120  # P3.1: per-tool execution timeout (seconds)
+
+
+# P1.4: Dispatch mapping for set_context — replaces if/elif chain
+_CTX_DISPATCH = {
+    "scratchpad_path": lambda ctx, v: setattr(ctx, "scratchpad_path", v),
+    "exa_api_key": lambda ctx, v: setattr(ctx, "exa_api_key", v),
+    "openai_api_key": lambda ctx, v: setattr(ctx, "openai_api_key", v),
+    "workspace": lambda ctx, v: setattr(ctx, "workspace", v),
+    "_mcp_manager": lambda ctx, v: globals().__setitem__("_MCP_MANAGER", v),
+}
 
 
 def set_context(**kwargs) -> None:
     """Set module-level context accessible to tool implementations."""
     ctx = _TOOL_CONTEXT
     for key, value in kwargs.items():
-        if key == "scratchpad_path":
-            ctx.scratchpad_path = value
-        elif key == "exa_api_key":
-            ctx.exa_api_key = value
-        elif key == "openai_api_key":
-            ctx.openai_api_key = value
-        elif key == "workspace":
-            ctx.workspace = value
-        elif key == "_mcp_manager":
-            global _MCP_MANAGER
-            _MCP_MANAGER = value
+        handler = _CTX_DISPATCH.get(key)
+        if handler is not None:
+            handler(ctx, value)
         else:
             setattr(ctx, key, value)
 
@@ -490,18 +500,25 @@ def _build_error_hint(name: str, exc: Exception = None, error_msg: str = "") -> 
     if heuristic:
         hint_parts.append(f"Hint: {heuristic}")
 
-    valid_params: list[str] = []
-    for tool_def in TOOLS:
-        if tool_def["function"]["name"] == name:
-            props = tool_def["function"].get("parameters", {}).get("properties", {})
-            required = tool_def["function"].get("parameters", {}).get("required", [])
-            for pname, pinfo in props.items():
-                ptype = pinfo.get("type", "any")
-                marker = " (required)" if pname in required else ""
-                valid_params.append(f"{pname}: {ptype}{marker}")
-            break
-    if valid_params:
-        hint_parts.append(f"Valid parameters: {', '.join(valid_params)}")
+    # P0.2: Pre-built cache avoids O(n) TOOLS scan on every failure
+    cached = _TOOL_PARAM_CACHE.get(name)
+    if cached is None:
+        valid_params_list: list[str] = []
+        for tool_def in TOOLS:
+            if tool_def["function"]["name"] == name:
+                props = tool_def["function"].get("parameters", {}).get("properties", {})
+                required = set(tool_def["function"].get("parameters", {}).get("required", []))
+                for pname, pinfo in props.items():
+                    ptype = pinfo.get("type", "any")
+                    marker = " (required)" if pname in required else ""
+                    valid_params_list.append(f"{pname}: {ptype}{marker}")
+                _TOOL_PARAM_CACHE[name] = (", ".join(valid_params_list), required)
+                break
+        else:
+            _TOOL_PARAM_CACHE[name] = ("", set())
+    valid_params_str, _required_set = _TOOL_PARAM_CACHE[name]
+    if valid_params_str:
+        hint_parts.append(f"Valid parameters: {valid_params_str}")
 
     hint_parts.append("Please fix your tool call arguments and retry.")
     return "\n".join(hint_parts)
@@ -667,7 +684,7 @@ def _learn_from_failure(name: str, result: "ToolResult | None") -> None:
                 detail=detail,
                 importance=importance,
             )
-    except Exception:
+    except (KeyError, ValueError, TypeError, AttributeError, sqlite3.Error):
         pass  # Never let auto-learn crash tool execution
 
 
@@ -760,13 +777,29 @@ def execute_tool(
                 hint=f"Tool '{name}' requires user approval and was denied. Consider an alternative approach or ask the user to approve.",
             )
 
-    # Pass on_output to the tool if it accepts it
-    import inspect
-    sig = inspect.signature(dispatch)
-    if "on_output" in sig.parameters:
-        result = dispatch(args, write_gate, read_gate, on_output=on_output)
-    else:
-        result = dispatch(args, write_gate, read_gate)
+    # Pass on_output to the tool if it accepts it (P0.1: cached signature check)
+    accepts_on_output = _DISPATCH_SIGNATURES.get(name)
+    if accepts_on_output is None:
+        import inspect
+        accepts_on_output = "on_output" in inspect.signature(dispatch).parameters
+        _DISPATCH_SIGNATURES[name] = accepts_on_output
+
+    # P3.1: Per-tool execution timeout via ThreadPoolExecutor
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = (
+            executor.submit(dispatch, args, write_gate, read_gate, on_output=on_output)
+            if accepts_on_output
+            else executor.submit(dispatch, args, write_gate, read_gate)
+        )
+        try:
+            result = future.result(timeout=_TOOL_TIMEOUT)
+        except concurrent.futures.TimeoutError:
+            return ToolResult(
+                success=False,
+                content=f"Tool '{name}' timed out after {_TOOL_TIMEOUT}s.",
+                hint=_build_error_hint(name, error_msg=f"timed out after {_TOOL_TIMEOUT}s"),
+            )
 
     # Normalize: every failed result gets a _build_error_hint so the LLM
     # always sees the same structure (tool name, error, valid params, retry
