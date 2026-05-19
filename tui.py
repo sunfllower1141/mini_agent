@@ -908,11 +908,13 @@ class MiniAgentTUI(App):
     # Drain queue
     # ------------------------------------------------------------------
 
+    _BATCH_SIZE = 8  # drain at most this many messages per tick for visible streaming
+
     def _drain(self) -> None:
         if self.queue.empty():
             return
         try:
-            while True:
+            for _ in range(self._BATCH_SIZE):
                 msg = self.queue.get_nowait()
 
                 if isinstance(msg, tuple):
@@ -1122,12 +1124,9 @@ class MiniAgentTUI(App):
         self._hide_spinner()
         self._refresh_git_status()
 
-        # Save last response for clipboard
+        # Save last response for clipboard (already streamed into chat-view MsgAgent)
         if self._current_response_text:
             self._last_response = self._current_response_text
-            # Show in markdown pane
-            self._response_md.styles.display = "block"
-            self._response_md.update(self._current_response_text)
 
         self._current_response = None
         self._current_response_text = ""
