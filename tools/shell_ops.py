@@ -455,7 +455,33 @@ _BINARY_EXTS = {".pyc", ".pyo", ".so", ".o", ".a", ".dylib", ".dll",
                 ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
                 ".ttf", ".otf", ".woff", ".woff2", ".eot",
                 ".db", ".sqlite", ".sqlite3", ".mdb",
-                ".exe", ".bin", ".dat", ".pkl", ".pickle"}
+                ".exe", ".bin", ".dat", ".pkl", ".pickle",
+                # SQLite auxiliary files — os.path.splitext splits on last dot
+                "-wal", "-shm", "-journal",
+                # Coverage / profiling binary files
+                ".coverage",
+                ".prof", ".gcda", ".gcno",
+                # macOS resource forks
+                ".rsrc",
+                # No extension — catches files like .DS_Store, .coverage (no dot variant)
+                ".ds_store"}
+
+
+def _is_binary_file(filepath: str) -> bool:
+    """Check if a file is binary by reading the first 512 bytes.
+
+    Returns True if the file contains null bytes or is unreadable.
+    Used as a fast pre-filter in search_files to avoid reading
+    SQLite WALs, coverage DBs, and other binary files that slip
+    past extension-based filtering.
+    """
+    try:
+        with open(filepath, "rb") as f:
+            chunk = f.read(512)
+        # Null byte in first 512 bytes → binary (covers SQLite, ELF, Mach-O, etc.)
+        return b"\x00" in chunk
+    except (OSError, PermissionError):
+        return True  # Can't read → treat as binary, skip it
 
 
 _SEARCH_MAX_RESULTS = 200
@@ -515,6 +541,10 @@ def _search_with_rg(root_dir: str, pattern: str, use_regex: bool, ignore_case: b
     cmd.extend(["--", pattern, root_dir])
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        # Check for rg errors (regex parse errors, etc.)
+        if result.returncode != 0 and result.stderr.strip():
+            err = result.stderr.strip().split("\n")[0]
+            return ToolResult(success=False, content=f"Invalid regex: {err}")
         lines = result.stdout.splitlines()
         if not lines:
             return ToolResult(success=True, content=f"No matches for '{pattern}' in {root_dir}")
@@ -594,6 +624,9 @@ def _search_files(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolR
                     # appearing hung, but the walk always completes.
                     pass
                 fpath = os.path.join(root, fname)
+                # Skip binary files (null bytes in first 512 bytes)
+                if _is_binary_file(fpath):
+                    continue
                 try:
                     with open(fpath, "r", errors="replace", encoding="utf-8") as f:
                         for lineno, line in enumerate(f, 1):

@@ -1,3 +1,4 @@
+# Python packages
 exa-py>=2.0
 sentence-transformers>=3.0
 requests>=2.20
@@ -7,3 +8,6 @@ websockets>=12.0
 pyperclip
 flake8>=7.0
 pytest>=9.0
+
+# System dependencies (brew install / apt-get):
+#   ripgrep (rg) — fast search, used by search_files
