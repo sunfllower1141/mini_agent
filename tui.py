@@ -31,7 +31,7 @@ def _safe(text: str) -> str:
     return text.replace("\\", "\\\\").replace("[", r"\[")
 
 from textual.app import App, ComposeResult
-from textual.containers import Container, Horizontal, HorizontalScroll
+from textual.containers import Container, Horizontal, HorizontalScroll, Vertical
 from textual.widgets import Header, Footer, RichLog, TextArea, Tree, Markdown
 from textual.binding import Binding
 
