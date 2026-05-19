@@ -16,7 +16,6 @@ class TestFanOut(unittest.TestCase):
     @patch("tools._TOOL_CONTEXT")
     @patch("tools.agent_ops._spawn_one")
     @patch("tools.agent_ops._MAX_CONCURRENT", 10)
-    @pytest.mark.skip(reason="mock call arg keys changed")
     def test_fan_out_two_descriptions(self, mock_spawn_one, mock_ctx):
         """fan_out with 2 descs spawns 2 agents and returns their task_ids."""
         mock_runtime = MagicMock(spec=AgentRuntime)
@@ -37,14 +36,14 @@ class TestFanOut(unittest.TestCase):
         self.assertEqual(task_ids, ["task-aaa", "task-bbb"])
         self.assertEqual(mock_spawn_one.call_count, 2)
 
-        # Verify first call args
+        # Verify first call args (positional: task, config, runtime, wg, rg, max_turns)
         call_args_0 = mock_spawn_one.call_args_list[0]
         self.assertEqual(call_args_0[0][0], "do thing A")  # desc
-        self.assertEqual(call_args_0[1]["max_turns"], 10)
+        self.assertEqual(call_args_0[0][5], 10)  # max_turns is positional arg 6
 
         call_args_1 = mock_spawn_one.call_args_list[1]
         self.assertEqual(call_args_1[0][0], "do thing B")  # desc
-        self.assertEqual(call_args_1[1]["max_turns"], 10)
+        self.assertEqual(call_args_1[0][5], 10)
 
     @patch("tools._TOOL_CONTEXT")
     @patch("tools.agent_ops._spawn_one")
@@ -305,7 +304,6 @@ class TestScatterGather(unittest.TestCase):
 
     @patch("tools.agent_patterns.fan_in")
     @patch("tools.agent_patterns.fan_out")
-    @pytest.mark.skip(reason="mock call arg keys changed")
     def test_scatter_gather_template_substitution(self, mock_fan_out, mock_fan_in):
         """scatter_gather substitutes {item} into each worker's task template."""
         mock_fan_out.return_value = ["tid-0", "tid-1", "tid-2"]
@@ -323,10 +321,10 @@ class TestScatterGather(unittest.TestCase):
             max_turns=10,
         )
 
-        # Verify fan_out was called with substituted descriptions
+        # Verify fan_out was called with substituted descriptions (positional arg 0)
         call_args = mock_fan_out.call_args
         self.assertIsNotNone(call_args)
-        descriptions = call_args[1]["descriptions"]
+        descriptions = call_args[0][0]
         self.assertEqual(descriptions[0], "Process the apple and return it.")
         self.assertEqual(descriptions[1], "Process the banana and return it.")
         self.assertEqual(descriptions[2], "Process the cherry and return it.")

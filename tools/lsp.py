@@ -433,7 +433,7 @@ class LspConnection:
         an empty string so the server can still respond with diagnostics.
         """
         try:
-            with open(uri_to_path(uri, encoding="utf-8"), "r") as f:
+            with open(uri_to_path(uri), "r", encoding="utf-8") as f:
                 text = f.read()
         except (OSError, FileNotFoundError):
             text = ""
