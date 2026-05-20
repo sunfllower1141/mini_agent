@@ -1,6 +1,6 @@
 # mini_agent
 
-A coding agent powered by DeepSeek V4 Pro with **63 tools**. Terminal REPL or Textual TUI. SQLite-backed memory with cross-session project knowledge. Headless browser automation via Playwright. Cross-platform: macOS, Linux, and Windows.
+A coding agent powered by DeepSeek V4 Pro with **63 tools**. Prompt-toolkit TUI or plain terminal REPL. SQLite-backed memory with cross-session project knowledge. Headless browser automation via Playwright. Cross-platform: macOS, Linux, and Windows.
 
 ## Features
 
@@ -29,9 +29,10 @@ A coding agent powered by DeepSeek V4 Pro with **63 tools**. Terminal REPL or Te
 - **Background test output**: persisted to DB, not discarded
 
 ### Interfaces
-- **Textual TUI** (`python tui.py`) — rich terminal UI with 9 themes, live token streaming, tool log with diffs, sub-agent panes, agent tree, input history, Ctrl+Z suspend to shell
-- **Terminal REPL** (`python mini_agent.py`) — ANSI-coloured REPL for headless/piped usage, stdin/stdout streaming
-- **--legacy-tui** — runs the Textual TUI from `mini_agent.py` (same as `python tui.py`)
+- **Prompt-toolkit TUI** (`python tui_pt.py`) — the **current** main interface: live token streaming, tools & thinking panel, chat panel, slash commands (`/help`, `/clear`, `/stats`, `/session`, `/export`, `/workspace`, `/shell`, `/init`), git status, session tracking, rounded borders
+- **Textual TUI** (`python tui.py`) — **deprecated**, kept as backup: rich terminal UI with 9 themes, live token streaming, tool log with diffs, sub-agent panes, agent tree
+- **Terminal REPL** (`python mini_agent.py`) — **deprecated** plain terminal REPL for headless/piped usage, ANSI-coloured output, stdin/stdout streaming
+- `--legacy-tui` flag runs `tui.py`, `--no-ui` flag runs the plain REPL
 
 ### Dev Tools
 - **LSP integration**: definition, references, hover, diagnostics via pylsp (auto-started on first use)
@@ -73,10 +74,11 @@ EXA_API_KEY="your-exa-key-here"            # optional — https://exa.ai
 EOF
 
 # 5. Run
-python tui.py              # Textual TUI (recommended)
+python tui_pt.py             # Prompt-toolkit TUI (recommended)
 # or
-python mini_agent.py       # Plain terminal REPL
-python mini_agent.py --tui # Same as python tui.py
+python tui.py                # Textual TUI (deprecated, backup)
+# or
+python mini_agent.py         # Plain terminal REPL (deprecated)
 ```
 
 ## Configuration
@@ -94,7 +96,7 @@ EXA_API_KEY="..."               # optional — web search
 ### `.mini_agent.toml` (advanced settings)
 ```toml
 model = "deepseek-v4-pro"
-sub_agent_model = "deepseek-v4-flash"
+sub_agent_model = "deepseek-v4-pro"
 sub_agent_max_concurrent = 10
 sub_agent_max_turns = 25
 max_messages = 500
@@ -106,7 +108,6 @@ presence_penalty = 0.1
 # response_format = "json_object"
 allow_overwrites = false
 stream = true
-stream = false
 
 [[mcp_server]]
 name = "my-server"
@@ -125,6 +126,9 @@ args = ["-m", "my_mcp_server"]
 | `--approve` | Ask confirmation before write/destructive tools |
 | `--allow-overwrites` | Allow overwriting existing files |
 | `--unrestricted` | Remove workspace boundary checks |
+| `--no-ui` | Run plain stdin REPL (`mini_agent.py`) instead of TUI |
+| `--legacy-tui` | Launch legacy Textual TUI (`tui.py`) instead of prompt_toolkit TUI |
+| `--theme NAME` | Initial UI theme (slate, dawn, sepia, ember, midnight, cobalt, neon, forest, dracula) |
 | `--timeout SECONDS` | Max seconds for shell commands (default 60, max 300) |
 | `-h, --help` | Show help |
 
@@ -132,48 +136,49 @@ args = ["-m", "my_mcp_server"]
 
 ```bash
 python -m pytest
-# 1,083 tests in ~23 seconds
+# 1,075 tests in ~23 seconds
 ```
 
 ## Architecture
 
 ```
-mini_agent.py        Terminal REPL entry point
-tui.py               Textual TUI (AgentWorker, themes, tree, diff preview)
-llm.py               LLM turn orchestration, circuit breaker, tool piping/grouping
-api.py               API calls (call_deepseek), message cleaning cache, complexity routing
-prompt.py            System prompt + .mini_agent.rules injection
-config.py            AgentConfig (.env + TOML + env + CLI), build_startup_context
-memory.py            SQLite conversation store + pruning + project_knowledge table
-safety.py            Read/Write safety gates + diff preview + _safe_resolve
-interject.py         Thread-safe user interjection queue
-terminal.py          ANSI colour helpers
-retry.py             HTTP retry with jitter + exponential backoff (408, 429, 5xx)
-stream.py            SSE stream parser
-agent_runtime.py     Sub-agent lifecycle, file reservations, inboxes, subscriptions, snapshots
-sub_agent.py         Sub-agent loop — progress-based termination (hung/error-loop detection),
-                     streaming snapshots, heartbeats, reports to reports/<id>.md
+tui_pt.py             Prompt-toolkit TUI (current) — live streaming, tools/chat panels, slash commands
+tui.py                Textual TUI (deprecated, backup) — AgentWorker, themes, tree, diff preview
+mini_agent.py         Terminal REPL (deprecated) — plain stdin/stdout
+llm.py                LLM turn orchestration, circuit breaker, tool piping/grouping
+api.py                API calls (call_deepseek), message cleaning cache, complexity routing
+prompt.py             System prompt + .mini_agent.rules injection
+config.py             AgentConfig (.env + TOML + env + CLI), build_startup_context
+memory.py             SQLite conversation store + pruning + project_knowledge table
+safety.py             Read/Write safety gates + diff preview + _safe_resolve
+interject.py          Thread-safe user interjection queue
+terminal.py           ANSI colour helpers
+retry.py              HTTP retry with jitter + exponential backoff (408, 429, 5xx)
+stream.py             SSE stream parser
+agent_runtime.py      Sub-agent lifecycle, file reservations, inboxes, subscriptions, snapshots
+sub_agent.py          Sub-agent loop — progress-based termination (hung/error-loop detection),
+                      streaming snapshots, heartbeats, reports to reports/<id>.md
 tools/
-  __init__.py        Tool dispatch, cached signatures, per-tool timeout (120s),
-                     auto-learn failure patterns, JSON repair, file reservations
-  schema.py          TOOLS definitions (63 tools)
-  file_ops.py        read/write/edit/list/info — cross-agent collision detection,
-                     cascading fuzzy whitespace match (3-pass: exact→trailing→indent)
-  shell_ops.py       run_shell, search_files, run_tests, git, task_status, verify,
-                     diagnose_failures, cross-platform shell + python detection
-  search_ops.py      find_symbol, find_usages, semantic_search, web_search,
-                     recall_turn, fetch_url
-  agent_ops.py       spawn/status/collect/message/read/extend/handoff/inbox/subscribe/cancel + remember
-  agent_messages.py  AgentMessage, 9 message types, validation, routing
-  agent_patterns.py  fan_out, fan_in, pipeline, barrier, scatter_gather
-  browser_ops.py     Headless browser automation — navigate, snapshot, click, type,
-                     screenshot via Playwright Chromium
-  lsp.py             LSP client — pylsp integration, 4 tools (definition, references, hover, diagnostics),
-                     cross-platform (select + queue-based reader)
-  mcp_client.py      MCP client — stdio JSON-RPC, tool discovery at startup
-  _json_rpc_shared.py  Shared subprocess drain_stderr + is_subprocess_connected
+  __init__.py         Tool dispatch, cached signatures, per-tool timeout (120s),
+                      auto-learn failure patterns, JSON repair, file reservations
+  schema.py           TOOLS definitions (63 tools)
+  file_ops.py         read/write/edit/list/info — cross-agent collision detection,
+                      cascading fuzzy whitespace match (3-pass: exact→trailing→indent)
+  shell_ops.py        run_shell, search_files, run_tests, git, task_status, verify,
+                      diagnose_failures, cross-platform shell + python detection
+  search_ops.py       find_symbol, find_usages, semantic_search, web_search,
+                      recall_turn, fetch_url
+  agent_ops.py        spawn/status/collect/message/read/extend/handoff/inbox/subscribe/cancel + remember
+  agent_messages.py   AgentMessage, 9 message types, validation, routing
+  agent_patterns.py   fan_out, fan_in, pipeline, barrier, scatter_gather
+  browser_ops.py      Headless browser automation — navigate, snapshot, click, type,
+                      screenshot via Playwright Chromium
+  lsp.py              LSP client — pylsp integration, 4 tools (definition, references, hover, diagnostics),
+                      cross-platform (select + queue-based reader)
+  mcp_client.py       MCP client — stdio JSON-RPC, tool discovery at startup
+  _json_rpc_shared.py Shared subprocess drain_stderr + is_subprocess_connected
 tests/
-  test_*.py          34 test files, 1,083 tests
+  test_*.py           36 test files, 1,075 tests
 ```
 
 ## Key State
@@ -222,8 +227,9 @@ tests/
 - HTTP 408 (Request Timeout) added to retryable statuses.
 
 ### Interfaces
-- Textual TUI (`python tui.py`) with 9 themes, live token streaming, tool log, sub-agent panes, agent tree.
-- Terminal REPL (`python mini_agent.py`) for headless/piped usage.
+- **Prompt-toolkit TUI** (`python tui_pt.py`) — current main interface with live streaming, tools & thinking panel, chat panel, slash commands, git status, session tracking.
+- **Textual TUI** (`python tui.py`) — deprecated, kept as backup. 9 themes, live token streaming, tool log, sub-agent panes, agent tree.
+- **Terminal REPL** (`python mini_agent.py`) — deprecated plain terminal REPL for headless/piped usage.
 - LSP integration via pylsp (auto-started on first use).
 - MCP client discovers external tools at startup via stdio JSON-RPC.
 - User interjection queue with `/cancel` support.

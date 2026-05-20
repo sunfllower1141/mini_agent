@@ -747,14 +747,14 @@ def parse_args(argv: list[str] | None = None) -> object:
         "--unrestricted", action="store_true", default=None,
         help="Remove workspace boundary checks (allows read/write anywhere)",
     )
-    # ----- UI selection (Ink CLI by default) -----
+    # ----- UI selection (prompt_toolkit TUI by default) -----
     parser.add_argument(
         "--no-ui", action="store_true", default=None,
-        help="Run the plain stdin REPL instead of the Ink CLI (no Node required)",
+        help="Run the plain stdin REPL (mini_agent.py) instead of the prompt_toolkit TUI",
     )
     parser.add_argument(
         "--legacy-tui", action="store_true", default=None,
-        help="Launch the legacy Textual TUI (tui.py) instead of the Ink CLI",
+        help="Launch the legacy Textual TUI (tui.py) instead of the prompt_toolkit TUI",
     )
     parser.add_argument(
         "--theme", default=None,
