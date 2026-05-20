@@ -88,10 +88,65 @@ _AGENT_COLORS = ["green", "yellow", "accent", "pulse", "red"]
 def _build_css(theme: TuiTheme) -> str:
     return f"""
 /* No backgrounds anywhere — terminal-native transparency.
+   Override Textual's built-in widget backgrounds.
    Separation via rounded thick borders + whitespace padding only. */
+
+* {{
+    background: transparent;
+}}
 
 Screen {{
     background: transparent;
+}}
+
+Vertical {{
+    background: transparent;
+    border: none;
+}}
+
+VerticalScroll {{
+    background: transparent;
+    border: none;
+}}
+
+Horizontal {{
+    background: transparent;
+    border: none;
+}}
+
+HorizontalScroll {{
+    background: transparent;
+    border: none;
+}}
+
+Container {{
+    background: transparent;
+    border: none;
+}}
+
+RichLog {{
+    background: transparent;
+    border: none;
+}}
+
+Static {{
+    background: transparent;
+    border: none;
+}}
+
+Tree {{
+    background: transparent;
+    border: none;
+}}
+
+TextArea {{
+    background: transparent;
+    border: none;
+}}
+
+Markdown {{
+    background: transparent;
+    border: none;
 }}
 
 Header {{
