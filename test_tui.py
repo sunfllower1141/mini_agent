@@ -48,8 +48,8 @@ class TestTUIImports(unittest.TestCase):
 
     def test_css_palette(self):
         css = MiniAgentTUI.CSS
-        self.assertIn("#45475a", css)    # border color (Catppuccin Mocha surface1)
         self.assertIn("#89b4fa", css)    # accent (Catppuccin Mocha blue)
+        self.assertIn("rgba(0, 0, 0, 0.01)", css)  # near-transparent TextArea bg
 
 
 class TestMessageTypes(unittest.TestCase):

@@ -127,6 +127,7 @@ Container {{
 RichLog {{
     background: transparent;
     border: none;
+    background-tint: transparent;
 }}
 
 Static {{
@@ -137,10 +138,11 @@ Static {{
 Tree {{
     background: transparent;
     border: none;
+    background-tint: transparent;
 }}
 
 TextArea {{
-    background: transparent;
+    background: rgba(0, 0, 0, 0.01);
     border: none;
 }}
 
@@ -154,7 +156,6 @@ Header {{
     text-style: bold;
     padding: 1 3;
     border: none;
-    border-bottom: thick {theme.border} 30%;
 }}
 
 Header.pulse {{
@@ -166,12 +167,10 @@ Footer {{
     height: 1;
     padding: 0 3;
     border: none;
-    border-top: thick {theme.border} 30%;
 }}
 
 Footer.pulse {{
     color: {theme.pulse};
-    border-top: thick {theme.pulse} 50%;
 }}
 
 #main-area {{
@@ -183,7 +182,6 @@ Footer.pulse {{
 #left-pane {{
     width: 42%;
     border: none;
-    border-right: round {theme.border} 25%;
     padding: 1 2;
 }}
 
@@ -196,7 +194,7 @@ Footer.pulse {{
 
 #tools-log {{
     color: {theme.text};
-    border: round {theme.border} 20%;
+    border: none;
     padding: 1 2;
     margin-bottom: 1;
     height: 1fr;
@@ -206,7 +204,6 @@ Footer.pulse {{
 
 #thinking-log {{
     border: none;
-    border-top: thick {theme.border} 25%;
     padding: 1 2;
     margin-top: 1;
     margin-bottom: 1;
@@ -230,7 +227,7 @@ Footer.pulse {{
 #agent-tree {{
     display: block;
     color: {theme.dim};
-    border: round {theme.border} 25%;
+    border: none;
     padding: 1 2;
     margin-top: 1;
     height: auto;
@@ -242,7 +239,6 @@ Footer.pulse {{
 
 #subagent-pane {{
     border: none;
-    border-top: thick {theme.border} 25%;
     padding: 1 2;
     margin-top: 1;
     height: auto;
@@ -257,7 +253,7 @@ Footer.pulse {{
     width: 1fr;
     margin: 0 1;
     scrollbar-size: 0 0;
-    border: round {theme.border} 25%;
+    border: none;
 }}
 
 /* --- Chat view (right) --- */
@@ -271,21 +267,21 @@ MsgUser {{
     color: {theme.text};
     margin: 1 0 1 8;
     padding: 1 2;
-    border-left: thick {theme.accent} 60%;
+    border: none;
 }}
 
 MsgAgent {{
     color: {theme.text};
     margin: 1 8 1 0;
     padding: 1 2;
-    border-left: thick {theme.green} 60%;
+    border: none;
 }}
 
 MsgThinking {{
     color: {theme.thinking};
     margin: 1 8 1 0;
     padding: 1 2;
-    border-left: thick {theme.thinking} 40%;
+    border: none;
 }}
 
 MsgThinking.hidden {{
@@ -296,14 +292,13 @@ MsgError {{
     color: {theme.text};
     margin: 1 8 1 0;
     padding: 1 2;
-    border-left: thick {theme.red} 60%;
+    border: none;
 }}
 
 /* --- Input area --- */
 
 #input-area {{
     border: none;
-    border-top: thick {theme.accent} 30%;
     padding: 1 3;
     height: auto;
     min-height: 3;
@@ -319,7 +314,7 @@ MsgError {{
 }}
 
 #input:focus {{
-    border-left: thick {theme.accent} 50%;
+    border: none;
     padding-left: 2;
 }}
 """
@@ -486,6 +481,27 @@ class MiniAgentTUI(App):
 
     def on_mount(self) -> None:
         self._tui_theme = CATPPUCCIN_MOCHA
+
+        # Register a Textual Theme with surface/panel matching terminal background.
+        # Textual doesn't support true terminal transparency (FAQ), but matching
+        # the terminal bg gives the same visual result.  Without this, built-in
+        # widgets default to $surface (opaque gray) regardless of CSS overrides.
+        from textual.theme import Theme
+        self.register_theme(Theme(
+            name="mini-transparent",
+            primary="#89b4fa",
+            secondary="#a6e3a1",
+            warning="#f9e2af",
+            error="#f38ba8",
+            success="#a6e3a1",
+            accent="#89b4fa",
+            foreground="#cdd6f4",
+            background="#1e1e2e",
+            surface="transparent",
+            panel="transparent",
+            dark=True,
+        ))
+        self.theme = "mini-transparent"
 
         workspace = resolve_workspace()
         cli = parse_args()
