@@ -159,7 +159,12 @@ def _spawn_one(
                 if tui_queue is not None:
                     tui_queue.put(("sub_token", task_id, f"[sub {task_id}] START: {task[:80]}\n"))
                 else:
-                    print(f"\n  [sub {task_id}] START: {task[:80]}", file=_sys.stderr, flush=True)
+                    # Log to file instead of stderr to avoid breaking TUI layout
+                    import os as _os
+                    _os.makedirs("logs", exist_ok=True)
+                    _log_path = f"logs/sub_agent_{task_id}.log"
+                    with open(_log_path, "a", encoding="utf-8") as _lf:
+                        _lf.write(f"\n--- [sub {task_id}] START: {task[:200]} ---\n")
             result = run_sub_agent(
                 task=task,
                 config=config,
@@ -248,7 +253,7 @@ def _spawn_agent(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolRes
         max_turns = _parse_max_turns(args.get("max_turns", _DEFAULT_MAX_TURNS))
         if isinstance(max_turns, ToolResult):
             return max_turns
-        visible = args.get("visible", True)
+        visible = args.get("visible", False)
         subscriptions = args.get("subscriptions", None)
 
         runtime: AgentRuntime = getattr(_TOOL_CONTEXT, "_agent_runtime", None)
@@ -307,7 +312,7 @@ def _spawn_agent(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolRes
     max_turns = _parse_max_turns(args.get("max_turns", _DEFAULT_MAX_TURNS))
     if isinstance(max_turns, ToolResult):
         return max_turns
-    visible = args.get("visible", True)
+    visible = args.get("visible", False)
     shared_context = args.get("shared_context", "")
     subscriptions = args.get("subscriptions", None)
 

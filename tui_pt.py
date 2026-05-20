@@ -50,6 +50,7 @@ from config import (
 from llm import run_agent_turn
 from stream import THINKING_START, THINKING_END
 from safety import ReadSafetyGate, WriteSafetyGate
+from api import clear_api_cache
 from prompt import build_system_prompt
 
 # ---------------------------------------------------------------------------
@@ -237,7 +238,8 @@ class AgentWorker(threading.Thread):
                  session, turn_id: int,
                  chat_buf: ChatBuffer,
                  tools_buf: ChatBuffer,
-                 thinking_buf: ChatBuffer):
+                 thinking_buf: ChatBuffer,
+                 subagent_buf: ChatBuffer):
         super().__init__(daemon=True)
         self.messages = messages
         self.config = config
@@ -248,6 +250,7 @@ class AgentWorker(threading.Thread):
         self.chat_buf = chat_buf
         self.tools_buf = tools_buf
         self.thinking_buf = thinking_buf
+        self.subagent_buf = subagent_buf
         self.cancel = threading.Event()
         self._thinking_text = ""
         self._in_thinking = False
@@ -293,7 +296,12 @@ class AgentWorker(threading.Thread):
             self.chat_buf.append_last(text, style="msg-agent")
     def _on_tool_start(self, summary: str, parallel: bool = False):
         label = f"⚡ {summary}" if parallel else f"🔧 {summary}"
-        self.tools_buf.append(label)
+        # Route agent-related tool calls to sub-agent buffer
+        tool_name = summary.split(":", 1)[0].strip() if ":" in summary else summary.split("(", 1)[0].strip()
+        if tool_name in _AGENT_TOOLS:
+            self.subagent_buf.append(label)
+        else:
+            self.tools_buf.append(label)
 
     def _on_tool_end(self, ok: bool, detail: str,
                      turn_id: int = 0, diff_preview=None):
@@ -303,6 +311,19 @@ class AgentWorker(threading.Thread):
         for sub in line.split('\n'):
             if sub.strip():
                 self.tools_buf.append(f"    {sub}")
+
+
+# ---------------------------------------------------------------------------
+# Agent tool names — routed to sub-agent output window
+# ---------------------------------------------------------------------------
+
+_AGENT_TOOLS: set[str] = {
+    "spawn_agent", "agent_status", "collect_agent", "collect_any",
+    "agent_message", "agent_read", "agent_extend", "agent_cancel",
+    "agent_handoff", "agent_inbox", "agent_subscribe",
+    "fan_out", "fan_in", "pipeline", "barrier", "scatter_gather",
+    "wait_for_agent",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -330,6 +351,7 @@ class MiniAgentTUI:
         self.chat_buf = ChatBuffer()
         self.tools_buf = ChatBuffer()
         self.thinking_buf = ChatBuffer()
+        self.subagent_buf = ChatBuffer()
 
         # Startup info
         self.tools_buf.append(f"mini_agent — {self.config.model}")
@@ -404,8 +426,26 @@ class MiniAgentTUI:
             style="class:thinking",
         )
 
+        # Sub-agent log (left pane, under thinking)
+        self.subagent_area = PTTextArea(
+            text="",
+            read_only=True,
+            scrollbar=False,
+            wrap_lines=True,
+            height=D(max=12),
+            style="class:dim",
+        )
+
+        # Sub-agents label
+        subagent_label = Window(
+            content=FormattedTextControl([('class:dim', ' Sub-agents')]),
+            height=1,
+            style='class:dim',
+        )
+
         left_pane = rounded_frame(
-            HSplit([self.tools_area, _h_line(), self.thinking_area]),
+            HSplit([self.tools_area, _h_line(), self.thinking_area,
+                    _h_line(), subagent_label, self.subagent_area]),
             title="Tools & Thinking",
             width=D(weight=40),
         )
@@ -472,6 +512,11 @@ class MiniAgentTUI:
             self.thinking_area.buffer.cursor_position = \
                 len(self.thinking_area.buffer.text)
 
+        if self.subagent_area is not None and self.subagent_buf.dirty:
+            self.subagent_area.text = self.subagent_buf.get_text()
+            self.subagent_area.buffer.cursor_position = \
+                len(self.subagent_area.buffer.text)
+
         if self.chat_area is not None and self.chat_buf.dirty:
             self.chat_area.text = self.chat_buf.get_text()
             self.chat_area.buffer.cursor_position = \
@@ -532,6 +577,7 @@ class MiniAgentTUI:
             chat_buf=self.chat_buf,
             tools_buf=self.tools_buf,
             thinking_buf=self.thinking_buf,
+            subagent_buf=self.subagent_buf,
         )
         self.worker.start()
         return True
@@ -545,14 +591,19 @@ class MiniAgentTUI:
         cmd = text.lower().strip()
 
         if cmd == "/clear":
+            # Cancel any running worker to avoid it operating on the old list
+            if self.worker and self.worker.is_alive():
+                self.worker.cancel.set()
             self.messages = [
                 {"role": "system", "content": build_system_prompt(self.config)},
                 {"role": "system", "content": build_startup_context(self.config.workspace)},
             ]
+            clear_api_cache()  # invalidate stale incremental-cleaning cache
             self.memory.clear()
             self._total_turns = 0
             self._total_tokens = 0
             self.tools_buf.append("--- conversation cleared ---")
+            self.subagent_buf.append("--- conversation cleared ---")
             return
 
         if cmd == "/help":
@@ -695,12 +746,24 @@ class MiniAgentTUI:
 
     def _export_to_file(self, path: str) -> None:
         """Export conversation to a markdown file."""
-        with open(path, "w") as f:
-            f.write("# mini_agent Conversation\\n\\n")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("# mini_agent Conversation\n\n")
             for msg in self.messages:
                 role = msg["role"].upper()
                 content = msg.get("content", "")
-                f.write(f"## {role}\\n\\n{content}\\n\\n")
+                if isinstance(content, str):
+                    f.write(f"## {role}\n\n{content}\n\n")
+                elif isinstance(content, list):
+                    # Multi-part content (e.g. tool calls)
+                    f.write(f"## {role}\n\n")
+                    for part in content:
+                        if isinstance(part, dict):
+                            if part.get("type") == "tool_use":
+                                f.write(f"- **Tool**: {part.get('name', 'unknown')}\n")
+                                f.write(f"  ```\n{part.get('input', {})}\n  ```\n")
+                            elif part.get("type") == "text":
+                                f.write(f"{part.get('text', '')}\n")
+                    f.write("\n")
 
     # ------------------------------------------------------------------
     # Header / Status text

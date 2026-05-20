@@ -340,11 +340,18 @@ def run_sub_agent(
                     tui_queue.put(("sub_token", tui_task_id, t))
                 on_token = _make_streaming_wrapper(_on_token_sub)
             else:
-                import sys as _sys
-                def _on_token_stderr(t: str) -> None:
-                    _sys.stderr.write(t)
-                    _sys.stderr.flush()
-                on_token = _make_streaming_wrapper(_on_token_stderr)
+                # Write streaming tokens to log file instead of stderr
+                # to avoid breaking TUI layouts.
+                import os as _os
+                _os.makedirs("logs", exist_ok=True)
+                _log_path = f"logs/sub_agent_{task_id}.log"
+                def _on_token_log(t: str) -> None:
+                    try:
+                        with open(_log_path, "a", encoding="utf-8") as _lf:
+                            _lf.write(t)
+                    except OSError:
+                        pass  # best-effort logging
+                on_token = _make_streaming_wrapper(_on_token_log)
         try:
             # Sub-agents use a cheaper/faster model for worker tasks.
             # Save and restore to avoid mutating the shared config object.
