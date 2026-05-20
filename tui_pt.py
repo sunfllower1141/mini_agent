@@ -474,14 +474,8 @@ class MiniAgentTUI:
 
         if self.chat_area is not None and self.chat_buf.dirty:
             self.chat_area.text = self.chat_buf.get_text()
-        """Point cursor at last line so chat window auto-scrolls to bottom."""
-        with self.chat_buf._lock:
-            n = len(self.chat_buf._lines)
-        # Return a Point-like object (y=line, x=0)
-        class _Pos:
-            __slots__ = ('x', 'y')
-            def __init__(self, y): self.x = 0; self.y = y
-        return _Pos(max(0, n - 1))
+            self.chat_area.buffer.cursor_position = \
+                len(self.chat_area.buffer.text)
 
     # ------------------------------------------------------------------
     # Key bindings
