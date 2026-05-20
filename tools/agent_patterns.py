@@ -285,8 +285,151 @@ def scatter_gather(
 
 
 # ============================================================================
+# Audit coordination — scout-then-drill pattern for codebase audits
+# ============================================================================
+
+# Shared context template for audit sub-agents.
+# Injects the critical discipline rules that prevent context-bloat and
+# empty-report failures.
+AUDIT_SHARED_CONTEXT = (
+    "AUDIT DISCIPLINE (you MUST follow these rules):\n"
+    "1. SCOUT FIRST: Use search_files or find_symbol to identify candidate "
+    "files/issues before reading anything. Spend at most 2 turns on discovery.\n"
+    "2. READ SELECTIVELY: Read only the 3-5 most relevant files. "
+    "Never try to read ALL files — you will run out of context.\n"
+    "3. REPORT EARLY: Reserve your last 3 turns for writing findings. "
+    "When the WRAP-UP message appears, STOP reading and START writing.\n"
+    "4. FINDINGS FIRST: Write your findings table BEFORE any explanation or "
+    "methodology. Use this exact format:\n"
+    "   | Severity | File | Line | Issue | Fix |\n"
+    "   |----------|------|------|-------|-----|\n"
+    "5. PARTIAL IS OK: If you can't finish, write what you have. "
+    "An incomplete report with 3 findings is infinitely better than no report.\n"
+    "6. ONE DIMENSION: Focus on your assigned defect class (bugs, perf, style, "
+    "etc.). Do not expand into other areas.\n"
+    "7. WRITE TO DISK: Use write_file to save your report to "
+    "reports/<audit-category>.md before your final message.\n"
+    "8. NO PREAMBLE: Your final message should start with the findings table. "
+    "Put all explanation, caveats, and methodology AFTER the table.\n"
+)
+
+
+def audit_parallel(
+    defect_classes: list[str],
+    workspace_scope: str | None = None,
+    runtime: AgentRuntime | None = None,
+    config=None,
+    wg=None,
+    rg=None,
+    max_turns: int = 15,
+    subscriptions: list[str] | None = None,
+) -> list[str]:
+    """Fan-out an audit across defect classes with scout-then-drill discipline.
+
+    Each defect class gets its own sub-agent with AUDIT_SHARED_CONTEXT injected.
+    Uses fewer turns (default 15) with strong wrap-up enforcement at turn 12.
+
+    Args:
+        defect_classes: List of defect categories to audit (e.g.,
+            ["bugs & error handling", "code quality", "performance"]).
+        workspace_scope: Optional path constraint (e.g., "tools/").
+        runtime: AgentRuntime instance.
+        config: AgentConfig instance.
+        wg, rg: Safety gates.
+        max_turns: Turn budget per auditor (default 15 — intentionally low).
+        subscriptions: Message types each auditor subscribes to. Defaults to
+            [] (disable heartbeats) to reduce overhead during audit.
+
+    Returns:
+        List of task_id strings.
+    """
+    from tools import _TOOL_CONTEXT
+    from tools.agent_ops import _spawn_one, _MAX_CONCURRENT
+
+    if runtime is None:
+        runtime = getattr(_TOOL_CONTEXT, "_agent_runtime", None)
+        if runtime is None:
+            raise RuntimeError("Agent runtime not initialized.")
+
+    if config is None:
+        config = getattr(_TOOL_CONTEXT, "_agent_config", None)
+        if config is None:
+            raise RuntimeError("Agent config not available.")
+
+    if subscriptions is None:
+        # Default: suppress heartbeats during audit to reduce interrupt overhead
+        subscriptions = []
+
+    scope_hint = f" Scope: {workspace_scope}." if workspace_scope else ""
+
+    task_ids = []
+    for defect_class in defect_classes:
+        if runtime.active_count >= _MAX_CONCURRENT:
+            break
+
+        task = (
+            f"AUDIT TASK: Find all {defect_class} issues in the codebase.{scope_hint}\n"
+            f"Remember: scout first (search_files), read only 3-5 files, "
+            f"write findings to reports/audit-{defect_class.replace(' ', '-')[:40]}.md, "
+            f"then produce your final summary table."
+        )
+
+        tid = _spawn_one(
+            task, config, runtime, wg, rg, max_turns,
+            cancel_event=None, visible=False,
+            shared_context=AUDIT_SHARED_CONTEXT,
+            subscriptions=subscriptions,
+        )
+        task_ids.append(tid)
+
+    return task_ids
+
+
+# ============================================================================
 # Tool wrappers — registered as LLM-callable tools
 # ============================================================================
+
+
+@_register("audit_parallel")
+def _audit_parallel(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
+    """Fan-out audit across defect classes with scout-then-drill discipline.
+
+    Required:
+        defect_classes: list[str] — e.g. ["bugs", "code quality", "performance"].
+
+    Optional:
+        workspace_scope: str — limit audit to a subdirectory (e.g. "tools/").
+        max_turns: int — turns per auditor (default 15).
+    """
+    from tools import _TOOL_CONTEXT
+
+    runtime = getattr(_TOOL_CONTEXT, "_agent_runtime", None)
+    config = getattr(_TOOL_CONTEXT, "_agent_config", None)
+
+    defect_classes = args.get("defect_classes", [])
+    if not defect_classes:
+        return ToolResult(success=False, content="defect_classes is required.")
+
+    scope = args.get("workspace_scope")
+    turns = args.get("max_turns", 15)
+
+    try:
+        task_ids = audit_parallel(
+            defect_classes=defect_classes,
+            workspace_scope=scope,
+            runtime=runtime,
+            config=config,
+            wg=wg,
+            rg=rg,
+            max_turns=turns,
+        )
+        return ToolResult(
+            success=True,
+            content=f"Spawned {len(task_ids)} audit agents: {task_ids}\n"
+                    f"Collect results with collect_any/collect_agent when ready.",
+        )
+    except Exception as exc:
+        return ToolResult(success=False, content=str(exc))
 
 
 @_register("fan_out")

@@ -189,8 +189,27 @@ def run_sub_agent(
                 _f.write(f"\n## Result\n\n{result.content}\n")
                 if result.scratchpad:
                     _f.write(f"\n## Scratchpad\n\n{result.scratchpad}\n")
-            # Truncate inline content, point to file
-            result.content = f"[report: {_path}] {result.content[:300]}{'...' if len(result.content) > 300 else ''}"
+            # Smart inline preview: prioritize findings/structured content over preamble.
+            # Scan for finding markers; if found, show those. Otherwise fall back to head truncation.
+            _content = result.content
+            _finding_markers = [
+                "## Findings", "## Issues", "| Severity |", "| File |",
+                "### ❌ CRITICAL", "### ❌ HIGH", "### 🔴", "### 🟡",
+                "**CRITICAL**", "**HIGH**", "| Priority |",
+            ]
+            _best_idx = len(_content)  # fallback: show from start
+            for _marker in _finding_markers:
+                _idx = _content.find(_marker)
+                if _idx != -1 and _idx < _best_idx:
+                    _best_idx = _idx
+            if _best_idx < len(_content) and _best_idx > 0:
+                # Found a marker — show from 50 chars before it, or from start if near beginning
+                _preview_start = max(0, _best_idx - 50)
+                _preview = _content[_preview_start:_preview_start + 500]
+            else:
+                _preview = _content[:300]
+            _truncated = len(_content) > len(_preview) + _preview_start if _best_idx < len(_content) else len(_content) > 300
+            result.content = f"[report: {_path}] {'...' if _best_idx > 50 else ''}{_preview}{'...' if _truncated else ''}"
         except OSError:
             pass  # can't write report; return inline as fallback
         return result
@@ -356,6 +375,35 @@ def run_sub_agent(
             # the cache to serve stale cleaned messages with orphaned tools.
             from api import clear_api_cache
             clear_api_cache()
+
+            # --- Turn-budget awareness: when running low, force the agent to wrap up ---
+            _turns_left = max_turns - turn_count
+            if _turns_left <= 3 and _turns_left > 0:
+                messages.append({
+                    "role": "system",
+                    "content": (
+                        f"⚠️ WRAP-UP: You have {_turns_left} turns remaining. "
+                        "STOP reading files. STOP investigating further. "
+                        "You MUST write your findings NOW.\n"
+                        "1. Compile all findings you've gathered into a structured report.\n"
+                        "2. Use write_file to write the report to disk (reports/<your-task-id>.md).\n"
+                        "3. In your final message, present the findings summary as a table with "
+                        "Severity, File, Line, Issue, and Fix columns.\n"
+                        "4. Do NOT read any more files. Work only from what you already have."
+                    ),
+                    "_transient": True,
+                })
+            elif _turns_left <= 0:
+                messages.append({
+                    "role": "system",
+                    "content": (
+                        "⛔ FINAL TURN: You are out of turns. "
+                        "Do NOT call any tools that read files. "
+                        "Write your report with whatever findings you have, even if incomplete. "
+                        "A partial report is better than no report."
+                    ),
+                    "_transient": True,
+                })
 
             # --- Communication nudge: every 3 turns, remind the agent to coordinate ---
             if turn_count % 3 == 0:
@@ -601,6 +649,28 @@ _SUB_AGENT_SYSTEM_PROMPT = (
     "- If you encounter an error you cannot fix, report it clearly in your "
     "final answer rather than looping.\n"
     "- Keep your response focused and under 2000 characters.\n"
+    "\n"
+    "COMPLETION CRITERIA — You are DONE when:\n"
+    "1. You have WRITTEN your findings/report to disk using write_file.\n"
+    "2. Your final message contains a summary table of findings.\n"
+    "3. If you cannot complete the full task, write a PARTIAL report with "
+    "whatever you have. An incomplete report is always better than nothing.\n"
+    "\n"
+    "REPORT FORMAT — For audit/investigation tasks, structure output as:\n"
+    "## Findings\n"
+    "| Severity | File | Line | Issue | Fix |\n"
+    "|----------|------|------|-------|-----|\n"
+    "Put findings FIRST. Explanation, methodology, and preamble go AFTER "
+    "the findings table. This ensures the orchestrator sees results even "
+    "if your output is truncated.\n"
+    "\n"
+    "SCOUT-THEN-DRILL — When analyzing many files:\n"
+    "1. FIRST: use search_files or find_symbol to identify candidate "
+    "files/locations (cheap, 1-2 turns).\n"
+    "2. SECOND: read only the 3-5 most relevant files deeply (expensive).\n"
+    "3. THIRD: write findings immediately — do NOT keep reading more files.\n"
+    "Never try to read ALL files in a codebase. You will run out of context "
+    "and produce nothing.\n"
     "\n"
     "You MAY spawn sub-agents (spawn_agent) to parallelize independent "
     "subtasks. When you do, follow the same orchestrator rules as the "
