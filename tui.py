@@ -87,15 +87,17 @@ _AGENT_COLORS = ["green", "yellow", "accent", "pulse", "red"]
 
 def _build_css(theme: TuiTheme) -> str:
     return f"""
+/* All backgrounds transparent — terminal native look.
+   Separation via subtle border colors only. */
+
 Screen {{
-    background: {theme.bg};
 }}
 
 Header {{
-    background: {theme.surface};
     color: {theme.accent};
     text-style: bold;
     padding: 0 2;
+    border-bottom: solid {theme.border} 30%;
 }}
 
 Header.pulse {{
@@ -104,16 +106,15 @@ Header.pulse {{
 }}
 
 Footer {{
-    background: {theme.surface};
     color: {theme.dim};
     height: 1;
     padding: 0 2;
-    transition: background 300ms;
+    border-top: solid {theme.border} 30%;
 }}
 
 Footer.pulse {{
-    background: {theme.pulse};
-    color: {theme.bg};
+    color: {theme.pulse};
+    border-top: solid {theme.pulse} 50%;
 }}
 
 #main-area {{
@@ -123,18 +124,16 @@ Footer.pulse {{
 
 #left-pane {{
     width: 42%;
-    background: {theme.surface};
+    border-right: solid {theme.border} 25%;
 }}
 
 #right-pane {{
     width: 1fr;
-    background: {theme.bg};
 }}
 
 /* --- Tools panel (left) --- */
 
 #tools-log {{
-    background: {theme.bg};
     color: {theme.text};
     border: none;
     padding: 0 1;
@@ -144,15 +143,19 @@ Footer.pulse {{
 }}
 
 #thinking-log {{
-    background: {theme.bg};
-    color: {theme.thinking};
-    border: none;
-    border-top: solid {theme.border};
+    border-top: solid {theme.border} 25%;
     padding: 0 1;
     height: auto;
     max-height: 12;
     overflow-y: auto;
     scrollbar-size: 0 0;
+}}
+
+#thinking-log Static {{
+    color: {theme.thinking};
+    margin: 0;
+    padding: 0 1;
+    text-style: italic;
 }}
 
 #thinking-log.hidden {{
@@ -161,10 +164,9 @@ Footer.pulse {{
 
 #agent-tree {{
     display: block;
-    background: {theme.surface};
     color: {theme.dim};
     border: none;
-    border-top: solid {theme.border};
+    border-top: solid {theme.border} 25%;
     padding: 0 1;
     height: auto;
     max-height: 10;
@@ -174,9 +176,8 @@ Footer.pulse {{
 }}
 
 #subagent-pane {{
-    background: {theme.surface};
     border: none;
-    border-top: solid {theme.border};
+    border-top: solid {theme.border} 25%;
     padding: 0 1;
     height: auto;
     max-height: 12;
@@ -187,42 +188,38 @@ Footer.pulse {{
 }}
 
 #subagent-pane RichLog {{
-    background: {theme.bg};
     width: 1fr;
     margin: 0 1;
     scrollbar-size: 0 0;
-    border: solid {theme.border};
+    border: solid {theme.border} 25%;
 }}
 
 /* --- Chat view (right) --- */
 
 #chat-view {{
-    background: {theme.bg};
     padding: 1 2 0 2;
     scrollbar-size: 0 0;
 }}
 
 MsgUser {{
-    background: {theme.text} 5%;
     color: {theme.text};
     margin: 0 0 1 8;
     padding: 0 2;
-    border-left: solid {theme.accent};
+    border-left: solid {theme.accent} 60%;
 }}
 
 MsgAgent {{
-    background: {theme.green} 5%;
     color: {theme.text};
     margin: 0 8 1 0;
     padding: 0 2;
-    border-left: solid {theme.green};
+    border-left: solid {theme.green} 60%;
 }}
 
 MsgThinking {{
     color: {theme.thinking};
     margin: 0 8 1 0;
     padding: 0 2;
-    border-left: solid {theme.thinking};
+    border-left: solid {theme.thinking} 40%;
 }}
 
 MsgThinking.hidden {{
@@ -230,17 +227,15 @@ MsgThinking.hidden {{
 }}
 
 MsgError {{
-    background: {theme.red} 10%;
     color: {theme.text};
     margin: 0 8 1 0;
     padding: 0 2;
-    border-left: solid {theme.red};
+    border-left: solid {theme.red} 60%;
 }}
 
 /* --- Input area --- */
 
 #input-area {{
-    background: {theme.surface};
     border-top: solid {theme.accent} 30%;
     padding: 1 2;
     height: auto;
@@ -249,11 +244,15 @@ MsgError {{
 }}
 
 #input {{
-    background: {theme.surface};
     color: {theme.text};
     border: none;
     width: 100%;
     height: auto;
+}}
+
+#input:focus {{
+    border-left: solid {theme.accent} 50%;
+    padding-left: 1;
 }}
 
 #input:focus {{
@@ -399,7 +398,7 @@ class MiniAgentTUI(App):
         with Horizontal(id="main-area"):
             with Vertical(id="left-pane"):
                 yield RichLog(id="tools-log", highlight=True, markup=True, wrap=True)
-                yield RichLog(id="thinking-log", highlight=True, markup=True, wrap=True)
+                yield Vertical(id="thinking-log")
                 yield Tree("agent", id="agent-tree")
                 with HorizontalScroll(id="subagent-pane"):
                     pass
@@ -446,7 +445,7 @@ class MiniAgentTUI(App):
 
         self._chat_view = self.query_one("#chat-view", VerticalScroll)
         self._tools_log = tools_log
-        self._thinking_log = self.query_one("#thinking-log", RichLog)
+        self._thinking_log = self.query_one("#thinking-log", Vertical)
         self._footer = self.query_one(Footer)
 
         self._tree_node_map: dict[str, object] = {}
@@ -473,6 +472,7 @@ class MiniAgentTUI(App):
         self._turn_id: int = 0
         self._current_response: Markdown | None = None
         self._current_response_text: str = ""
+        self._thinking_widget: Static | None = None
 
         from tools import _TOOL_CONTEXT
         _TOOL_CONTEXT.__dict__["_tui_queue"] = self.queue
@@ -958,23 +958,18 @@ class MiniAgentTUI(App):
         if text.startswith(THINKING_START):
             self._in_thinking = True
             self._thinking_buf = ""
+            self._thinking_widget = Static("")
+            self._thinking_log.mount(self._thinking_widget)
             return
         if text == THINKING_END:
             self._in_thinking = False
-            # Flush remaining thinking text
-            if self._thinking_buf.strip():
-                self._thinking_log.write(_safe(self._thinking_buf.strip()))
             self._thinking_buf = ""
+            self._thinking_widget = None
             return
         if self._in_thinking:
             self._thinking_buf += text
-            # Write lines as they complete into the thinking-log
-            if "\n" in self._thinking_buf:
-                lines = self._thinking_buf.split("\n")
-                for line in lines[:-1]:
-                    if line.strip():
-                        self._thinking_log.write(_safe(line.strip()))
-                self._thinking_buf = lines[-1]
+            if self._thinking_widget is not None:
+                self._thinking_widget.update(_safe(self._thinking_buf.strip()))
             return
 
         # --- Content: builds in chat-view (right pane), never interrupted ---
@@ -1120,11 +1115,12 @@ class MiniAgentTUI(App):
     # ------------------------------------------------------------------
 
     def _finish_turn(self, usage: dict | None = None, turn_count: int = 0) -> None:
-        # Flush any remaining thinking text
-        if self._thinking_buf.strip():
-            self._thinking_log.write(_safe(self._thinking_buf.strip()))
+        # Flush any remaining thinking text to the Static widget
+        if self._thinking_buf.strip() and self._thinking_widget is not None:
+            self._thinking_widget.update(_safe(self._thinking_buf.strip()))
         self._in_thinking = False
         self._thinking_buf = ""
+        self._thinking_widget = None
         self._active_tool = ""
         self._approval_active = False
         self._hide_spinner()
@@ -1149,3 +1145,4 @@ class MiniAgentTUI(App):
 if __name__ == "__main__":
     app = MiniAgentTUI()
     app.run()
+()
