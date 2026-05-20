@@ -142,6 +142,25 @@ STYLE = Style.from_dict({
     "msg-thinking": f"fg:{THEME['thinking']}",
     # TextArea styling
     "textarea":     f"fg:{THEME['text']}",
+    # Monochrome Pygments syntax highlighting (greyscale)
+    "pygments.comment":              f"italic {_GREY_DIM}",
+    "pygments.keyword":              f"bold {_GREY_LIGHT}",
+    "pygments.keyword.constant":     f"bold {_GREY_LIGHT}",
+    "pygments.keyword.declaration":  f"bold {_GREY_LIGHT}",
+    "pygments.keyword.namespace":    f"bold {_GREY_LIGHT}",
+    "pygments.keyword.type":         f"bold {_GREY_LIGHT}",
+    "pygments.name":                 _GREY_MID,
+    "pygments.name.builtin":         f"bold {_GREY_MID}",
+    "pygments.name.function":        _GREY_BOLD,
+    "pygments.name.class":           f"bold {_GREY_BOLD}",
+    "pygments.name.decorator":       _GREY_DIM,
+    "pygments.name.exception":       _GREY_BOLD,
+    "pygments.literal.string":       _GREY_LIGHT,
+    "pygments.literal.string.doc":   f"italic {_GREY_DIM}",
+    "pygments.literal.number":       _GREY_LIGHT,
+    "pygments.operator":             _GREY_DIM,
+    "pygments.punctuation":          _GREY_DIM,
+    "pygments.literal":              _GREY_LIGHT,
 })
 
 
@@ -449,7 +468,7 @@ class MiniAgentTUI:
             read_only=True,
             scrollbar=False,
             wrap_lines=True,
-            lexer=PygmentsLexer(PythonLexer, sync_style=lambda _: MonochromeStyle),
+            lexer=PygmentsLexer(PythonLexer),
             style="class:dim",
         )
 

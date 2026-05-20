@@ -491,7 +491,7 @@ def build_startup_context(
                     capture_output=True, text=True, timeout=GIT_LOG_TIMEOUT)
         if r.returncode == 0 and r.stdout.strip():
             parts.append("\n## Recent git log\n```\n" + r.stdout.rstrip() + "\n```")
-    except OSError | _sp.TimeoutExpired:
+    except (OSError, _sp.TimeoutExpired):
         pass
 
     # 4. Project knowledge (cross-session learnings, if available)
