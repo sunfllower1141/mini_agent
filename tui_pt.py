@@ -91,7 +91,7 @@ STYLE = Style.from_dict({
     "input":        f"fg:{THEME['text']}",
     "input-focus":  f"fg:{THEME['text']}",
     "pulse":        f"fg:{THEME['dim']}",
-    "msg-user":     f"fg:{THEME['text']}",
+    "msg-user":     f"fg:{THEME['accent']}",
     "msg-agent":    f"fg:{THEME['text']}",
     "msg-error":    f"fg:{THEME['red']}",
     "msg-thinking": f"fg:{THEME['thinking']}",
@@ -106,48 +106,54 @@ STYLE = Style.from_dict({
 
 class ChatBuffer:
     """Thread-safe append-only text log.  Workers write here; the main
-    thread syncs to TextArea widgets for display."""
+    thread syncs to TextArea widgets for display.
+
+    Lines are stored as (style_class, text) tuples for styled rendering.
+    If style_class is None/empty, the default style is used.
+    """
 
     MAX_LINES = 2000
 
     def __init__(self):
-        self._lines: list[str] = []  # plain text lines
+        self._lines: list[tuple[str, str]] = []  # (style_class, text)
         self._lock = threading.Lock()
-        self._dirty = True
 
-    def append(self, text: str):
+    def append(self, text: str, style: str = ""):
         with self._lock:
             for line in text.split('\n'):
-                self._lines.append(line)
+                self._lines.append((style, line))
             excess = len(self._lines) - self.MAX_LINES
             if excess > 0:
                 self._lines = self._lines[excess:]
-            self._dirty = True
 
-    def append_last(self, text: str):
-        """Append text to the last line (for streaming tokens)."""
+    def append_last(self, text: str, style: str = ""):
+        """Append text to the last line if same style (for streaming tokens)."""
         with self._lock:
-            if text == '\n':
-                self._lines.append('')
-            elif self._lines:
-                self._lines[-1] += text
+            if self._lines and self._lines[-1][0] == style:
+                prev_style, prev_text = self._lines[-1]
+                self._lines[-1] = (prev_style, prev_text + text)
             else:
-                self._lines.append(text)
+                self._lines.append((style, text))
             excess = len(self._lines) - self.MAX_LINES
             if excess > 0:
                 self._lines = self._lines[excess:]
-            self._dirty = True
 
     def get_text(self) -> str:
         """Return full log as a single string (for syncing to TextArea)."""
         with self._lock:
-            self._dirty = False
-            return '\n'.join(self._lines)
+            return '\n'.join(text for _, text in self._lines)
+
+    def get_formatted(self) -> "FormattedText":
+        """Return styled FormattedText for use in FormattedTextControl."""
+        with self._lock:
+            return FormattedText([
+                (f"class:{style}" if style else "", line + '\n')
+                for style, line in self._lines
+            ])
 
     @property
     def dirty(self) -> bool:
-        with self._lock:
-            return self._dirty
+        return False  # unused now, kept for compat
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +164,7 @@ def _h_line() -> Window:
     return Window(height=1, char=BOX_H, style="class:border")
 
 
-def rounded_frame(content, title: str | None = None) -> HSplit:
+def rounded_frame(content, title: str | None = None, width=None) -> HSplit:
     """Wrap *content* in a rounded border (╭─╮│╰─╯) with optional title."""
     if title:
         top = VSplit([
@@ -200,7 +206,7 @@ def rounded_frame(content, title: str | None = None) -> HSplit:
                style="class:border", dont_extend_width=True),
     ], height=1)
 
-    return HSplit([top, body, bottom])
+    return HSplit([top, body, bottom], width=width)
 
 # ---------------------------------------------------------------------------
 # Worker thread — runs agent turn, writes to ChatBuffers
@@ -250,7 +256,7 @@ class AgentWorker(threading.Thread):
                 session=self.session,
             )
         except Exception as e:
-            self.chat_buf.append(f"Error: {e}")
+            self.chat_buf.append(f"Error: {e}", style="msg-error")
             return
 
         if msg is not None:
@@ -270,7 +276,7 @@ class AgentWorker(threading.Thread):
         if self._in_thinking:
             self.thinking_buf.append_last(text)
         else:
-            self.chat_buf.append_last(text)
+            self.chat_buf.append_last(text, style="msg-agent")
     def _on_tool_start(self, summary: str, parallel: bool = False):
         label = f"⚡ {summary}" if parallel else f"🔧 {summary}"
         self.tools_buf.append(label)
@@ -334,7 +340,6 @@ class MiniAgentTUI:
         self._refresh_git_status()
 
         # Build TextArea widgets (will be referenced in layout and synced)
-        self.chat_area: PTTextArea | None = None
         self.tools_area: PTTextArea | None = None
         self.thinking_area: PTTextArea | None = None
         self._status_window: Window | None = None
@@ -385,17 +390,22 @@ class MiniAgentTUI:
         left_pane = rounded_frame(
             HSplit([self.tools_area, _h_line(), self.thinking_area]),
             title="Tools & Thinking",
+            width=D(weight=40),
         )
 
-        # Chat view (right pane)
-        self.chat_area = PTTextArea(
-            text="",
-            read_only=True,
-            scrollbar=False,
+        # Chat view (right pane) — uses FormattedTextControl for colored text
+        _chat_fc = FormattedTextControl(
+            lambda: self.chat_buf.get_formatted(),
+            get_cursor_position=lambda: self._chat_cursor_pos(),
+        )
+        self._chat_window = Window(
+            content=_chat_fc,
             wrap_lines=True,
             style="class:text",
+            always_hide_cursor=True,
         )
-        right_pane = rounded_frame(self.chat_area, title="Chat")
+        right_pane = rounded_frame(self._chat_window, title="Chat",
+                                   width=D(weight=60))
 
         # Body: left pane | right pane (no vertical divider)
         body = VSplit([left_pane, right_pane])
@@ -431,14 +441,9 @@ class MiniAgentTUI:
     # ------------------------------------------------------------------
 
     def _sync_display(self, app=None):
-        """Sync all ChatBuffers to their TextArea widgets.  Called by
-        before_render on every refresh cycle.  After sync, each TextArea
-        auto-scrolls to the bottom."""
-        if self.chat_area is not None:
-            self.chat_area.text = self.chat_buf.get_text()
-            self.chat_area.buffer.cursor_position = \
-                len(self.chat_area.buffer.text)
-
+        """Sync tools/thinking ChatBuffers to TextArea widgets.  Called by
+        before_render on every refresh cycle.  Chat pane uses
+        FormattedTextControl (self-refreshing via cursor position)."""
         if self.tools_area is not None:
             self.tools_area.text = self.tools_buf.get_text()
             self.tools_area.buffer.cursor_position = \
@@ -448,6 +453,16 @@ class MiniAgentTUI:
             self.thinking_area.text = self.thinking_buf.get_text()
             self.thinking_area.buffer.cursor_position = \
                 len(self.thinking_area.buffer.text)
+
+    def _chat_cursor_pos(self):
+        """Point cursor at last line so chat window auto-scrolls to bottom."""
+        with self.chat_buf._lock:
+            n = len(self.chat_buf._lines)
+        # Return a Point-like object (y=line, x=0)
+        class _Pos:
+            __slots__ = ('x', 'y')
+            def __init__(self, y): self.x = 0; self.y = y
+        return _Pos(max(0, n - 1))
 
     # ------------------------------------------------------------------
     # Key bindings
@@ -479,7 +494,9 @@ class MiniAgentTUI:
         if not text:
             return False
 
-        self.chat_buf.append(f"You: {text}")
+        self.chat_buf.append(f"─ You", style="msg-user")
+        self.chat_buf.append(text, style="msg-user")
+        self.chat_buf.append("", style="")  # blank line for spacing
         buffer.reset()
         self.messages.append({"role": "user", "content": text})
 
@@ -494,7 +511,6 @@ class MiniAgentTUI:
             thinking_buf=self.thinking_buf,
         )
         self.worker.start()
-        self._sync_display()
         return True
 
     # ------------------------------------------------------------------
