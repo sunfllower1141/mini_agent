@@ -5,6 +5,11 @@ requests>=2.20
 tomli>=2.0; python_version < "3.11"
 textual>=1.0
 pyperclip
+numpy>=1.21
+prompt-toolkit>=3.0
+Pygments>=2.0
+playwright>=1.40
+python-lsp-server>=1.14
 flake8>=7.0
 pytest>=9.0
 

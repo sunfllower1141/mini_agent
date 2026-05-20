@@ -23,6 +23,7 @@ Layout (top to bottom):
 """
 from __future__ import annotations
 
+import os
 import sys
 import subprocess
 import threading
@@ -42,10 +43,14 @@ from prompt_toolkit.widgets import TextArea as PTTextArea
 from prompt_toolkit.lexers import PygmentsLexer
 from pygments.lexers.python import PythonLexer
 
-from config import resolve_workspace, init_session, parse_args
+from config import (
+    resolve_workspace, init_session, parse_args,
+    build_startup_context, list_sessions, switch_session, delete_session,
+)
 from llm import run_agent_turn
 from stream import THINKING_START, THINKING_END
 from safety import ReadSafetyGate, WriteSafetyGate
+from prompt import build_system_prompt
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -342,6 +347,8 @@ class MiniAgentTUI:
         # Worker state
         self.worker: AgentWorker | None = None
         self._turn_id = 0
+        self._total_turns = 0
+        self._total_tokens = 0
 
         # Git status
         self._git_branch = ""
@@ -506,6 +513,12 @@ class MiniAgentTUI:
         if not text:
             return False
 
+        # Route slash commands
+        if text.startswith("/"):
+            self._handle_command(text)
+            buffer.reset()
+            return True
+
         self.chat_buf.append(f"─ You", style="msg-user")
         self.chat_buf.append(text, style="msg-user")
         self.chat_buf.append("", style="")  # blank line for spacing
@@ -513,6 +526,10 @@ class MiniAgentTUI:
         self.messages.append({"role": "user", "content": text})
 
         self._turn_id += 1
+        # Accumulate totals from previous worker
+        if self.worker and not self.worker.is_alive():
+            self._total_turns += self.worker.total_turns
+            self._total_tokens += self.worker.total_tokens
         self.worker = AgentWorker(
             self.messages, self.config,
             self.write_gate, self.read_gate,
@@ -524,6 +541,172 @@ class MiniAgentTUI:
         )
         self.worker.start()
         return True
+
+    # ------------------------------------------------------------------
+    # Slash commands
+    # ------------------------------------------------------------------
+
+    def _handle_command(self, text: str) -> None:
+        """Route /slash commands.  Results write to tools_buf."""
+        cmd = text.lower().strip()
+
+        if cmd == "/clear":
+            self.messages = [
+                {"role": "system", "content": build_system_prompt(self.config)},
+                {"role": "system", "content": build_startup_context(self.config.workspace)},
+            ]
+            self.memory.clear()
+            self._total_turns = 0
+            self._total_tokens = 0
+            self.tools_buf.append("--- conversation cleared ---")
+            return
+
+        if cmd == "/help":
+            for line in [
+                "/clear     Reset conversation memory",
+                "/export    Write conversation to markdown",
+                "/help      Show this help",
+                "/init      Reinitialize rules + toml",
+                "/stats     Show session stats",
+                "/session   new | switch | delete | list",
+                "/shell     Drop to real shell (Ctrl+D to return)",
+                "/theme     Show theme info",
+                "/workspace Switch workspace",
+            ]:
+                self.tools_buf.append(line)
+            return
+
+        if cmd == "/stats":
+            turns = self._total_turns
+            tokens = self._total_tokens
+            if self.worker and self.worker.total_turns:
+                turns += self.worker.total_turns
+                tokens += self.worker.total_tokens
+            self.tools_buf.append(
+                f"Session: {len(self.messages)} msgs, {turns} turns, "
+                f"{tokens} tokens, {self.config.model}"
+            )
+            return
+
+        if cmd.startswith("/session"):
+            parts = cmd.split(maxsplit=2)
+            sub = parts[1] if len(parts) > 1 else ""
+            arg = parts[2] if len(parts) > 2 else ""
+            ws = self.config.workspace
+            if sub == "list":
+                sessions = list_sessions(ws)
+                self.tools_buf.append(
+                    f"Sessions: {', '.join(sessions) if sessions else 'none'}"
+                )
+            elif sub == "new" and arg:
+                session_data = switch_session(ws, arg, self.memory, self.config)
+                self.messages = self.memory.save(self.messages)
+                self.memory.close()
+                self.memory = session_data["memory"]
+                self.messages = session_data["messages"]
+                self._total_turns = 0
+                self._total_tokens = 0
+                self.tools_buf.append(f"Created session '{arg}'.")
+            elif sub == "switch" and arg:
+                self.messages = self.memory.save(self.messages)
+                self.memory.close()
+                session_data = switch_session(ws, arg, self.memory, self.config)
+                self.memory = session_data["memory"]
+                self.messages = session_data["messages"]
+                self._total_turns = 0
+                self._total_tokens = 0
+                self.tools_buf.append(f"Switched to '{arg}'.")
+            elif sub == "delete" and arg:
+                ok, msg = delete_session(ws, arg)
+                self.tools_buf.append(msg)
+            else:
+                self.tools_buf.append(
+                    "Usage: /session new <name> | switch <name> | delete <name> | list"
+                )
+            return
+
+        if cmd == "/export":
+            import datetime
+            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            fname = f"conversation_{ts}.md"
+            path = os.path.join(self.config.workspace, fname)
+            self._export_to_file(path)
+            self.tools_buf.append(f"Exported to {fname}")
+            return
+
+        if cmd.startswith("/theme"):
+            self.tools_buf.append("Theme: Catppuccin Mocha (only palette available)")
+            return
+
+        if cmd.startswith("/workspace"):
+            parts = text.split(maxsplit=1)
+            new_path = parts[1].strip() if len(parts) > 1 else ""
+            if not new_path:
+                self.tools_buf.append("Usage: /workspace <path>")
+                return
+            new_workspace = os.path.abspath(new_path)
+            if not os.path.isdir(new_workspace):
+                self.tools_buf.append(f"Not a directory: {new_workspace}")
+                return
+            self.messages = self.memory.save(self.messages)
+            self.memory.close()
+            from config import init_session as _init_session
+            try:
+                new_data = _init_session(new_workspace)
+            except Exception as exc:
+                self.tools_buf.append(f"Error: {exc}")
+                return
+            self.config = new_data["config"]
+            self.config.verbose = "--quiet" not in sys.argv
+            self.write_gate = new_data["write_gate"]
+            self.read_gate = new_data["read_gate"]
+            self.memory = new_data["memory"]
+            self.messages = new_data["messages"]
+            self.session.close()
+            self.session = new_data["session"]
+            self.worker = None
+            self._total_turns = 0
+            self._total_tokens = 0
+            self._turn_id += 1
+            self._refresh_git_status()
+            self.tools_buf.append(f"Workspace: {new_workspace}")
+            return
+
+        if cmd == "/init":
+            from tools.file_ops import _init_rules
+            from safety import ReadSafetyGate
+            rg = ReadSafetyGate(self.config.workspace)
+            result = _init_rules({}, None, rg)
+            self.tools_buf.append(result.content)
+            return
+
+        if cmd == "/shell":
+            self.tools_buf.append("Dropping to shell — type 'exit' or Ctrl+D to return.")
+            self.app.exit()
+            import code
+            code.interact(local=locals())
+            self.app = Application(
+                layout=self._build_layout(),
+                key_bindings=self._build_keybindings(),
+                style=STYLE,
+                full_screen=True,
+                mouse_support=True,
+                refresh_interval=0.05,
+                before_render=self._sync_display,
+            )
+            self.app.run()
+            return
+
+        self.tools_buf.append(f"Unknown command: {text}")
+
+    def _export_to_file(self, path: str) -> None:
+        """Export conversation to a markdown file."""
+        with open(path, "w") as f:
+            f.write("# mini_agent Conversation\\n\\n")
+            for msg in self.messages:
+                role = msg["role"].upper()
+                content = msg.get("content", "")
+                f.write(f"## {role}\\n\\n{content}\\n\\n")
 
     # ------------------------------------------------------------------
     # Header / Status text
