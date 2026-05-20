@@ -8,6 +8,7 @@ with env vars and CLI flags.  Priority: CLI > env var > config file > default.
 from __future__ import annotations
 
 import os
+import subprocess as _sp
 import sys
 from dataclasses import dataclass, field
 
@@ -490,7 +491,7 @@ def build_startup_context(
                     capture_output=True, text=True, timeout=GIT_LOG_TIMEOUT)
         if r.returncode == 0 and r.stdout.strip():
             parts.append("\n## Recent git log\n```\n" + r.stdout.rstrip() + "\n```")
-    except OSError | subprocess.TimeoutExpired:
+    except OSError | _sp.TimeoutExpired:
         pass
 
     # 4. Project knowledge (cross-session learnings, if available)
