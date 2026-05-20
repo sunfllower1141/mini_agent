@@ -46,7 +46,8 @@ from tools import set_context, build_symbol_index
 
 
 # ---------------------------------------------------------------------------
-# Themes
+# Theme — Catppuccin Mocha
+# https://github.com/catppuccin/catppuccin — de facto standard dark TUI palette
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
@@ -65,55 +66,22 @@ class TuiTheme:
     pulse: str
     purple: str
 
-THEMES: dict[str, TuiTheme] = {
-    "dawn": TuiTheme("Dawn",
-        bg="#faf8f5", surface="#f0ede8", border="#d4cfc8",
-        accent="#b8956a", text="#3d3a35", dim="#8a857d",
-        green="#5a8a4a", yellow="#b89540", red="#c06050",
-        thinking="#b0aaa0", pulse="#f0c060", purple="#a080c0"),
-    "sepia": TuiTheme("Sepia",
-        bg="#f4f0e6", surface="#e8e0d0", border="#c8b898",
-        accent="#b8893a", text="#4a3f30", dim="#8a7a60",
-        green="#6a8a4a", yellow="#c0a040", red="#b85840",
-        thinking="#b0a080", pulse="#e0b040", purple="#9a7ab0"),
-    "ember": TuiTheme("Ember",
-        bg="#1e1814", surface="#2a221c", border="#3a3028",
-        accent="#d4985a", text="#d0c8be", dim="#7a7064",
-        green="#7ab860", yellow="#d4a040", red="#d47050",
-        thinking="#5a5040", pulse="#e89840", purple="#c090d0"),
-    "slate": TuiTheme("Slate",
-        bg="#111111", surface="#1b1b1b", border="#2a2a2a",
-        accent="#8f8f8f", text="#b8b8b8", dim="#5a5a5a",
-        green="#4f9f6f", yellow="#b89a4a", red="#a85a5a",
-        thinking="#3a3a3a", pulse="#c0c040", purple="#8a7ab0"),
-    "midnight": TuiTheme("Midnight",
-        bg="#090b0d", surface="#131619", border="#1e2226",
-        accent="#8899aa", text="#b0c0d0", dim="#4a5560",
-        green="#4a8a6a", yellow="#9a8a4a", red="#9a6060",
-        thinking="#2a3040", pulse="#6a8acc", purple="#7a8ab0"),
-    "cobalt": TuiTheme("Cobalt",
-        bg="#0a1220", surface="#101830", border="#1e2850",
-        accent="#6090d0", text="#a0b8d8", dim="#4a6090",
-        green="#5a9a6a", yellow="#a0a040", red="#b06060",
-        thinking="#203050", pulse="#5090e0", purple="#8090d0"),
-    "neon": TuiTheme("Neon",
-        bg="#0c0c0c", surface="#16161a", border="#303030",
-        accent="#e040e0", text="#c0e0c0", dim="#506050",
-        green="#00e060", yellow="#e0c000", red="#ff4060",
-        thinking="#302040", pulse="#e040ff", purple="#c040ff"),
-    "forest": TuiTheme("Forest",
-        bg="#0e1410", surface="#141c16", border="#1e2e22",
-        accent="#60a870", text="#a0c0a8", dim="#4a6a50",
-        green="#60d070", yellow="#b0b040", red="#c06050",
-        thinking="#203028", pulse="#50d060", purple="#8090b0"),
-    "dracula": TuiTheme("Dracula",
-        bg="#282a36", surface="#1e1f29", border="#44475a",
-        accent="#bd93f9", text="#f8f8f2", dim="#6272a4",
-        green="#50fa7b", yellow="#f1fa8c", red="#ff5555",
-        thinking="#44475a", pulse="#ff79c6", purple="#bd93f9"),
-}
+CATPPUCCIN_MOCHA = TuiTheme(
+    name="Catppuccin Mocha",
+    bg="#1e1e2e",        # base
+    surface="#313244",   # surface0 — cards, panes
+    border="#45475a",    # surface1 — borders, separators
+    accent="#89b4fa",    # blue — primary accent
+    text="#cdd6f4",      # text — foreground
+    dim="#6c7086",       # overlay0 — comments, secondary
+    green="#a6e3a1",     # green — success
+    yellow="#f9e2af",    # yellow — warnings
+    red="#f38ba8",       # red — errors
+    thinking="#585b70",  # surface2 — thinking is low-attention
+    pulse="#cba6f7",     # mauve — pulse / attention
+    purple="#cba6f7",    # mauve — same as pulse
+)
 
-DEFAULT_THEME = "slate"
 _AGENT_COLORS = ["green", "yellow", "accent", "pulse", "red"]
 
 
@@ -127,6 +95,12 @@ Header {{
     background: {theme.surface};
     color: {theme.accent};
     text-style: bold;
+    padding: 0 2;
+}}
+
+Header.pulse {{
+    background: {theme.pulse};
+    color: {theme.bg};
 }}
 
 Footer {{
@@ -167,6 +141,22 @@ Footer.pulse {{
     height: 1fr;
     overflow-y: auto;
     scrollbar-size: 0 0;
+}}
+
+#thinking-log {{
+    background: {theme.bg};
+    color: {theme.thinking};
+    border: none;
+    border-top: solid {theme.border};
+    padding: 0 1;
+    height: auto;
+    max-height: 12;
+    overflow-y: auto;
+    scrollbar-size: 0 0;
+}}
+
+#thinking-log.hidden {{
+    display: none;
 }}
 
 #agent-tree {{
@@ -230,8 +220,13 @@ MsgAgent {{
 
 MsgThinking {{
     color: {theme.thinking};
-    margin: 0 8 2 0;
+    margin: 0 8 1 0;
     padding: 0 2;
+    border-left: solid {theme.thinking};
+}}
+
+MsgThinking.hidden {{
+    display: none;
 }}
 
 MsgError {{
@@ -240,19 +235,6 @@ MsgError {{
     margin: 0 8 1 0;
     padding: 0 2;
     border-left: solid {theme.red};
-}}
-
-#response-md {{
-    background: {theme.bg};
-    color: {theme.text};
-    border: none;
-    border-top: solid {theme.border};
-    padding: 0 1;
-    height: auto;
-    max-height: 50%;
-    overflow-y: auto;
-    scrollbar-size: 0 0;
-    display: none;
 }}
 
 /* --- Input area --- */
@@ -398,17 +380,18 @@ class AgentWorker(threading.Thread):
 class MiniAgentTUI(App):
     """Textual TUI for mini_agent."""
 
-    CSS = _build_css(THEMES[DEFAULT_THEME])
+    CSS = _build_css(CATPPUCCIN_MOCHA)
 
     BINDINGS = [
-        Binding("ctrl+c", "cancel", "Cancel"),
-        Binding("ctrl+q", "quit", "Quit"),
+        Binding("ctrl+c", "cancel", "Cancel", show=False),
+        Binding("ctrl+q", "quit", "Quit", show=False),
         Binding("ctrl+z", "suspend_process", "Suspend", show=False),
-        Binding("ctrl+shift+c", "copy", "Copy"),
-        Binding("ctrl+l", "clear_pane", "Clear Chat"),
-        Binding("ctrl+h", "help_overlay", "Help"),
+        Binding("ctrl+shift+c", "copy", "Copy", show=False),
+        Binding("ctrl+l", "clear_pane", "Clear Chat", show=False),
+        Binding("ctrl+h", "help_overlay", "Help", show=False),
         Binding("question_mark", "help_overlay", "Help", show=False),
-        Binding("enter", "submit", "Submit", priority=True),
+        Binding("ctrl+t", "toggle_thinking", "Toggle thinking", show=False),
+        Binding("enter", "submit", "Submit", show=False, priority=True),
     ]
 
     def compose(self) -> ComposeResult:
@@ -416,12 +399,12 @@ class MiniAgentTUI(App):
         with Horizontal(id="main-area"):
             with Vertical(id="left-pane"):
                 yield RichLog(id="tools-log", highlight=True, markup=True, wrap=True)
+                yield RichLog(id="thinking-log", highlight=True, markup=True, wrap=True)
                 yield Tree("agent", id="agent-tree")
                 with HorizontalScroll(id="subagent-pane"):
                     pass
             with Vertical(id="right-pane"):
                 yield VerticalScroll(id="chat-view")
-                yield Markdown("", id="response-md")
         with Container(id="input-area"):
             yield TextArea("", id="input")
         yield Footer()
@@ -440,8 +423,7 @@ class MiniAgentTUI(App):
     # ------------------------------------------------------------------
 
     def on_mount(self) -> None:
-        theme_key = os.environ.get("MINI_AGENT_THEME", DEFAULT_THEME).lower()
-        self._tui_theme = THEMES.get(theme_key, THEMES[DEFAULT_THEME])
+        self._tui_theme = CATPPUCCIN_MOCHA
 
         workspace = resolve_workspace()
         cli = parse_args()
@@ -460,12 +442,12 @@ class MiniAgentTUI(App):
         tools_log.write(f"[{t.dim}]Workspace: {workspace}[/]")
         if saved := len(self.messages) - 2:
             tools_log.write(f"[{t.dim}]Restored {saved} messages[/]")
-        tools_log.write(f"[{t.dim}]Theme: {t.name}  (/theme to switch)[/]")
+        tools_log.write(f"[{t.dim}]Theme: {t.name}[/]")
 
         self._chat_view = self.query_one("#chat-view", VerticalScroll)
         self._tools_log = tools_log
+        self._thinking_log = self.query_one("#thinking-log", RichLog)
         self._footer = self.query_one(Footer)
-        self._response_md = self.query_one("#response-md", Markdown)
 
         self._tree_node_map: dict[str, object] = {}
         self._pending_children: dict[str, list] = {}
@@ -577,11 +559,16 @@ class MiniAgentTUI(App):
             child.remove()
         self._thinking_buf = ""
         self._in_thinking = False
-        self._current_thinking = None
         self._current_response = None
         self._current_response_text = ""
-        self._response_md.styles.display = "none"
-        self._response_md.update("")
+
+    def action_toggle_thinking(self) -> None:
+        """Toggle the #thinking-log pane in the left column."""
+        log = self._thinking_log
+        if log.has_class("hidden"):
+            log.remove_class("hidden")
+        else:
+            log.add_class("hidden")
 
     def action_help_overlay(self) -> None:
         t = self._tui_theme
@@ -817,7 +804,7 @@ class MiniAgentTUI(App):
             ws = self.config.workspace
             if sub == "list":
                 sessions = list_sessions(ws)
-                log.write(f"[{t.dim}]Sessions: {', '.join(sessions) if sessions else 'none'}[/]")
+                log.write(f"[{t.dim}]Sessions: {_safe(', '.join(sessions) if sessions else 'none')}[/]")
             elif sub == "new" and arg:
                 session_data = switch_session(ws, arg, self.memory, self.config)
                 self.messages = self.memory.save(self.messages)
@@ -826,7 +813,7 @@ class MiniAgentTUI(App):
                 self.messages = session_data["messages"]
                 self._total_turns = 0
                 self._total_tokens = 0
-                log.write(f"[{t.green}]Created session '{arg}'.[/]")
+                log.write(f"[{t.green}]Created session '{_safe(arg)}'.[/]")
             elif sub == "switch" and arg:
                 self.messages = self.memory.save(self.messages)
                 self.memory.close()
@@ -835,10 +822,10 @@ class MiniAgentTUI(App):
                 self.messages = session_data["messages"]
                 self._total_turns = 0
                 self._total_tokens = 0
-                log.write(f"[{t.green}]Switched to '{arg}'.[/]")
+                log.write(f"[{t.green}]Switched to '{_safe(arg)}'.[/]")
             elif sub == "delete" and arg:
                 ok, msg = delete_session(ws, arg)
-                log.write(f"[{t.dim}]{msg}[/]")
+                log.write(f"[{t.dim}]{_safe(msg)}[/]")
             else:
                 log.write(f"[{t.yellow}]Usage: /session new <name> | switch <name> | delete <name> | list[/]")
             return
@@ -853,15 +840,7 @@ class MiniAgentTUI(App):
             return
 
         if cmd.startswith("/theme"):
-            parts = cmd.split(None, 1)
-            theme_name = parts[1].strip().lower() if len(parts) > 1 else ""
-            if theme_name in THEMES:
-                self._tui_theme = THEMES[theme_name]
-                self._apply_theme()
-                os.environ["MINI_AGENT_THEME"] = theme_name
-                log.write(f"[{t.green}]Theme: {self._tui_theme.name}[/]")
-            else:
-                log.write(f"[{t.yellow}]Available: {', '.join(THEMES)}[/]")
+            log.write(f"[{t.dim}]Theme: Tokyo Night (only palette available)[/]")
             return
 
         if cmd.startswith("/workspace"):
@@ -872,7 +851,7 @@ class MiniAgentTUI(App):
                 return
             new_workspace = os.path.abspath(new_path)
             if not os.path.isdir(new_workspace):
-                log.write(f"[{t.yellow}]Not a directory: {new_workspace}[/]")
+                log.write(f"[{t.yellow}]Not a directory: {_safe(new_workspace)}[/]")
                 return
             self.messages = self.memory.save(self.messages)
             self.memory.close()
@@ -880,7 +859,7 @@ class MiniAgentTUI(App):
             try:
                 new_data = _init_session(new_workspace)
             except Exception as exc:
-                log.write(f"[{t.red}]Error: {exc}[/]")
+                log.write(f"[{t.red}]Error: {_safe(exc)}[/]")
                 return
             self.config = new_data["config"]
             self.config.verbose = "--quiet" not in sys.argv
@@ -901,7 +880,7 @@ class MiniAgentTUI(App):
             self._history = []
             self._history_pos = 0
             self._refresh_git_status()
-            log.write(f"[{t.green}]Workspace: {new_workspace}[/]")
+            log.write(f"[{t.green}]Workspace: {_safe(new_workspace)}[/]")
             return
 
         if cmd == "/init":
@@ -909,14 +888,14 @@ class MiniAgentTUI(App):
             from safety import ReadSafetyGate
             rg = ReadSafetyGate(self.config.workspace)
             result = _init_rules({}, None, rg)
-            log.write(f"[{t.dim}]{result.content}[/]")
+            log.write(f"[{t.dim}]{_safe(result.content)}[/]")
             return
 
         if cmd == "/shell":
             self.action_shell()
             return
 
-        log.write(f"[{t.yellow}]Unknown command: {text}[/]")
+        log.write(f"[{t.yellow}]Unknown command: {_safe(text)}[/]")
 
     # ------------------------------------------------------------------
     # Drain queue
@@ -973,32 +952,37 @@ class MiniAgentTUI(App):
 
     def _drain_token(self, msg: _TokenMsg) -> None:
         text = msg.text
+
+        # --- Thinking: stream into #thinking-log in the LEFT pane ---
+        # (physically separate from chat-view in the right pane)
         if text.startswith(THINKING_START):
             self._in_thinking = True
             self._thinking_buf = ""
-            self._current_thinking = MsgThinking("")
-            self._chat_view.mount(self._current_thinking)
             return
         if text == THINKING_END:
             self._in_thinking = False
-            self._current_thinking = None
+            # Flush remaining thinking text
+            if self._thinking_buf.strip():
+                self._thinking_log.write(_safe(self._thinking_buf.strip()))
+            self._thinking_buf = ""
             return
         if self._in_thinking:
             self._thinking_buf += text
-            if self._current_thinking is not None:
-                self._current_thinking.update(self._thinking_buf.strip())
-                self._chat_view.scroll_end(animate=False)
+            # Write lines as they complete into the thinking-log
+            if "\n" in self._thinking_buf:
+                lines = self._thinking_buf.split("\n")
+                for line in lines[:-1]:
+                    if line.strip():
+                        self._thinking_log.write(_safe(line.strip()))
+                self._thinking_buf = lines[-1]
             return
 
-        # Streaming content — update (or create) current MsgAgent widget
+        # --- Content: builds in chat-view (right pane), never interrupted ---
         self._current_response_text += text
         if self._current_response is None:
-            # Insert a thin separator when transitioning from thinking to content
-            if not self._in_thinking and self._thinking_buf.strip():
-                self._chat_view.mount(Static(""))
             self._current_response = MsgAgent("")
             self._chat_view.mount(self._current_response)
-        self._current_response.update(self._current_response_text)
+        self._current_response.update(_safe(self._current_response_text))
         self._chat_view.scroll_end(animate=False)
 
     # --- Tool handlers ---
@@ -1008,7 +992,7 @@ class MiniAgentTUI(App):
             return
         self._active_tool = msg.summary.split("(")[0].strip() if "(" in msg.summary else msg.summary[:20]
         t = self._tui_theme
-        self._tools_log.write(f"[{t.yellow}][tool] {msg.summary}[/]")
+        self._tools_log.write(f"[{t.yellow}][tool] {_safe(msg.summary)}[/]")
 
     def _drain_tool_end(self, msg: _ToolEnd) -> None:
         if msg.turn_id != self._turn_id:
@@ -1019,15 +1003,15 @@ class MiniAgentTUI(App):
         detail = msg.detail
         if len(detail) > 120:
             detail = detail[:120] + "..."
-        self._tools_log.write(f"[{color}]{symbol} {detail}[/]")
+        self._tools_log.write(f"[{color}]{symbol} {_safe(detail)}[/]")
         self._active_tool = ""
         if msg.diff_preview:
             self._tools_log.write(f"[{t.dim}]--- diff ---[/]")
             for line in msg.diff_preview.split("\n")[:30]:
-                self._tools_log.write(f"[{t.dim}]{line}[/]")
+                self._tools_log.write(f"[{t.dim}]{_safe(line)}[/]")
 
     def _drain_error(self, msg: _Error) -> None:
-        self._chat_view.mount(MsgError(f"**Error:** {msg.msg}"))
+        self._chat_view.mount(MsgError(f"**Error:** {_safe(msg.msg)}"))
         self._chat_view.scroll_end(animate=False)
 
     # --- Sub-agent handlers ---
@@ -1057,7 +1041,7 @@ class MiniAgentTUI(App):
         ac = self._sub_colors[task_id]
         for line in buf.split("\n")[:-1]:
             if line:
-                sublog.write(f"[{ac}][/] {line}")
+                sublog.write(f"[{ac}][/] {_safe(line)}")
         self._sub_bufs[task_id] = buf.split("\n")[-1]
 
     def _drain_sub_tree_spawn(self, msg: tuple) -> None:
@@ -1068,7 +1052,7 @@ class MiniAgentTUI(App):
             return
         t = self._tui_theme
         tree = self.query_one("#agent-tree", Tree)
-        label = f"[{t.yellow}]\u25b6 {name}[/]"
+        label = f"[{t.yellow}]\u25b6 {_safe(name)}[/]"
         parent_node = tree.root
         if parent_id and parent_id in self._tree_node_map:
             parent_node = self._tree_node_map[parent_id]
@@ -1082,7 +1066,7 @@ class MiniAgentTUI(App):
         parent_node.expand()
         tree.styles.display = "block"
         for child_id, child_name, child_desc in self._pending_children.pop(task_id, []):
-            child_node = node.add(f"[{t.yellow}]\u25b6 {child_name}[/]")
+            child_node = node.add(f"[{t.yellow}]\u25b6 {_safe(child_name)}[/]")
             child_node.data = {"id": child_id, "label": child_name, "desc": child_desc}
             self._tree_node_map[child_id] = child_node
             node.expand()
@@ -1099,11 +1083,11 @@ class MiniAgentTUI(App):
                 ol = ol.replace(old_tag, "")
                 break
         if status == "running":
-            node.set_label(f"[{t.yellow}]\u25b6 {ol}[/]")
+            node.set_label(f"[{t.yellow}]\u25b6 {_safe(ol)}[/]")
         elif status == "completed":
-            node.set_label(f"[{t.green}]\u2713 {ol}[/]")
+            node.set_label(f"[{t.green}]\u2713 {_safe(ol)}[/]")
         else:
-            node.set_label(f"[{t.red}]\u2717 {ol}[/]")
+            node.set_label(f"[{t.red}]\u2717 {_safe(ol)}[/]")
 
     def _drain_sub_tool(self, msg: tuple) -> None:
         t = self._tui_theme
@@ -1115,13 +1099,13 @@ class MiniAgentTUI(App):
             if hasattr(self, "_sub_colors") and task_id in self._sub_colors:
                 ac = self._sub_colors[task_id]
             label = task_id[:8] if task_id else "sub"
-            self._tools_log.write(f"[{ac}][{label}] {name}[/]")
+            self._tools_log.write(f"[{ac}][{label}] {_safe(name)}[/]")
         elif action == "end":
             ok = msg[3] if len(msg) > 3 else True
             detail = msg[4] if len(msg) > 4 else ""
             symbol = "\u2713" if ok else "\u2717"
             color = t.green if ok else t.red
-            self._tools_log.write(f"[{color}]{symbol} {detail[:60]}[/]")
+            self._tools_log.write(f"[{color}]{symbol} {_safe(detail[:60])}[/]")
 
     def _drain_sub_done(self, msg: tuple) -> None:
         _, task_id = msg
@@ -1136,6 +1120,9 @@ class MiniAgentTUI(App):
     # ------------------------------------------------------------------
 
     def _finish_turn(self, usage: dict | None = None, turn_count: int = 0) -> None:
+        # Flush any remaining thinking text
+        if self._thinking_buf.strip():
+            self._thinking_log.write(_safe(self._thinking_buf.strip()))
         self._in_thinking = False
         self._thinking_buf = ""
         self._active_tool = ""

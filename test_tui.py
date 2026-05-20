@@ -46,10 +46,10 @@ class TestTUIImports(unittest.TestCase):
         self.assertIn("ctrl+q", binds)
         self.assertEqual(binds["ctrl+q"], "quit")
 
-    def test_css_dark_gray_palette(self):
+    def test_css_palette(self):
         css = MiniAgentTUI.CSS
-        self.assertIn("#111111", css)
-        self.assertNotIn("16162a", css)
+        self.assertIn("#1e1e2e", css)    # bg (Catppuccin Mocha base)
+        self.assertIn("#89b4fa", css)    # accent (Catppuccin Mocha blue)
 
 
 class TestMessageTypes(unittest.TestCase):
@@ -242,147 +242,9 @@ class TestSafe(unittest.TestCase):
         self.assertEqual(_safe(""), "")
 
 
-class TestBoxHelpers(unittest.TestCase):
-    """Tests for the instance _box_* rendering helpers (now buffer via _write_to_log)."""
-
-    def setUp(self):
-        self.app = MiniAgentTUI()
-        self.app._chat = MagicMock()
-        self.app._tools_log = MagicMock()
-        self.app._chat_buf = ""
-        self.app._tools_buf = ""
-        self.app._agent_box_open = False
-
-    def _assert_buf_contains(self, text):
-        """Assert text was buffered (in _chat_buf or _tools_buf)."""
-        combined = self.app._chat_buf + self.app._tools_buf
-        self.assertIn(text, combined)
-
-    def test_box_open(self):
-        self.app._box_open(self.app._chat, "Label", "green")
-        self._assert_buf_contains("╭── Label ──")
-
-    def test_box_line(self):
-        self.app._box_line(self.app._chat, "hello", "blue")
-        self._assert_buf_contains("│ hello")
-
-    def test_box_empty(self):
-        self.app._box_empty(self.app._chat, "red")
-        self._assert_buf_contains("│")
-
-    def test_box_close_no_label(self):
-        self.app._box_close(self.app._chat, "green")
-        self._assert_buf_contains("╰──")
-
-    def test_box_close_with_label(self):
-        self.app._box_close(self.app._chat, "green", "OK")
-        self._assert_buf_contains("OK")
-
-
-class TestHandleToken(unittest.TestCase):
-    """Tests for _handle_token thinking/content routing."""
-
-    def setUp(self):
-        self.workspace = tempfile.mkdtemp()
-        from memory import MemoryStore
-        self.config = AgentConfig.load(self.workspace)
-        self.config.api_key = DEFAULT_API_KEY
-        self.app = MiniAgentTUI()
-        self.app._in_thinking = False
-        self.app._thinking_buf = ""
-        self.app._thinking_flush_pos = 0
-        self.app._buf = ""
-        self.app._tui_theme = MagicMock()
-        self.app._tui_theme.accent = "green"
-        self.app._tui_theme.thinking = "#aaa"
-        self.app._tui_theme.dim = "#666"
-        self.app._tui_theme.bg = "#111"
-        self.app._tui_theme.surface = "#222"
-        self.app._agent_box_open = False
-        self.app.memory = MemoryStore(os.path.join(self.workspace, ".test_mem.db"))
-        self.app.messages = []
-        self.app._table_buf = []
-        self.app._accumulated_content = []
-        # Required for buffered _box_* methods via _write_to_log
-        self.app._chat = MagicMock()
-        self.app._tools_log = MagicMock()
-        self.app._chat_buf = ""
-        self.app._tools_buf = ""
-
-    def tearDown(self):
-        import shutil
-        shutil.rmtree(self.workspace, ignore_errors=True)
-
-    def test_thinking_start_sets_in_thinking_flag(self):
-        log = self.app._chat
-        self.app._handle_token(_TokenMsg(THINKING_START), log)
-        self.assertTrue(self.app._in_thinking)
-
-    def test_thinking_end_clears_flag(self):
-        log = self.app._chat
-        self.app._in_thinking = True
-        self.app._thinking_buf = ""
-        self.app._handle_token(_TokenMsg(THINKING_END), log)
-        self.assertFalse(self.app._in_thinking)
-
-    def test_thinking_buffers_text(self):
-        log = self.app._chat
-        self.app._in_thinking = True
-        self.app._handle_token(_TokenMsg("hello "), log)
-        self.assertEqual(self.app._thinking_buf, "hello ")
-
-    def test_content_opens_agent_box(self):
-        log = self.app._chat
-        self.app._handle_token(_TokenMsg("Hello, World!"), log)
-        self.assertTrue(self.app._agent_box_open)
-
-    def test_content_buffers_text(self):
-        log = self.app._chat
-        self.app._handle_token(_TokenMsg("Hello"), log)
-        self.app._handle_token(_TokenMsg(" World"), log)
-        self.assertIn("Hello World", self.app._buf)
-
-
-class TestFlushBuf(unittest.TestCase):
-    """Tests for _flush_buf behavior."""
-
-    def setUp(self):
-        self.workspace = tempfile.mkdtemp()
-        from memory import MemoryStore
-        self.config = AgentConfig.load(self.workspace)
-        self.config.api_key = DEFAULT_API_KEY
-        self.app = MiniAgentTUI()
-        self.app._buf = ""
-        self.app._agent_box_open = False
-        self.app._tui_theme = MagicMock()
-        self.app._tui_theme.accent = "green"
-        self.app._tui_theme.dim = "#666"
-        self.app._accumulated_content = []
-        self.app._table_buf = []
-        self.app.memory = MemoryStore(os.path.join(self.workspace, ".test_mem.db"))
-        self.app.messages = []
-        # Required for buffered _box_* methods via _write_to_log
-        self.app._chat = MagicMock()
-        self.app._tools_log = MagicMock()
-        self.app._chat_buf = ""
-        self.app._tools_buf = ""
-
-    def tearDown(self):
-        import shutil
-        shutil.rmtree(self.workspace, ignore_errors=True)
-
-    def test_blank_buf_no_write(self):
-        self.app._chat_buf = ""
-        self.app._flush_buf()
-        self.assertEqual(self.app._chat_buf, "")
-
-    def test_nonblank_buf_flushes(self):
-        self.app._buf = "some text here"
-        self.app._flush_buf()
-        self.assertEqual(self.app._buf, "")
-        # _box_line should have buffered text via _write_to_log
-        self.assertIn("some text here", self.app._chat_buf)
-        self.assertTrue(self.app._agent_box_open)
+# TestBoxHelpers, TestHandleToken, TestFlushBuf removed — _box_*, _handle_token,
+# and _flush_buf methods were deleted in the CSS-Markdown facelift (commit 617efd2).
+# Token/content rendering is now handled by _drain_token via the drain loop.
 
 
 class TestFinishTurn(unittest.TestCase):
@@ -396,14 +258,9 @@ class TestFinishTurn(unittest.TestCase):
         self.app = MiniAgentTUI()
         self.app._in_thinking = False
         self.app._thinking_buf = ""
-        self.app._thinking_flush_pos = 0
-        self.app._buf = ""
-        self.app._agent_box_open = True
         self.app._tui_theme = MagicMock()
         self.app._tui_theme.accent = "green"
         self.app._tui_theme.dim = "#666"
-        self.app._accumulated_content = []
-        self.app._table_buf = []
         self.app.memory = MemoryStore(os.path.join(self.workspace, ".test_mem.db"))
         self.app.messages = [{"role": "user", "content": "test"}]
         self.app.config = self.config
@@ -411,11 +268,18 @@ class TestFinishTurn(unittest.TestCase):
         self.app._total_turns = 0
         self.app.worker = MagicMock()
         self.app._turn_finished = False
-        # _finish_turn now uses direct attributes instead of query_one
-        self.app._chat = MagicMock()
+        self.app._active_tool = ""
+        self.app._approval_active = False
+        self.app._current_response = None
+        self.app._current_response_text = ""
+        self.app._last_response = ""
+        self.app._chat_view = MagicMock()
         self.app._tools_log = MagicMock()
-        self.app._chat_buf = ""
-        self.app._tools_buf = ""
+        self.app._git_branch = ""
+        self.app._git_dirty = False
+        self.app._session_start = 0.0
+        self.app._footer = MagicMock()
+        self.app._response_md = MagicMock()
 
     def tearDown(self):
         import shutil
@@ -425,13 +289,14 @@ class TestFinishTurn(unittest.TestCase):
         self.app.query_one = MagicMock()  # for #input focus
         self.app._finish_turn()
         self.assertFalse(self.app._in_thinking)
-        self.assertEqual(self.app._buf, "")
+        self.assertEqual(self.app._thinking_buf, "")
+        self.assertEqual(self.app._current_response_text, "")
         self.assertTrue(self.app._turn_finished)
 
     def test_finish_turn_updates_token_count(self):
         self.app.query_one = MagicMock()  # for #input focus
         self.app._finish_turn(usage={"total_tokens": 1500}, turn_count=3)
-        self.assertEqual(self.app._total_tokens, 1500)
+        self.assertEqual(self.app._total_tokens, 1500)  # += usage["total_tokens"]
         self.assertEqual(self.app._total_turns, 3)
 
 
@@ -512,10 +377,10 @@ class TestHandleCommand(unittest.TestCase):
         self.app.memory = MagicMock()
         self.app.write_gate = MagicMock()
         self.app.write_gate.check.return_value = (True, "")
-        self.app.notify = MagicMock()
         self.app._apply_theme = MagicMock()
         self.app._export_to_file = MagicMock()
-        self.app.query_one = MagicMock()
+        # _handle_command uses self._tools_log directly (not query_one)
+        self.app._tools_log = MagicMock()
 
     def tearDown(self):
         import shutil
@@ -523,7 +388,7 @@ class TestHandleCommand(unittest.TestCase):
 
     def _get_log_mock(self):
         """Return the RichLog mock used for #tools-log writes."""
-        return self.app.query_one.return_value
+        return self.app._tools_log
 
     def test_handle_clear(self):
         """/clear resets messages, memory, history, and counters."""
@@ -543,7 +408,6 @@ class TestHandleCommand(unittest.TestCase):
         # Should write multiple lines including command descriptions
         calls = [c[0][0] for c in log.write.call_args_list if c[0]]
         joined = " ".join(calls)
-        self.assertIn("Commands", joined)
         self.assertIn("/clear", joined)
         self.assertIn("/help", joined)
         self.assertIn("/export", joined)
@@ -556,7 +420,7 @@ class TestHandleCommand(unittest.TestCase):
         log = self._get_log_mock()
         calls = [c[0][0] for c in log.write.call_args_list if c[0]]
         joined = " ".join(calls)
-        self.assertIn("Commands", joined)
+        self.assertIn("/clear", joined)
 
     def test_handle_stats(self):
         """/stats shows session tokens, turns, messages, model."""
@@ -565,8 +429,8 @@ class TestHandleCommand(unittest.TestCase):
         calls = [c[0][0] for c in log.write.call_args_list if c[0]]
         joined = " ".join(calls)
         self.assertIn("2500", joined)
-        self.assertIn("5", joined)
-        self.assertIn("1 msgs", joined)  # 1 system message
+        self.assertIn("5 turns", joined)
+        self.assertIn("1 msgs", joined)
 
     def test_handle_export(self):
         """/export calls _export_to_file with a timestamped path."""
@@ -581,36 +445,28 @@ class TestHandleCommand(unittest.TestCase):
         self.assertIn("Exported to", joined)
 
     def test_handle_theme_valid(self):
-        """'/theme dawn' switches theme and applies it."""
+        """'/theme' now always shows Tokyo Night (single palette)."""
         self.app._handle_command("/theme dawn")
-        # Check theme was set
-        self.assertEqual(self.app._tui_theme.name, "Dawn")
-        self.app._apply_theme.assert_called_once()
         log = self._get_log_mock()
         calls = [c[0][0] for c in log.write.call_args_list if c[0]]
         joined = " ".join(calls)
-        self.assertIn("Theme switched", joined)
-        self.assertIn("Dawn", joined)
+        self.assertIn("Tokyo Night", joined)
 
     def test_handle_theme_invalid(self):
-        """'/theme bogus' lists available themes."""
+        """'/theme bogus' also shows Tokyo Night (single palette)."""
         self.app._handle_command("/theme bogus")
         log = self._get_log_mock()
         calls = [c[0][0] for c in log.write.call_args_list if c[0]]
         joined = " ".join(calls)
-        self.assertIn("Available themes", joined)
-        self.assertIn("dawn", joined)
-        self.assertIn("slate", joined)
-        # Also shows usage hint
-        self.assertIn("Usage", joined)
+        self.assertIn("Tokyo Night", joined)
 
     def test_handle_theme_no_name(self):
-        """'/theme' with no argument lists available themes."""
+        """'/theme' with no argument shows Tokyo Night."""
         self.app._handle_command("/theme")
         log = self._get_log_mock()
         calls = [c[0][0] for c in log.write.call_args_list if c[0]]
         joined = " ".join(calls)
-        self.assertIn("Available themes", joined)
+        self.assertIn("Tokyo Night", joined)
 
     def test_handle_unknown_command(self):
         """Unknown /command writes error message."""
@@ -624,76 +480,57 @@ class TestHandleCommand(unittest.TestCase):
 
 
 class TestBuildCSS(unittest.TestCase):
-    """Tests for _build_css covering all themes and expected selectors."""
+    """Tests for _build_css with Catppuccin Mocha theme."""
 
     @classmethod
     def setUpClass(cls):
-        from tui import THEMES
-        cls.THEMES = THEMES
+        from tui import CATPPUCCIN_MOCHA
+        cls.THEME = CATPPUCCIN_MOCHA
 
     @staticmethod
     def _css(theme):
         from tui import _build_css
         return _build_css(theme)
 
-    def test_all_nine_themes_return_non_empty_css(self):
-        """_build_css returns a non-empty string for every theme."""
-        for key, theme in self.THEMES.items():
-            with self.subTest(theme=key):
-                css = self._css(theme)
-                self.assertIsInstance(css, str)
-                self.assertGreater(len(css.strip()), 0,
-                                   f"CSS for theme '{key}' is empty")
+    def test_css_is_non_empty(self):
+        """_build_css returns a non-empty string for Catppuccin Mocha."""
+        css = self._css(self.THEME)
+        self.assertIsInstance(css, str)
+        self.assertGreater(len(css.strip()), 0)
 
     def test_css_contains_expected_selectors(self):
         """CSS output contains basic selectors for layout widgets."""
-        css = self._css(self.THEMES["slate"])
+        css = self._css(self.THEME)
         expected_selectors = [
             "Screen {",
             "Header {",
             "Footer {",
-            "#static-pane {",
+            "#left-pane {",
             "#tools-log {",
+            "#thinking-log {",
             "#agent-tree {",
             "#subagent-pane {",
-            "#chat-pane {",
+            "#chat-view {",
             "#input-area {",
             "#input {",
-            "#status-bar {",
         ]
         for selector in expected_selectors:
             with self.subTest(selector=selector):
                 self.assertIn(selector, css,
                               f"CSS missing selector: {selector}")
 
-    def test_dawn_theme_has_light_colors(self):
-        """Dawn (light) theme uses light background hex."""
-        css = self._css(self.THEMES["dawn"])
-        self.assertIn("#faf8f5", css)
+    def test_bg_in_screen(self):
+        """Theme background is in Screen."""
+        css = self._css(self.THEME)
+        self.assertIn(f"background: {self.THEME.bg};", css)
 
-    def test_dracula_theme_has_classic_colors(self):
-        """Dracula theme uses its iconic purple accent."""
-        css = self._css(self.THEMES["dracula"])
-        self.assertIn("#bd93f9", css)
-        self.assertIn("#282a36", css)
-
-    def test_all_themes_inject_background_on_screen(self):
-        """Every theme places a background on Screen."""
-        for key, theme in self.THEMES.items():
-            with self.subTest(theme=key):
-                css = self._css(theme)
-                self.assertIn(f"background: {theme.bg};", css)
-
-    def test_all_themes_inject_accent_in_header(self):
-        """Every theme places its accent color in Header."""
-        for key, theme in self.THEMES.items():
-            with self.subTest(theme=key):
-                css = self._css(theme)
-                # Header block contains accent color
-                header_start = css.index("Header {")
-                header_end = css.index("}", header_start)
-                header_block = css[header_start:header_end]
-                self.assertIn(f"color: {theme.accent};", header_block)
+    def test_accent_in_header(self):
+        """Theme accent color is in Header."""
+        css = self._css(self.THEME)
+        header_start = css.index("Header {")
+        header_end = css.index("}", header_start)
+        header_block = css[header_start:header_end]
+        self.assertIn(f"color: {self.THEME.accent};", header_block)
 
 
 if __name__ == "__main__":
