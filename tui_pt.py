@@ -39,6 +39,8 @@ from prompt_toolkit.layout.dimension import D
 from prompt_toolkit.layout.layout import Layout
 from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import TextArea as PTTextArea
+from prompt_toolkit.lexers import PygmentsLexer
+from pygments.lexers.python import PythonLexer
 
 from config import resolve_workspace, init_session, parse_args
 from llm import run_agent_turn
@@ -117,6 +119,7 @@ class ChatBuffer:
     def __init__(self):
         self._lines: list[tuple[str, str]] = []  # (style_class, text)
         self._lock = threading.Lock()
+        self._dirty = False
 
     def append(self, text: str, style: str = ""):
         with self._lock:
@@ -125,6 +128,7 @@ class ChatBuffer:
             excess = len(self._lines) - self.MAX_LINES
             if excess > 0:
                 self._lines = self._lines[excess:]
+            self._dirty = True
 
     def append_last(self, text: str, style: str = ""):
         """Append text to the last line if same style (for streaming tokens)."""
@@ -137,10 +141,13 @@ class ChatBuffer:
             excess = len(self._lines) - self.MAX_LINES
             if excess > 0:
                 self._lines = self._lines[excess:]
+            self._dirty = True
 
     def get_text(self) -> str:
-        """Return full log as a single string (for syncing to TextArea)."""
+        """Return full log as a single string (for syncing to TextArea).
+        Clears the dirty flag — call only when syncing to display."""
         with self._lock:
+            self._dirty = False
             return '\n'.join(text for _, text in self._lines)
 
     def get_formatted(self) -> "FormattedText":
@@ -153,7 +160,8 @@ class ChatBuffer:
 
     @property
     def dirty(self) -> bool:
-        return False  # unused now, kept for compat
+        with self._lock:
+            return self._dirty
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +271,7 @@ class AgentWorker(threading.Thread):
             usage = msg.get("_total_usage") or {}
             self.total_tokens = usage.get("total_tokens", 0)
             self.total_turns = msg.get("_turn_count", 0)
+            self.chat_buf.append("")  # blank line after agent output
 
     # -- callbacks ----------------------------------------------------
 
@@ -374,6 +383,7 @@ class MiniAgentTUI:
             read_only=True,
             scrollbar=False,
             wrap_lines=True,
+            lexer=PygmentsLexer(PythonLexer),
             style="class:dim",
         )
 
@@ -393,18 +403,15 @@ class MiniAgentTUI:
             width=D(weight=40),
         )
 
-        # Chat view (right pane) — uses FormattedTextControl for colored text
-        _chat_fc = FormattedTextControl(
-            lambda: self.chat_buf.get_formatted(),
-            get_cursor_position=lambda: self._chat_cursor_pos(),
-        )
-        self._chat_window = Window(
-            content=_chat_fc,
+        # Chat view (right pane)
+        self.chat_area = PTTextArea(
+            text="",
+            read_only=True,
+            scrollbar=False,
             wrap_lines=True,
             style="class:text",
-            always_hide_cursor=True,
         )
-        right_pane = rounded_frame(self._chat_window, title="Chat",
+        right_pane = rounded_frame(self.chat_area, title="Chat",
                                    width=D(weight=60))
 
         # Body: left pane | right pane (no vertical divider)
@@ -441,20 +448,25 @@ class MiniAgentTUI:
     # ------------------------------------------------------------------
 
     def _sync_display(self, app=None):
-        """Sync tools/thinking ChatBuffers to TextArea widgets.  Called by
-        before_render on every refresh cycle.  Chat pane uses
-        FormattedTextControl (self-refreshing via cursor position)."""
-        if self.tools_area is not None:
+        """Sync ChatBuffers to TextArea widgets.  Called by before_render
+        on every refresh cycle.  Skips buffers that haven't changed (dirty
+        tracking) to keep input responsive during fast typing."""
+        # Guard: TextAreas not yet created (before _build_layout runs)
+        if not hasattr(self, 'chat_area') or self.chat_area is None:
+            return
+
+        if self.tools_area is not None and self.tools_buf.dirty:
             self.tools_area.text = self.tools_buf.get_text()
             self.tools_area.buffer.cursor_position = \
                 len(self.tools_area.buffer.text)
 
-        if self.thinking_area is not None:
+        if self.thinking_area is not None and self.thinking_buf.dirty:
             self.thinking_area.text = self.thinking_buf.get_text()
             self.thinking_area.buffer.cursor_position = \
                 len(self.thinking_area.buffer.text)
 
-    def _chat_cursor_pos(self):
+        if self.chat_area is not None and self.chat_buf.dirty:
+            self.chat_area.text = self.chat_buf.get_text()
         """Point cursor at last line so chat window auto-scrolls to bottom."""
         with self.chat_buf._lock:
             n = len(self.chat_buf._lines)
