@@ -48,7 +48,7 @@ class TestTUIImports(unittest.TestCase):
 
     def test_css_palette(self):
         css = MiniAgentTUI.CSS
-        self.assertIn("#1e1e2e", css)    # bg (Catppuccin Mocha base)
+        self.assertIn("#45475a", css)    # border color (Catppuccin Mocha surface1)
         self.assertIn("#89b4fa", css)    # accent (Catppuccin Mocha blue)
 
 
@@ -519,10 +519,15 @@ class TestBuildCSS(unittest.TestCase):
                 self.assertIn(selector, css,
                               f"CSS missing selector: {selector}")
 
-    def test_bg_in_screen(self):
-        """Theme background is in Screen."""
+    def test_screen_no_background(self):
+        """Screen is transparent — allows terminal background through."""
         css = self._css(self.THEME)
-        self.assertIn(f"background: {self.THEME.bg};", css)
+        screen_start = css.index("Screen {")
+        screen_end = css.index("}", screen_start)
+        screen_block = css[screen_start:screen_end]
+        # Screen may declare 'background: transparent' but never a solid color
+        self.assertNotIn("background: $", screen_block)
+        self.assertNotIn("background: #", screen_block)
 
     def test_accent_in_header(self):
         """Theme accent color is in Header."""

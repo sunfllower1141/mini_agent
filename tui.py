@@ -87,64 +87,74 @@ _AGENT_COLORS = ["green", "yellow", "accent", "pulse", "red"]
 
 def _build_css(theme: TuiTheme) -> str:
     return f"""
-/* All backgrounds transparent — terminal native look.
-   Separation via subtle border colors only. */
+/* No backgrounds anywhere — terminal-native transparency.
+   Separation via rounded thick borders + whitespace padding only. */
 
 Screen {{
+    background: transparent;
 }}
 
 Header {{
     color: {theme.accent};
     text-style: bold;
-    padding: 0 2;
-    border-bottom: solid {theme.border} 30%;
+    padding: 1 3;
+    border: none;
+    border-bottom: thick {theme.border} 30%;
 }}
 
 Header.pulse {{
-    background: {theme.pulse};
-    color: {theme.bg};
+    color: {theme.pulse};
 }}
 
 Footer {{
     color: {theme.dim};
     height: 1;
-    padding: 0 2;
-    border-top: solid {theme.border} 30%;
+    padding: 0 3;
+    border: none;
+    border-top: thick {theme.border} 30%;
 }}
 
 Footer.pulse {{
     color: {theme.pulse};
-    border-top: solid {theme.pulse} 50%;
+    border-top: thick {theme.pulse} 50%;
 }}
 
 #main-area {{
     height: 1fr;
     min-height: 6;
+    padding: 1 0;
 }}
 
 #left-pane {{
     width: 42%;
-    border-right: solid {theme.border} 25%;
+    border: none;
+    border-right: round {theme.border} 25%;
+    padding: 1 2;
 }}
 
 #right-pane {{
     width: 1fr;
+    padding: 1 2;
 }}
 
 /* --- Tools panel (left) --- */
 
 #tools-log {{
     color: {theme.text};
-    border: none;
-    padding: 0 1;
+    border: round {theme.border} 20%;
+    padding: 1 2;
+    margin-bottom: 1;
     height: 1fr;
     overflow-y: auto;
     scrollbar-size: 0 0;
 }}
 
 #thinking-log {{
-    border-top: solid {theme.border} 25%;
-    padding: 0 1;
+    border: none;
+    border-top: thick {theme.border} 25%;
+    padding: 1 2;
+    margin-top: 1;
+    margin-bottom: 1;
     height: auto;
     max-height: 12;
     overflow-y: auto;
@@ -165,9 +175,9 @@ Footer.pulse {{
 #agent-tree {{
     display: block;
     color: {theme.dim};
-    border: none;
-    border-top: solid {theme.border} 25%;
-    padding: 0 1;
+    border: round {theme.border} 25%;
+    padding: 1 2;
+    margin-top: 1;
     height: auto;
     max-height: 10;
     min-height: 0;
@@ -177,8 +187,9 @@ Footer.pulse {{
 
 #subagent-pane {{
     border: none;
-    border-top: solid {theme.border} 25%;
-    padding: 0 1;
+    border-top: thick {theme.border} 25%;
+    padding: 1 2;
+    margin-top: 1;
     height: auto;
     max-height: 12;
     min-height: 0;
@@ -191,35 +202,35 @@ Footer.pulse {{
     width: 1fr;
     margin: 0 1;
     scrollbar-size: 0 0;
-    border: solid {theme.border} 25%;
+    border: round {theme.border} 25%;
 }}
 
 /* --- Chat view (right) --- */
 
 #chat-view {{
-    padding: 1 2 0 2;
+    padding: 1 2 1 2;
     scrollbar-size: 0 0;
 }}
 
 MsgUser {{
     color: {theme.text};
-    margin: 0 0 1 8;
-    padding: 0 2;
-    border-left: solid {theme.accent} 60%;
+    margin: 1 0 1 8;
+    padding: 1 2;
+    border-left: thick {theme.accent} 60%;
 }}
 
 MsgAgent {{
     color: {theme.text};
-    margin: 0 8 1 0;
-    padding: 0 2;
-    border-left: solid {theme.green} 60%;
+    margin: 1 8 1 0;
+    padding: 1 2;
+    border-left: thick {theme.green} 60%;
 }}
 
 MsgThinking {{
     color: {theme.thinking};
-    margin: 0 8 1 0;
-    padding: 0 2;
-    border-left: solid {theme.thinking} 40%;
+    margin: 1 8 1 0;
+    padding: 1 2;
+    border-left: thick {theme.thinking} 40%;
 }}
 
 MsgThinking.hidden {{
@@ -228,16 +239,17 @@ MsgThinking.hidden {{
 
 MsgError {{
     color: {theme.text};
-    margin: 0 8 1 0;
-    padding: 0 2;
-    border-left: solid {theme.red} 60%;
+    margin: 1 8 1 0;
+    padding: 1 2;
+    border-left: thick {theme.red} 60%;
 }}
 
 /* --- Input area --- */
 
 #input-area {{
-    border-top: solid {theme.accent} 30%;
-    padding: 1 2;
+    border: none;
+    border-top: thick {theme.accent} 30%;
+    padding: 1 3;
     height: auto;
     min-height: 3;
     max-height: 12;
@@ -248,16 +260,12 @@ MsgError {{
     border: none;
     width: 100%;
     height: auto;
+    padding: 0 1;
 }}
 
 #input:focus {{
-    border-left: solid {theme.accent} 50%;
-    padding-left: 1;
-}}
-
-#input:focus {{
-    border-left: solid {theme.accent};
-    padding-left: 1;
+    border-left: thick {theme.accent} 50%;
+    padding-left: 2;
 }}
 """
 
@@ -970,6 +978,7 @@ class MiniAgentTUI(App):
             self._thinking_buf += text
             if self._thinking_widget is not None:
                 self._thinking_widget.update(_safe(self._thinking_buf.strip()))
+                self.call_after_refresh(self._thinking_log.scroll_end)
             return
 
         # --- Content: builds in chat-view (right pane), never interrupted ---
