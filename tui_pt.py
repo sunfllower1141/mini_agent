@@ -42,6 +42,8 @@ from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import TextArea as PTTextArea
 from prompt_toolkit.lexers import PygmentsLexer
 from pygments.lexers.python import PythonLexer
+from pygments.style import Style as PygmentsStyle
+from pygments.token import Token
 
 from config import (
     resolve_workspace, init_session, parse_args,
@@ -82,6 +84,41 @@ THEME = {
     "thinking":     "#585b70",
     "pulse":        "#cba6f7",
 }
+
+# ---------------------------------------------------------------------------
+# Monochrome Pygments style — greyscale syntax highlighting
+# ---------------------------------------------------------------------------
+
+# Shades of grey from Catppuccin Mocha palette
+_GREY_LIGHT = "#bac2de"   # light grey for keywords, strings
+_GREY_MID   = "#9399b2"   # mid grey for names, builtins
+_GREY_DIM   = "#6c7086"   # dim grey for comments, operators
+_GREY_BOLD  = "#cdd6f4"   # bold grey (white-ish) for emphasis
+
+
+class MonochromeStyle(PygmentsStyle):
+    """Pygments style using only shades of grey."""
+    background_color = THEME["bg"]
+    styles = {
+        Token.Comment:             f"italic {_GREY_DIM}",
+        Token.Keyword:             f"bold {_GREY_LIGHT}",
+        Token.Keyword.Constant:    f"bold {_GREY_LIGHT}",
+        Token.Keyword.Declaration: f"bold {_GREY_LIGHT}",
+        Token.Keyword.Namespace:   f"bold {_GREY_LIGHT}",
+        Token.Keyword.Type:        f"bold {_GREY_LIGHT}",
+        Token.Name:                _GREY_MID,
+        Token.Name.Builtin:        f"bold {_GREY_MID}",
+        Token.Name.Function:       _GREY_BOLD,
+        Token.Name.Class:          f"bold {_GREY_BOLD}",
+        Token.Name.Decorator:      _GREY_DIM,
+        Token.Name.Exception:      _GREY_BOLD,
+        Token.String:              _GREY_LIGHT,
+        Token.String.Doc:          f"italic {_GREY_DIM}",
+        Token.Number:              _GREY_LIGHT,
+        Token.Operator:            _GREY_DIM,
+        Token.Punctuation:         _GREY_DIM,
+        Token.Literal:             _GREY_LIGHT,
+    }
 
 STYLE = Style.from_dict({
     "header":       f"fg:{THEME['dim']}",
@@ -412,7 +449,7 @@ class MiniAgentTUI:
             read_only=True,
             scrollbar=False,
             wrap_lines=True,
-            lexer=PygmentsLexer(PythonLexer),
+            lexer=PygmentsLexer(PythonLexer, sync_style=lambda _: MonochromeStyle),
             style="class:dim",
         )
 
