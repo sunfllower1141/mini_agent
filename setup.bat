@@ -25,7 +25,7 @@ echo.
 echo To start:
 echo   venv\Scripts\activate.bat
 echo   python mini_agent.py            # terminal REPL
-echo   python tui.py                   # TUI (Textual)
+echo   python tui_pt.py                # TUI (prompt_toolkit)
 echo.
 echo Optional flags:
 echo   --unrestricted   allow read/write outside workspace
