@@ -28,38 +28,89 @@ MEMORY_FILENAME = ".mini_agent_memory.db"
 
 DEFAULT_API_PROVIDER = "deepseek"  # "deepseek", "claude", "xai", or "ollama"
 
-# Ollama defaults (local model via Ollama's OpenAI-compatible endpoint)
-# Camoproj VM: RTX 6000 Ada 48GB, accessible via Tailscale at 100.79.96.42
-OLLAMA_DEFAULT_MODEL         = "qwen3.6:27b"
-OLLAMA_DEFAULT_SUB_AGENT_MODEL = "qwen3.6:27b"
-OLLAMA_DEFAULT_API_URL       = "http://100.79.96.42:11434/v1/chat/completions"
-OLLAMA_DEFAULT_MAX_TOKENS    = 8_192
-OLLAMA_DEFAULT_CONTEXT_WINDOW = 262_144  # Qwen3.6-27B native context length
-OLLAMA_DEFAULT_ROUTING_MODEL = ""  # no cheap routing model for local
+# ---------------------------------------------------------------------------
+# Provider defaults registry
+# ---------------------------------------------------------------------------
+# Each provider has a ProviderDefaults entry.  The registry is the single
+# source of truth for provider-specific defaults.  Legacy module-level
+# constants (DEEPSEEK_DEFAULT_MODEL, etc.) are kept as aliases for
+# backward compatibility but new code should use PROVIDER_DEFAULTS[provider].
 
-# DeepSeek defaults
-DEEPSEEK_DEFAULT_MODEL         = "deepseek-v4-pro"
-DEEPSEEK_DEFAULT_SUB_AGENT_MODEL = "deepseek-v4-pro"
-DEEPSEEK_DEFAULT_API_URL       = "https://api.deepseek.com/v1/chat/completions"
-DEEPSEEK_DEFAULT_MAX_TOKENS    = 200_000
-DEEPSEEK_DEFAULT_CONTEXT_WINDOW = 1_000_000  # V4-Pro native context length
-DEEPSEEK_DEFAULT_ROUTING_MODEL = ""  # disabled by default; set to "deepseek-v4-flash" to enable
+@dataclass
+class ProviderDefaults:
+    """Default values for one LLM provider."""
+    model: str
+    sub_agent_model: str
+    api_url: str
+    max_tokens: int
+    context_window: int
+    routing_model: str = ""  # cheaper model for read/search prompts; "" = disabled
 
-# Claude defaults (via OpenAI-compatible endpoint)
-CLAUDE_DEFAULT_MODEL           = "claude-sonnet-4-5"
-CLAUDE_DEFAULT_SUB_AGENT_MODEL = "claude-sonnet-4-5"
-CLAUDE_DEFAULT_API_URL         = "https://api.anthropic.com/v1/chat/completions"
-CLAUDE_DEFAULT_MAX_TOKENS      = 32_000
-CLAUDE_DEFAULT_CONTEXT_WINDOW  = 1_000_000  # Opus 4.7 / Sonnet 4.5 native context length
-# Claude has no cheap routing model; leave disabled
-CLAUDE_DEFAULT_ROUTING_MODEL   = ""
+PROVIDER_DEFAULTS: dict[str, ProviderDefaults] = {
+    "deepseek": ProviderDefaults(
+        model="deepseek-v4-pro",
+        sub_agent_model="deepseek-v4-pro",
+        api_url="https://api.deepseek.com/v1/chat/completions",
+        max_tokens=200_000,
+        context_window=1_000_000,  # V4-Pro native context length
+        routing_model="",  # disabled by default; set to "deepseek-v4-flash" to enable
+    ),
+    "claude": ProviderDefaults(
+        model="claude-sonnet-4-5",
+        sub_agent_model="claude-sonnet-4-5",
+        api_url="https://api.anthropic.com/v1/chat/completions",
+        max_tokens=32_000,
+        context_window=1_000_000,  # Opus 4.7 / Sonnet 4.5 native context length
+        routing_model="",
+    ),
+    "xai": ProviderDefaults(
+        model="grok-4.3",
+        sub_agent_model="grok-4.3",
+        api_url="https://api.x.ai/v1/chat/completions",
+        max_tokens=200_000,
+        context_window=1_000_000,  # Grok 4.3 native context length
+        routing_model="",
+    ),
+    "ollama": ProviderDefaults(
+        model="qwen3.6:27b",
+        sub_agent_model="qwen3.6:27b",
+        # Camoproj VM: RTX 6000 Ada 48GB, accessible via Tailscale at 100.79.96.42
+        api_url="http://100.79.96.42:11434/v1/chat/completions",
+        max_tokens=8_192,
+        context_window=262_144,  # Qwen3.6-27B native context length
+        routing_model="",
+    ),
+}
 
-# xAI / Grok defaults (OpenAI-compatible endpoint)
-XAI_DEFAULT_MODEL              = "grok-4.3"
-XAI_DEFAULT_SUB_AGENT_MODEL    = "grok-4.3"
-XAI_DEFAULT_API_URL            = "https://api.x.ai/v1/chat/completions"
-XAI_DEFAULT_MAX_TOKENS         = 200_000
-XAI_DEFAULT_ROUTING_MODEL      = ""  # xAI has no cheap routing model; leave disabled
+# Legacy module-level aliases (kept for backward compatibility with tests
+# and external consumers that import e.g. DEEPSEEK_DEFAULT_MODEL directly).
+DEEPSEEK_DEFAULT_MODEL         = PROVIDER_DEFAULTS["deepseek"].model
+DEEPSEEK_DEFAULT_SUB_AGENT_MODEL = PROVIDER_DEFAULTS["deepseek"].sub_agent_model
+DEEPSEEK_DEFAULT_API_URL       = PROVIDER_DEFAULTS["deepseek"].api_url
+DEEPSEEK_DEFAULT_MAX_TOKENS    = PROVIDER_DEFAULTS["deepseek"].max_tokens
+DEEPSEEK_DEFAULT_CONTEXT_WINDOW = PROVIDER_DEFAULTS["deepseek"].context_window
+DEEPSEEK_DEFAULT_ROUTING_MODEL = PROVIDER_DEFAULTS["deepseek"].routing_model
+
+CLAUDE_DEFAULT_MODEL           = PROVIDER_DEFAULTS["claude"].model
+CLAUDE_DEFAULT_SUB_AGENT_MODEL = PROVIDER_DEFAULTS["claude"].sub_agent_model
+CLAUDE_DEFAULT_API_URL         = PROVIDER_DEFAULTS["claude"].api_url
+CLAUDE_DEFAULT_MAX_TOKENS      = PROVIDER_DEFAULTS["claude"].max_tokens
+CLAUDE_DEFAULT_CONTEXT_WINDOW  = PROVIDER_DEFAULTS["claude"].context_window
+CLAUDE_DEFAULT_ROUTING_MODEL   = PROVIDER_DEFAULTS["claude"].routing_model
+
+XAI_DEFAULT_MODEL              = PROVIDER_DEFAULTS["xai"].model
+XAI_DEFAULT_SUB_AGENT_MODEL    = PROVIDER_DEFAULTS["xai"].sub_agent_model
+XAI_DEFAULT_API_URL            = PROVIDER_DEFAULTS["xai"].api_url
+XAI_DEFAULT_MAX_TOKENS         = PROVIDER_DEFAULTS["xai"].max_tokens
+XAI_DEFAULT_CONTEXT_WINDOW     = PROVIDER_DEFAULTS["xai"].context_window
+XAI_DEFAULT_ROUTING_MODEL      = PROVIDER_DEFAULTS["xai"].routing_model
+
+OLLAMA_DEFAULT_MODEL           = PROVIDER_DEFAULTS["ollama"].model
+OLLAMA_DEFAULT_SUB_AGENT_MODEL = PROVIDER_DEFAULTS["ollama"].sub_agent_model
+OLLAMA_DEFAULT_API_URL         = PROVIDER_DEFAULTS["ollama"].api_url
+OLLAMA_DEFAULT_MAX_TOKENS      = PROVIDER_DEFAULTS["ollama"].max_tokens
+OLLAMA_DEFAULT_CONTEXT_WINDOW  = PROVIDER_DEFAULTS["ollama"].context_window
+OLLAMA_DEFAULT_ROUTING_MODEL   = PROVIDER_DEFAULTS["ollama"].routing_model
 
 DEFAULT_MODEL        = DEEPSEEK_DEFAULT_MODEL
 DEFAULT_SUB_AGENT_MODEL = DEEPSEEK_DEFAULT_SUB_AGENT_MODEL
@@ -405,106 +456,102 @@ def _load_dotenv(workspace: str) -> None:
         pass
 
 
+# Provider → env var name for API key lookup.
+_PROVIDER_KEY_ENV: dict[str, str] = {
+    "deepseek": ENV_DEEPSEEK_API_KEY,
+    "claude": ENV_CLAUDE_API_KEY,
+    "xai": ENV_XAI_API_KEY,
+    "ollama": ENV_OLLAMA_API_KEY,
+}
+# Provider → env var name for API URL override.
+_PROVIDER_URL_ENV: dict[str, str] = {
+    "deepseek": ENV_DEEPSEEK_API_URL,
+    "claude": ENV_CLAUDE_API_URL,
+    "xai": ENV_XAI_API_URL,
+    "ollama": ENV_OLLAMA_API_URL,
+}
+# Provider → env var name for model override.
+_PROVIDER_MODEL_ENV: dict[str, str] = {
+    "claude": ENV_CLAUDE_MODEL,
+    "xai": ENV_XAI_MODEL,
+    "ollama": ENV_OLLAMA_MODEL,
+}
+
+# Auto-detection priority order (first provider with an available key wins).
+_AUTO_DETECT_ORDER = ["deepseek", "claude", "xai", "ollama"]
+
+
+def _detect_provider() -> str | None:
+    """Return the first provider whose API key env var is set, or None."""
+    for provider in _AUTO_DETECT_ORDER:
+        key_env = _PROVIDER_KEY_ENV.get(provider)
+        if key_env and os.environ.get(key_env):
+            return provider
+    # Ollama is always reachable via Tailscale (camoproj VM); fall back to it.
+    return "ollama"
+
+
 def _apply_env_overrides(config: AgentConfig) -> None:
     """Phase 2: apply environment variable overrides on top of TOML/defaults."""
     # --- explicit provider override ---
     if os.environ.get(ENV_API_PROVIDER):
         config.api_provider = os.environ[ENV_API_PROVIDER]
 
-    # --- auto-detect provider from available keys (if not explicitly set) ---
-    has_deepseek = bool(os.environ.get(ENV_DEEPSEEK_API_KEY))
-    has_claude = bool(os.environ.get(ENV_CLAUDE_API_KEY))
-    has_xai = bool(os.environ.get(ENV_XAI_API_KEY))
-    has_ollama = bool(os.environ.get(ENV_OLLAMA_API_URL) or os.environ.get(ENV_OLLAMA_MODEL))
-    # Ollama is reachable via Tailscale from all machines (camoproj VM)
-    if not has_ollama:
-        has_ollama = True  # camoproj's Ollama at 100.79.96.42:11434 always reachable
+    # --- auto-detect from available keys (if not explicitly set) ---
     if not os.environ.get(ENV_API_PROVIDER):
-        # On Windows with no cloud keys, default to local ollama
-        if has_ollama and not has_deepseek and not has_claude and not has_xai:
-            config.api_provider = "ollama"
-        elif has_xai and not has_deepseek and not has_claude:
-            config.api_provider = "xai"
-        elif has_claude and not has_deepseek:
-            config.api_provider = "claude"
-        elif has_deepseek:
-            config.api_provider = "deepseek"
+        detected = _detect_provider()
+        if detected:
+            config.api_provider = detected
 
-    # --- apply provider-specific defaults if switching ---
-    if config.api_provider == "claude":
-        if not os.environ.get(ENV_DEEPSEEK_API_URL) and config.api_url == DEEPSEEK_DEFAULT_API_URL:
-            config.api_url = CLAUDE_DEFAULT_API_URL
-        if config.model == DEEPSEEK_DEFAULT_MODEL:
-            config.model = CLAUDE_DEFAULT_MODEL
-        if config.sub_agent_model == DEEPSEEK_DEFAULT_SUB_AGENT_MODEL:
-            config.sub_agent_model = CLAUDE_DEFAULT_SUB_AGENT_MODEL
-        if config.max_tokens == DEEPSEEK_DEFAULT_MAX_TOKENS:
-            config.max_tokens = CLAUDE_DEFAULT_MAX_TOKENS
-        if config.context_window == DEEPSEEK_DEFAULT_CONTEXT_WINDOW:
-            config.context_window = CLAUDE_DEFAULT_CONTEXT_WINDOW
-        if config.routing_model == DEEPSEEK_DEFAULT_ROUTING_MODEL:
-            config.routing_model = CLAUDE_DEFAULT_ROUTING_MODEL
-    elif config.api_provider == "xai":
-        if not os.environ.get(ENV_XAI_API_URL) and config.api_url == DEEPSEEK_DEFAULT_API_URL:
-            config.api_url = XAI_DEFAULT_API_URL
-        if config.model == DEEPSEEK_DEFAULT_MODEL:
-            config.model = XAI_DEFAULT_MODEL
-        if config.sub_agent_model == DEEPSEEK_DEFAULT_SUB_AGENT_MODEL:
-            config.sub_agent_model = XAI_DEFAULT_SUB_AGENT_MODEL
-        if config.max_tokens == DEEPSEEK_DEFAULT_MAX_TOKENS:
-            config.max_tokens = XAI_DEFAULT_MAX_TOKENS
-        if config.context_window == DEEPSEEK_DEFAULT_CONTEXT_WINDOW:
-            config.context_window = XAI_DEFAULT_MAX_TOKENS
-        if config.routing_model == DEEPSEEK_DEFAULT_ROUTING_MODEL:
-            config.routing_model = XAI_DEFAULT_ROUTING_MODEL
-    elif config.api_provider == "ollama":
-        if not os.environ.get(ENV_OLLAMA_API_URL) and config.api_url == DEEPSEEK_DEFAULT_API_URL:
-            config.api_url = OLLAMA_DEFAULT_API_URL
-        if config.model == DEEPSEEK_DEFAULT_MODEL:
-            config.model = OLLAMA_DEFAULT_MODEL
-        if config.sub_agent_model == DEEPSEEK_DEFAULT_SUB_AGENT_MODEL:
-            config.sub_agent_model = OLLAMA_DEFAULT_SUB_AGENT_MODEL
-        if config.max_tokens == DEEPSEEK_DEFAULT_MAX_TOKENS:
-            config.max_tokens = OLLAMA_DEFAULT_MAX_TOKENS
-        if config.context_window == DEEPSEEK_DEFAULT_CONTEXT_WINDOW:
-            config.context_window = OLLAMA_DEFAULT_CONTEXT_WINDOW
-        if config.routing_model == DEEPSEEK_DEFAULT_ROUTING_MODEL:
-            config.routing_model = OLLAMA_DEFAULT_ROUTING_MODEL
+    # --- apply provider-specific defaults on switch ---
+    # NOTE: uses equality against deepseek defaults to detect "not yet
+    # overridden".  A TOML value equal to a deepseek default will be
+    # overwritten — this is a known limitation (rare in practice).
+    provider = config.api_provider
+    defaults = PROVIDER_DEFAULTS.get(provider)
+    if defaults is not None:
+        deepseek = PROVIDER_DEFAULTS["deepseek"]
+        # Only swap if the URL hasn't been explicitly overridden via env
+        if not os.environ.get(_PROVIDER_URL_ENV.get(provider, "")):
+            if config.api_url in (deepseek.api_url, DEEPSEEK_DEFAULT_API_URL):
+                config.api_url = defaults.api_url
+        if config.model == deepseek.model:
+            config.model = defaults.model
+        if config.sub_agent_model == deepseek.sub_agent_model:
+            config.sub_agent_model = defaults.sub_agent_model
+        if config.max_tokens == deepseek.max_tokens:
+            config.max_tokens = defaults.max_tokens
+        if config.context_window == deepseek.context_window:
+            config.context_window = defaults.context_window
+        if config.routing_model == deepseek.routing_model:
+            config.routing_model = defaults.routing_model
 
     # --- API keys ---
-    if has_deepseek:
-        config.api_key = os.environ[ENV_DEEPSEEK_API_KEY]
-    if has_claude:
-        config.api_key = os.environ[ENV_CLAUDE_API_KEY]
-    if has_xai:
-        config.api_key = os.environ[ENV_XAI_API_KEY]
+    for prov, env_name in _PROVIDER_KEY_ENV.items():
+        if os.environ.get(env_name):
+            config.api_key = os.environ[env_name]
+            break  # first available key wins
+
     if os.environ.get(ENV_SUB_AGENT_API_KEY):
         config.sub_agent_api_key = os.environ[ENV_SUB_AGENT_API_KEY]
-    elif has_claude and not os.environ.get(ENV_SUB_AGENT_API_KEY):
-        config.sub_agent_api_key = os.environ[ENV_CLAUDE_API_KEY]
-    elif has_deepseek and not os.environ.get(ENV_SUB_AGENT_API_KEY):
-        config.sub_agent_api_key = os.environ[ENV_DEEPSEEK_API_KEY]
+    elif not os.environ.get(ENV_SUB_AGENT_API_KEY):
+        # Fall back to primary key in provider priority order
+        for prov in _AUTO_DETECT_ORDER:
+            key_env = _PROVIDER_KEY_ENV.get(prov)
+            if key_env and os.environ.get(key_env):
+                config.sub_agent_api_key = os.environ[key_env]
+                break
 
     # --- API URL overrides ---
-    if os.environ.get(ENV_DEEPSEEK_API_URL):
-        config.api_url = os.environ[ENV_DEEPSEEK_API_URL]
-    if os.environ.get(ENV_CLAUDE_API_URL):
-        config.api_url = os.environ[ENV_CLAUDE_API_URL]
-    if os.environ.get(ENV_XAI_API_URL):
-        config.api_url = os.environ[ENV_XAI_API_URL]
-    if os.environ.get(ENV_OLLAMA_API_URL):
-        config.api_url = os.environ[ENV_OLLAMA_API_URL]
+    for _prov, env_name in _PROVIDER_URL_ENV.items():
+        if os.environ.get(env_name):
+            config.api_url = os.environ[env_name]
 
     # --- model override ---
-    if os.environ.get(ENV_CLAUDE_MODEL):
-        config.model = os.environ[ENV_CLAUDE_MODEL]
-        config.sub_agent_model = os.environ[ENV_CLAUDE_MODEL]
-    if os.environ.get(ENV_XAI_MODEL):
-        config.model = os.environ[ENV_XAI_MODEL]
-        config.sub_agent_model = os.environ[ENV_XAI_MODEL]
-    if os.environ.get(ENV_OLLAMA_MODEL):
-        config.model = os.environ[ENV_OLLAMA_MODEL]
-        config.sub_agent_model = os.environ[ENV_OLLAMA_MODEL]
+    for _prov, env_name in _PROVIDER_MODEL_ENV.items():
+        if os.environ.get(env_name):
+            config.model = os.environ[env_name]
+            config.sub_agent_model = os.environ[env_name]
 
     # --- workspace ---
     if os.environ.get(ENV_AGENT_WORKSPACE):
@@ -548,276 +595,6 @@ def _apply_cli_overrides(config: AgentConfig,
         config.approve_write_ops = True
     if any(a == CLI_UNRESTRICTED for a in _argv):
         config.unrestricted = True
-
-
-# TODO: build_startup_context is ~70 lines — consider splitting tree generation,
-#       STATE.txt reading, and git log into separate helpers.
-def build_startup_context(
-    workspace: str, *, knowledge: list[dict] | None = None,
-) -> str:
-    """Generate a one-shot system message describing the workspace at startup.
-
-    Saves the agent discovery turns — no need to list_directory / read STATE.txt
-    before getting to work.
-
-    If *knowledge* is provided (list of {summary, category, detail} dicts from
-    the project_knowledge table), it is appended as a "Project Learnings" section
-    so the agent benefits from past session experience.
-    """
-    import subprocess as _sp
-
-    parts: list[str] = []
-    parts.append("[WORKSPACE CONTEXT — injected once at session start]")
-
-    # 1. File tree (skip hidden dirs, __pycache__, .git, venv, node_modules)
-    SKIP = {".git", "__pycache__", ".venv", "venv", "node_modules", ".mypy_cache",
-            ".pytest_cache", ".ruff_cache", "dist", "build", ".tox"}
-    tree_lines: list[str] = []
-    try:
-        walk = list(os.walk(workspace))
-    except OSError:
-        walk = []
-    for dirpath, dirnames, filenames in walk:
-        dirnames[:] = sorted(d for d in dirnames if d not in SKIP and not d.startswith("."))
-        depth = dirpath[len(workspace):].count(os.sep)
-        indent = "  " * depth
-        label = os.path.basename(dirpath) or workspace.rstrip(os.sep).rsplit(os.sep, 1)[-1]
-        tree_lines.append(f"{indent}[d] {label}/")
-        for fname in sorted(filenames):
-            if fname.startswith("."):
-                continue
-            tree_lines.append(f"{indent}  [f] {fname}")
-        if len(tree_lines) > TREE_TRUNCATION_LINES:
-            tree_lines.append(f"{indent}  ... (truncated)")
-            break
-    parts.append("```\n" + "\n".join(tree_lines) + "\n```")
-
-    # 2. Recent git log (last 5 commits, if this is a git repo)
-    try:
-        r = _sp.run(["git", "-C", workspace, "log", "--oneline", f"-{GIT_LOG_COUNT}"],
-                    capture_output=True, text=True, timeout=GIT_LOG_TIMEOUT)
-        if r.returncode == 0 and r.stdout.strip():
-            parts.append("\n## Recent git log\n```\n" + r.stdout.rstrip() + "\n```")
-    except (OSError, _sp.TimeoutExpired):
-        pass
-
-    # 4. Project knowledge (cross-session learnings, if available)
-    if knowledge:
-        lines = []
-        # Session summary first (if present)
-        session_entries = [e for e in knowledge if e.get("category") == "session_summary"]
-        other_entries = [e for e in knowledge if e.get("category") != "session_summary"]
-        if session_entries:
-            summary = session_entries[0].get("summary", "")
-            detail = session_entries[0].get("detail", "")
-            lines.append("\n## Last Session Summary")
-            lines.append(f"{summary}")
-            if detail:
-                lines.append(f"{detail}")
-        if other_entries:
-            lines.append("\n## Project Learnings (from past sessions)")
-            for entry in other_entries:
-                cat = entry.get("category", "general")
-                s = entry.get("summary", "")
-                d = entry.get("detail", "")
-                tags = f"[{cat}]"
-                lines.append(f"- {tags} {s}" + (f" — {d}" if d else ""))
-        parts.append("\n".join(lines))
-
-    return "\n".join(parts) + "\n"
-
-
-# ---------------------------------------------------------------------------
-# Session management
-# ---------------------------------------------------------------------------
-
-def _session_db_path(workspace: str, session_name: str | None = None) -> str:
-    """Return the memory DB path for a given session name."""
-    if session_name:
-        base = MEMORY_FILENAME.replace(".db", "")
-        return os.path.join(workspace, f"{base}_session_{session_name}.db")
-    return os.path.join(workspace, MEMORY_FILENAME)
-
-
-def list_sessions(workspace: str) -> list[str]:
-    """Return list of available session names in the workspace."""
-    sessions: list[str] = []
-    prefix = MEMORY_FILENAME.replace(".db", "_session_")
-    for fname in os.listdir(workspace):
-        if fname.startswith(prefix) and fname.endswith(".db"):
-            name = fname[len(prefix):-len(".db")]
-            sessions.append(name)
-    # Also check if default session DB exists
-    default_path = os.path.join(workspace, MEMORY_FILENAME)
-    if os.path.isfile(default_path) and "default" not in sessions:
-        sessions.insert(0, "default")
-    return sessions
-
-
-def switch_session(
-    workspace: str,
-    session_name: str,
-    current_memory: "MemoryStore | None",
-    current_config: "AgentConfig",
-) -> dict:
-    """Save current session and load a new one. Returns new session dict."""
-    from memory import MemoryStore
-    from prompt import build_system_prompt
-
-    # Save current session
-    if current_memory is not None:
-        current_memory.close()
-
-    db_path = _session_db_path(workspace, session_name)
-    memory = MemoryStore(db_path, max_messages=current_config.max_messages,
-                         max_tokens=current_config.context_window)
-    saved = memory.load()
-    if saved:
-        from memory import _compress_tool_results, _prune_by_tokens, _summarize_pruned
-        saved, _ = _compress_tool_results(saved, keep_recent=20)
-        saved, pruned = _prune_by_tokens(saved, current_config.context_window, current_config.max_messages)
-        if pruned:
-            summary = _summarize_pruned(pruned)
-            if summary:
-                saved.insert(0, {"role": "user", "content": summary})
-
-    knowledge = memory.get_top_knowledge(limit=15) if not memory._skip_load else []
-    # Also inject the latest session summary for context
-    session_summary = memory.get_latest_session_summary() if not memory._skip_load else None
-    startup_ctx = build_startup_context(workspace, knowledge=knowledge)
-    messages: list[dict] = [
-        {"role": "system", "content": build_system_prompt(current_config)},
-        {"role": "system", "content": startup_ctx},
-    ]
-    if saved:
-        messages.extend(saved)
-
-    return {"memory": memory, "messages": messages}
-
-
-def delete_session(workspace: str, session_name: str) -> tuple[bool, str]:
-    """Delete a session's memory DB. Returns (ok, message)."""
-    if session_name == "default":
-        return False, "Cannot delete the default session."
-    db_path = _session_db_path(workspace, session_name)
-    if not os.path.isfile(db_path):
-        return False, f"Session '{session_name}' not found."
-    os.remove(db_path)
-    return True, f"Deleted session '{session_name}'."
-
-
-def init_session(workspace: str, cli_args: object | None = None) -> dict:
-    """Shared agent initialization used by both terminal and TUI.
-
-    *cli_args* is an optional argparse namespace. Pass it to forward
-    CLI flags to AgentConfig.load().
-
-    Returns: config, write_gate, read_gate, memory, messages
-    """
-    from safety import ReadSafetyGate, WriteSafetyGate
-    from memory import MemoryStore
-    from prompt import build_system_prompt
-    from tools import set_context, build_symbol_index
-    from agent_runtime import AgentRuntime
-
-    config = AgentConfig.load(workspace, cli_args=cli_args)
-    write_gate = WriteSafetyGate(workspace, allow_overwrites=config.allow_overwrites,
-                                 unrestricted=config.unrestricted)
-    read_gate = ReadSafetyGate(workspace, unrestricted=config.unrestricted)
-    memory_path = os.path.join(workspace or os.getcwd(), config.memory_filename)
-    memory = MemoryStore(memory_path, max_messages=config.max_messages,
-                        max_tokens=config.context_window)
-    set_context(exa_api_key=config.exa_api_key, openai_api_key=config.openai_api_key,
-                scratchpad_path=memory._db_path, _memory_store=memory)
-    
-    # Initialize multi-agent runtime
-    runtime = AgentRuntime()
-    set_context(_agent_config=config, _agent_runtime=runtime)
-    
-    build_symbol_index(workspace)
-
-    # Initialize LSP (pylsp) with workspace root so LSP tools work
-    from tools.lsp import set_lsp_root, shutdown_lsp as _shutdown_lsp
-    set_lsp_root(workspace)
-
-    # Preload semantic search model in background (non-blocking)
-    # so the ~9s cold start hides behind the first user interaction.
-    try:
-        from tools.search_ops import _sem_preload
-        _sem_preload()
-    except Exception:
-        pass  # sentence-transformers may not be installed — tolerate
-
-    # Auto-init .mini_agent.rules and .mini_agent.toml if they don't exist yet
-    rules_path = os.path.join(workspace, ".mini_agent.rules")
-    if not os.path.isfile(rules_path):
-        try:
-            from tools.file_ops import _init_rules
-            result = _init_rules({}, None, read_gate)
-            if result.success:
-                print(f"  \u2728 Auto-init: {result.content[:120]}", file=sys.stderr)
-        except OSError as exc:
-            print(f"  \u26a0 Auto-init skipped: {exc}", file=sys.stderr)
-
-    # Start MCP connections if configured
-    mcp_manager = None
-    if config.mcp_servers:
-        try:
-            from tools.mcp_client import McpClientManager
-            mcp_manager = McpClientManager(config.mcp_servers)
-            connected = mcp_manager.start_all()
-            if connected:
-                set_context(_mcp_manager=mcp_manager)
-                print(
-                    f"MCP: connected to {len(connected)} server(s): "
-                    f"{', '.join(connected)}",
-                    file=sys.stderr,
-                )
-        except OSError as exc:
-            print(f"Warning: MCP init failed: {exc}", file=sys.stderr)
-
-    saved = memory.load()
-    # Prune loaded conversation to avoid massive first-turn payload
-    if saved:
-        from memory import _compress_tool_results, _prune_by_tokens, _summarize_pruned
-        saved, _ = _compress_tool_results(saved, keep_recent=20)
-        saved, pruned = _prune_by_tokens(saved, config.context_window, config.max_messages)
-        if pruned:
-            summary = _summarize_pruned(pruned)
-            if summary:
-                saved.insert(0, {"role": "user", "content": summary})
-    knowledge = memory.get_top_knowledge(limit=15) if memory else []
-    startup_ctx = build_startup_context(workspace, knowledge=knowledge)
-    messages: list[dict] = [
-        {"role": "system", "content": build_system_prompt(config)},
-        {"role": "user", "content": startup_ctx},
-    ]
-    if saved:
-        messages.extend(saved)
-
-    import requests as _requests
-    session = _requests.Session()
-    # Set default timeout (connect, read) for every request.
-    import functools
-    session.request = functools.partial(session.request, timeout=(HTTP_CONNECT_TIMEOUT, HTTP_READ_TIMEOUT))
-    # Limit connection pool to avoid resource waste on long-running sessions.
-    session.mount("https://", _requests.adapters.HTTPAdapter(
-        pool_connections=HTTP_POOL_CONNECTIONS, pool_maxsize=HTTP_POOL_MAXSIZE))
-
-    # Ensure the session is closed on normal interpreter shutdown.
-    import atexit
-    atexit.register(session.close)
-    atexit.register(_shutdown_lsp)
-
-    return {
-        "config": config,
-        "write_gate": write_gate,
-        "read_gate": read_gate,
-        "memory": memory,
-        "messages": messages,
-        "session": session,
-    }
-
 
 def parse_args(argv: list[str] | None = None) -> object:
     """Parse CLI flags with argparse.
@@ -895,3 +672,20 @@ def resolve_workspace(override: str | None = None) -> str:
         if arg == "--workspace" and i + 1 < len(args):
             return args[i + 1]
     return os.environ.get("AGENT_WORKSPACE", os.getcwd())
+
+
+# ---------------------------------------------------------------------------
+# Backward-compatible re-exports (at end of file to avoid circular imports)
+# ---------------------------------------------------------------------------
+# These functions have been moved to dedicated modules but are re-exported
+# here so existing callers (tui.py, tui_pt.py, mini_agent.py, eval/runner.py,
+# tests) continue to work unchanged.
+
+from bootstrap import init_session  # noqa: F401, E402
+from session import (  # noqa: F401, E402
+    _session_db_path,
+    list_sessions,
+    switch_session,
+    delete_session,
+)
+from prompt import build_startup_context  # noqa: F401, E402
