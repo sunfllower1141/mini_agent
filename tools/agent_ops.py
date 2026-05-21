@@ -247,6 +247,9 @@ def _spawn_agent(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolRes
 
     Supports batch spawn via 'tasks' (list of task strings) in addition
     to single 'task' spawn.
+
+    Set 'synchronous'=true to block until the sub-agent completes and
+    return its result directly (agent-as-tool pattern).
     """
     from tools import _TOOL_CONTEXT
     from agent_runtime import AgentRuntime
@@ -288,6 +291,7 @@ def _spawn_agent(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolRes
             )
 
         parent_task_id = getattr(_TOOL_CONTEXT, "_agent_task_id", "")
+        synchronous = args.get("synchronous", False)
         task_ids = []
         _max_concurrent = getattr(getattr(_TOOL_CONTEXT, "_agent_config", None), "sub_agent_max_concurrent", _MAX_CONCURRENT)
         for task in valid_tasks:
@@ -308,6 +312,30 @@ def _spawn_agent(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolRes
                 content=f"Too many sub-agents running ({runtime.active_count} active, "
                         f"max {_MAX_CONCURRENT}). Wait for some to complete before spawning more.",
             )
+
+        # --- synchronous mode: block until all complete (agent-as-tool pattern) ---
+        if synchronous:
+            results = []
+            for tid in task_ids:
+                def _ready(tid=tid):
+                    return runtime.get_status(tid) != "running"
+                with runtime._condition:
+                    runtime._condition.wait_for(_ready, timeout=_COLLECT_TIMEOUT)
+                status = runtime.get_status(tid)
+                if status == "completed":
+                    result = runtime.get_result(tid)
+                    if result is not None:
+                        runtime._collected.add(tid)
+                        results.append(result)
+            if not results:
+                return ToolResult(
+                    success=False,
+                    content="Synchronous spawn: no agents completed in time.",
+                )
+            lines = [f"Synchronous batch: {len(results)}/{len(task_ids)} completed:"]
+            for r in results:
+                lines.append(f"  - [{r.success}] {r.content[:200]}")
+            return ToolResult(success=True, content="\n".join(lines))
 
         return ToolResult(
             success=True,
@@ -360,6 +388,7 @@ def _spawn_agent(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolRes
         )
 
     parent_task_id = getattr(_TOOL_CONTEXT, "_agent_task_id", "")
+    synchronous = args.get("synchronous", False)
     task_id = _spawn_one(task, config, runtime, wg, rg, max_turns,
                          cancel_event=None, visible=visible,
                          shared_context=shared_context,
@@ -367,6 +396,31 @@ def _spawn_agent(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolRes
                          parent_depth=getattr(_TOOL_CONTEXT, "_agent_depth", 0),
                          max_depth=getattr(_TOOL_CONTEXT, "_agent_max_depth", 3),
                          parent_task_id=parent_task_id)
+
+    # --- synchronous mode: block until complete (agent-as-tool pattern) ---
+    if synchronous:
+        def _ready():
+            return runtime.get_status(task_id) != "running"
+        with runtime._condition:
+            runtime._condition.wait_for(_ready, timeout=_COLLECT_TIMEOUT)
+        status = runtime.get_status(task_id)
+        if status == "completed":
+            result = runtime.get_result(task_id)
+            if result is not None:
+                runtime._collected.add(task_id)
+                return ToolResult(
+                    success=result.success,
+                    content=(
+                        f"Synchronous agent '{task_id}' completed:\n"
+                        f"  Success: {result.success}\n"
+                        f"  Turns: {result.turns_used}\n"
+                        f"  Content:\n{result.content}"
+                    ),
+                )
+        return ToolResult(
+            success=False,
+            content=f"Synchronous agent '{task_id}' did not complete in time.",
+        )
 
     return ToolResult(
         success=True,
@@ -574,9 +628,9 @@ def _collect_agent_summary(args: dict) -> str:
 # collect_any
 # ---------------------------------------------------------------------------
 
-_COLLECT_ANY_TIMEOUT = 10   # seconds to wait for any sub-agent (kept short so
-                            # parent agent can check for user interjections between
-                            # polls — the parent's natural turn cycle handles this)
+_COLLECT_ANY_TIMEOUT = 60   # seconds to wait for any sub-agent (was 10s; 60s
+                            # reduces orchestrator polling frequency and context
+                            # bloat from repeated orchestration injections)
 
 
 @_register("collect_any")

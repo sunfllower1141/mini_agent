@@ -92,10 +92,42 @@ def run_sub_agent(
     _agent_tl.task_id = task_id
 
     # --- build messages for sub-agent ---
+    # Sub-agents get a minimal system prompt: behavior rules + essential tools only.
+    # The full tool schema (50+ tools at ~15K tokens) is NOT sent — sub-agents
+    # only need read_file, write_file, edit_file, search_files, find_symbol,
+    # find_usages, list_directory, run_shell, and sub-agent coordination tools.
+    # This saves ~15K tokens per sub-agent context.
+    _SUB_TOOL_NAMES = {
+        "read_file", "write_file", "edit_file", "list_directory",
+        "search_files", "find_symbol", "find_usages", "run_shell",
+        "run_tests", "verify", "git", "file_info", "diff", "restore_file",
+        "web_search", "fetch_url", "semantic_search",
+        # Sub-agent coordination (if not at max depth)
+        "spawn_agent", "agent_status", "collect_agent", "collect_any",
+        "agent_extend", "agent_cancel", "agent_message", "agent_read",
+        "agent_inbox", "agent_handoff", "agent_subscribe",
+        # Scratchpad + plan tracking
+        "write_scratchpad", "todo_write", "todo_read",
+        "plan", "plan_status",
+    }
+    _sub_tools = [t for t in TOOLS if t["function"]["name"] in _SUB_TOOL_NAMES]
+
     messages: list[dict] = [
         {"role": "system", "content": _SUB_AGENT_SYSTEM_PROMPT},
-        {"role": "system", "content": build_system_prompt(config)},
     ]
+    # Build a lightweight system prompt with only the tools sub-agents need
+    _sub_system = build_system_prompt(config)
+    # Replace the full tool listing with the subset
+    if _sub_tools:
+        _sub_system += "\n\n## Available Tools (subset for workers)\n"
+        for t in _sub_tools:
+            fn = t["function"]
+            desc = fn.get("description", "")
+            # Keep description to one line
+            if "\n" in desc:
+                desc = desc.split("\n")[0]
+            _sub_system += f"\n- **{fn['name']}**: {desc}"
+    messages.append({"role": "system", "content": _sub_system})
     if current_depth >= max_depth:
         messages.append({
             "role": "system",
@@ -413,20 +445,40 @@ def run_sub_agent(
                     "_transient": True,
                 })
 
-            # --- Communication nudge: every 3 turns, remind the agent to coordinate ---
-            if turn_count % 3 == 0:
-                messages.append({
-                    "role": "user",
-                    "content": (
-                        "[COMMUNICATION NUDGE] You have been working for {t} turns.\n"
-                        "1. Check your **agent_inbox** for messages from the orchestrator or siblings.\n"
-                        "2. Check **agent_read** for broadcast messages.\n"
-                        "3. Send a **status.heartbeat** via agent_handoff summarizing progress.\n"
-                        "4. If editing shared files, broadcast intent via **agent_message**.\n"
-                        "5. If a sibling works on the same file, coordinate via **agent_handoff**.\n"
-                    ).format(t=turn_count),
-                    "_transient": True,
-                })
+            # --- Communication nudge: only inject if agent has unread inbox messages ---
+            # Previously injected every 3 turns (~500 tokens each), but most agents
+            # never use the messaging system. Now opt-in: only nudge when there's
+            # actually something to read.
+            if turn_count % _TURN_INTERVAL_COMM_NUDGE == 0:
+                _runtime = getattr(_TOOL_CONTEXT, "_agent_runtime", None)
+                _has_unread = False
+                if _runtime is not None and task_id:
+                    inbox = _runtime.get_inbox(task_id)
+                    # Check if there are messages the agent hasn't seen yet
+                    _last_inbox_count = getattr(
+                        _TOOL_CONTEXT, f"_agent_{task_id}_last_inbox_count", 0
+                    )
+                    if len(inbox) > _last_inbox_count:
+                        _has_unread = True
+                    # Also check global broadcasts
+                    all_msgs = getattr(_runtime, "messages", None)
+                    if all_msgs is not None:
+                        _last_bcast = getattr(
+                            _TOOL_CONTEXT, f"_agent_{task_id}_last_bcast_count", 0
+                        )
+                        if len(all_msgs) > _last_bcast:
+                            _has_unread = True
+                if _has_unread:
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "[COMMUNICATION NUDGE] You have unread messages.\n"
+                            "1. Check your **agent_inbox** for direct messages.\n"
+                            "2. Check **agent_read** for broadcast messages.\n"
+                            "3. Send a **status.heartbeat** via agent_handoff summarizing progress.\n"
+                        ),
+                        "_transient": True,
+                    })
 
             msg = call_llm(
                 messages, config,

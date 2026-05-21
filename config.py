@@ -49,15 +49,15 @@ class ProviderDefaults:
 PROVIDER_DEFAULTS: dict[str, ProviderDefaults] = {
     "deepseek": ProviderDefaults(
         model="deepseek-v4-pro",
-        sub_agent_model="deepseek-v4-pro",
+        sub_agent_model="deepseek-v4-flash",  # cheaper worker model for sub-agents
         api_url="https://api.deepseek.com/v1/chat/completions",
         max_tokens=200_000,
         context_window=1_000_000,  # V4-Pro native context length
-        routing_model="",  # disabled by default; set to "deepseek-v4-flash" to enable
+        routing_model="deepseek-v4-flash",  # also use flash for simple read/search prompts
     ),
     "claude": ProviderDefaults(
         model="claude-sonnet-4-5",
-        sub_agent_model="claude-sonnet-4-5",
+        sub_agent_model="claude-sonnet-4-5",  # Anthropic: same model for sub-agents (no cheaper tier via API)
         api_url="https://api.anthropic.com/v1/chat/completions",
         max_tokens=32_000,
         context_window=1_000_000,  # Opus 4.7 / Sonnet 4.5 native context length
@@ -65,7 +65,7 @@ PROVIDER_DEFAULTS: dict[str, ProviderDefaults] = {
     ),
     "xai": ProviderDefaults(
         model="grok-4.3",
-        sub_agent_model="grok-4.3",
+        sub_agent_model="grok-4.3",  # xAI: same model for sub-agents
         api_url="https://api.x.ai/v1/chat/completions",
         max_tokens=200_000,
         context_window=1_000_000,  # Grok 4.3 native context length
@@ -73,7 +73,7 @@ PROVIDER_DEFAULTS: dict[str, ProviderDefaults] = {
     ),
     "ollama": ProviderDefaults(
         model="qwen3.6:27b",
-        sub_agent_model="qwen3.6:27b",
+        sub_agent_model="qwen3.6:27b",  # local LLM: no cheaper variant installed, use same model
         # Camoproj VM: RTX 6000 Ada 48GB, accessible via Tailscale at 100.79.96.42
         api_url="http://100.79.96.42:11434/v1/chat/completions",
         max_tokens=8_192,

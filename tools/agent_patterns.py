@@ -22,6 +22,212 @@ from safety import ReadSafetyGate, WriteSafetyGate
 from tools import ToolResult, _register, _summarize, _TOOL_CONTEXT
 
 
+# ============================================================================
+# LLM-callable tools (registered) — exposed so the orchestrator can use
+# fan_out/fan_in/scatter_gather/pipeline/barrier as regular tool calls
+# instead of only via Python API.
+# ============================================================================
+
+@_register("fan_out")
+def _fan_out_tool(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
+    """Fan-out: spawn multiple sub-agents from a list of task descriptions.
+
+    Each description becomes a separate sub-agent. Returns task_ids list.
+    """
+    descriptions = args.get("descriptions", [])
+    if not descriptions or not isinstance(descriptions, list):
+        return ToolResult(
+            success=False,
+            content="'descriptions' must be a non-empty list of task strings.",
+        )
+    shared_context = args.get("shared_context", "")
+    max_turns_raw = args.get("max_turns", 15)
+    try:
+        max_turns = int(max_turns_raw)
+    except (TypeError, ValueError):
+        return ToolResult(success=False, content="max_turns must be an integer.")
+    subscriptions = args.get("subscriptions", None)
+
+    try:
+        task_ids = fan_out(
+            descriptions=descriptions,
+            shared_input=None,
+            shared_context_override=shared_context,
+            max_turns=max_turns,
+            subscriptions=subscriptions,
+            wg=wg, rg=rg,
+        )
+    except RuntimeError as exc:
+        return ToolResult(success=False, content=f"fan_out failed: {exc}")
+
+    return ToolResult(
+        success=True,
+        content=f"Spawned {len(task_ids)} agents: {', '.join(task_ids)}",
+    )
+
+
+@_summarize("fan_out")
+def _fan_out_summary(args: dict) -> str:
+    descs = args.get("descriptions", [])
+    return f"fan_out([{len(descs)} tasks])"
+
+
+@_register("fan_in")
+def _fan_in_tool(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
+    """Fan-in: collect results from a set of previously spawned sub-agents.
+
+    Blocks until all complete or timeout elapses.
+    """
+    task_ids = args.get("task_ids", [])
+    if not task_ids or not isinstance(task_ids, list):
+        return ToolResult(
+            success=False,
+            content="'task_ids' must be a non-empty list of task ID strings.",
+        )
+    timeout = args.get("timeout", 60)
+    try:
+        timeout = float(timeout)
+    except (TypeError, ValueError):
+        return ToolResult(success=False, content="timeout must be a number.")
+
+    try:
+        results = fan_in(task_ids=task_ids, timeout=timeout)
+    except RuntimeError as exc:
+        return ToolResult(success=False, content=f"fan_in failed: {exc}")
+
+    completed = [r for r in results if r is not None]
+    failed = [r for r in results if r is None]
+    lines = [f"Collected {len(completed)}/{len(task_ids)} results:"]
+    for r in completed:
+        status = "OK" if r.success else "FAIL"
+        lines.append(f"  - {r.content[:120]}")
+    if failed:
+        lines.append(f"  ({len(failed)} timed out or not found)")
+    return ToolResult(success=True, content="\n".join(lines))
+
+
+@_summarize("fan_in")
+def _fan_in_summary(args: dict) -> str:
+    tids = args.get("task_ids", [])
+    return f"fan_in([{len(tids)} ids])"
+
+
+@_register("scatter_gather")
+def _scatter_gather_tool(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
+    """Scatter-gather: apply a single task template across a list of items in parallel.
+
+    Each {item} is substituted into the template to create a sub-agent task.
+    """
+    template = args.get("template", "")
+    items = args.get("items", [])
+    if not template or not items or not isinstance(items, list):
+        return ToolResult(
+            success=False,
+            content="'template' (string) and 'items' (list) are required.",
+        )
+    max_turns_raw = args.get("max_turns", 15)
+    try:
+        max_turns = int(max_turns_raw)
+    except (TypeError, ValueError):
+        return ToolResult(success=False, content="max_turns must be an integer.")
+
+    try:
+        results = scatter_gather(
+            items=items,
+            worker_task_template=template,
+            max_turns=max_turns,
+            wg=wg, rg=rg,
+        )
+    except RuntimeError as exc:
+        return ToolResult(success=False, content=f"scatter_gather failed: {exc}")
+
+    completed = [r for r in results if r is not None]
+    lines = [f"Scatter-gather: {len(completed)}/{len(items)} completed."]
+    for r in completed:
+        lines.append(f"  - {r.content[:120]}")
+    return ToolResult(success=True, content="\n".join(lines))
+
+
+@_summarize("scatter_gather")
+def _scatter_gather_summary(args: dict) -> str:
+    items = args.get("items", [])
+    return f"scatter_gather([{len(items)} items])"
+
+
+@_register("pipeline")
+def _pipeline_tool(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
+    """Pipeline: execute a sequence of tasks in order, each after the previous completes."""
+    stages = args.get("stages", [])
+    if not stages or not isinstance(stages, list):
+        return ToolResult(
+            success=False,
+            content="'stages' must be a non-empty list of task description strings.",
+        )
+    timeout = args.get("timeout", 300)
+    try:
+        timeout = float(timeout)
+    except (TypeError, ValueError):
+        return ToolResult(success=False, content="timeout must be a number.")
+
+    stage_dicts = [{"task": s} for s in stages if isinstance(s, str)]
+    if not stage_dicts:
+        return ToolResult(success=False, content="All stages must be strings.")
+
+    try:
+        result = pipeline(stages=stage_dicts, timeout=timeout, wg=wg, rg=rg)
+    except RuntimeError as exc:
+        return ToolResult(success=False, content=f"pipeline failed: {exc}")
+
+    if result is None:
+        return ToolResult(success=False, content="Pipeline failed: a stage returned no result.")
+    return ToolResult(
+        success=result.success,
+        content=f"Pipeline complete. Final result: {result.content[:500]}",
+    )
+
+
+@_summarize("pipeline")
+def _pipeline_summary(args: dict) -> str:
+    stages = args.get("stages", [])
+    return f"pipeline([{len(stages)} stages])"
+
+
+@_register("barrier")
+def _barrier_tool(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
+    """Barrier: block until all specified sub-agents have completed."""
+    name = args.get("name", "")
+    task_ids = args.get("task_ids", [])
+    if not name or not task_ids:
+        return ToolResult(
+            success=False,
+            content="'name' and 'task_ids' are required.",
+        )
+    timeout = args.get("timeout", 120)
+    try:
+        timeout = float(timeout)
+    except (TypeError, ValueError):
+        return ToolResult(success=False, content="timeout must be a number.")
+
+    try:
+        ok = barrier(name=name, task_ids=task_ids, timeout=timeout)
+    except RuntimeError as exc:
+        return ToolResult(success=False, content=f"barrier failed: {exc}")
+
+    return ToolResult(
+        success=ok,
+        content=f"Barrier '{name}': {'all arrived' if ok else 'timeout'}.",
+    )
+
+
+@_summarize("barrier")
+def _barrier_summary(args: dict) -> str:
+    return f"barrier({args.get('name', '?')})"
+
+
+# ============================================================================
+# Python API helpers (non-tool) — keep original functions for programmatic use
+# ============================================================================
+
 def fan_out(
     descriptions: list[str],
     shared_input: dict | None = None,
@@ -32,6 +238,7 @@ def fan_out(
     max_turns: int = 15,
     visible: bool = False,
     subscriptions: list[str] | None = None,
+    shared_context_override: str = "",
 ) -> list[str]:
     """Spawn N workers from a list of task descriptions.
 
@@ -64,8 +271,8 @@ def fan_out(
             raise RuntimeError("Agent config not available.")
 
     import json
-    shared_ctx = ""
-    if shared_input:
+    shared_ctx = shared_context_override
+    if not shared_ctx and shared_input:
         shared_ctx = json.dumps(shared_input)
 
     task_ids = []

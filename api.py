@@ -27,6 +27,17 @@ from retry import _request_with_retry
 from stream import _parse_stream
 from tools.schema import TOOLS
 
+# ---------------------------------------------------------------------------
+# API rate limiter — prevents thundering-herd when N sub-agents share one key
+# ---------------------------------------------------------------------------
+# All LLM API calls (parent + sub-agents) funnel through this semaphore.
+# Default is 2 concurrent calls; set SUB_AGENT_MAX_CONCURRENT_CALLS env var
+# to override (e.g. for higher-tier API keys with looser rate limits).
+_MAX_CONCURRENT_LLM_CALLS = int(
+    __import__("os").environ.get("SUB_AGENT_MAX_CONCURRENT_CALLS", "2")
+)
+_LLM_SEMAPHORE = threading.Semaphore(_MAX_CONCURRENT_LLM_CALLS)
+
 
 # ---------------------------------------------------------------------------
 # APIError exception class
@@ -244,19 +255,32 @@ def call_llm(
         proxies_dict = {"http": config.socks_proxy, "https": config.socks_proxy}
 
     # Anthropic's OpenAI-compatible endpoint uses Bearer auth (same as DeepSeek)
-    r = _request_with_retry(
-        session,
-        config.api_url,
-        headers={
-            "Authorization": f"Bearer {config.api_key}",
-            "Content-Type": "application/json",
-            "User-Agent": "mini_agent/1.0",
-        },
-        json=payload,
-        stream=config.stream,
-        cancel_event=cancel_event,
-        proxies=proxies_dict,
-    )
+    # Gate all LLM API calls through a semaphore to prevent thundering-herd
+    # rate-limit storms when N sub-agents share the same API key.
+    acquired = _LLM_SEMAPHORE.acquire(timeout=120)  # 2 min max wait
+    if not acquired:
+        raise APIError(
+            status_code=429,
+            body="API rate limiter: timed out waiting for a free call slot (120s). "
+                 "Too many concurrent LLM calls. Reduce sub-agent count or increase "
+                 "SUB_AGENT_MAX_CONCURRENT_CALLS env var."
+        )
+    try:
+        r = _request_with_retry(
+            session,
+            config.api_url,
+            headers={
+                "Authorization": f"Bearer {config.api_key}",
+                "Content-Type": "application/json",
+                "User-Agent": "mini_agent/1.0",
+            },
+            json=payload,
+            stream=config.stream,
+            cancel_event=cancel_event,
+            proxies=proxies_dict,
+        )
+    finally:
+        _LLM_SEMAPHORE.release()
 
     if r is None:
         return None  # cancelled during retry

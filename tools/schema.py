@@ -570,7 +570,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "spawn_agent",
-            "description": "Spawn one or more sub-agents to work on tasks in background threads. Returns a task_id immediately — the parent does NOT block. Use agent_status to poll or collect_agent to block later when you need the result. For multiple tasks, pass 'tasks' (list) instead of 'task' to spawn them all in one call. Sub-agents share your workspace and tools but have their own context. Max 10 concurrent sub-agents, 25 turns each (extendable to 35).",
+            "description": "Spawn one or more sub-agents to work on tasks in background threads. Returns a task_id immediately — the parent does NOT block. Use agent_status to poll or collect_agent to block later when you need the result. For multiple tasks, pass 'tasks' (list) instead of 'task' to spawn them all in one call. Sub-agents share your workspace and tools but have their own context. Max 10 concurrent sub-agents, 25 turns each (extendable to 35). Set 'synchronous'=true to block until completion and return the result directly (agent-as-tool pattern).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -582,6 +582,10 @@ TOOLS = [
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "Multiple task descriptions to spawn in parallel. Use this OR 'task' (not both). Max 10 at a time."
+                    },
+                    "synchronous": {
+                        "type": "boolean",
+                        "description": "Optional: if true, block until the sub-agent(s) complete and return results directly (agent-as-tool pattern). Default: false."
                     },
                     "shared_context": {
                         "type": "string",
@@ -655,7 +659,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "collect_any",
-            "description": "Collect the first sub-agent that finishes (from a list of task_ids). If any have already completed, returns immediately. Otherwise polls until one completes or timeout (10s). Use after spawn_agent with multiple tasks to grab the fastest result.",
+            "description": "Collect the first sub-agent that finishes (from a list of task_ids). If any have already completed, returns immediately. Otherwise polls until one completes or timeout (60s). Use after spawn_agent with multiple tasks to grab the fastest result.",
             "parameters": {
                 "type": "object",
                 "properties": {

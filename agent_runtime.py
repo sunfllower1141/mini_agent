@@ -21,6 +21,10 @@ class SubAgentResult:
     """Result returned when a sub-agent completes (or fails).
 
     Mirrors ToolResult so the parent can consume it like any other tool output.
+
+    Structured output fields (findings, files_changed) are populated by parsing
+    the content for audit-style reports. These enable reliable result validation
+    and aggregation by the orchestrator.
     """
     success: bool
     content: str              # final answer or summary
@@ -28,6 +32,82 @@ class SubAgentResult:
     tool_calls_made: int = 0
     scratchpad: str = ""      # final scratchpad state for parent context
     error: str | None = None
+    findings: list[dict] | None = None  # parsed structured findings [{severity, file, line, issue, fix}]
+    files_changed: list[str] | None = None  # list of files modified by this agent
+
+    def __post_init__(self):
+        """Auto-parse structured output from content if findings not explicitly set."""
+        if self.findings is None:
+            self.findings = self._parse_findings()
+        if self.files_changed is None:
+            self.files_changed = self._parse_files_changed()
+
+    def _parse_findings(self) -> list[dict]:
+        """Try to extract structured findings from the content.
+
+        Looks for markdown tables with Severity/File/Line/Issue/Fix headers,
+        or JSON blocks with 'findings' key.
+        """
+        findings = []
+        content = self.content or ""
+        # Try JSON first
+        import json as _json, re as _re
+        try:
+            # Look for JSON block
+            json_match = _re.search(r'\{[^{}]*"findings"[^{}]*\}', content, _re.DOTALL)
+            if json_match:
+                data = _json.loads(json_match.group(0))
+                if "findings" in data:
+                    return data["findings"]
+        except (_json.JSONDecodeError, KeyError, TypeError):
+            pass
+        # Try markdown table with | Severity | File | ... headers
+        table_pattern = _re.compile(
+            r'\|\s*Severity\s*\|.*?\n\|[-|\s]+\|.*?\n((?:\|.*?\|\n?)+)',
+            _re.IGNORECASE
+        )
+        match = table_pattern.search(content)
+        if match:
+            rows = match.group(1).strip().split('\n')
+            for row in rows:
+                cells = [c.strip() for c in row.split('|')[1:-1]]
+                if len(cells) >= 5:
+                    findings.append({
+                        "severity": cells[0],
+                        "file": cells[1],
+                        "line": cells[2],
+                        "issue": cells[3],
+                        "fix": cells[4],
+                    })
+                elif len(cells) >= 3:
+                    findings.append({
+                        "severity": cells[0],
+                        "file": cells[1],
+                        "line": cells[2] if len(cells) > 2 else "",
+                        "issue": cells[3] if len(cells) > 3 else "",
+                        "fix": cells[4] if len(cells) > 4 else "",
+                    })
+        return findings
+
+    def _parse_files_changed(self) -> list[str]:
+        """Try to extract list of files changed from the content."""
+        files = []
+        content = self.content or ""
+        import re as _re
+        # Look for patterns like "files_changed: [...]" or "Modified: file1, file2"
+        for pattern in [
+            r'files?_changed:\s*\[([^\]]+)\]',
+            r'Modified:\s*(.+?)(?:\n|$)',
+            r'Files?\s+(?:changed|modified|written):\s*(.+?)(?:\n|$)',
+        ]:
+            match = _re.search(pattern, content, _re.IGNORECASE)
+            if match:
+                items = match.group(1)
+                files.extend(
+                    f.strip().strip("'\"") for f in items.split(',')
+                    if f.strip()
+                )
+        return files
 
     def to_dict(self) -> dict:
         """Return a JSON-serializable dict."""
@@ -38,6 +118,8 @@ class SubAgentResult:
             "tool_calls_made": self.tool_calls_made,
             "scratchpad": self.scratchpad,
             "error": self.error,
+            "findings": self.findings,
+            "files_changed": self.files_changed,
         }
 
     def to_json(self) -> str:
@@ -49,6 +131,8 @@ class SubAgentResult:
             "tool_calls_made": self.tool_calls_made,
             "scratchpad": self.scratchpad,
             "error": self.error,
+            "findings": self.findings,
+            "files_changed": self.files_changed,
         })
 
 

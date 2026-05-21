@@ -197,7 +197,17 @@ def _inject_git_diff(
 
 
 def _inject_orchestration_context(messages: list[dict]) -> None:
-    """Inject sub-agent orchestration status (every turn, if runtime active)."""
+    """Inject sub-agent orchestration status ONLY when state changes.
+
+    Suppresses injection when nothing new happened since last turn:
+    - No new completions (pending_results unchanged)
+    - No new broadcast messages
+    - No auto-extensions performed
+    - Running set unchanged
+
+    This prevents ~500-1000 tokens of orchestration overhead per turn
+    when sub-agents are steadily working but nothing has completed yet.
+    """
     try:
         runtime = getattr(_TOOL_CONTEXT, "_agent_runtime", None)
         if runtime is None:
@@ -206,6 +216,28 @@ def _inject_orchestration_context(messages: list[dict]) -> None:
         pending = runtime.get_pending_results()
         if not running_ids and not pending:
             return
+
+        # --- Compute a state fingerprint to detect changes ---
+        pending_fp = tuple(
+            (tid, r.success, r.content[:80])
+            for tid, r in pending
+        )
+        running_fp = tuple(sorted(running_ids))
+        all_msgs = getattr(runtime, "messages", None)
+        msg_fp = len(all_msgs) if all_msgs is not None else 0
+
+        # Check if anything changed since last injection
+        last_state = getattr(_TOOL_CONTEXT, "_last_orch_state", None)
+        current_state = (pending_fp, running_fp, msg_fp)
+        if last_state == current_state and not (
+            # Always inject if running_ids is non-empty on first turn or if
+            # there are pending results we haven't reported yet
+            pending and getattr(_TOOL_CONTEXT, "_last_pending_reported", 0) < len(pending)
+        ):
+            return
+        _TOOL_CONTEXT._last_orch_state = current_state
+        _TOOL_CONTEXT._last_pending_reported = len(pending)
+
         parts: list[str] = []
         if pending:
             parts.append("Sub-agent(s) COMPLETED since your last turn:")
@@ -226,7 +258,6 @@ def _inject_orchestration_context(messages: list[dict]) -> None:
                 "the first result. Do NOT redo their work."
             )
         # --- Inject new broadcast messages from sub-agents ---
-        all_msgs = getattr(runtime, "messages", None)
         if all_msgs is not None:
             msg_count = len(all_msgs)
             last_seen = getattr(_TOOL_CONTEXT, "_last_msg_count", 0)
