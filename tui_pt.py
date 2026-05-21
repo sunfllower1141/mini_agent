@@ -936,9 +936,26 @@ class MiniAgentTUI:
 # Entry point
 # ---------------------------------------------------------------------------
 
+def _cleanup_orphans():
+    """Kill stale pylsp processes from previous sessions."""
+    try:
+        subprocess.run(
+            ["pkill", "-f", "pylsp"],
+            capture_output=True, timeout=5)
+    except Exception:
+        pass  # pkill may not exist, or no orphans to kill
+
 if __name__ == "__main__":
     # Redirect stderr to a log file so random warnings / debug prints from
     # tools and subprocess modules don't corrupt the prompt_toolkit TUI layout.
     _stderr_log_path = os.path.join(os.path.dirname(__file__), "tui_stderr.log")
     sys.stderr = open(_stderr_log_path, "a")
+
+    # Kill orphaned LSP processes from previous sessions
+    _cleanup_orphans()
+
+    # Ensure cleanup on normal exit
+    import atexit
+    atexit.register(_cleanup_orphans)
+
     MiniAgentTUI().run()
