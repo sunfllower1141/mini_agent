@@ -629,6 +629,10 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     
     build_symbol_index(workspace)
 
+    # Initialize LSP (pylsp) with workspace root so LSP tools work
+    from tools.lsp import set_lsp_root, shutdown_lsp as _shutdown_lsp
+    set_lsp_root(workspace)
+
     # Preload semantic search model in background (non-blocking)
     # so the ~9s cold start hides behind the first user interaction.
     try:
@@ -696,6 +700,7 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     # Ensure the session is closed on normal interpreter shutdown.
     import atexit
     atexit.register(session.close)
+    atexit.register(_shutdown_lsp)
 
     return {
         "config": config,

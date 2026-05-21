@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
 import threading
 import json
 import queue
@@ -118,11 +117,7 @@ class LspConnection:
                 return False
             self._connected = True
             return True
-        except Exception as exc:
-            print(
-                f"Warning: LSP server '{self.language_id}' failed to connect: {exc}",
-                file=sys.stderr,
-            )
+        except Exception:
             self.disconnect()
             return False
 
@@ -228,6 +223,8 @@ class LspConnection:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            bufsize=0,
+            env={**os.environ, "PYTHONUNBUFFERED": "1"},
         )
         # On Windows, start a background reader thread since select doesn't work on pipes
         if os.name == 'nt':
@@ -419,11 +416,7 @@ class LspConnection:
             )
             self._send_notification("initialized", {})
             return True
-        except (LspRpcError, LspConnectionError) as exc:
-            print(
-                f"Warning: LSP server '{self.language_id}' initialize failed: {exc}",
-                file=sys.stderr,
-            )
+        except (LspRpcError, LspConnectionError):
             return False
 
     def _ensure_document_open(self, uri: str) -> None:

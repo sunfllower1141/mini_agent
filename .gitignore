@@ -13,6 +13,7 @@ venv/
 .DS_Store
 
 # Runtime data
+tui_stderr.log
 .mini_agent_memory.db
 .mini_agent_memory.db-shm
 .mini_agent_memory.db-wal

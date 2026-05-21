@@ -875,4 +875,8 @@ class MiniAgentTUI:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    # Redirect stderr to a log file so random warnings / debug prints from
+    # tools and subprocess modules don't corrupt the prompt_toolkit TUI layout.
+    _stderr_log_path = os.path.join(os.path.dirname(__file__), "tui_stderr.log")
+    sys.stderr = open(_stderr_log_path, "a")
     MiniAgentTUI().run()
