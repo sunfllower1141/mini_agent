@@ -679,28 +679,25 @@ def _run_tests(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
     cmd = _get_python_cmd() + ["-m", "pytest", "-q", "--ignore=venv"]
     if target:
         cmd.append(target)
+    else:
+        # Full suite: add per-test timeout to prevent hangs
+        cmd.append("--timeout=60")
 
     try:
         proc = subprocess.Popen(
-            cmd,
-            cwd=rg.workspace_root,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
+            cmd, cwd=rg.workspace_root,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         )
     except Exception as e:
         return ToolResult(success=False, content=f"Error starting pytest: {e}")
 
-    # Background mode: register and return immediately
     if background:
         task_id = str(uuid.uuid4())[:8]
         _TASK_REGISTRY[task_id] = proc
-        # Drain stdout/stderr in daemon threads to prevent pipe-buffer deadlock
         stdout_lines: list[str] = []
         stderr_lines: list[str] = []
         threading.Thread(target=_stream_reader, args=(proc.stdout, stdout_lines), daemon=True).start()
         threading.Thread(target=_stream_reader, args=(proc.stderr, stderr_lines), daemon=True).start()
-        # Persist output after the process completes
         def _persist_when_done():
             proc.wait()
             output = "".join(stdout_lines)
@@ -713,7 +710,6 @@ def _run_tests(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
             content=f"Started background test run {task_id}. Use task_status to check.",
         )
 
-    # Foreground: use communicate() to avoid thread overhead
     try:
         out, err = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -722,9 +718,7 @@ def _run_tests(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
         return ToolResult(success=False, content=f"Tests timed out after {timeout}s")
 
     output = (out + err).strip()
-    # Persist to DB so agent can read failures without re-running
     _persist_test_output(output)
-
     summary, success = _parse_pytest_output(output, proc.returncode)
     return ToolResult(success=success, content=summary)
 

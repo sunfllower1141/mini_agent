@@ -1173,6 +1173,14 @@ def _write_scratchpad(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> 
     # Use the shared MemoryStore connection to avoid SQLite "database is locked"
     # errors caused by opening a second connection to the same WAL-mode file.
     memory_store = getattr(_TOOL_CONTEXT, "_memory_store", None)
+
+    # If no shared store but scratchpad_path is configured, create one on the fly.
+    if memory_store is None:
+        scratchpad_path = getattr(_TOOL_CONTEXT, "scratchpad_path", None)
+        if scratchpad_path:
+            from memory import MemoryStore
+            memory_store = MemoryStore(scratchpad_path)
+
     if memory_store is not None:
         try:
             memory_store.set_scratchpad(content_text)

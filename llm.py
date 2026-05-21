@@ -773,9 +773,8 @@ def _api_call_phase(
                               on_output=on_tool_output,
                               approve_callback=approve_callback)
         deferred_stream_results.append((tc, result))
-        detail = format_tool_detail(result, max_len=TOOL_DETAIL_DISPLAY_LENGTH)
-        if on_tool_end is not None:
-            on_tool_end(result.success, detail, diff_preview=result.diff_preview)
+        # on_tool_end is deferred to _tool_execution_phase to avoid
+        # double-firing for streaming tools.
 
     msg = call_llm(messages, config, on_token=_outer_on_token,
                         session=session, on_tool_ready=_on_tool_ready,
@@ -822,8 +821,9 @@ def _tool_execution_phase(
     if not remaining:
         # All tools were already executed during streaming
         messages.append(msg)
+        # on_tool_end already fired during streaming (via _on_tool_ready)
         for tc, result in deferred_stream_results:
-            _append_tool_result(messages, tc, result, on_tool_end,
+            _append_tool_result(messages, tc, result, on_tool_end=None,
                                 recent_keys=recent_tool_keys,
                                 lock=tool_keys_lock)
         _save_turn_summary(turn_count, msg, deferred_stream_results, messages)
@@ -834,8 +834,9 @@ def _tool_execution_phase(
     messages.append(msg)
 
     # Flush deferred tool results from streaming execution
+    # on_tool_end already fired during streaming (via _on_tool_ready)
     for tc, result in deferred_stream_results:
-        _append_tool_result(messages, tc, result, on_tool_end,
+        _append_tool_result(messages, tc, result, on_tool_end=None,
                             recent_keys=recent_tool_keys,
                             lock=tool_keys_lock)
 
