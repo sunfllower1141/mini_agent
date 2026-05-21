@@ -203,7 +203,7 @@ def _start_windows_tunnel(config: AgentConfig) -> None:
     if platform.system() != "Windows":
         return  # no-op on macOS / Linux
 
-    key_path = os.path.expandvars(_WINDOWS_TUNNEL_KEY)
+    key_path = os.path.join(os.path.expanduser("~"), _WINDOWS_TUNNEL_KEY)
     if not os.path.isfile(key_path):
         print(
             f"Warning: Windows tunnel key not found at {key_path} — "
