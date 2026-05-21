@@ -503,7 +503,9 @@ def _build_compressed(
 # TODO: _summarize_pruned is ~80 lines — consider splitting into helpers for
 #       each message role (user, tool, assistant) and file/command categorization.
 def _summarize_pruned(pruned: list[dict]) -> str:
-    """Build a one-paragraph summary of pruned messages.
+    """Build a one-paragraph summary of pruned messages using an LLM call.
+
+    Falls back to a rules-based summary if the LLM call fails.
 
     The summary is injected as a synthetic 'user' message so the agent
     sees it as prior conversation context.
@@ -511,6 +513,15 @@ def _summarize_pruned(pruned: list[dict]) -> str:
     if not pruned:
         return ""
 
+    if len(pruned) < 3:
+        # Too small to warrant an LLM call — use rules-based fallback
+        return _summarize_pruned_rules(pruned)
+
+    return _summarize_pruned_llm(pruned)
+
+
+def _summarize_pruned_rules(pruned: list[dict]) -> str:
+    """Rules-based summary fallback for small pruned sets."""
     files_read: list[str] = []
     files_written: list[str] = []
     files_edited: list[str] = []
@@ -530,7 +541,6 @@ def _summarize_pruned(pruned: list[dict]) -> str:
             text = _get_tool_content(m)
 
             if "bytes to" in text or "OK: wrote" in text or "OK: replaced" in text:
-                # Extract path
                 path = text.split(" to ")[-1].split("\n")[0] if " to " in text else text
                 if len(path) > _SUMMARY_PATH_PREVIEW:
                     path = path[:_SUMMARY_PATH_PREVIEW] + "…"
@@ -564,10 +574,10 @@ def _summarize_pruned(pruned: list[dict]) -> str:
 
     parts: list[str] = ["Earlier in this conversation:"]
     if turns:
-        for t in turns[-_SUMMARY_MAX_TURNS:]:  # last N user messages
+        for t in turns[-_SUMMARY_MAX_TURNS:]:
             parts.append(f"- {t}")
     if files_read:
-        unique = list(dict.fromkeys(files_read))  # dedupe, preserve order
+        unique = list(dict.fromkeys(files_read))
         parts.append(f"- Files read: {', '.join(unique[:_SUMMARY_MAX_FILES])}")
     if files_written:
         unique = list(dict.fromkeys(files_written))
@@ -579,6 +589,68 @@ def _summarize_pruned(pruned: list[dict]) -> str:
         parts.append(f"- Commands run: {', '.join(commands_run[:_SUMMARY_MAX_COMMANDS])}")
 
     return "\n".join(parts)
+
+
+def _summarize_pruned_llm(pruned: list[dict]) -> str:
+    """Use a cheap LLM to summarize pruned conversation context.
+
+    Returns a concise paragraph (2-4 sentences) capturing key decisions,
+    facts, and actions from the pruned messages. Falls back to rules-based
+    summarization on failure.
+    """
+    # Build a compact representation of pruned messages
+    lines: list[str] = []
+    for m in pruned:
+        role = m.get("role", "")
+        content = str(m.get("content", ""))[:500]
+        if role == "user":
+            lines.append(f"[user] {content}")
+        elif role == "assistant":
+            tc = m.get("tool_calls")
+            if tc:
+                names = [t.get("function", {}).get("name", "?") for t in tc]
+                lines.append(f"[assistant] called: {', '.join(names)}")
+            elif content:
+                lines.append(f"[assistant] {content[:300]}")
+        elif role == "tool":
+            text = _get_tool_content(m)
+            lines.append(f"[tool result] {text[:300]}")
+
+    conversation_text = "\n".join(lines[-50:])  # cap at last 50 to keep prompt small
+
+    prompt = (
+        "Summarize this conversation excerpt in 2-3 sentences. "
+        "Capture: key decisions made, important facts learned, files modified, "
+        "and the overall progress. Be concise.\n\n"
+        f"{conversation_text}\n\nSummary:"
+    )
+
+    try:
+        from api import call_llm
+        # Use the model-family concept: route to the cheapest model
+        # We build a minimal config for this one-shot summarization call
+        from config import AgentConfig
+        summarizer_config = AgentConfig()
+        summarizer_config.model = "claude-3-5-haiku-20241022"
+        summarizer_config.api_provider = "claude"
+        summarizer_config.max_tokens = 200
+        summarizer_config.stream = False
+        summarizer_config.temperature = 1.0
+        summarizer_config.api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        if not summarizer_config.api_key:
+            # Try deepseek as fallback
+            summarizer_config.api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+            summarizer_config.api_provider = "deepseek"
+            summarizer_config.model = "deepseek-chat"
+
+        messages = [{"role": "user", "content": prompt}]
+        result = call_llm(messages, summarizer_config)
+        if result and result.get("content"):
+            return f"[Earlier context summary] {result['content'].strip()}"
+    except Exception:
+        pass  # Fall through to rules-based
+
+    return _summarize_pruned_rules(pruned)
 
 
 # ---------------------------------------------------------------------------
@@ -1054,6 +1126,87 @@ class MemoryStore:
         import sys
         print(f"Warning: memory save failed: {last_exc}", file=sys.stderr)
         return messages  # return original on failure so caller doesn't lose data
+
+    # -----------------------------------------------------------------------
+    # Sticky facts (survive pruning, injected into system prompt)
+    # -----------------------------------------------------------------------
+
+    def get_sticky_facts(self) -> str:
+        """Return sticky facts as a string for injection into system prompt."""
+        try:
+            conn = self._get_conn()
+            rows = conn.execute(
+                "SELECT summary FROM project_knowledge"
+                " WHERE category = 'sticky_fact'"
+                " ORDER BY importance DESC, hits DESC LIMIT 10"
+            ).fetchall()
+            if rows:
+                return "\n".join(f"- {r[0]}" for r in rows)
+        except sqlite3.Error:
+            pass
+        return ""
+
+    def add_sticky_fact(self, summary: str, detail: str = "",
+                        importance: int = 1) -> None:
+        """Persist a fact that survives context pruning."""
+        try:
+            conn = self._get_conn()
+            conn.execute(
+                "INSERT OR REPLACE INTO project_knowledge"
+                " (category, summary, detail, importance)"
+                " VALUES ('sticky_fact', ?, ?, ?)",
+                (summary, detail, importance),
+            )
+            conn.commit()
+        except sqlite3.Error:
+            warnings.warn("Failed to store sticky fact", stacklevel=2)
+
+    # -----------------------------------------------------------------------
+    # Mid-session pruning (triggers at 70% token capacity)
+    # -----------------------------------------------------------------------
+
+    def force_prune(self, messages: list[dict]) -> list[dict]:
+        """Proactively prune when approaching the token budget.
+
+        Checks if current token count exceeds 70% of *max_tokens* and, if so,
+        trims oldest turns, compresses tool results, and injects a summary.
+        Returns the (possibly reduced) message list.
+
+        Unlike ``save()``, this does NOT write to the SQLite database — it's
+        purely an in-memory compaction.  Persistence is handled by ``save()``.
+        """
+        trigger = int(self._max_tokens * 0.70)
+        current = sum(_estimate_tokens(m) for m in messages)
+        if current <= trigger:
+            return messages  # under threshold, nothing to do
+
+        # Prune to 60% capacity to avoid churn
+        target = int(self._max_tokens * 0.60)
+        budget_messages = max(self._max_messages // 2, 25)
+
+        # Temporarily swap max_tokens for this one-shot prune
+        saved_tokens = self._max_tokens
+        saved_messages = self._max_messages
+        self._max_tokens = target
+        self._max_messages = budget_messages
+
+        try:
+            cleaned = _clean_messages(messages)
+            cleaned, _ = _compress_tool_results(cleaned, keep_recent=_COMPRESSION_KEEP_RECENT)
+            kept, pruned = _prune_by_tokens(cleaned, target, budget_messages)
+
+            if pruned:
+                summary = _summarize_pruned(pruned)
+                if summary:
+                    summary_msg = {"role": "user", "content": summary}
+                    kept.insert(0, summary_msg)
+
+            self._token_count = sum(_estimate_tokens(m) for m in kept)
+            self._last_saved_count = len(kept)
+            return kept
+        finally:
+            self._max_tokens = saved_tokens
+            self._max_messages = saved_messages
 
     def clear(self) -> None:
         """Remove all messages and reclaim disk space."""

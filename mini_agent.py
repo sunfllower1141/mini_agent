@@ -327,6 +327,9 @@ def main() -> None:
                          f"     {c('✗', _RED)}  FAILED: {c(detail, _RED)}",
                          file=sys.stderr)
 
+            # Mid-session pruning: proactively trim context when approaching token budget
+            messages = memory.force_prune(messages)
+
             msg = run_agent_turn(
                 messages, config, write_gate, read_gate,
                 on_tool_start=_tool_start,
