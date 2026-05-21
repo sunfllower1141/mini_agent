@@ -34,6 +34,7 @@ OLLAMA_DEFAULT_MODEL         = "qwen3.6:27b"
 OLLAMA_DEFAULT_SUB_AGENT_MODEL = "qwen3.6:27b"
 OLLAMA_DEFAULT_API_URL       = "http://100.79.96.42:11434/v1/chat/completions"
 OLLAMA_DEFAULT_MAX_TOKENS    = 8_192
+OLLAMA_DEFAULT_CONTEXT_WINDOW = 262_144  # Qwen3.6-27B native context length
 OLLAMA_DEFAULT_ROUTING_MODEL = ""  # no cheap routing model for local
 
 # DeepSeek defaults
@@ -41,6 +42,7 @@ DEEPSEEK_DEFAULT_MODEL         = "deepseek-v4-pro"
 DEEPSEEK_DEFAULT_SUB_AGENT_MODEL = "deepseek-v4-pro"
 DEEPSEEK_DEFAULT_API_URL       = "https://api.deepseek.com/v1/chat/completions"
 DEEPSEEK_DEFAULT_MAX_TOKENS    = 200_000
+DEEPSEEK_DEFAULT_CONTEXT_WINDOW = 1_000_000  # V4-Pro native context length
 DEEPSEEK_DEFAULT_ROUTING_MODEL = ""  # disabled by default; set to "deepseek-v4-flash" to enable
 
 # Claude defaults (via OpenAI-compatible endpoint)
@@ -48,6 +50,7 @@ CLAUDE_DEFAULT_MODEL           = "claude-sonnet-4-5"
 CLAUDE_DEFAULT_SUB_AGENT_MODEL = "claude-sonnet-4-5"
 CLAUDE_DEFAULT_API_URL         = "https://api.anthropic.com/v1/chat/completions"
 CLAUDE_DEFAULT_MAX_TOKENS      = 32_000
+CLAUDE_DEFAULT_CONTEXT_WINDOW  = 1_000_000  # Opus 4.7 / Sonnet 4.5 native context length
 # Claude has no cheap routing model; leave disabled
 CLAUDE_DEFAULT_ROUTING_MODEL   = ""
 
@@ -65,6 +68,7 @@ DEFAULT_API_URL      = DEEPSEEK_DEFAULT_API_URL
 DEFAULT_API_KEY      = ""  # set via DEEPSEEK_API_KEY/CLAUDE_API_KEY env var, .env file, or .mini_agent.toml
 DEFAULT_MAX_MESSAGES = 50
 DEFAULT_MAX_TOKENS   = DEEPSEEK_DEFAULT_MAX_TOKENS
+DEFAULT_CONTEXT_WINDOW = DEEPSEEK_DEFAULT_CONTEXT_WINDOW
 DEFAULT_SUB_AGENT_MAX_TURNS = 25
 DEFAULT_ROUTING_MODEL = ""  # disabled by default; set to provider-specific cheap model
 DEFAULT_EXA_API_KEY = ""  # set via EXA_API_KEY env var or .mini_agent.toml
@@ -158,6 +162,7 @@ class AgentConfig:
     memory_filename: str = MEMORY_FILENAME
     max_messages: int = DEFAULT_MAX_MESSAGES
     max_tokens: int = DEFAULT_MAX_TOKENS
+    context_window: int = DEFAULT_CONTEXT_WINDOW  # memory budget for pruning; defaults to provider context window
     sub_agent_max_turns: int = DEFAULT_SUB_AGENT_MAX_TURNS
     routing_model: str = DEFAULT_ROUTING_MODEL  # cheaper model for simple read/search prompts; "" = disabled
     temperature: float = 0.0
@@ -435,6 +440,8 @@ def _apply_env_overrides(config: AgentConfig) -> None:
             config.sub_agent_model = CLAUDE_DEFAULT_SUB_AGENT_MODEL
         if config.max_tokens == DEEPSEEK_DEFAULT_MAX_TOKENS:
             config.max_tokens = CLAUDE_DEFAULT_MAX_TOKENS
+        if config.context_window == DEEPSEEK_DEFAULT_CONTEXT_WINDOW:
+            config.context_window = CLAUDE_DEFAULT_CONTEXT_WINDOW
         if config.routing_model == DEEPSEEK_DEFAULT_ROUTING_MODEL:
             config.routing_model = CLAUDE_DEFAULT_ROUTING_MODEL
     elif config.api_provider == "xai":
@@ -446,6 +453,8 @@ def _apply_env_overrides(config: AgentConfig) -> None:
             config.sub_agent_model = XAI_DEFAULT_SUB_AGENT_MODEL
         if config.max_tokens == DEEPSEEK_DEFAULT_MAX_TOKENS:
             config.max_tokens = XAI_DEFAULT_MAX_TOKENS
+        if config.context_window == DEEPSEEK_DEFAULT_CONTEXT_WINDOW:
+            config.context_window = XAI_DEFAULT_MAX_TOKENS
         if config.routing_model == DEEPSEEK_DEFAULT_ROUTING_MODEL:
             config.routing_model = XAI_DEFAULT_ROUTING_MODEL
     elif config.api_provider == "ollama":
@@ -457,6 +466,8 @@ def _apply_env_overrides(config: AgentConfig) -> None:
             config.sub_agent_model = OLLAMA_DEFAULT_SUB_AGENT_MODEL
         if config.max_tokens == DEEPSEEK_DEFAULT_MAX_TOKENS:
             config.max_tokens = OLLAMA_DEFAULT_MAX_TOKENS
+        if config.context_window == DEEPSEEK_DEFAULT_CONTEXT_WINDOW:
+            config.context_window = OLLAMA_DEFAULT_CONTEXT_WINDOW
         if config.routing_model == DEEPSEEK_DEFAULT_ROUTING_MODEL:
             config.routing_model = OLLAMA_DEFAULT_ROUTING_MODEL
 
@@ -659,12 +670,12 @@ def switch_session(
 
     db_path = _session_db_path(workspace, session_name)
     memory = MemoryStore(db_path, max_messages=current_config.max_messages,
-                         max_tokens=current_config.max_tokens)
+                         max_tokens=current_config.context_window)
     saved = memory.load()
     if saved:
         from memory import _compress_tool_results, _prune_by_tokens, _summarize_pruned
         saved, _ = _compress_tool_results(saved, keep_recent=20)
-        saved, pruned = _prune_by_tokens(saved, current_config.max_tokens, current_config.max_messages)
+        saved, pruned = _prune_by_tokens(saved, current_config.context_window, current_config.max_messages)
         if pruned:
             summary = _summarize_pruned(pruned)
             if summary:
@@ -715,7 +726,7 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     read_gate = ReadSafetyGate(workspace, unrestricted=config.unrestricted)
     memory_path = os.path.join(workspace or os.getcwd(), config.memory_filename)
     memory = MemoryStore(memory_path, max_messages=config.max_messages,
-                        max_tokens=config.max_tokens)
+                        max_tokens=config.context_window)
     set_context(exa_api_key=config.exa_api_key, openai_api_key=config.openai_api_key,
                 scratchpad_path=memory._db_path, _memory_store=memory)
     
@@ -770,7 +781,7 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     if saved:
         from memory import _compress_tool_results, _prune_by_tokens, _summarize_pruned
         saved, _ = _compress_tool_results(saved, keep_recent=20)
-        saved, pruned = _prune_by_tokens(saved, config.max_tokens, config.max_messages)
+        saved, pruned = _prune_by_tokens(saved, config.context_window, config.max_messages)
         if pruned:
             summary = _summarize_pruned(pruned)
             if summary:
