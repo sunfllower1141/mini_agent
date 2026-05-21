@@ -666,7 +666,7 @@ def _strip_orphaned_tool_results(messages: list[dict]) -> list[dict]:
     result: list[dict] = []
     pending_tool_call_ids: set[str] = set()
     for m in messages:
-        if m.get("role") == "assistant" and "tool_calls" in m:
+        if m.get("role") == "assistant" and m.get("tool_calls"):
             pending_tool_call_ids = {tc["id"] for tc in m["tool_calls"]}
             result.append(m)
         elif m.get("role") == "tool":
@@ -760,8 +760,8 @@ class MemoryStore:
     into a synthetic context message.
     """
 
-    DEFAULT_MAX_MESSAGES = 500
-    DEFAULT_MAX_TOKENS   = 800_000
+    DEFAULT_MAX_MESSAGES = 50
+    DEFAULT_MAX_TOKENS   = 80_000
 
     def __init__(
         self,

@@ -593,7 +593,7 @@ def run_sub_agent(
             if _tq is not None:
                 ok = result.success
                 detail = result.content[:100] if result.content else ""
-                tui_queue.put(("sub_tool", "end", name, ok, detail))
+                tui_queue.put(("sub_tool", "end", name, getattr(_TOOL_CONTEXT, "_agent_task_id", ""), ok, detail))
 
         # --- Auto-snapshot: record status every turn so the parent can peek
         #     with agent_status without waiting for a heartbeat. ---

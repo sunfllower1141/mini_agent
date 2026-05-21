@@ -1258,6 +1258,17 @@ class MiniAgentTUI(App):
             pass  # never let summary capture break quit
 
 if __name__ == "__main__":
+    # Redirect stderr to a log file so escape codes from stream.py, llm.py,
+    # and agent_runtime.py don't appear as garbage when the TUI exits.
+    _stderr_log_path = os.path.join(os.path.dirname(__file__), "tui_stderr.log")
+    sys.stderr = open(_stderr_log_path, "a")
+
+    # Kill orphaned LSP processes from previous sessions
+    try:
+        subprocess.run(["pkill", "-f", "pylsp"], capture_output=True, timeout=5)
+    except Exception:
+        pass
+
     app = MiniAgentTUI()
     app.run()
 ()
