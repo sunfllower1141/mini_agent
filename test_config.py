@@ -12,22 +12,44 @@ from unittest.mock import patch
 from config import AgentConfig, CONFIG_FILENAME, DEFAULT_API_KEY, DEFAULT_MODEL, DEFAULT_API_URL
 
 
+# Env vars that override AgentConfig defaults / TOML values. Tests must clear
+# these so behavior is deterministic regardless of the developer's shell.
+_OVERRIDING_ENV_VARS = (
+    "DEEPSEEK_API_KEY", "DEEPSEEK_API_URL",
+    "CLAUDE_API_KEY", "CLAUDE_API_URL", "CLAUDE_MODEL",
+    "XAI_API_KEY", "XAI_API_URL", "XAI_MODEL",
+    "SUB_AGENT_API_KEY", "API_PROVIDER",
+    "AGENT_WORKSPACE", "EXA_API_KEY", "OPENAI_API_KEY",
+)
+
+
+def _pop_overriding_env() -> dict:
+    """Remove env vars that would override config; return prior values."""
+    saved = {}
+    for name in _OVERRIDING_ENV_VARS:
+        if name in os.environ:
+            saved[name] = os.environ.pop(name)
+    return saved
+
+
+def _restore_env(saved: dict) -> None:
+    """Restore env vars previously removed by _pop_overriding_env."""
+    for name, value in saved.items():
+        os.environ[name] = value
+
+
 class TestAgentConfigDefaults(unittest.TestCase):
     """Test default values and factory behaviour without overrides."""
 
     def setUp(self):
         self.workspace = tempfile.mkdtemp()
         # Unset env vars that override defaults
-        self._prev_api_key = os.environ.pop("DEEPSEEK_API_KEY", None)
-        self._prev_api_url = os.environ.pop("DEEPSEEK_API_URL", None)
+        self._saved_env = _pop_overriding_env()
 
     def tearDown(self):
         import shutil
         shutil.rmtree(self.workspace, ignore_errors=True)
-        if self._prev_api_key is not None:
-            os.environ["DEEPSEEK_API_KEY"] = self._prev_api_key
-        if self._prev_api_url is not None:
-            os.environ["DEEPSEEK_API_URL"] = self._prev_api_url
+        _restore_env(self._saved_env)
 
     def test_defaults_are_set(self):
         config = AgentConfig.load(self.workspace)
@@ -56,16 +78,12 @@ class TestAgentConfigTOML(unittest.TestCase):
     def setUp(self):
         self.workspace = tempfile.mkdtemp()
         # Unset env vars that override TOML values
-        self._prev_api_key = os.environ.pop("DEEPSEEK_API_KEY", None)
-        self._prev_api_url = os.environ.pop("DEEPSEEK_API_URL", None)
+        self._saved_env = _pop_overriding_env()
 
     def tearDown(self):
         import shutil
         shutil.rmtree(self.workspace, ignore_errors=True)
-        if self._prev_api_key is not None:
-            os.environ["DEEPSEEK_API_KEY"] = self._prev_api_key
-        if self._prev_api_url is not None:
-            os.environ["DEEPSEEK_API_URL"] = self._prev_api_url
+        _restore_env(self._saved_env)
 
     def _write_toml(self, content: str) -> None:
         path = os.path.join(self.workspace, CONFIG_FILENAME)

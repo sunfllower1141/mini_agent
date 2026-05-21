@@ -230,6 +230,11 @@ def call_llm(
 
     payload = _build_payload(config, messages, clean_messages)
 
+    # Build proxies dict if SOCKS proxy is configured
+    proxies_dict = None
+    if config.socks_proxy:
+        proxies_dict = {"http": config.socks_proxy, "https": config.socks_proxy}
+
     # Anthropic's OpenAI-compatible endpoint uses Bearer auth (same as DeepSeek)
     r = _request_with_retry(
         session,
@@ -242,6 +247,7 @@ def call_llm(
         json=payload,
         stream=config.stream,
         cancel_event=cancel_event,
+        proxies=proxies_dict,
     )
 
     if r is None:
