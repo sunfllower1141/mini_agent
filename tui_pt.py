@@ -295,7 +295,7 @@ class AgentWorker(threading.Thread):
                  chat_buf: ChatBuffer,
                  tools_buf: ChatBuffer,
                  thinking_buf: ChatBuffer,
-                 subagent_buf: ChatBuffer):
+                 subagent_bufs: dict | None = None):
         super().__init__(daemon=True)
         self.messages = messages
         self.config = config
@@ -306,7 +306,7 @@ class AgentWorker(threading.Thread):
         self.chat_buf = chat_buf
         self.tools_buf = tools_buf
         self.thinking_buf = thinking_buf
-        self.subagent_buf = subagent_buf
+        self.subagent_bufs = subagent_bufs or {}
         self.cancel = threading.Event()
         self._thinking_text = ""
         self._in_thinking = False
@@ -355,7 +355,8 @@ class AgentWorker(threading.Thread):
         # Route agent-related tool calls to sub-agent buffer
         tool_name = summary.split(":", 1)[0].strip() if ":" in summary else summary.split("(", 1)[0].strip()
         if tool_name in _AGENT_TOOLS:
-            self.subagent_buf.append(label)
+            # Route to tools_buf — per-task subagent streaming handles via tui_queue
+            self.tools_buf.append(label)
         else:
             self.tools_buf.append(label)
 
@@ -407,7 +408,8 @@ class MiniAgentTUI:
         self.chat_buf = ChatBuffer()
         self.tools_buf = ChatBuffer()
         self.thinking_buf = ChatBuffer()
-        self.subagent_buf = ChatBuffer()
+        self.subagent_bufs: dict[str, ChatBuffer] = {}  # per-task-id buffers
+        self.subagent_buf = ChatBuffer()  # legacy single buffer for agent tool commands
 
         # Startup info
         self.tools_buf.append(f"mini_agent — {self.config.model}")
@@ -421,6 +423,9 @@ class MiniAgentTUI:
             accept_handler=self._on_submit,
             enable_history_search=True,
         )
+
+        # Sub-agent streaming queue (shared with tools via _TOOL_CONTEXT)
+        self._subagent_queue = None  # set after layout built, wired by tools
 
         # Worker state
         self.worker: AgentWorker | None = None
@@ -482,15 +487,9 @@ class MiniAgentTUI:
             style="class:thinking",
         )
 
-        # Sub-agent log (left pane, under thinking)
-        self.subagent_area = PTTextArea(
-            text="",
-            read_only=True,
-            scrollbar=False,
-            wrap_lines=True,
-            height=D(max=12),
-            style="class:dim",
-        )
+        # Sub-agent panes (left pane, under thinking) — one per task_id
+        self.subagent_areas: dict[str, PTTextArea] = {}
+        self.subagent_container = HSplit([], height=D(max=12))
 
         # Sub-agents label
         subagent_label = Window(
@@ -501,7 +500,7 @@ class MiniAgentTUI:
 
         left_pane = rounded_frame(
             HSplit([self.tools_area, _h_line(), self.thinking_area,
-                    _h_line(), subagent_label, self.subagent_area]),
+                    _h_line(), subagent_label, self.subagent_container]),
             title="Tools & Thinking",
             width=D(weight=40),
         )
@@ -550,6 +549,34 @@ class MiniAgentTUI:
     # Display sync — copies ChatBuffers → TextAreas, auto-scrolls
     # ------------------------------------------------------------------
 
+
+    def _drain_subagent_queue(self):
+        """Drain sub-agent streaming tokens from tui_queue into per-task buffers."""
+        q = getattr(self, "_subagent_queue", None)
+        if q is None:
+            return
+        try:
+            while True:
+                msg = q.get_nowait()
+                msg_type = msg[0]
+                if msg_type == "sub_token":
+                    _, task_id, text = msg
+                    if task_id not in self.subagent_bufs:
+                        self.subagent_bufs[task_id] = ChatBuffer()
+                    self.subagent_bufs[task_id].append_last(text, style="")
+                elif msg_type == "sub_tool":
+                    _, action, name, task_id, *rest = msg
+                    if task_id not in self.subagent_bufs:
+                        self.subagent_bufs[task_id] = ChatBuffer()
+                    if action == "start":
+                        self.subagent_bufs[task_id].append(f"🔧 {name}")
+                    elif action == "end":
+                        ok, detail = rest[0], rest[1] if len(rest) > 1 else ""
+                        status = "OK" if ok else "ERR"
+                        self.subagent_bufs[task_id].append(f"  {status} {detail}")
+        except:
+            pass  # queue empty
+
     def _sync_display(self, app=None):
         """Sync ChatBuffers to TextArea widgets.  Called by before_render
         on every refresh cycle.  Skips buffers that haven't changed (dirty
@@ -568,15 +595,39 @@ class MiniAgentTUI:
             self.thinking_area.buffer.cursor_position = \
                 len(self.thinking_area.buffer.text)
 
-        if self.subagent_area is not None and self.subagent_buf.dirty:
-            self.subagent_area.text = self.subagent_buf.get_text()
-            self.subagent_area.buffer.cursor_position = \
-                len(self.subagent_area.buffer.text)
+        # Sync per-task-id sub-agent panes
+        for tid, buf in list(self.subagent_bufs.items()):
+            if tid not in self.subagent_areas:
+                # Create new pane for this task
+                area = PTTextArea(
+                    text="",
+                    read_only=True,
+                    scrollbar=False,
+                    wrap_lines=True,
+                    height=D(max=6),
+                    style="class:dim",
+                )
+                self.subagent_areas[tid] = area
+                children = list(self.subagent_container.children)
+                children.append(area)
+                self.subagent_container.children = children
+            if buf.dirty:
+                self.subagent_areas[tid].text = buf.get_text()
+                self.subagent_areas[tid].buffer.cursor_position = \
+                    len(self.subagent_areas[tid].buffer.text)
+
+        # Sync legacy subagent_buf for agent tool commands
+        if hasattr(self, 'subagent_buf') and self.subagent_buf.dirty:
+            # Route legacy buffer content to each active pane as well
+            pass  # agent tool commands are infrequent; keep in tools_buf instead
 
         if self.chat_area is not None and self.chat_buf.dirty:
             self.chat_area.text = self.chat_buf.get_text()
             self.chat_area.buffer.cursor_position = \
                 len(self.chat_area.buffer.text)
+
+        # Drain sub-agent streaming queue — route tokens to per-task buffers
+        self._drain_subagent_queue()
 
     # ------------------------------------------------------------------
     # Key bindings
@@ -627,6 +678,12 @@ class MiniAgentTUI:
             self._total_turns += self.worker.total_turns
             self._total_tokens += self.worker.total_tokens
             self.messages = self.memory.save(self.messages)
+        # Wire sub-agent output queue into tool context
+        import queue as _queue
+        self._subagent_queue = _queue.Queue()
+        from tools import _TOOL_CONTEXT
+        _TOOL_CONTEXT._tui_queue = self._subagent_queue
+
         self.worker = AgentWorker(
             self.messages, self.config,
             self.write_gate, self.read_gate,
@@ -635,7 +692,7 @@ class MiniAgentTUI:
             chat_buf=self.chat_buf,
             tools_buf=self.tools_buf,
             thinking_buf=self.thinking_buf,
-            subagent_buf=self.subagent_buf,
+            subagent_bufs=self.subagent_bufs,
         )
         self.worker.start()
         return True

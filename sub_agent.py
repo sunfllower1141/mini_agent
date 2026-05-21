@@ -335,9 +335,10 @@ def run_sub_agent(
                         )
                 return _wrapped
 
-            if tui_queue is not None:
+            _tq = tui_queue or getattr(_TOOL_CONTEXT, "_tui_queue", None)
+            if _tq is not None:
                 def _on_token_sub(t: str) -> None:
-                    tui_queue.put(("sub_token", tui_task_id, t))
+                    _tq.put(("sub_token", tui_task_id, t))
                 on_token = _make_streaming_wrapper(_on_token_sub)
             else:
                 # Write streaming tokens to log file instead of stderr
@@ -502,7 +503,8 @@ def run_sub_agent(
             name = fn.get("name", "")
 
             # Stream tool start to TUI
-            if tui_queue is not None:
+            _tq = tui_queue or getattr(_TOOL_CONTEXT, "_tui_queue", None)
+            if _tq is not None:
                 tui_queue.put(("sub_tool", "start", name, getattr(_TOOL_CONTEXT, "_agent_task_id", "")))
 
             # --- Depth guard: block spawn/status/collect at max depth ---
@@ -587,7 +589,8 @@ def run_sub_agent(
                 "content": json.dumps({"success": result.success, "content": r_content}),
             })
             # Stream tool end to TUI
-            if tui_queue is not None:
+            _tq = tui_queue or getattr(_TOOL_CONTEXT, "_tui_queue", None)
+            if _tq is not None:
                 ok = result.success
                 detail = result.content[:100] if result.content else ""
                 tui_queue.put(("sub_tool", "end", name, ok, detail))
