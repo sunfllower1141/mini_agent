@@ -567,7 +567,7 @@ def switch_session(
     saved = memory.load()
     if saved:
         from memory import _compress_tool_results, _prune_by_tokens, _summarize_pruned
-        saved, _ = _compress_tool_results(saved, keep_recent=6)
+        saved, _ = _compress_tool_results(saved, keep_recent=20)
         saved, pruned = _prune_by_tokens(saved, current_config.max_tokens, current_config.max_messages)
         if pruned:
             summary = _summarize_pruned(pruned)
@@ -673,7 +673,7 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     # Prune loaded conversation to avoid massive first-turn payload
     if saved:
         from memory import _compress_tool_results, _prune_by_tokens, _summarize_pruned
-        saved, _ = _compress_tool_results(saved, keep_recent=6)
+        saved, _ = _compress_tool_results(saved, keep_recent=20)
         saved, pruned = _prune_by_tokens(saved, config.max_tokens, config.max_messages)
         if pruned:
             summary = _summarize_pruned(pruned)

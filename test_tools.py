@@ -475,8 +475,10 @@ class TestRunTests(unittest.TestCase):
         self.write_gate, self.read_gate = _gates(self.workspace)
         # Reset sub-agent depth in case another test leaked it (daemon threads)
         _TOOL_CONTEXT._agent_depth = 0
-        # Create a minimal test file so pytest has something to discover
-        test_dir = os.path.join(self.workspace, "tests")
+        # Create a minimal test file so pytest has something to discover.
+        # Must not use "tests" or "eval" dir names — run_tests now ignores
+        # those to skip eval harness and subdirectory test fixtures.
+        test_dir = os.path.join(self.workspace, "dummy_tests")
         os.makedirs(test_dir)
         with open(os.path.join(test_dir, "__init__.py"), "w") as f:
             f.write("")
@@ -494,15 +496,15 @@ class TestRunTests(unittest.TestCase):
         self.assertIn("passed", result.content)
 
     def test_runs_specific_file(self):
-        tc = _make_tool_call("run_tests", path="tests/test_dummy.py")
+        tc = _make_tool_call("run_tests", path="dummy_tests/test_dummy.py")
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertTrue(result.success)
         self.assertIn("passed", result.content)
 
     def test_failing_tests_return_failure(self):
-        with open(os.path.join(self.workspace, "tests", "test_fail.py"), "w") as f:
+        with open(os.path.join(self.workspace, "dummy_tests", "test_fail.py"), "w") as f:
             f.write("def test_fail(): assert False\n")
-        tc = _make_tool_call("run_tests", path="tests/test_fail.py")
+        tc = _make_tool_call("run_tests", path="dummy_tests/test_fail.py")
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertFalse(result.success)
         self.assertIn("failed", result.content)
@@ -514,7 +516,7 @@ class TestRunTests(unittest.TestCase):
 
     def test_background_mode_returns_task_id(self):
         from tools import _TASK_REGISTRY
-        tc = _make_tool_call("run_tests", path="tests/test_dummy.py", background=True)
+        tc = _make_tool_call("run_tests", path="dummy_tests/test_dummy.py", background=True)
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertTrue(result.success)
         self.assertIn("background test run", result.content)

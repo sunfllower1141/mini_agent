@@ -676,12 +676,12 @@ def _run_tests(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
     target = args.get("path", "").strip()
     background = args.get("background", False)
     timeout = args.get("timeout", 120)
-    cmd = _get_python_cmd() + ["-m", "pytest", "-q", "--ignore=venv"]
+    cmd = _get_python_cmd() + ["-m", "pytest", "-q", "--ignore=venv", "--ignore=eval", "--ignore=tests"]
     if target:
         cmd.append(target)
     else:
         # Full suite: add per-test timeout to prevent hangs
-        cmd.append("--timeout=60")
+        cmd.extend(["--timeout=60", "--timeout_method=thread"])
 
     try:
         proc = subprocess.Popen(

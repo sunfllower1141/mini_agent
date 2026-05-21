@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import sys
+import json
 import subprocess
 import threading
 from queue import Queue, Empty
@@ -713,6 +714,7 @@ class MiniAgentTUI(App):
 
     def action_quit(self) -> None:
         self.messages = self.memory.save(self.messages)
+        self._capture_session_summary()
         self.exit()
 
     def action_copy(self) -> None:
@@ -1221,6 +1223,39 @@ class MiniAgentTUI(App):
         if usage and usage.get("total_tokens"):
             self._total_tokens += usage["total_tokens"]
 
+        # Periodically persist session summary for restart context
+        if self._total_turns > 0 and self._total_turns % 5 == 0:
+            self._capture_session_summary()
+
+    def _capture_session_summary(self) -> None:
+        """Store a brief session summary for next-startup context injection."""
+        try:
+            # Gather the last few user messages and tool actions
+            user_msgs = []
+            last_tool = ""
+            for m in reversed(self.messages):
+                if len(user_msgs) >= 3:
+                    break
+                role = m.get("role", "")
+                if role == "user" and not m.get("_transient"):
+                    content = m.get("content", "")
+                    if content and len(content) < 200:
+                        user_msgs.append(content)
+                if role == "tool" and not last_tool:
+                    try:
+                        data = json.loads(m.get("content", "{}"))
+                        last_tool = data.get("name", data.get("tool", ""))
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+            summary = " | ".join(reversed(user_msgs)) if user_msgs else "coding session"
+            if last_tool:
+                summary += f" (last tool: {last_tool})"
+            self.memory.capture_session_summary(
+                f"Working on: {summary}",
+                detail=f"~{self._total_turns} turns, {self._total_tokens} tokens",
+            )
+        except Exception:
+            pass  # never let summary capture break quit
 
 if __name__ == "__main__":
     app = MiniAgentTUI()

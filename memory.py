@@ -138,7 +138,7 @@ def _estimate_tokens(msg: dict) -> int:
         text = _get_tool_content(msg)
     elif msg.get("role") == "assistant" and msg.get("tool_calls"):
         # Tool-call messages: count the arguments text
-        total = len(msg.get("content", ""))
+        total = len(msg.get("content", "") or "")
         for tc in msg["tool_calls"]:
             fn = tc.get("function", {})
             total += len(json.dumps(fn.get("arguments", "")))

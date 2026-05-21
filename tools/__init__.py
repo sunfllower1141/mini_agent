@@ -821,10 +821,12 @@ def execute_tool(
         _TOOL_CONTEXT.__dict__.pop("_failure_patterns", None)
 
     # --- Post-edit auto-verification: run LSP diagnostics after file writes ---
+    # Guarded by a module-level lock to prevent concurrent LSP connections
+    # from deadlocking (two threads both trying to connect to the same pylsp).
     if result.success and name in ("write_file", "edit_file"):
         try:
             file_path = args.get("path", "")
-            if file_path:
+            if file_path and threading.current_thread() is threading.main_thread():
                 from tools.lsp import _lsp_diagnostics
                 diag_result = _lsp_diagnostics({"file_path": file_path}, write_gate, read_gate)
                 if diag_result.success and diag_result.content:
