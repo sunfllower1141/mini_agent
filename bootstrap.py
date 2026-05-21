@@ -24,7 +24,6 @@ from config import (
 from safety import ReadSafetyGate, WriteSafetyGate
 from memory import MemoryStore
 from prompt import build_system_prompt, build_startup_context
-from tools import set_context, build_symbol_index
 from agent_runtime import AgentRuntime
 
 
@@ -37,6 +36,8 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     Returns dict with keys: config, write_gate, read_gate, memory,
     messages, session.
     """
+    from tools import set_context, build_symbol_index
+
     config = AgentConfig.load(workspace, cli_args=cli_args)
     write_gate = WriteSafetyGate(workspace, allow_overwrites=config.allow_overwrites,
                                  unrestricted=config.unrestricted)

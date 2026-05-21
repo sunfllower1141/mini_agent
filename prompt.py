@@ -48,7 +48,7 @@ def build_system_prompt(config: "AgentConfig") -> str:
     # Dynamic header + rules + git status are appended after so they
     # don't invalidate the cached prefix.
     # --- Provider-specific note ---
-    provider = config.api_provider
+    provider = getattr(config, "api_provider", None) or "deepseek"
     provider_notes: dict[str, str] = {
         "deepseek": (
             "Note: running on DeepSeek. DeepSeek is prone to tool-call loops in long "
