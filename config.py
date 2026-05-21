@@ -411,9 +411,9 @@ def _apply_env_overrides(config: AgentConfig) -> None:
     has_claude = bool(os.environ.get(ENV_CLAUDE_API_KEY))
     has_xai = bool(os.environ.get(ENV_XAI_API_KEY))
     has_ollama = bool(os.environ.get(ENV_OLLAMA_API_URL) or os.environ.get(ENV_OLLAMA_MODEL))
-    # On Windows with tunnel, ollama is reachable on camoproj
-    if not has_ollama and platform.system() == "Windows":
-        has_ollama = True  # SSH tunnel makes camoproj's Ollama reachable
+    # Ollama is reachable via Tailscale from all machines (camoproj VM)
+    if not has_ollama:
+        has_ollama = True  # camoproj's Ollama at 100.79.96.42:11434 always reachable
     if not os.environ.get(ENV_API_PROVIDER):
         # On Windows with no cloud keys, default to local ollama
         if has_ollama and not has_deepseek and not has_claude and not has_xai:
