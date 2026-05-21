@@ -590,6 +590,7 @@ class MiniAgentTUI:
         def _(event):
             if self.worker and self.worker.is_alive():
                 self.worker.cancel.set()
+            self.messages = self.memory.save(self.messages)
             event.app.exit()
 
         @kb.add("enter")
@@ -625,6 +626,7 @@ class MiniAgentTUI:
         if self.worker and not self.worker.is_alive():
             self._total_turns += self.worker.total_turns
             self._total_tokens += self.worker.total_tokens
+            self.messages = self.memory.save(self.messages)
         self.worker = AgentWorker(
             self.messages, self.config,
             self.write_gate, self.read_gate,
@@ -783,6 +785,7 @@ class MiniAgentTUI:
 
         if cmd == "/shell":
             self.tools_buf.append("Dropping to shell — type 'exit' or Ctrl+D to return.")
+            self.messages = self.memory.save(self.messages)
             self.app.exit()
             import code
             code.interact(local=locals())
