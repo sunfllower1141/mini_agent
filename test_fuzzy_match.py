@@ -1,6 +1,6 @@
 
 import unittest
-from tools.file_ops import _fuzzy_find, _line_match
+from tools.file_ops import _fuzzy_find, _line_match, _find_closest_lines
 
 
 class TestFuzzyFind(unittest.TestCase):
@@ -151,6 +151,99 @@ class TestLineMatch(unittest.TestCase):
         result = _line_match(cl, sl, trim="right")
         self.assertIsNone(result)
 
+
+
+class TestFuzzyFindPass4(unittest.TestCase):
+    """Tests for the 4th-pass normalized-content fuzzy matching."""
+
+    # -- Tab vs space normalization --
+    def test_tabs_vs_spaces(self):
+        content = "\t\tif x:\n\t\t    pass"
+        search = "    if x:\n        pass"
+        result = _fuzzy_find(content, search)
+        self.assertIsNotNone(result)
+        start, end = result
+        self.assertEqual(content[start:end], "\t\tif x:\n\t\t    pass")
+
+    def test_mixed_tabs_spaces(self):
+        content = "  def foo():\n    return 1"
+        search = "\tdef foo():\n\treturn 1"
+        result = _fuzzy_find(content, search)
+        self.assertIsNotNone(result)
+
+    # -- CRLF normalization --
+    def test_crlf_normalization(self):
+        content = "hello\r\nworld\r\n"
+        search = "hello\nworld"
+        result = _fuzzy_find(content, search)
+        self.assertIsNotNone(result)
+        start, end = result
+        # CRLF is normalized in matching; the returned region should contain the matched content
+        matched = content[start:end].replace('\r', '')
+        self.assertIn("helloworld", matched.replace('\n', ''))
+
+    # -- Collapsed whitespace --
+    def test_collapsed_extra_spaces(self):
+        content = "hello    world\n  foo  bar"
+        search = "hello world\nfoo bar"
+        result = _fuzzy_find(content, search)
+        self.assertIsNotNone(result)
+
+    # -- Exact still wins over fuzzy --
+    def test_exact_wins_over_fuzzy(self):
+        content = "  hello world\n  foo bar"
+        search = "  hello world\n  foo bar"
+        result = _fuzzy_find(content, search)
+        self.assertIsNotNone(result)
+        start, end = result
+        # Should match at start since exact match found it
+        self.assertEqual(content[start:end], search)
+
+    # -- Ambiguous fuzzy match refused --
+    def test_ambiguous_fuzzy_refused(self):
+        content = "  hello world\n  foo bar\n  hello world\n  foo bar"
+        search = "hello world\nfoo bar"
+        result = _fuzzy_find(content, search)
+        self.assertIsNone(result)
+
+    # -- Single line fuzzy --
+    def test_single_line_tab_to_space(self):
+        content = "\t\treturn x + y"
+        search = "    return x + y"
+        result = _fuzzy_find(content, search)
+        self.assertIsNotNone(result)
+
+    # -- Empty still fails --
+    def test_empty_search_still_fails(self):
+        result = _fuzzy_find("hello", "")
+        self.assertIsNone(result)
+
+
+class TestFindClosestLines(unittest.TestCase):
+    """Tests for the _find_closest_lines diagnostic helper."""
+
+    def test_exact_match_found(self):
+        content_lines = ["def foo():", "    return 1", ""]
+        search_lines = ["def foo():", "    return 1"]
+        result = _find_closest_lines(content_lines, search_lines)
+        self.assertIsNotNone(result)
+        self.assertEqual(result['line'], 1)
+        self.assertEqual(result['lines'], ["def foo():", "    return 1"])
+
+    def test_tab_mismatch(self):
+        content_lines = ["\tdef foo():", "\t    return 1"]
+        search_lines = ["    def foo():", "        return 1"]
+        result = _find_closest_lines(content_lines, search_lines)
+        self.assertIsNotNone(result)
+        # Should match since normalization handles tabs
+        self.assertEqual(result['line'], 1)
+
+    def test_whitespace_diff_shown(self):
+        content_lines = ["def bar():", "    return 42"]
+        search_lines = ["def foo():", "    return 1"]
+        result = _find_closest_lines(content_lines, search_lines)
+        self.assertIsNotNone(result)
+        self.assertIn("expected", result['diff_hint'].lower())
 
 if __name__ == "__main__":
     unittest.main()

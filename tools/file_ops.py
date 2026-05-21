@@ -254,12 +254,63 @@ def _write_file_summary(args: dict) -> str:
 _EditResult = tuple[str, ToolResult]  # (path, result)
 
 
+def _normalize_line(s: str) -> str:
+    """Collapse whitespace: tabs→spaces, strip, collapse multiple spaces."""
+    return ' '.join(s.replace('\t', '    ').split())
+
+
+
+def _find_closest_lines(content_lines: list[str], search_lines: list[str]) -> dict | None:
+    """Find the closest matching region in the file for diagnostic diff.
+
+    Uses normalized content comparison (pass 4 style) with a sliding window.
+    Returns {'line': int, 'lines': list[str], 'diff_hint': str} or None.
+    """
+    n_search = len(search_lines)
+    n_content = len(content_lines)
+    if n_search == 0 or n_content < n_search:
+        return None
+
+    norm_search = [_normalize_line(s) for s in search_lines]
+    best_score = -1
+    best_idx = 0
+
+    # Score each window: count how many lines match (after normalization)
+    for i in range(n_content - n_search + 1):
+        window = content_lines[i:i + n_search]
+        norm_window = [_normalize_line(w) for w in window]
+        score = sum(1 for a, b in zip(norm_search, norm_window) if a == b)
+        if score > best_score:
+            best_score = score
+            best_idx = i
+
+    match_ratio = best_score / n_search if n_search > 0 else 0
+
+    # Build a diff hint showing what's different
+    diff_parts = []
+    norm_content_window = [_normalize_line(l) for l in content_lines[best_idx:best_idx + n_search]]
+    for j in range(n_search):
+        if norm_search[j] != norm_content_window[j]:
+            diff_parts.append(
+                f"line {j+1}: expected '{norm_search[j][:40]}' "
+                f"got '{norm_content_window[j][:40]}'"
+            )
+
+    return {
+        'line': best_idx + 1,
+        'lines': content_lines[best_idx:best_idx + n_search],
+        'diff_hint': '; '.join(diff_parts[:5]) if diff_parts else '',
+    }
+
+
 def _fuzzy_find(content: str, search: str) -> tuple[int, int] | None:
-    """Cascading 3-pass match for edit_file.
+    """Cascading 4-pass match for edit_file.
     1. Exact match. 2. Trailing-whitespace-tolerant. 3. Indentation-tolerant.
+    4. Normalized-content fuzzy match (tabs→spaces, collapsed whitespace).
     """
     if not search or not content:
         return None
+    # Pass 1: exact substring
     idx = content.find(search)
     if idx != -1:
         return (idx, idx + len(search))
@@ -269,11 +320,42 @@ def _fuzzy_find(content: str, search: str) -> tuple[int, int] | None:
         search_lines.pop()
     if not search_lines:
         return None
+    # Pass 2-3: trailing-whitespace-tolerant, then full indent-tolerant
     for trim in ('right', 'all'):
         result = _line_match(content_lines, search_lines, trim, content)
         if result is not None:
             return result
-    return None
+    # Pass 4: normalize whitespace on every line, then try to match
+    return _fuzzy_find_closest(content, search_lines, content_lines)
+
+
+def _fuzzy_find_closest(content: str, search_lines: list[str],
+                        content_lines: list[str]) -> tuple[int, int] | None:
+    """Pass 4: normalize all whitespace on every line, sliding-window match.
+
+    Normalizes both search and content lines by collapsing whitespace
+    (tabs→spaces, strip, collapse multiple spaces to single space).
+    Requires a unique match — if multiple windows match, returns None.
+    """
+    norm_search = [_normalize_line(s) for s in search_lines]
+    n_search = len(search_lines)
+    n_content = len(content_lines)
+    if n_search == 0 or n_content < n_search:
+        return None
+    match_start = None
+    for i in range(n_content - n_search + 1):
+        window = content_lines[i:i + n_search]
+        if [_normalize_line(w) for w in window] == norm_search:
+            if match_start is not None:
+                return None  # ambiguous — multiple matches
+            match_start = i
+    if match_start is None:
+        return None
+    start_byte = sum(len(line) + 1 for line in content_lines[:match_start])
+    end_byte = start_byte + sum(len(line) + 1 for line in content_lines[match_start:match_start + n_search])
+    if end_byte > start_byte and content[end_byte - 1:end_byte] == '\n':
+        end_byte -= 1
+    return (start_byte, end_byte)
 
 
 def _line_match(content_lines, search_lines, trim, content=''):
@@ -344,11 +426,31 @@ def _apply_single_edit(
                     candidates.append(f"  line {lineno}: {line.rstrip()[:120]}")
                 if len(candidates) >= 3:
                     break
+            # Build diagnostic: find the closest matching lines and show diff
+            _old_lines = old.split('\n')
+            _content_lines = original.split('\n')
+            best_match = _find_closest_lines(_content_lines, _old_lines)
             hint = (
                 f"Edit failed: old_string not found in '{resolved}'.\n"
                 f"Hint: The string must match exactly — check whitespace, indentation, "
                 f"and line endings. Try read_file first to verify the exact text."
             )
+            if best_match:
+                hint += (
+                    f"\n\nClosest match found around line {best_match['line']}:\n"
+                    f"  Expected ({len(_old_lines)} lines):\n"
+                )
+                for ol in _old_lines[:10]:
+                    hint += f"    | {ol.rstrip()}\n"
+                if len(_old_lines) > 10:
+                    hint += f"    ... ({len(_old_lines) - 10} more lines omitted)\n"
+                hint += f"  Actual (file at line {best_match['line']}):\n"
+                for fl in best_match['lines'][:10]:
+                    hint += f"    | {fl.rstrip()}\n"
+                if len(best_match['lines']) > 10:
+                    hint += f"    ... ({len(best_match['lines']) - 10} more lines omitted)\n"
+                if best_match['diff_hint']:
+                    hint += f"\nDifferences: {best_match['diff_hint']}"
             if candidates:
                 hint += "\nSimilar lines found (did you mean one of this?):\n" + "\n".join(candidates)
             if old_first_line:
