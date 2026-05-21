@@ -676,7 +676,7 @@ def _run_tests(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
     target = args.get("path", "").strip()
     background = args.get("background", False)
     timeout = args.get("timeout", 120)
-    cmd = _get_python_cmd() + ["-m", "pytest", "-q"]
+    cmd = _get_python_cmd() + ["-m", "pytest", "-q", "--ignore=venv"]
     if target:
         cmd.append(target)
 
