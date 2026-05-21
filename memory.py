@@ -1128,40 +1128,6 @@ class MemoryStore:
         return messages  # return original on failure so caller doesn't lose data
 
     # -----------------------------------------------------------------------
-    # Sticky facts (survive pruning, injected into system prompt)
-    # -----------------------------------------------------------------------
-
-    def get_sticky_facts(self) -> str:
-        """Return sticky facts as a string for injection into system prompt."""
-        try:
-            conn = self._get_conn()
-            rows = conn.execute(
-                "SELECT summary FROM project_knowledge"
-                " WHERE category = 'sticky_fact'"
-                " ORDER BY importance DESC, hits DESC LIMIT 10"
-            ).fetchall()
-            if rows:
-                return "\n".join(f"- {r[0]}" for r in rows)
-        except sqlite3.Error:
-            pass
-        return ""
-
-    def add_sticky_fact(self, summary: str, detail: str = "",
-                        importance: int = 1) -> None:
-        """Persist a fact that survives context pruning."""
-        try:
-            conn = self._get_conn()
-            conn.execute(
-                "INSERT OR REPLACE INTO project_knowledge"
-                " (category, summary, detail, importance)"
-                " VALUES ('sticky_fact', ?, ?, ?)",
-                (summary, detail, importance),
-            )
-            conn.commit()
-        except sqlite3.Error:
-            warnings.warn("Failed to store sticky fact", stacklevel=2)
-
-    # -----------------------------------------------------------------------
     # Mid-session pruning (triggers at 70% token capacity)
     # -----------------------------------------------------------------------
 
@@ -1200,6 +1166,18 @@ class MemoryStore:
                 if summary:
                     summary_msg = {"role": "user", "content": summary}
                     kept.insert(0, summary_msg)
+
+            # Re-inject persisted project knowledge so key facts survive pruning
+            knowledge = self.get_top_knowledge(limit=10)
+            if knowledge:
+                facts = "\n".join(
+                    f"- [{k['category']}] {k['summary']}"
+                    for k in knowledge
+                )
+                kept.insert(0, {
+                    "role": "user",
+                    "content": f"[Project learnings from past sessions:\n{facts}]",
+                })
 
             self._token_count = sum(_estimate_tokens(m) for m in kept)
             self._last_saved_count = len(kept)
