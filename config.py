@@ -26,7 +26,15 @@ except ImportError:
 CONFIG_FILENAME = ".mini_agent.toml"
 MEMORY_FILENAME = ".mini_agent_memory.db"
 
-DEFAULT_API_PROVIDER = "deepseek"  # "deepseek", "claude", or "xai"
+DEFAULT_API_PROVIDER = "deepseek"  # "deepseek", "claude", "xai", or "ollama"
+
+# Ollama defaults (local model via Ollama's OpenAI-compatible endpoint)
+# Camoproj VM: RTX 6000 Ada 48GB, accessible via Tailscale at 100.79.96.42
+OLLAMA_DEFAULT_MODEL         = "qwen3.6:27b"
+OLLAMA_DEFAULT_SUB_AGENT_MODEL = "qwen3.6:27b"
+OLLAMA_DEFAULT_API_URL       = "http://100.79.96.42:11434/v1/chat/completions"
+OLLAMA_DEFAULT_MAX_TOKENS    = 8_192
+OLLAMA_DEFAULT_ROUTING_MODEL = ""  # no cheap routing model for local
 
 # DeepSeek defaults
 DEEPSEEK_DEFAULT_MODEL         = "deepseek-v4-pro"
@@ -88,7 +96,10 @@ ENV_CLAUDE_API_URL   = "CLAUDE_API_URL"
 ENV_XAI_API_URL      = "XAI_API_URL"
 ENV_CLAUDE_MODEL     = "CLAUDE_MODEL"
 ENV_XAI_MODEL        = "XAI_MODEL"
-ENV_API_PROVIDER     = "API_PROVIDER"  # "deepseek", "claude", or "xai" — overrides auto-detection
+ENV_OLLAMA_MODEL     = "OLLAMA_MODEL"
+ENV_OLLAMA_API_URL   = "OLLAMA_API_URL"
+ENV_OLLAMA_API_KEY   = "OLLAMA_API_KEY"
+ENV_API_PROVIDER     = "API_PROVIDER"  # "deepseek", "claude", "xai", or "ollama" — overrides auto-detection
 ENV_AGENT_WORKSPACE  = "AGENT_WORKSPACE"
 ENV_EXA_API_KEY      = "EXA_API_KEY"
 ENV_OPENAI_API_KEY   = "OPENAI_API_KEY"
@@ -216,6 +227,7 @@ def _start_windows_tunnel(config: AgentConfig) -> None:
         "ssh",
         "-i", key_path,
         "-D", str(_WINDOWS_TUNNEL_PORT),
+        "-L", "11434:localhost:11434",  # forward Ollama API port
         "-o", "StrictHostKeyChecking=no",
         "-o", "ServerAliveInterval=60",
         "-N",  # no shell, just tunnel
@@ -398,8 +410,15 @@ def _apply_env_overrides(config: AgentConfig) -> None:
     has_deepseek = bool(os.environ.get(ENV_DEEPSEEK_API_KEY))
     has_claude = bool(os.environ.get(ENV_CLAUDE_API_KEY))
     has_xai = bool(os.environ.get(ENV_XAI_API_KEY))
+    has_ollama = bool(os.environ.get(ENV_OLLAMA_API_URL) or os.environ.get(ENV_OLLAMA_MODEL))
+    # On Windows with tunnel, ollama is reachable on camoproj
+    if not has_ollama and platform.system() == "Windows":
+        has_ollama = True  # SSH tunnel makes camoproj's Ollama reachable
     if not os.environ.get(ENV_API_PROVIDER):
-        if has_xai and not has_deepseek and not has_claude:
+        # On Windows with no cloud keys, default to local ollama
+        if has_ollama and not has_deepseek and not has_claude and not has_xai:
+            config.api_provider = "ollama"
+        elif has_xai and not has_deepseek and not has_claude:
             config.api_provider = "xai"
         elif has_claude and not has_deepseek:
             config.api_provider = "claude"
@@ -429,6 +448,17 @@ def _apply_env_overrides(config: AgentConfig) -> None:
             config.max_tokens = XAI_DEFAULT_MAX_TOKENS
         if config.routing_model == DEEPSEEK_DEFAULT_ROUTING_MODEL:
             config.routing_model = XAI_DEFAULT_ROUTING_MODEL
+    elif config.api_provider == "ollama":
+        if not os.environ.get(ENV_OLLAMA_API_URL) and config.api_url == DEEPSEEK_DEFAULT_API_URL:
+            config.api_url = OLLAMA_DEFAULT_API_URL
+        if config.model == DEEPSEEK_DEFAULT_MODEL:
+            config.model = OLLAMA_DEFAULT_MODEL
+        if config.sub_agent_model == DEEPSEEK_DEFAULT_SUB_AGENT_MODEL:
+            config.sub_agent_model = OLLAMA_DEFAULT_SUB_AGENT_MODEL
+        if config.max_tokens == DEEPSEEK_DEFAULT_MAX_TOKENS:
+            config.max_tokens = OLLAMA_DEFAULT_MAX_TOKENS
+        if config.routing_model == DEEPSEEK_DEFAULT_ROUTING_MODEL:
+            config.routing_model = OLLAMA_DEFAULT_ROUTING_MODEL
 
     # --- API keys ---
     if has_deepseek:
@@ -451,6 +481,8 @@ def _apply_env_overrides(config: AgentConfig) -> None:
         config.api_url = os.environ[ENV_CLAUDE_API_URL]
     if os.environ.get(ENV_XAI_API_URL):
         config.api_url = os.environ[ENV_XAI_API_URL]
+    if os.environ.get(ENV_OLLAMA_API_URL):
+        config.api_url = os.environ[ENV_OLLAMA_API_URL]
 
     # --- model override ---
     if os.environ.get(ENV_CLAUDE_MODEL):
@@ -459,6 +491,9 @@ def _apply_env_overrides(config: AgentConfig) -> None:
     if os.environ.get(ENV_XAI_MODEL):
         config.model = os.environ[ENV_XAI_MODEL]
         config.sub_agent_model = os.environ[ENV_XAI_MODEL]
+    if os.environ.get(ENV_OLLAMA_MODEL):
+        config.model = os.environ[ENV_OLLAMA_MODEL]
+        config.sub_agent_model = os.environ[ENV_OLLAMA_MODEL]
 
     # --- workspace ---
     if os.environ.get(ENV_AGENT_WORKSPACE):

@@ -173,6 +173,15 @@ def _build_payload(
         if config.response_format:
             payload["response_format"] = {"type": config.response_format}
 
+    elif provider == "ollama":
+        # Ollama's OpenAI-compatible endpoint supports temperature and stop.
+        # No frequency_penalty, presence_penalty, or response_format.
+        # No tools support either.
+        payload["temperature"] = config.temperature
+        if config.stop_sequences:
+            payload["stop"] = config.stop_sequences
+        payload.pop("tools", None)
+
     return payload
 
 
