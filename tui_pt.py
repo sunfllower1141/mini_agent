@@ -736,6 +736,15 @@ class MiniAgentTUI:
             self._total_turns += self.worker.total_turns
             self._total_tokens += self.worker.total_tokens
             self.messages = self.memory.save(self.messages)
+        elif self.worker and self.worker.is_alive():
+            # Guard: cancel any still-running worker before starting a new one.
+            # Otherwise two workers run in parallel sharing the same buffers,
+            # producing duplicate "you" instances in the output.
+            self.worker.cancel.set()
+            self.worker.join(timeout=2.0)
+            self._total_turns += self.worker.total_turns
+            self._total_tokens += self.worker.total_tokens
+            self.messages = self.memory.save(self.messages)
         # Wire sub-agent output queue into tool context
         self._subagent_queue = queue.Queue()
         from tools import _TOOL_CONTEXT
