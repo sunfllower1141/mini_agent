@@ -608,10 +608,10 @@ class MiniAgentTUI:
                     style="class:dim",
                 )
                 self.subagent_areas[tid] = area
-                # Wrap in Window — HSplit.children requires Container objects
-                from prompt_toolkit.layout.containers import Window as _Window
+                # Wrap in Window — use area.control (BufferControl) which has reset()
+                from prompt_toolkit.layout import Window as _Window
                 children = list(self.subagent_container.children)
-                children.append(_Window(area))
+                children.append(_Window(content=area.control))
                 self.subagent_container.children = children
             if buf.dirty:
                 self.subagent_areas[tid].text = buf.get_text()
