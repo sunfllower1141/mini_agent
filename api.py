@@ -174,13 +174,12 @@ def _build_payload(
             payload["response_format"] = {"type": config.response_format}
 
     elif provider == "ollama":
-        # Ollama's OpenAI-compatible endpoint supports temperature and stop.
+        # Ollama's OpenAI-compatible endpoint supports temperature, stop, and tools.
         # No frequency_penalty, presence_penalty, or response_format.
-        # No tools support either.
+        # Tool calling works with recent models (qwen3.6, llama3.x, etc.)
         payload["temperature"] = config.temperature
         if config.stop_sequences:
             payload["stop"] = config.stop_sequences
-        payload.pop("tools", None)
 
     return payload
 
