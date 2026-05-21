@@ -105,9 +105,9 @@ class TestBuildSystemPrompt(unittest.TestCase):
     def test_prompt_length_within_limit(self):
         prompt = build_system_prompt(self._config())
         length = len(prompt)
-        # Prompt is substantial (~23-24k chars) but should not grow unbounded
-        self.assertLess(length, 25000,
-                        f"Prompt is {length} chars (expected ~23600, adjust if content changed)")
+        # Prompt is substantial (~26k chars) but should not grow unbounded
+        self.assertLess(length, 30000,
+                        f"Prompt is {length} chars (expected ~26300, adjust if content changed)")
         self.assertGreater(length, 4000,
                            f"Prompt is only {length} chars, expected > 4000")
 

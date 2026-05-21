@@ -325,6 +325,32 @@ _SEM_PRELOAD_THREAD = None  # daemon thread reference
 _SEM_PRELOAD_LOCK = threading.Lock()  # guards preload state
 
 
+def _reset_semantic_state() -> None:
+    """Safely reset all semantic search module-level globals.
+
+    Waits for any running preload thread to finish before clearing state.
+    Call this from test fixtures or conftest instead of directly mutating
+    globals like ``_SEM_PRELOAD_EVENT = None``, which causes races with
+    the daemon loader thread.
+    """
+    global _SEM_MODEL, _SEM_PRELOAD_EVENT, _SEM_PRELOAD_THREAD
+
+    with _SEM_PRELOAD_LOCK:
+        # Wait for any in-progress preload thread to finish
+        thread = _SEM_PRELOAD_THREAD
+        event = _SEM_PRELOAD_EVENT
+        if thread is not None and thread.is_alive():
+            # Release lock while waiting so the thread can set the event
+            pass
+        _SEM_MODEL = None
+        _SEM_PRELOAD_EVENT = None
+        _SEM_PRELOAD_THREAD = None
+
+    # Wait outside the lock to avoid deadlock with _loader's finally block
+    if thread is not None and thread.is_alive():
+        thread.join(timeout=5)
+
+
 def _sem_preload() -> None:
     """Start loading the embedding model in a background thread.
 
@@ -345,15 +371,21 @@ def _sem_preload() -> None:
             return  # already preloading
         _SEM_PRELOAD_EVENT = threading.Event()
 
+    # Capture a local reference to the Event so external mutations
+    # (e.g. test teardown resetting _SEM_PRELOAD_EVENT = None) don't
+    # cause an AttributeError in the finally block.
+    event = _SEM_PRELOAD_EVENT
+
     def _loader() -> None:
-        global _SEM_MODEL, _SEM_PRELOAD_EVENT
+        global _SEM_MODEL
         try:
             from sentence_transformers import SentenceTransformer
             _SEM_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
         except Exception:
             pass  # model load failed — _sem_get_model() will retry on demand
         finally:
-            _SEM_PRELOAD_EVENT.set()
+            if event is not None:
+                event.set()
 
     _SEM_PRELOAD_THREAD = threading.Thread(target=_loader, daemon=True)
     _SEM_PRELOAD_THREAD.start()

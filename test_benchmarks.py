@@ -685,10 +685,8 @@ class TestBenchmarkSemanticSearch:
         import threading
         import time as _time
 
-        # Force clean state
-        so._SEM_MODEL = None
-        so._SEM_PRELOAD_EVENT = None
-        so._SEM_PRELOAD_THREAD = None
+        # Force clean state (safe: waits for any running loader thread)
+        so._reset_semantic_state()
 
         t0 = _time.perf_counter()
         so._sem_preload()
@@ -717,10 +715,8 @@ class TestBenchmarkSemanticSearch:
         from tools.search_ops import _sem_get_model
         import tools.search_ops as so
 
-        # Force cold start — clear preload state too
-        so._SEM_MODEL = None
-        so._SEM_PRELOAD_EVENT = None
-        so._SEM_PRELOAD_THREAD = None
+        # Force cold start — clear preload state safely
+        so._reset_semantic_state()
 
         import time as _time
         t0 = _time.perf_counter()
@@ -737,10 +733,8 @@ class TestBenchmarkSemanticSearch:
         import threading
         import time as _time
 
-        # Force clean state
-        so._SEM_MODEL = None
-        so._SEM_PRELOAD_EVENT = None
-        so._SEM_PRELOAD_THREAD = None
+        # Force clean state (safe: waits for any running loader thread)
+        so._reset_semantic_state()
 
         # Start preload in background
         so._sem_preload()
