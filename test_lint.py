@@ -6,6 +6,7 @@ is never imported by a test (e.g. tui_pt.py which is the entry point).
 
 import os
 import py_compile
+import unittest
 
 ROOT = os.path.dirname(__file__)
 SOURCES = [
@@ -22,7 +23,8 @@ SOURCES = [
 ]
 
 
-def test_all_sources_compile():
-    for path in SOURCES:
-        full = os.path.join(ROOT, path)
-        py_compile.compile(full, doraise=True)
+class TestLintSources(unittest.TestCase):
+    def test_all_sources_compile(self):
+        for path in SOURCES:
+            full = os.path.join(ROOT, path)
+            py_compile.compile(full, doraise=True)

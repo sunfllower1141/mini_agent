@@ -16,7 +16,7 @@ import time
 
 from agent_runtime import AgentRuntime, SubAgentResult
 from tools import execute_tool, _TOOL_DISPATCH, _TOOL_CONTEXT, set_context
-from safety import ReadSafetyGate, WriteSafetyGate
+from conftest import make_mock_config
 
 
 # ---------------------------------------------------------------------------
@@ -27,53 +27,6 @@ from safety import ReadSafetyGate, WriteSafetyGate
 def runtime():
     """Fresh AgentRuntime for each test."""
     return AgentRuntime()
-
-
-@pytest.fixture
-def gates(tmp_path):
-    """Safety gates rooted in a temp directory."""
-    wg = WriteSafetyGate(str(tmp_path))
-    rg = ReadSafetyGate(str(tmp_path))
-    return wg, rg
-
-
-@pytest.fixture
-def configured_context(tmp_path, monkeypatch):
-    """Set up _TOOL_CONTEXT with a runtime and a mock config for tool tests."""
-    from agent_runtime import AgentRuntime
-    runtime = AgentRuntime()
-    # Create a minimal mock config
-    class MockConfig:
-        model = "test-model"
-        api_key = "test-key"
-        api_url = "https://test.api"
-        stream = False
-        verbose = True
-        sub_agent_model = "test-model"
-        sub_agent_api_key = ""
-        sub_agent_max_concurrent = 5
-        sub_agent_max_turns = 5
-        workspace = "/tmp"
-        unrestricted = False
-        allow_overwrites = True
-        approve_write_ops = False
-        memory_filename = ":memory:"
-        max_messages = 500
-        max_tokens = 200000
-        exa_api_key = ""
-        openai_api_key = ""
-    config = MockConfig()
-    set_context(_agent_runtime=runtime, _agent_config=config, workspace=str(tmp_path))
-    yield
-    # Clean up all sub-agents so background threads don't pollute
-    # _AGENT_MSGS for subsequent tests (e.g. heartbeat handoffs).
-    runtime.cancel_all()
-    for t in list(runtime.tasks.values()):
-        t.join(timeout=2)
-    from tools.agent_ops import _AGENT_MSGS, _AGENT_MSGS_LOCK
-    with _AGENT_MSGS_LOCK:
-        _AGENT_MSGS.clear()
-    set_context(_agent_runtime=None, _agent_config=None)
 
 
 # ---------------------------------------------------------------------------
@@ -381,25 +334,7 @@ class TestRecursionGuard:
         wg = MagicMock()
         rg = MagicMock()
 
-        class MockConfig:
-            model = "test-model"
-            api_key = "test-key"
-            api_url = "https://test.api"
-            stream = False
-            verbose = True
-            sub_agent_model = "test-model"
-            sub_agent_api_key = ""
-            sub_agent_max_concurrent = 5
-            sub_agent_max_turns = 5
-            workspace = "/tmp"
-            unrestricted = False
-            allow_overwrites = True
-            approve_write_ops = False
-            memory_filename = ":memory:"
-            max_messages = 500
-            max_tokens = 200000
-            exa_api_key = ""
-            openai_api_key = ""
+        config = make_mock_config()
 
         for tool_name in blocked:
             with patch("sub_agent.call_llm") as mock_llm:
@@ -421,7 +356,7 @@ class TestRecursionGuard:
                 ]
                 result = run_sub_agent(
                     task="test blocked tools",
-                    config=MockConfig(),
+                    config=make_mock_config(),
                     write_gate=wg,
                     read_gate=rg,
                     max_turns=2,

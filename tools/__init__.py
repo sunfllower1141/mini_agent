@@ -876,3 +876,50 @@ from tools import agent_patterns  # noqa: E402, F401
 from tools import agent_messages  # noqa: E402, F401
 from tools import lsp         # noqa: E402, F401
 from tools.search_ops import build_symbol_index  # noqa: E402, F401
+from tools.mcp_client import get_mcp_manager, init_mcp_servers, shutdown_mcp  # noqa: E402, F401
+
+# ---------------------------------------------------------------------------
+# mcp_discover / mcp_call — MCP client tools
+# ---------------------------------------------------------------------------
+
+
+@_register("mcp_discover")
+def _mcp_discover(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
+    """List all tools from all connected MCP servers."""
+    manager = get_mcp_manager()
+    return manager.discover()
+
+
+@_summarize("mcp_discover")
+def _mcp_discover_summary(_args: dict) -> str:
+    return "mcp_discover()"
+
+
+@_register("mcp_call")
+def _mcp_call(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
+    """Call a tool on a specific MCP server."""
+    server = args.get("server", "")
+    tool = args.get("tool", "")
+    arguments = args.get("arguments", {})
+    if not server:
+        return ToolResult(
+            success=False,
+            content="Missing required parameter: 'server' (MCP server name).",
+            hint="Use mcp_discover to see available servers, then mcp_call with a server and tool name.",
+        )
+    if not tool:
+        return ToolResult(
+            success=False,
+            content="Missing required parameter: 'tool' (tool name to call).",
+            hint="Use mcp_discover to see available tools on each server.",
+        )
+    manager = get_mcp_manager()
+    return manager.call(server, tool, arguments)
+
+
+@_summarize("mcp_call")
+def _mcp_call_summary(args: dict) -> str:
+    server = args.get("server", "?")
+    tool = args.get("tool", "?")
+    return f"mcp_call({server}/{tool})"
+from tools.mcp_client import get_mcp_manager, init_mcp_servers, shutdown_mcp  # noqa: E402, F401

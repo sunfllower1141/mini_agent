@@ -6,17 +6,8 @@ test_fetch_url.py — tests for the fetch_url tool (_fetch_url in tools.search_o
 import unittest
 from unittest.mock import patch, MagicMock
 
-from safety import ReadSafetyGate, WriteSafetyGate
+from conftest import make_gates as _gates
 from tools import ToolResult
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _gates() -> tuple[WriteSafetyGate, ReadSafetyGate]:
-    """Return unrestricted gates for tool testing."""
-    return WriteSafetyGate("/tmp", allow_overwrites=True), ReadSafetyGate("/tmp")
 
 
 def _make_mock_response(status=200, content_type="text/html", data=b"<html><body>Hello World</body></html>"):

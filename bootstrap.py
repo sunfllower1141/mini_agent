@@ -26,6 +26,47 @@ from memory import MemoryStore
 from prompt import build_system_prompt, build_startup_context
 from agent_runtime import AgentRuntime
 
+# MCP tool schemas — injected into TOOLS lazily when config.mcp_servers is non-empty.
+_MCP_SCHEMAS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "mcp_discover",
+            "description": "Discover tools from all configured MCP (Model Context Protocol) servers. Lists every tool available across all connected servers with their descriptions. Use this before mcp_call to see what tools are available.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mcp_call",
+            "description": "Call a tool on a connected MCP (Model Context Protocol) server. Use mcp_discover first to see available servers and tools. Servers are configured in .mini_agent.toml [agent.mcp_servers.<name>].",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "server": {
+                        "type": "string",
+                        "description": "MCP server name (as configured in .mini_agent.toml)."
+                    },
+                    "tool": {
+                        "type": "string",
+                        "description": "Tool name to call on the server."
+                    },
+                    "arguments": {
+                        "type": "object",
+                        "description": "Optional: arguments to pass to the MCP tool as a JSON object."
+                    }
+                },
+                "required": ["server", "tool"]
+            }
+        }
+    }
+]
+
 
 def init_session(workspace: str, cli_args: object | None = None) -> dict:
     """Shared agent initialization used by both terminal and TUI.
@@ -61,6 +102,20 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     # Initialize LSP (pylsp) with workspace root so LSP tools work
     from tools.lsp import set_lsp_root, shutdown_lsp as _shutdown_lsp
     set_lsp_root(workspace)
+
+    # Initialize MCP client with servers from config (graceful fallback if none)
+    if config.mcp_servers:
+        try:
+            from tools.mcp_client import init_mcp_servers, shutdown_mcp as _shutdown_mcp
+            init_mcp_servers(config.mcp_servers)
+            atexit.register(_shutdown_mcp)
+            # Lazily inject mcp_discover / mcp_call schemas into TOOLS
+            # only when MCP servers are actually configured.
+            from tools.schema import TOOLS
+            if not any(td["function"]["name"] == "mcp_discover" for td in TOOLS):
+                TOOLS.extend(_MCP_SCHEMAS)
+        except Exception:
+            pass  # MCP servers are optional — tolerate startup failures
 
     # Preload semantic search model in background (non-blocking)
     # so the ~9s cold start hides behind the first user interaction.

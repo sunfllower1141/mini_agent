@@ -9,9 +9,8 @@ references, hover, diagnostics) are tested with inline mock data.
 from __future__ import annotations
 
 import os
+import unittest
 from pathlib import Path
-
-import pytest
 
 from tools.lsp import (
     LspConnection,
@@ -180,98 +179,98 @@ def _make_fake_connection(
 # Test: _uri_from_path
 # ====================================================================
 
-class TestUriFromPath:
+class TestUriFromPath(unittest.TestCase):
     def test_simple_path(self) -> None:
         uri = _uri_from_path("/home/user/test.py")
-        assert uri.startswith("file://")
-        assert "test.py" in uri
+        self.assertTrue(uri.startswith("file://"))
+        self.assertIn("test.py", uri)
 
     def test_relative_path_converts_to_absolute(self) -> None:
         uri = _uri_from_path("test.py")
-        assert uri.startswith("file://")
-        assert os.path.abspath("test.py") in uri.replace("file://", "")
+        self.assertTrue(uri.startswith("file://"))
+        self.assertIn(os.path.abspath("test.py"), uri.replace("file://", ""))
 
     def test_windows_style_path(self) -> None:
         uri = _uri_from_path("C:\\Users\\test.py")
-        assert "test.py" in uri
+        self.assertIn("test.py", uri)
 
 
 # ====================================================================
 # Test: detect_language
 # ====================================================================
 
-class TestDetectLanguage:
+class TestDetectLanguage(unittest.TestCase):
     def test_python_file(self) -> None:
         result = detect_language("foo.py")
-        assert result is not None
+        self.assertIsNotNone(result)
         lang_id, command, args = result
-        assert lang_id == "python"
-        assert command == "pylsp"
-        assert args == []
+        self.assertEqual(lang_id, "python")
+        self.assertEqual(command, "pylsp")
+        self.assertEqual(args, [])
 
     def test_python_stub_file(self) -> None:
         result = detect_language("foo.pyi")
-        assert result is not None
-        assert result[0] == "python"
+        self.assertIsNotNone(result)
+        self.assertEqual(result[0], "python")
 
     def test_pythonx_file(self) -> None:
         result = detect_language("foo.pyx")
-        assert result is not None
-        assert result[0] == "python"
+        self.assertIsNotNone(result)
+        self.assertEqual(result[0], "python")
 
     def test_text_file_returns_none(self) -> None:
-        assert detect_language("foo.txt") is None
+        self.assertIsNone(detect_language("foo.txt"))
 
     def test_no_extension_returns_none(self) -> None:
-        assert detect_language("Makefile") is None
+        self.assertIsNone(detect_language("Makefile"))
 
     def test_unknown_extension_returns_none(self) -> None:
-        assert detect_language("foo.rs") is None
+        self.assertIsNone(detect_language("foo.rs"))
 
     def test_case_insensitive_extension(self) -> None:
         result = detect_language("foo.PY")
-        assert result is not None
-        assert result[0] == "python"
+        self.assertIsNotNone(result)
+        self.assertEqual(result[0], "python")
 
 
 # ====================================================================
 # Test: uri_to_path
 # ====================================================================
 
-class TestUriToPath:
+class TestUriToPath(unittest.TestCase):
     def test_file_uri_to_path(self) -> None:
         uri = _uri_from_path("/tmp/test.py")
         result = uri_to_path(uri)
-        assert result.endswith("test.py")
-        assert os.path.isabs(result)
+        self.assertTrue(result.endswith("test.py"))
+        self.assertTrue(os.path.isabs(result))
 
 
 # ====================================================================
 # Test: _severity_name
 # ====================================================================
 
-class TestSeverityName:
+class TestSeverityName(unittest.TestCase):
     def test_error(self) -> None:
-        assert "[ERROR]" in _severity_name(1)
+        self.assertIn("[ERROR]", _severity_name(1))
 
     def test_warning(self) -> None:
-        assert "[WARN]" in _severity_name(2)
+        self.assertIn("[WARN]", _severity_name(2))
 
     def test_info(self) -> None:
-        assert "[INFO]" in _severity_name(3)
+        self.assertIn("[INFO]", _severity_name(3))
 
     def test_hint(self) -> None:
-        assert "[HINT]" in _severity_name(4)
+        self.assertIn("[HINT]", _severity_name(4))
 
     def test_unknown(self) -> None:
-        assert "[?]" in _severity_name(99)
+        self.assertIn("[?]", _severity_name(99))
 
 
 # ====================================================================
 # Test: _location_to_line
 # ====================================================================
 
-class TestLocationToLine:
+class TestLocationToLine(unittest.TestCase):
     def test_standard_location(self) -> None:
         loc = {
             "uri": _uri_from_path("/tmp/test.py"),
@@ -281,7 +280,7 @@ class TestLocationToLine:
             },
         }
         result = _location_to_line(loc)
-        assert "test.py:5:10" in result
+        self.assertIn("test.py:5:10", result)
 
     def test_location_link(self) -> None:
         loc = {
@@ -296,55 +295,55 @@ class TestLocationToLine:
             },
         }
         result = _location_to_line(loc)
-        assert "test.py:3:0" in result
+        self.assertIn("test.py:3:0", result)
 
 
 # ====================================================================
 # Test: LspConnection lifecycle
 # ====================================================================
 
-class TestLspConnectionLifecycle:
+class TestLspConnectionLifecycle(unittest.TestCase):
     def test_connect_success(self) -> None:
         conn = _make_fake_connection()
-        assert conn.connect(_uri_from_path(str(HERE)))
-        assert conn.is_connected
+        self.assertTrue(conn.connect(_uri_from_path(str(HERE))))
+        self.assertTrue(conn.is_connected)
 
     def test_disconnect(self) -> None:
         conn = _make_fake_connection()
         conn.connect(_uri_from_path(str(HERE)))
         conn.disconnect()
-        assert not conn.is_connected
+        self.assertFalse(conn.is_connected)
         # double disconnect is safe
         conn.disconnect()
-        assert not conn.is_connected
+        self.assertFalse(conn.is_connected)
 
     def test_connect_when_already_connected(self) -> None:
         conn = _make_fake_connection()
         conn.connect(_uri_from_path(str(HERE)))
-        assert conn.connect() is True
+        self.assertTrue(conn.connect())
 
     def test_connect_fails_when_initialize_errors(self) -> None:
         conn = _make_fake_connection(initialize_error=True)
-        assert conn.connect() is False
-        assert not conn.is_connected
+        self.assertFalse(conn.connect())
+        self.assertFalse(conn.is_connected)
 
     def test_is_connected_initially_false(self) -> None:
         conn = _make_fake_connection()
-        assert not conn.is_connected
+        self.assertFalse(conn.is_connected)
 
 
 # ====================================================================
 # Test: LspConnection.definition
 # ====================================================================
 
-class TestLspConnectionDefinition:
+class TestLspConnectionDefinition(unittest.TestCase):
     def test_definition_returns_location(self) -> None:
         conn = _make_fake_connection()
         conn.connect()
         result = conn.definition("/fake/test.py", 5, 10)
-        assert isinstance(result, ToolResult)
-        assert result.success
-        assert "def_module.py:10:4" in result.content
+        self.assertIsInstance(result, ToolResult)
+        self.assertTrue(result.success)
+        self.assertIn("def_module.py:10:4", result.content)
 
     def test_definition_list_result(self) -> None:
         """Definition returning a list of locations."""
@@ -368,80 +367,80 @@ class TestLspConnectionDefinition:
         )
         conn.connect()
         result = conn.definition("/fake/test.py", 0, 0)
-        assert result.success
-        assert "foo.py:1:0" in result.content
-        assert "bar.py:2:3" in result.content
+        self.assertTrue(result.success)
+        self.assertIn("foo.py:1:0", result.content)
+        self.assertIn("bar.py:2:3", result.content)
 
     def test_definition_on_disconnected_returns_error(self) -> None:
         conn = _make_fake_connection()
         # Never connect
         result = conn.definition("/fake/test.py", 0, 0)
-        assert isinstance(result, ToolResult)
-        assert not result.success
-        assert "not connected" in result.content.lower()
+        self.assertIsInstance(result, ToolResult)
+        self.assertFalse(result.success)
+        self.assertIn("not connected", result.content.lower())
 
 
 # ====================================================================
 # Test: LspConnection.references
 # ====================================================================
 
-class TestLspConnectionReferences:
+class TestLspConnectionReferences(unittest.TestCase):
     def test_references_returns_locations(self) -> None:
         conn = _make_fake_connection()
         conn.connect()
         result = conn.references("/fake/test.py", 3, 4)
-        assert isinstance(result, ToolResult)
-        assert result.success
-        assert "ref_file.py:1:0" in result.content
-        assert "ref_file2.py:5:2" in result.content
+        self.assertIsInstance(result, ToolResult)
+        self.assertTrue(result.success)
+        self.assertIn("ref_file.py:1:0", result.content)
+        self.assertIn("ref_file2.py:5:2", result.content)
 
     def test_references_empty(self) -> None:
         conn = _make_fake_connection(references_result=[])
         conn.connect()
         result = conn.references("/fake/test.py", 0, 0)
-        assert result.success
-        assert "no references" in result.content.lower()
+        self.assertTrue(result.success)
+        self.assertIn("no references", result.content.lower())
 
     def test_references_on_disconnected_returns_error(self) -> None:
         conn = _make_fake_connection()
         result = conn.references("/fake/test.py", 0, 0)
-        assert not result.success
-        assert "not connected" in result.content.lower()
+        self.assertFalse(result.success)
+        self.assertIn("not connected", result.content.lower())
 
 
 # ====================================================================
 # Test: LspConnection.hover
 # ====================================================================
 
-class TestLspConnectionHover:
+class TestLspConnectionHover(unittest.TestCase):
     def test_hover_returns_contents(self) -> None:
         conn = _make_fake_connection()
         conn.connect()
         result = conn.hover("/fake/test.py", 2, 6)
-        assert isinstance(result, ToolResult)
-        assert result.success
-        assert "mock_function" in result.content
+        self.assertIsInstance(result, ToolResult)
+        self.assertTrue(result.success)
+        self.assertIn("mock_function", result.content)
 
     def test_hover_null_result(self) -> None:
         """Hover returning null -> (no hover information)."""
         conn = _make_fake_connection(hover_result=None)
         conn.connect()
         result = conn.hover("/fake/test.py", 0, 0)
-        assert result.success
-        assert "no hover information" in result.content.lower()
+        self.assertTrue(result.success)
+        self.assertIn("no hover information", result.content.lower())
 
     def test_hover_on_disconnected_returns_error(self) -> None:
         conn = _make_fake_connection()
         result = conn.hover("/fake/test.py", 0, 0)
-        assert not result.success
-        assert "not connected" in result.content.lower()
+        self.assertFalse(result.success)
+        self.assertIn("not connected", result.content.lower())
 
 
 # ====================================================================
 # Test: LspConnection.get_diagnostics
 # ====================================================================
 
-class TestLspConnectionDiagnostics:
+class TestLspConnectionDiagnostics(unittest.TestCase):
     def test_get_diagnostics_with_data(self) -> None:
         diags = [
             {
@@ -466,35 +465,35 @@ class TestLspConnectionDiagnostics:
         conn = _make_fake_connection(diagnostics=diags)
         conn.connect()
         result = conn.get_diagnostics("/fake/test.py")
-        assert result.success
-        assert "Undefined variable 'x'" in result.content
-        assert "Unused import 'os'" in result.content
-        assert "[ERROR]" in result.content
-        assert "[WARN]" in result.content
+        self.assertTrue(result.success)
+        self.assertIn("Undefined variable 'x'", result.content)
+        self.assertIn("Unused import 'os'", result.content)
+        self.assertIn("[ERROR]", result.content)
+        self.assertIn("[WARN]", result.content)
 
     def test_get_diagnostics_empty(self) -> None:
         conn = _make_fake_connection()
         conn.connect()
         result = conn.get_diagnostics("/fake/test.py")
-        assert result.success
-        assert "No diagnostics" in result.content
+        self.assertTrue(result.success)
+        self.assertIn("No diagnostics", result.content)
 
     def test_get_diagnostics_returns_no_diagnostics_when_never_connected(self) -> None:
         """get_diagnostics doesn't check connection; just returns empty cache."""
         conn = _make_fake_connection()
         result = conn.get_diagnostics("/fake/test.py")
-        assert result.success
-        assert "No diagnostics" in result.content
+        self.assertTrue(result.success)
+        self.assertIn("No diagnostics", result.content)
 
 
 # ====================================================================
 # Test: LspClientManager
 # ====================================================================
 
-class TestLspClientManager:
+class TestLspClientManager(unittest.TestCase):
     def test_get_connection_returns_none_for_unsupported_file(self) -> None:
         mgr = LspClientManager()
-        assert mgr.get_connection("test.txt") is None
+        self.assertIsNone(mgr.get_connection("test.txt"))
 
     def test_get_connection_caches(self) -> None:
         mgr = LspClientManager()
@@ -503,45 +502,45 @@ class TestLspClientManager:
         mgr._connections["python"] = fake
         mgr.set_root(str(HERE))
         conn = mgr.get_connection(str(HERE / "sample.py"))
-        assert conn is fake
+        self.assertIs(conn, fake)
 
     def test_set_root(self) -> None:
         mgr = LspClientManager()
         mgr.set_root("/tmp/workspace")
-        assert mgr._root_uri is not None
-        assert "workspace" in mgr._root_uri
+        self.assertIsNotNone(mgr._root_uri)
+        self.assertIn("workspace", mgr._root_uri)
 
     def test_shutdown_all(self) -> None:
         mgr = LspClientManager()
         fake = _make_fake_connection()
         mgr._connections["python"] = fake
         mgr.shutdown_all()
-        assert "python" not in mgr._connections
+        self.assertNotIn("python", mgr._connections)
 
     def test_global_manager_singleton(self) -> None:
         # Reset global state first
         shutdown_lsp()
         m1 = get_lsp_manager()
         m2 = get_lsp_manager()
-        assert m1 is m2
+        self.assertIs(m1, m2)
 
     def test_shutdown_lsp_clears_manager(self) -> None:
         m1 = get_lsp_manager()
         shutdown_lsp()
         m2 = get_lsp_manager()
-        assert m1 is not m2
+        self.assertIsNot(m1, m2)
 
 
 # ====================================================================
 # Test: Error types
 # ====================================================================
 
-class TestErrorTypes:
+class TestErrorTypes(unittest.TestCase):
     def test_lsp_rpc_error(self) -> None:
         err = LspRpcError({"code": -32601, "message": "Method not found"})
-        assert err.code == -32601
-        assert "Method not found" in str(err)
+        self.assertEqual(err.code, -32601)
+        self.assertIn("Method not found", str(err))
 
     def test_lsp_connection_error(self) -> None:
         err = LspConnectionError("Connection lost")
-        assert "Connection lost" in str(err)
+        self.assertIn("Connection lost", str(err))

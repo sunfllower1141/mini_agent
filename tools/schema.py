@@ -1220,5 +1220,42 @@ TOOLS = [
                 "required": []
             }
         }
-    }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mcp_discover",
+            "description": "List all tools from all connected MCP (Model Context Protocol) servers. Use this to see what external tools are available before calling them with mcp_call.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mcp_call",
+            "description": "Call a tool on a specific MCP (Model Context Protocol) server. Use mcp_discover first to see available servers and tools.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "server": {
+                        "type": "string",
+                        "description": "MCP server name (e.g. 'my-server'). Use mcp_discover to see available servers."
+                    },
+                    "tool": {
+                        "type": "string",
+                        "description": "Tool name to call on the server (e.g. 'calculate', 'get_weather')."
+                    },
+                    "arguments": {
+                        "type": "object",
+                        "description": "Optional: keyword arguments to pass to the MCP tool."
+                    }
+                },
+                "required": ["server", "tool"]
+            }
+        }
+    },
 ]

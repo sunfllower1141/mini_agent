@@ -9,22 +9,8 @@ import subprocess
 import tempfile
 import unittest
 
-from safety import ReadSafetyGate, WriteSafetyGate
+from conftest import make_tool_call as _make_tool_call, make_gates as _gates
 from tools import execute_tool
-
-
-def _make_tool_call(name: str, **kwargs) -> dict:
-    return {
-        "id": "call_test",
-        "function": {
-            "name": name,
-            "arguments": json.dumps(kwargs),
-        },
-    }
-
-
-def _gates(workspace: str) -> tuple[WriteSafetyGate, ReadSafetyGate]:
-    return WriteSafetyGate(workspace, allow_overwrites=True), ReadSafetyGate(workspace)
 
 
 class TestGitTool(unittest.TestCase):

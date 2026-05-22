@@ -17,7 +17,6 @@ import requests as req_mod
 
 from config import AgentConfig
 from llm import call_deepseek, run_agent_turn
-from safety import ReadSafetyGate, WriteSafetyGate
 from tools import execute_tool, ToolResult
 
 
@@ -45,8 +44,7 @@ def _tool_call(name: str, call_id: str, args: dict) -> dict:
     }
 
 
-def _gates(workspace: str) -> tuple[WriteSafetyGate, ReadSafetyGate]:
-    return WriteSafetyGate(workspace, allow_overwrites=True), ReadSafetyGate(workspace)
+from conftest import make_gates as _gates
 
 
 # ---------------------------------------------------------------------------

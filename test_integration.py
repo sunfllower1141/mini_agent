@@ -18,69 +18,20 @@ Covers:
 import re
 import time
 import threading
-import pytest
+import tempfile
+import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from tools import _TOOL_DISPATCH, _TOOL_CONTEXT, set_context
-from safety import ReadSafetyGate, WriteSafetyGate
 from agent_runtime import AgentRuntime, SubAgentResult
-
-
-# ---------------------------------------------------------------------------
-# Fixtures (same as test_sub_agent.py — no shared conftest)
-# ---------------------------------------------------------------------------
-
-@pytest.fixture
-def gates(tmp_path):
-    """Safety gates rooted in a temp directory."""
-    wg = WriteSafetyGate(str(tmp_path))
-    rg = ReadSafetyGate(str(tmp_path))
-    return wg, rg
-
-
-@pytest.fixture
-def configured_context(tmp_path, monkeypatch):
-    """Set up _TOOL_CONTEXT with a runtime and a mock config for tool tests."""
-    from agent_runtime import AgentRuntime
-
-    runtime = AgentRuntime()
-
-    class MockConfig:
-        model = "test-model"
-        api_key = "test-key"
-        api_url = "https://test.api"
-        stream = False
-        sub_agent_model = "test-model"
-        sub_agent_api_key = ""
-        sub_agent_max_concurrent = 5
-        sub_agent_max_turns = 5
-        workspace = str(tmp_path)
-        unrestricted = False
-        allow_overwrites = True
-        approve_write_ops = False
-
-    config = MockConfig()
-    set_context(
-        _agent_runtime=runtime,
-        _agent_config=config,
-        workspace=str(tmp_path),
-    )
-    yield
-    # Clean up all sub-agents so background threads don't pollute
-    # _AGENT_MSGS for subsequent tests (e.g. heartbeat handoffs).
-    runtime.cancel_all()
-    # Join all threads to ensure no in-flight messages land after cleanup.
-    for t in list(runtime.tasks.values()):
-        t.join(timeout=2)
-    from tools.agent_ops import _AGENT_MSGS, _AGENT_MSGS_LOCK
-    with _AGENT_MSGS_LOCK:
-        _AGENT_MSGS.clear()
-    set_context(_agent_runtime=None, _agent_config=None)
+from conftest import make_mock_config, make_gates
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_llm_response(content: str = "done", tool_calls: list | None = None):
     """Build a response dict matching what run_sub_agent expects."""
@@ -127,16 +78,54 @@ def _extract_task_ids(text: str) -> list[str]:
     return []
 
 
+def _setUp_context():
+    """Create runtime, config, gates, and set _TOOL_CONTEXT.
+
+    Returns (runtime, tmp_dir, wg, rg) for use in setUp.
+    Caller must store tmp_dir to cleanup later.
+    """
+    tmp_dir = tempfile.TemporaryDirectory()
+    tmp_path = Path(tmp_dir.name)
+    runtime = AgentRuntime()
+    config = make_mock_config(workspace=str(tmp_path))
+    set_context(
+        _agent_runtime=runtime,
+        _agent_config=config,
+        workspace=str(tmp_path),
+    )
+    wg, rg = make_gates(str(tmp_path))
+    return runtime, tmp_dir, wg, rg
+
+
+def _tearDown_context(runtime, tmp_dir):
+    """Undo _setUp_context: cancel agents, clear msgs, reset context, cleanup."""
+    runtime.cancel_all()
+    for t in list(runtime.tasks.values()):
+        t.join(timeout=2)
+    from tools.agent_ops import _AGENT_MSGS, _AGENT_MSGS_LOCK
+
+    with _AGENT_MSGS_LOCK:
+        _AGENT_MSGS.clear()
+    set_context(_agent_runtime=None, _agent_config=None)
+    tmp_dir.cleanup()
+
+
 # ---------------------------------------------------------------------------
 # 1. Full spawn → file work → collect → verify disk
 # ---------------------------------------------------------------------------
 
-class TestFullSpawnCollectVerify:
+class TestFullSpawnCollectVerify(unittest.TestCase):
     """Integration: spawn a sub-agent that writes a file, collect, verify."""
 
-    def test_spawn_writes_file_and_collect(self, configured_context, gates, tmp_path):
-        wg, rg = gates
-        test_file = tmp_path / "agent_output.txt"
+    def setUp(self):
+        self.runtime, self.tmp_dir, self.wg, self.rg = _setUp_context()
+
+    def tearDown(self):
+        _tearDown_context(self.runtime, self.tmp_dir)
+
+    def test_spawn_writes_file_and_collect(self):
+        wg, rg = self.wg, self.rg
+        test_file = Path(self.tmp_dir.name) / "agent_output.txt"
 
         with patch("sub_agent.call_llm") as mock_llm:
             mock_llm.side_effect = [
@@ -157,24 +146,24 @@ class TestFullSpawnCollectVerify:
                 {"task": "write a test file", "max_turns": 3},
                 wg, rg,
             )
-            assert result.success, f"spawn failed: {result.content}"
-            assert "Spawned sub-agent" in result.content
+            self.assertTrue(result.success, f"spawn failed: {result.content}")
+            self.assertIn("Spawned sub-agent", result.content)
 
             task_id = _extract_task_id(result.content)
-            assert task_id is not None, f"No task_id found in: {result.content}"
+            self.assertIsNotNone(task_id, f"No task_id found in: {result.content}")
 
             collect = _TOOL_DISPATCH["collect_agent"]
             collected = collect({"task_id": task_id}, wg, rg)
-            assert collected.success, f"collect failed: {collected.content}"
-            assert "All done" in collected.content
+            self.assertTrue(collected.success, f"collect failed: {collected.content}")
+            self.assertIn("All done", collected.content)
 
         # Verify file on disk
-        assert test_file.exists(), f"File {test_file} was not created"
-        assert test_file.read_text() == "hello from sub-agent"
+        self.assertTrue(test_file.exists(), f"File {test_file} was not created")
+        self.assertEqual(test_file.read_text(), "hello from sub-agent")
 
-    def test_spawn_failed_task_reports_content(self, configured_context, gates):
+    def test_spawn_failed_task_reports_content(self):
         """If the sub-agent produces text, collect returns it."""
-        wg, rg = gates
+        wg, rg = self.wg, self.rg
 
         with patch("sub_agent.call_llm") as mock_llm:
             mock_llm.side_effect = [
@@ -186,24 +175,30 @@ class TestFullSpawnCollectVerify:
                 {"task": "failing task", "max_turns": 2},
                 wg, rg,
             )
-            assert result.success
+            self.assertTrue(result.success)
             task_id = _extract_task_id(result.content)
-            assert task_id
+            self.assertIsNotNone(task_id)
 
             collect = _TOOL_DISPATCH["collect_agent"]
             collected = collect({"task_id": task_id}, wg, rg)
-            assert "Something went wrong" in collected.content
+            self.assertIn("Something went wrong", collected.content)
 
 
 # ---------------------------------------------------------------------------
 # 2. Fan-out pattern with multiple agents + collect_any
 # ---------------------------------------------------------------------------
 
-class TestFanOut:
+class TestFanOut(unittest.TestCase):
     """Integration: spawn multiple agents, collect_any to get first result."""
 
-    def test_fan_out_three_agents_collect_any(self, configured_context, gates):
-        wg, rg = gates
+    def setUp(self):
+        self.runtime, self.tmp_dir, self.wg, self.rg = _setUp_context()
+
+    def tearDown(self):
+        _tearDown_context(self.runtime, self.tmp_dir)
+
+    def test_fan_out_three_agents_collect_any(self):
+        wg, rg = self.wg, self.rg
 
         with patch("sub_agent.call_llm") as mock_llm:
             mock_llm.return_value = _make_llm_response(content="result from agent")
@@ -213,18 +208,18 @@ class TestFanOut:
                 {"tasks": ["task alpha", "task beta", "task gamma"], "max_turns": 1},
                 wg, rg,
             )
-            assert batch_result.success
-            assert "3 sub-agent" in batch_result.content
+            self.assertTrue(batch_result.success)
+            self.assertIn("3 sub-agent", batch_result.content)
 
             # Collect the first finished
             collect_any = _TOOL_DISPATCH["collect_any"]
             first = collect_any({}, wg, rg)
-            assert first.success
-            assert "finished first" in first.content
-            assert "result from agent" in first.content
+            self.assertTrue(first.success)
+            self.assertIn("finished first", first.content)
+            self.assertIn("result from agent", first.content)
 
-    def test_fan_out_collect_any_with_specific_ids(self, configured_context, gates):
-        wg, rg = gates
+    def test_fan_out_collect_any_with_specific_ids(self):
+        wg, rg = self.wg, self.rg
 
         with patch("sub_agent.call_llm") as mock_llm:
             mock_llm.return_value = _make_llm_response(content="done")
@@ -234,18 +229,18 @@ class TestFanOut:
                 {"tasks": ["work A", "work B"], "max_turns": 1},
                 wg, rg,
             )
-            assert result.success
+            self.assertTrue(result.success)
             ids = _extract_task_ids(result.content)
-            assert len(ids) == 2
+            self.assertEqual(len(ids), 2)
 
             collect_any = _TOOL_DISPATCH["collect_any"]
             first = collect_any({"task_ids": ids}, wg, rg)
-            assert first.success
-            assert first.content
+            self.assertTrue(first.success)
+            self.assertTrue(first.content)
 
-    def test_batch_spawn_respects_concurrency_limit(self, configured_context, gates):
+    def test_batch_spawn_respects_concurrency_limit(self):
         """Batch spawn should not exceed _MAX_CONCURRENT (5)."""
-        wg, rg = gates
+        wg, rg = self.wg, self.rg
 
         with patch("sub_agent.call_llm") as mock_llm:
             mock_llm.return_value = _make_llm_response(content="ok")
@@ -255,25 +250,31 @@ class TestFanOut:
                 {"tasks": [f"task {i}" for i in range(7)], "max_turns": 1},
                 wg, rg,
             )
-            assert result.success
-            assert "5 sub-agent" in result.content or "Spawned" in result.content
+            self.assertTrue(result.success)
+            self.assertTrue(
+                "5 sub-agent" in result.content or "Spawned" in result.content
+            )
 
 
 # ---------------------------------------------------------------------------
 # 3. Agent handoff with typed messages
 # ---------------------------------------------------------------------------
 
-class TestAgentHandoffIntegration:
+class TestAgentHandoffIntegration(unittest.TestCase):
     """Integration: agent_handoff sends typed messages between agents."""
 
-    def setup_method(self):
+    def setUp(self):
         from tools.agent_ops import _AGENT_MSGS, _AGENT_MSGS_LOCK
 
         with _AGENT_MSGS_LOCK:
             _AGENT_MSGS.clear()
+        self.runtime, self.tmp_dir, self.wg, self.rg = _setUp_context()
 
-    def test_handoff_result_routes_to_global_list(self, configured_context, gates):
-        wg, rg = gates
+    def tearDown(self):
+        _tearDown_context(self.runtime, self.tmp_dir)
+
+    def test_handoff_result_routes_to_global_list(self):
+        wg, rg = self.wg, self.rg
         dispatch = _TOOL_DISPATCH["agent_handoff"]
 
         result = dispatch(
@@ -284,18 +285,18 @@ class TestAgentHandoffIntegration:
             },
             wg, rg,
         )
-        assert result.success
-        assert "handoff.result" in result.content
-        assert "1 total messages" in result.content
+        self.assertTrue(result.success)
+        self.assertIn("handoff.result", result.content)
+        self.assertIn("1 total messages", result.content)
 
         from tools.agent_ops import _AGENT_MSGS, _AGENT_MSGS_LOCK
 
         with _AGENT_MSGS_LOCK:
-            assert len(_AGENT_MSGS) == 1
-            assert "handoff.result" in _AGENT_MSGS[0]["text"]
+            self.assertEqual(len(_AGENT_MSGS), 1)
+            self.assertIn("handoff.result", _AGENT_MSGS[0]["text"])
 
-    def test_handoff_coord_fan_out(self, configured_context, gates):
-        wg, rg = gates
+    def test_handoff_coord_fan_out(self):
+        wg, rg = self.wg, self.rg
         dispatch = _TOOL_DISPATCH["agent_handoff"]
 
         result = dispatch(
@@ -306,11 +307,11 @@ class TestAgentHandoffIntegration:
             },
             wg, rg,
         )
-        assert result.success
-        assert "coord.fan_out" in result.content
+        self.assertTrue(result.success)
+        self.assertIn("coord.fan_out", result.content)
 
-    def test_handoff_status_heartbeat(self, configured_context, gates):
-        wg, rg = gates
+    def test_handoff_status_heartbeat(self):
+        wg, rg = self.wg, self.rg
         dispatch = _TOOL_DISPATCH["agent_handoff"]
 
         result = dispatch(
@@ -321,12 +322,12 @@ class TestAgentHandoffIntegration:
             },
             wg, rg,
         )
-        assert result.success
-        assert "status.heartbeat" in result.content
+        self.assertTrue(result.success)
+        self.assertIn("status.heartbeat", result.content)
 
-    def test_handoff_with_correlation_id(self, configured_context, gates):
+    def test_handoff_with_correlation_id(self):
         """Handoff with correlation_id should be accepted and stored."""
-        wg, rg = gates
+        wg, rg = self.wg, self.rg
         dispatch = _TOOL_DISPATCH["agent_handoff"]
 
         result = dispatch(
@@ -338,28 +339,34 @@ class TestAgentHandoffIntegration:
             },
             wg, rg,
         )
-        assert result.success
-        assert "handoff.result" in result.content
+        self.assertTrue(result.success)
+        self.assertIn("handoff.result", result.content)
 
         # Verify the correlation_id was stored in the global message list
         from tools.agent_ops import _AGENT_MSGS, _AGENT_MSGS_LOCK
 
         with _AGENT_MSGS_LOCK:
-            assert len(_AGENT_MSGS) >= 1
+            self.assertGreaterEqual(len(_AGENT_MSGS), 1)
             # The legacy dict format includes the serialized payload
             msg_text = _AGENT_MSGS[0]["text"]
-            assert "req-12345" in msg_text or "linked" in msg_text
+            self.assertTrue("req-12345" in msg_text or "linked" in msg_text)
 
 
 # ---------------------------------------------------------------------------
 # 4. Agent inbox / subscribe routing
 # ---------------------------------------------------------------------------
 
-class TestInboxSubscribeRouting:
+class TestInboxSubscribeRouting(unittest.TestCase):
     """Integration: set up subscriptions, route messages, read inbox."""
 
-    def test_subscribe_then_send_inbox_receives(self, configured_context, gates):
-        wg, rg = gates
+    def setUp(self):
+        self.runtime, self.tmp_dir, self.wg, self.rg = _setUp_context()
+
+    def tearDown(self):
+        _tearDown_context(self.runtime, self.tmp_dir)
+
+    def test_subscribe_then_send_inbox_receives(self):
+        wg, rg = self.wg, self.rg
         runtime: AgentRuntime = _TOOL_CONTEXT.__dict__["_agent_runtime"]
 
         ev = threading.Event()
@@ -373,7 +380,7 @@ class TestInboxSubscribeRouting:
                 {"task_id": "inbox-test", "types": ["handoff.result", "coord.sync"]},
                 wg, rg,
             )
-            assert sub_result.success, sub_result.content
+            self.assertTrue(sub_result.success, sub_result.content)
 
             handoff = _TOOL_DISPATCH["agent_handoff"]
             handoff(
@@ -383,16 +390,16 @@ class TestInboxSubscribeRouting:
 
             inbox_dispatch = _TOOL_DISPATCH["agent_inbox"]
             inbox_result = inbox_dispatch({"task_id": "inbox-test"}, wg, rg)
-            assert inbox_result.success
-            assert "handoff.result" in inbox_result.content
-            assert "producer" in inbox_result.content
+            self.assertTrue(inbox_result.success)
+            self.assertIn("handoff.result", inbox_result.content)
+            self.assertIn("producer", inbox_result.content)
         finally:
             runtime.cancel("inbox-test")
             t.join(timeout=1)
 
-    def test_inbox_empty_subscriptions_receives_all(self, configured_context, gates):
+    def test_inbox_empty_subscriptions_receives_all(self):
         """Agent with empty subscriptions receives all message types."""
-        wg, rg = gates
+        wg, rg = self.wg, self.rg
         runtime: AgentRuntime = _TOOL_CONTEXT.__dict__["_agent_runtime"]
 
         ev = threading.Event()
@@ -416,15 +423,15 @@ class TestInboxSubscribeRouting:
 
             inbox_dispatch = _TOOL_DISPATCH["agent_inbox"]
             inbox_result = inbox_dispatch({"task_id": "all-receiver"}, wg, rg)
-            assert inbox_result.success
-            assert "coord.sync" in inbox_result.content
+            self.assertTrue(inbox_result.success)
+            self.assertIn("coord.sync", inbox_result.content)
         finally:
             runtime.cancel("all-receiver")
             t.join(timeout=1)
 
-    def test_inbox_since_polling(self, configured_context, gates):
+    def test_inbox_since_polling(self):
         """inbox with 'since' skips previously-read messages."""
-        wg, rg = gates
+        wg, rg = self.wg, self.rg
         runtime: AgentRuntime = _TOOL_CONTEXT.__dict__["_agent_runtime"]
 
         from tools.agent_messages import AgentMessage
@@ -442,16 +449,16 @@ class TestInboxSubscribeRouting:
         inbox_dispatch = _TOOL_DISPATCH["agent_inbox"]
 
         r1 = inbox_dispatch({"task_id": "poller"}, wg, rg)
-        assert "message-0" in r1.content
+        self.assertIn("message-0", r1.content)
 
         r2 = inbox_dispatch({"task_id": "poller", "since": 2}, wg, rg)
-        assert "message-2" in r2.content
-        assert "message-0" not in r2.content
-        assert "message-1" not in r2.content
+        self.assertIn("message-2", r2.content)
+        self.assertNotIn("message-0", r2.content)
+        self.assertNotIn("message-1", r2.content)
 
-    def test_direct_target_routing_bypasses_subscriptions(self, configured_context, gates):
+    def test_direct_target_routing_bypasses_subscriptions(self):
         """Handoff with 'target' delivers directly regardless of subscriptions."""
-        wg, rg = gates
+        wg, rg = self.wg, self.rg
         runtime: AgentRuntime = _TOOL_CONTEXT.__dict__["_agent_runtime"]
 
         runtime.set_subscriptions("direct-target", set())
@@ -466,22 +473,28 @@ class TestInboxSubscribeRouting:
             },
             wg, rg,
         )
-        assert result.success
+        self.assertTrue(result.success)
 
         inbox = runtime.get_inbox("direct-target")
-        assert len(inbox) == 1
-        assert inbox[0].payload["result"] == {"secret": "direct-msg"}
+        self.assertEqual(len(inbox), 1)
+        self.assertEqual(inbox[0].payload["result"], {"secret": "direct-msg"})
 
 
 # ---------------------------------------------------------------------------
 # 5. Parent polls status while agent works
 # ---------------------------------------------------------------------------
 
-class TestParentPolling:
+class TestParentPolling(unittest.TestCase):
     """Integration: parent spawns agent, polls agent_status while it runs."""
 
-    def test_poll_running_then_completed(self, configured_context, gates):
-        wg, rg = gates
+    def setUp(self):
+        self.runtime, self.tmp_dir, self.wg, self.rg = _setUp_context()
+
+    def tearDown(self):
+        _tearDown_context(self.runtime, self.tmp_dir)
+
+    def test_poll_running_then_completed(self):
+        wg, rg = self.wg, self.rg
 
         with patch("sub_agent.call_llm") as mock_llm:
             mock_llm.side_effect = [
@@ -499,42 +512,48 @@ class TestParentPolling:
                 {"task": "slow work", "max_turns": 3},
                 wg, rg,
             )
-            assert result.success
+            self.assertTrue(result.success)
             task_id = _extract_task_id(result.content)
-            assert task_id
+            self.assertIsNotNone(task_id)
 
             # Poll while running
             status_dispatch = _TOOL_DISPATCH["agent_status"]
             status1 = status_dispatch({"task_id": task_id}, wg, rg)
-            assert status1.success
+            self.assertTrue(status1.success)
 
             # Collect — blocks until done
             collect = _TOOL_DISPATCH["collect_agent"]
             collected = collect({"task_id": task_id}, wg, rg)
-            assert collected.success
+            self.assertTrue(collected.success)
 
             # Poll after completion
             status2 = status_dispatch({"task_id": task_id}, wg, rg)
-            assert status2.success
-            assert "completed" in status2.content.lower() or "Success" in status2.content
+            self.assertTrue(status2.success)
+            self.assertIn("completed", status2.content.lower())
 
-    def test_poll_unknown_agent_returns_not_found(self, configured_context, gates):
-        wg, rg = gates
+    def test_poll_unknown_agent_returns_not_found(self):
+        wg, rg = self.wg, self.rg
         dispatch = _TOOL_DISPATCH["agent_status"]
         result = dispatch({"task_id": "nonexistent42"}, wg, rg)
-        assert result.success
-        assert "not found" in result.content
+        self.assertTrue(result.success)
+        self.assertIn("not found", result.content)
 
 
 # ---------------------------------------------------------------------------
 # 6. Multiple collect_any calls
 # ---------------------------------------------------------------------------
 
-class TestMultipleCollectAny:
+class TestMultipleCollectAny(unittest.TestCase):
     """Integration: spawn multiple agents, call collect_any repeatedly."""
 
-    def test_collect_any_multiple_agents(self, configured_context, gates):
-        wg, rg = gates
+    def setUp(self):
+        self.runtime, self.tmp_dir, self.wg, self.rg = _setUp_context()
+
+    def tearDown(self):
+        _tearDown_context(self.runtime, self.tmp_dir)
+
+    def test_collect_any_multiple_agents(self):
+        wg, rg = self.wg, self.rg
 
         with patch("sub_agent.call_llm") as mock_llm:
             mock_llm.return_value = _make_llm_response(content="quick result")
@@ -544,9 +563,9 @@ class TestMultipleCollectAny:
                 {"tasks": ["job 1", "job 2", "job 3"], "max_turns": 1},
                 wg, rg,
             )
-            assert batch.success
+            self.assertTrue(batch.success)
             ids = _extract_task_ids(batch.content)
-            assert len(ids) == 3
+            self.assertEqual(len(ids), 3)
 
             collect_any = _TOOL_DISPATCH["collect_any"]
 
@@ -556,13 +575,14 @@ class TestMultipleCollectAny:
             r2 = collect_any({}, wg, rg)
 
             # At least one should succeed
-            assert r1.success or r2.success, (
-                f"Neither collect_any succeeded.\nr1: {r1.content}\nr2: {r2.content}"
+            self.assertTrue(
+                r1.success or r2.success,
+                f"Neither collect_any succeeded.\nr1: {r1.content}\nr2: {r2.content}",
             )
 
-    def test_collect_any_after_all_completed(self, configured_context, gates):
+    def test_collect_any_after_all_completed(self):
         """After all agents complete, collect_any should return one immediately."""
-        wg, rg = gates
+        wg, rg = self.wg, self.rg
 
         with patch("sub_agent.call_llm") as mock_llm:
             mock_llm.return_value = _make_llm_response(content="done")
@@ -572,9 +592,9 @@ class TestMultipleCollectAny:
                 {"tasks": ["task X", "task Y"], "max_turns": 1},
                 wg, rg,
             )
-            assert result.success
+            self.assertTrue(result.success)
             ids = _extract_task_ids(result.content)
-            assert len(ids) == 2
+            self.assertEqual(len(ids), 2)
 
             # Wait for all to complete
             for tid in ids:
@@ -583,31 +603,35 @@ class TestMultipleCollectAny:
             # Now collect_any works on already-completed
             collect_any = _TOOL_DISPATCH["collect_any"]
             r = collect_any({"task_ids": ids}, wg, rg)
-            assert r.success, r.content
+            self.assertTrue(r.success, r.content)
 
-    def test_collect_any_no_agents_returns_error(self, configured_context, gates):
-        wg, rg = gates
+    def test_collect_any_no_agents_returns_error(self):
+        wg, rg = self.wg, self.rg
         collect_any = _TOOL_DISPATCH["collect_any"]
         result = collect_any({}, wg, rg)
-        assert result.success is False
-        assert "No sub-agents" in result.content
+        self.assertFalse(result.success)
+        self.assertIn("No sub-agents", result.content)
 
 
 # ---------------------------------------------------------------------------
 # 7. agent_message + agent_read broadcast/pagination
 # ---------------------------------------------------------------------------
 
-class TestMessageBroadcastIntegration:
+class TestMessageBroadcastIntegration(unittest.TestCase):
     """Integration: broadcast messages and read them back."""
 
-    def setup_method(self):
+    def setUp(self):
         from tools.agent_ops import _AGENT_MSGS, _AGENT_MSGS_LOCK
 
         with _AGENT_MSGS_LOCK:
             _AGENT_MSGS.clear()
+        self.runtime, self.tmp_dir, self.wg, self.rg = _setUp_context()
 
-    def test_broadcast_and_read_multiple(self, configured_context, gates):
-        wg, rg = gates
+    def tearDown(self):
+        _tearDown_context(self.runtime, self.tmp_dir)
+
+    def test_broadcast_and_read_multiple(self):
+        wg, rg = self.wg, self.rg
         send = _TOOL_DISPATCH["agent_message"]
         read = _TOOL_DISPATCH["agent_read"]
 
@@ -615,12 +639,12 @@ class TestMessageBroadcastIntegration:
         send({"text": "second message", "from": "agent-B"}, wg, rg)
 
         r = read({}, wg, rg)
-        assert r.success
-        assert "first message" in r.content
-        assert "second message" in r.content
+        self.assertTrue(r.success)
+        self.assertIn("first message", r.content)
+        self.assertIn("second message", r.content)
 
-    def test_read_since_pagination(self, configured_context, gates):
-        wg, rg = gates
+    def test_read_since_pagination(self):
+        wg, rg = self.wg, self.rg
         send = _TOOL_DISPATCH["agent_message"]
         read = _TOOL_DISPATCH["agent_read"]
 
@@ -628,24 +652,31 @@ class TestMessageBroadcastIntegration:
             send({"text": f"msg-{i}"}, wg, rg)
 
         r = read({"since": 3}, wg, rg)
-        assert r.success
-        assert "msg-3" in r.content
-        assert "msg-4" in r.content
-        assert "msg-0" not in r.content
-        assert "msg-1" not in r.content
-        assert "msg-2" not in r.content
+        self.assertTrue(r.success)
+        self.assertIn("msg-3", r.content)
+        self.assertIn("msg-4", r.content)
+        self.assertNotIn("msg-0", r.content)
+        self.assertNotIn("msg-1", r.content)
+        self.assertNotIn("msg-2", r.content)
 
 
 # ---------------------------------------------------------------------------
 # 8. Multi-agent E2E workflow patterns (pipeline + scatter_gather)
 # ---------------------------------------------------------------------------
 
-class TestMultiAgentE2EWorkflow:
+class TestMultiAgentE2EWorkflow(unittest.TestCase):
     """Integration: pipeline pattern and scatter_gather pattern end-to-end."""
 
-    def test_pipeline_pattern(self, configured_context, gates, tmp_path):
+    def setUp(self):
+        self.runtime, self.tmp_dir, self.wg, self.rg = _setUp_context()
+
+    def tearDown(self):
+        _tearDown_context(self.runtime, self.tmp_dir)
+
+    def test_pipeline_pattern(self):
         """Spawn agent A, agent A spawns agent B, collect both via pipeline."""
-        wg, rg = gates
+        wg, rg = self.wg, self.rg
+        tmp_path = Path(self.tmp_dir.name)
 
         # Stage A writes a file; Stage B reads it and appends.
         stage_a_file = tmp_path / "pipeline_stage_a.txt"
@@ -689,17 +720,17 @@ class TestMultiAgentE2EWorkflow:
                 },
                 wg, rg,
             )
-            assert result.success, f"pipeline failed: {result.content}"
-            assert "Stage B complete" in result.content or "success=True" in result.content
-            assert "stage-a-output" in result.content
+            self.assertTrue(result.success, f"pipeline failed: {result.content}")
+            self.assertIn("Stage B complete", result.content)
+            self.assertIn("stage-a-output", result.content)
 
         # Verify file on disk
-        assert stage_a_file.exists(), f"File {stage_a_file} was not created"
-        assert stage_a_file.read_text() == "stage-a-output"
+        self.assertTrue(stage_a_file.exists(), f"File {stage_a_file} was not created")
+        self.assertEqual(stage_a_file.read_text(), "stage-a-output")
 
-    def test_scatter_gather_pattern(self, configured_context, gates, tmp_path):
+    def test_scatter_gather_pattern(self):
         """Use scatter_gather to process a list of items concurrently."""
-        wg, rg = gates
+        wg, rg = self.wg, self.rg
 
         items = ["alpha", "beta", "gamma"]
 
@@ -718,18 +749,22 @@ class TestMultiAgentE2EWorkflow:
                 },
                 wg, rg,
             )
-            assert result.success, f"scatter_gather failed: {result.content}"
+            self.assertTrue(result.success, f"scatter_gather failed: {result.content}")
             # At least one worker processed an item
             content_lower = result.content.lower()
-            assert "processed" in content_lower or "alpha" in content_lower or "success" in content_lower
+            self.assertTrue(
+                "processed" in content_lower or "alpha" in content_lower or "success" in content_lower
+            )
 
-    def test_scatter_gather_empty_items(self, configured_context, gates):
+    def test_scatter_gather_empty_items(self):
         """scatter_gather with no items should return a clear error."""
-        wg, rg = gates
+        wg, rg = self.wg, self.rg
         sg_dispatch = _TOOL_DISPATCH["scatter_gather"]
         result = sg_dispatch(
             {"items": [], "worker_task_template": "Process {item}"},
             wg, rg,
         )
-        assert result.success is False
-        assert "items" in result.content.lower() or "No items" in result.content
+        self.assertFalse(result.success)
+        self.assertTrue(
+            "items" in result.content.lower() or "No items" in result.content
+        )

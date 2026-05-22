@@ -9,26 +9,9 @@ import tempfile
 import unittest
 from unittest.mock import patch, MagicMock
 
+from conftest import make_tool_call as _make_tool_call, make_gates as _gates
 from safety import ReadSafetyGate, WriteSafetyGate
 from tools import ToolResult, execute_tool, tool_summary, _TOOL_CONTEXT
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _make_tool_call(name: str, /, **kwargs) -> dict:
-    return {
-        "id": "call_test",
-        "function": {
-            "name": name,
-            "arguments": json.dumps(kwargs),
-        },
-    }
-
-
-def _gates(workspace: str) -> tuple[WriteSafetyGate, ReadSafetyGate]:
-    return WriteSafetyGate(workspace, allow_overwrites=True), ReadSafetyGate(workspace)
 
 
 # ---------------------------------------------------------------------------

@@ -72,8 +72,8 @@ PROVIDER_DEFAULTS: dict[str, ProviderDefaults] = {
         routing_model="",
     ),
     "ollama": ProviderDefaults(
-        model="qwen3.6",
-        sub_agent_model="qwen3.6",  # local LLM: no cheaper variant installed, use same model
+        model="qwen3.6:27b",
+        sub_agent_model="qwen3.6:27b",  # local LLM: no cheaper variant installed, use same model
         # Camoproj VM: RTX 6000 Ada 48GB, accessible via Tailscale at 100.79.96.42
         api_url="http://100.79.96.42:11434/v1/chat/completions",
         max_tokens=8_192,
@@ -209,6 +209,7 @@ class AgentConfig:
     approve_write_ops: bool = False
     unrestricted: bool = False
     socks_proxy: str = ""  # SOCKS5 proxy URL (auto-set on Windows for SSH tunnel)
+    mcp_servers: dict = field(default_factory=dict)  # {name: {command: [...], env: {...}}}
 
     # ------------------------------------------------------------------
     # Factory
@@ -331,6 +332,7 @@ _TOML_SCHEMA: dict[str, type] = {
     "openai_api_key": str,
     "approve_write_ops": bool,
     "unrestricted": bool,
+    "mcp_servers": dict,
 }
 
 
