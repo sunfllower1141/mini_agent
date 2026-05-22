@@ -499,10 +499,14 @@ class AgentWorker(threading.Thread):
             return
         if text == THINKING_END:
             self._in_thinking = False
+            self._needs_chat_newline = True
             return
         if self._in_thinking:
             self.thinking_buf.append_last(text)
         else:
+            if getattr(self, '_needs_chat_newline', False):
+                self.chat_buf.append("\n", style="msg-agent")
+                self._needs_chat_newline = False
             self.chat_buf.append_last(text, style="msg-agent")
 
     def _on_tool_start(self, summary: str, parallel: bool = False):
