@@ -62,7 +62,6 @@ def configured_context(tmp_path, monkeypatch):
         max_tokens = 200000
         exa_api_key = ""
         openai_api_key = ""
-        mcp_servers = []
     config = MockConfig()
     set_context(_agent_runtime=runtime, _agent_config=config, workspace=str(tmp_path))
     yield
@@ -401,7 +400,6 @@ class TestRecursionGuard:
             max_tokens = 200000
             exa_api_key = ""
             openai_api_key = ""
-            mcp_servers = []
 
         for tool_name in blocked:
             with patch("sub_agent.call_llm") as mock_llm:

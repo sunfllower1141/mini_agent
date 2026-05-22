@@ -65,8 +65,8 @@ if not any(td["function"]["name"] == "remember" for td in TOOLS):
 def _get_tool_schema(name: str) -> dict | None:
     """Look up a tool's parameter schema from TOOLS at runtime.
 
-    This is done at call time (not import time) so that MCP tools
-    dynamically appended to TOOLS after startup are always included.
+    This is done at call time (not import time) so that dynamically
+    appended tools are always included.
     """
     for td in TOOLS:
         if td["function"]["name"] == name:
@@ -167,7 +167,6 @@ _FILE_RESERVATIONS_LOCK = threading.Lock()
 
 # Sub-agent runtime registry (lazy init in config.init_session)
 _AGENT_RUNTIME = None  # AgentRuntime — set by init_session
-_MCP_MANAGER = None    # McpClientManager — set by init_session
 _CACHEABLE = frozenset({
     "read_file", "file_info", "list_directory",
     "search_files", "semantic_search", "web_search",
@@ -182,7 +181,6 @@ _CTX_DISPATCH = {
     "exa_api_key": lambda ctx, v: setattr(ctx, "exa_api_key", v),
     "openai_api_key": lambda ctx, v: setattr(ctx, "openai_api_key", v),
     "workspace": lambda ctx, v: setattr(ctx, "workspace", v),
-    "_mcp_manager": lambda ctx, v: globals().__setitem__("_MCP_MANAGER", v),
 }
 
 
@@ -869,5 +867,4 @@ from tools import agent_ops   # noqa: E402, F401
 from tools import agent_patterns  # noqa: E402, F401
 from tools import agent_messages  # noqa: E402, F401
 from tools import lsp         # noqa: E402, F401
-from tools import mcp_client  # noqa: E402, F401  # MCP tool discovery + calling
 from tools.search_ops import build_symbol_index  # noqa: E402, F401

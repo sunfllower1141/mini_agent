@@ -1,6 +1,6 @@
 """Shared JSON-RPC subprocess utilities.
 
-Extracted from mcp_client.py and lsp.py which had nearly identical
+Extracted from lsp.py which had nearly identical
 _drain_stderr and is_connected implementations.
 """
 

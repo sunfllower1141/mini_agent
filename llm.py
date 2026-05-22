@@ -527,6 +527,8 @@ def _execute_single_no_pipe(
 ) -> list[tuple[dict, "ToolResult"]]:
     """Execute a single tool call with no piping dependencies."""
     if cancel_event is not None and cancel_event.is_set():
+        _append_cancel_results([tc], messages, on_tool_end=on_tool_end,
+                                recent_keys=recent_tool_keys, lock=tool_keys_lock)
         return []
     if on_tool_start is not None:
         on_tool_start(tool_summary(tc))
@@ -569,6 +571,13 @@ def _execute_parallel_no_pipes(
         for future in as_completed(futures):
             if cancel_event is not None and cancel_event.is_set():
                 pool.shutdown(wait=False, cancel_futures=True)
+                # Append failure results for any tool calls not yet completed
+                completed = {id(tc) for tc, _ in parallel_results}
+                uncompleted = [tc for tc in remaining if id(tc) not in completed]
+                _append_cancel_results(
+                    uncompleted, messages, on_tool_end=on_tool_end,
+                    recent_keys=recent_tool_keys, lock=tool_keys_lock,
+                )
                 return parallel_results
             tc, result = future.result()
             _append_tool_result(messages, tc, result, on_tool_end,
@@ -632,7 +641,7 @@ def _execute_groups(
 ) -> list[tuple[dict, "ToolResult"]]:
     """Execute groups in order (parallel within group, sequential across groups)."""
     all_results: list[tuple] = []
-    for group in groups:
+    for group_idx, group in enumerate(groups):
         if on_tool_start is not None:
             for i in group:
                 on_tool_start(tool_summary(remaining[i]),
@@ -643,6 +652,15 @@ def _execute_groups(
             tc = remaining[i]
             _apply_pipe(tc, i, pipe_deps, pipe_results, json)
             if cancel_event is not None and cancel_event.is_set():
+                # Append failure results for current + all future groups
+                remaining_indices = {i} | {
+                    idx for g in groups[group_idx + 1:] for idx in g
+                }
+                _append_cancel_results(
+                    [remaining[idx] for idx in remaining_indices], messages,
+                    on_tool_end=on_tool_end, recent_keys=recent_tool_keys,
+                    lock=tool_keys_lock,
+                )
                 break
             result = execute_tool(tc, write_gate, read_gate,
                                   on_output=on_tool_output,
@@ -663,11 +681,24 @@ def _execute_groups(
 
             with ThreadPoolExecutor(max_workers=len(group)) as pool:
                 futures = {pool.submit(_run_piped, i): i for i in group}
+                completed_in_group: set[int] = set()
                 for future in as_completed(futures):
                     if cancel_event is not None and cancel_event.is_set():
                         pool.shutdown(wait=False, cancel_futures=True)
+                        # Append failure results for incomplete in this group
+                        # plus all future groups
+                        incomplete = (set(group) - completed_in_group) | {
+                            idx for g in groups[group_idx + 1:] for idx in g
+                        }
+                        _append_cancel_results(
+                            [remaining[idx] for idx in incomplete], messages,
+                            on_tool_end=on_tool_end,
+                            recent_keys=recent_tool_keys,
+                            lock=tool_keys_lock,
+                        )
                         break
                     i, tc, result = future.result()
+                    completed_in_group.add(i)
                     with results_lock:
                         pipe_results[i] = result
                     _append_tool_result(messages, tc, result, on_tool_end,
@@ -728,6 +759,12 @@ def _execute_tools(
         results: list[tuple[dict, "ToolResult"]] = []
         for i, tc in enumerate(remaining):
             if cancel_event is not None and cancel_event.is_set():
+                _append_cancel_results(
+                    remaining[i:], messages,
+                    on_tool_end=on_tool_end,
+                    recent_keys=recent_tool_keys,
+                    lock=tool_keys_lock,
+                )
                 break
             result = execute_tool(tc, write_gate, read_gate,
                                   on_output=on_tool_output,
@@ -795,14 +832,30 @@ def _api_call_phase(
         idx = tc.pop("_index", -1)
         if idx in executed_tool_indices:
             return
-        executed_tool_indices.add(idx)
         if cancel_event is not None and cancel_event.is_set():
             return
         if on_tool_start is not None:
             on_tool_start(tool_summary(tc))
-        result = execute_tool(tc, write_gate, read_gate,
-                              on_output=on_tool_output,
-                              approve_callback=approve_callback)
+        try:
+            result = execute_tool(tc, write_gate, read_gate,
+                                  on_output=on_tool_output,
+                                  approve_callback=approve_callback)
+            executed_tool_indices.add(idx)
+        except Exception as _exc:
+            # NEVER leave a tool_call_id orphaned — a failure result
+            # must be appended so the next API call doesn't get a 400
+            # "insufficient tool messages following tool_calls" error.
+            from tools import ToolResult as TR
+            import sys as _sys
+            tool_name = tc.get("function", {}).get("name", "?")
+            _sys.stderr.write(
+                f"{type(_exc).__name__}: {_exc}\n"
+            )
+            _sys.stderr.flush()
+            result = TR(
+                success=False,
+                content=f"Tool '{tool_name}' failed during streaming: {_exc}",
+            )
         deferred_stream_results.append((tc, result))
         # on_tool_end is deferred to _tool_execution_phase to avoid
         # double-firing for streaming tools.
@@ -1031,6 +1084,8 @@ def _append_tool_result(
     """Append a tool result message and fire the on_tool_end callback."""
     from tools import ToolResult as TR
     detail = format_tool_detail(result, max_len=TOOL_DETAIL_DISPLAY_LENGTH)
+    tool_name = tc.get("function", {}).get("name", "?")
+    tool_call_id = tc.get("id", "?")
     if on_tool_end is not None:
         on_tool_end(result.success, detail, diff_preview=result.diff_preview)
     messages.append({
@@ -1049,3 +1104,27 @@ def _append_tool_result(
             recent_keys.append(_tool_call_key(tc))
             while len(recent_keys) > _CIRCUIT_WINDOW:
                 recent_keys.popleft()
+
+
+def _append_cancel_results(
+    tool_calls: list[dict],
+    messages: list[dict],
+    *,
+    on_tool_end: Callable[..., Any] | None = None,
+    recent_keys: list[str] | None = None,
+    lock: threading.Lock | None = None,
+) -> None:
+    """Append failure ToolResults for cancelled tool calls.
+
+    Ensures every tool_call_id has a matching tool message so the next
+    API call doesn't get a 400 "insufficient tool messages" error.
+    """
+    from tools import ToolResult as TR
+    for tc in tool_calls:
+        name = tc.get("function", {}).get("name", "?")
+        result = TR(
+            success=False,
+            content=f"Tool '{name}' cancelled.",
+        )
+        _append_tool_result(messages, tc, result, on_tool_end,
+                            recent_keys=recent_keys, lock=lock)

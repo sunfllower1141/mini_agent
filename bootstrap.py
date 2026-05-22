@@ -3,7 +3,7 @@
 
 Extracted from config.py to keep the config module focused on
 configuration loading.  This module ties together config, safety,
-memory, tools, LSP, semantic search, MCP, and the requests session.
+memory, tools, LSP, semantic search, and the requests session.
 """
 from __future__ import annotations
 
@@ -76,23 +76,6 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
                 print(f"  ✨ Auto-init: {result.content[:120]}", file=sys.stderr)
         except OSError as exc:
             print(f"  ⚠ Auto-init skipped: {exc}", file=sys.stderr)
-
-    # Start MCP connections if configured
-    mcp_manager = None
-    if config.mcp_servers:
-        try:
-            from tools.mcp_client import McpClientManager
-            mcp_manager = McpClientManager(config.mcp_servers)
-            connected = mcp_manager.start_all()
-            if connected:
-                set_context(_mcp_manager=mcp_manager)
-                print(
-                    f"MCP: connected to {len(connected)} server(s): "
-                    f"{', '.join(connected)}",
-                    file=sys.stderr,
-                )
-        except OSError as exc:
-            print(f"Warning: MCP init failed: {exc}", file=sys.stderr)
 
     saved = memory.load()
     # Prune loaded conversation to avoid massive first-turn payload

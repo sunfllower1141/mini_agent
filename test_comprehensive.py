@@ -167,7 +167,6 @@ class TestCoordinationPatternsEndToEnd(unittest.TestCase):
             allow_overwrites = True; approve_write_ops = False
             api_key = ""; api_url = ""; stream = False; verbose = False
             sub_agent_api_key = ""; max_messages = 500; max_tokens = 200000
-            exa_api_key = ""; openai_api_key = ""; mcp_servers = []
 
         self.config = _Cfg()
 
@@ -247,7 +246,6 @@ class TestPipelineOrdering(unittest.TestCase):
             allow_overwrites = True; approve_write_ops = False
             api_key = ""; api_url = ""; stream = False; verbose = False
             sub_agent_api_key = ""; max_messages = 500; max_tokens = 200000
-            exa_api_key = ""; openai_api_key = ""; mcp_servers = []
 
         self.config = _Cfg()
 
@@ -455,7 +453,6 @@ class TestSubAgentRecursion(unittest.TestCase):
             allow_overwrites = True; approve_write_ops = False
             api_key = ""; api_url = ""; stream = False; verbose = False
             sub_agent_api_key = ""; max_messages = 500; max_tokens = 200000
-            exa_api_key = ""; openai_api_key = ""; mcp_servers = []
 
         self.config = _Cfg()
 

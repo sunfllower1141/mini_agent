@@ -1,7 +1,7 @@
 """Lint all Python source files by compiling them.
 
 Catches syntax errors that ``run_tests`` would miss if the broken module
-is never imported by a test (e.g. mini_agent.py which is the entry point).
+is never imported by a test (e.g. tui_pt.py which is the entry point).
 """
 
 import os
@@ -9,8 +9,6 @@ import py_compile
 
 ROOT = os.path.dirname(__file__)
 SOURCES = [
-    "mini_agent.py",
-    "tui.py",
     "llm.py",
     "prompt.py",
     "terminal.py",

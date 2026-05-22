@@ -128,6 +128,43 @@ def _compute_complexity(messages: list[dict]) -> str:
     return "complex"
 
 
+def _strip_orphaned_tool_calls(messages: list[dict]) -> list[dict]:
+    """Remove trailing assistant messages whose tool_calls lack matching
+    tool result messages.  Prevents 400 "insufficient tool messages
+    following tool_calls" errors from the API.
+
+    Returns a new list (never mutates the cached *messages* list).
+    """
+    # Walk backwards tracking which tool_call_ids have been seen.
+    seen_ids: set[str] = set()
+    strip_count = 0
+    for i in range(len(messages) - 1, -1, -1):
+        m = messages[i]
+        role = m.get("role", "")
+        if role == "tool":
+            tcid = m.get("tool_call_id")
+            if tcid:
+                seen_ids.add(tcid)
+        elif role == "assistant" and "tool_calls" in m:
+            tc_ids = [tc.get("id") for tc in m.get("tool_calls", []) if tc.get("id")]
+            if all(tcid in seen_ids for tcid in tc_ids):
+                # Fully covered — not orphaned. Continue scanning.
+                continue
+            else:
+                # Orphan: assistant has tool_calls with no matching results after it.
+                strip_count += 1
+                continue
+        elif role in ("user", "system"):
+            # user / system — stop, they break the tool-result chain
+            break
+        # else: text-only assistant or other — keep scanning backwards;
+        # a text-only assistant does not break the tool-call chain, it
+        # just sits between completed tool-call blocks.
+    if strip_count:
+        return messages[:-strip_count]
+    return messages
+
+
 def _build_payload(
     config: AgentConfig,
     messages: list[dict],
@@ -247,7 +284,12 @@ def call_llm(
             clean_messages.append(_clean_message(messages[i], i, provider))
         _clean_messages_cache[list_id] = (current_len, provider, clean_messages)
 
-    payload = _build_payload(config, messages, clean_messages)
+    # Safety net: strip any trailing assistant(tool_calls) messages that
+    # lack matching tool result messages.  An orphan here causes a 400
+    # "insufficient tool messages following tool_calls" from the API.
+    safe_messages = _strip_orphaned_tool_calls(clean_messages)
+
+    payload = _build_payload(config, messages, safe_messages)
 
     # Build proxies dict if SOCKS proxy is configured
     proxies_dict = None
@@ -290,6 +332,20 @@ def call_llm(
             err = r.json()
         except (ValueError, AttributeError):
             err = r.text
+        # --- Persist full error payload/response to api_error.log ---
+        import datetime as _dt, os as _os
+        _log_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "api_error.log")
+        try:
+            with open(_log_path, "a") as _f:
+                _f.write(f"\n{'='*80}\n")
+                _f.write(f"TIME: {_dt.datetime.now().isoformat()}\n")
+                _f.write(f"STATUS: {r.status_code}\n")
+                _f.write(f"RESPONSE_BODY:\n{str(err)}\n")
+                _f.write(f"PAYLOAD_MESSAGES_COUNT: {len(safe_messages)}\n")
+                _f.write(f"PAYLOAD:\n{json.dumps(payload, indent=2, default=str)}\n")
+                _f.write(f"{'='*80}\n")
+        except OSError:
+            pass  # Don't let logging break the error path
         raise APIError(status_code=r.status_code, body=str(err))
 
     if config.stream:

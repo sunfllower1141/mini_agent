@@ -221,7 +221,7 @@ _STATIC_PROMPT = (
     "\n"
     "Session tools: session_stats (turns/tokens/agents), recall_turn (recover pruned context).\n"
     "\n"
-    "External: mcp_discover/mcp_call (MCP tools), read_image (GPT-4o vision for screenshots/diagrams).\n"
+    "External: read_image (GPT-4o vision for screenshots/diagrams).\n"
 )
 
 # ---------------------------------------------------------------------------

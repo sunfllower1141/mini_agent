@@ -34,7 +34,7 @@ from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout.containers import (
-    FloatContainer, HSplit, VSplit, Window, to_container,
+    HSplit, VSplit, Window, to_container,
 )
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import D
@@ -46,6 +46,8 @@ from pygments.lexers.python import PythonLexer
 from pygments.style import Style as PygmentsStyle
 from pygments.token import Token
 
+import re as _re
+
 from config import (
     resolve_workspace, init_session, parse_args,
     build_startup_context, list_sessions, switch_session, delete_session,
@@ -55,6 +57,11 @@ from stream import THINKING_START, THINKING_END
 from safety import ReadSafetyGate, WriteSafetyGate
 from api import clear_api_cache
 from prompt import build_system_prompt
+
+# Pre-compiled regex for stripping ANSI escape sequences (used in _strip_ansi).
+_ANSI_RE = _re.compile(
+    r'\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07]*\x07|\x1b[PX^_].*?\x1b\\'
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -213,8 +220,13 @@ class ChatBuffer:
             self._dirty = True
 
     def get_text(self) -> str:
-        """Return full log as a single string (for syncing to TextArea).
-        Clears the dirty flag — call only when syncing to display."""
+        """Return full log as a single string without clearing the dirty flag."""
+        with self._lock:
+            return '\n'.join(text for _, text in self._lines)
+
+    def consume_text(self) -> str:
+        """Return full log as a single string and clear the dirty flag.
+        Call only when syncing to display — never call twice in one cycle."""
         with self._lock:
             self._dirty = False
             return '\n'.join(text for _, text in self._lines)
@@ -239,10 +251,6 @@ class ChatBuffer:
 
 def _h_line() -> Window:
     return Window(height=1, char=BOX_H, style="class:border")
-
-
-def _v_line() -> Window:
-    return Window(width=1, char=BOX_V, style="class:border")
 
 
 def rounded_frame(content, title: str | None = None, width=None) -> HSplit:
@@ -305,8 +313,7 @@ class AgentWorker(threading.Thread):
                  session, turn_id: int,
                  chat_buf: ChatBuffer,
                  tools_buf: ChatBuffer,
-                 thinking_buf: ChatBuffer,
-                 subagent_bufs: dict | None = None):
+                 thinking_buf: ChatBuffer):
         super().__init__(daemon=True)
         self.messages = messages
         self.config = config
@@ -317,8 +324,6 @@ class AgentWorker(threading.Thread):
         self.chat_buf = chat_buf
         self.tools_buf = tools_buf
         self.thinking_buf = thinking_buf
-        self.subagent_bufs = subagent_bufs or {}
-        self._subagent_dead: set[str] = set()
         self.cancel = threading.Event()
         self._thinking_text = ""
         self._in_thinking = False
@@ -364,13 +369,7 @@ class AgentWorker(threading.Thread):
             self.chat_buf.append_last(text, style="msg-agent")
     def _on_tool_start(self, summary: str, parallel: bool = False):
         label = f"⚡ {summary}" if parallel else f"🔧 {summary}"
-        # Route agent-related tool calls to sub-agent buffer
-        tool_name = summary.split(":", 1)[0].strip() if ":" in summary else summary.split("(", 1)[0].strip()
-        if tool_name in _AGENT_TOOLS:
-            # Route to tools_buf — per-task subagent streaming handles via tui_queue
-            self.tools_buf.append(label)
-        else:
-            self.tools_buf.append(label)
+        self.tools_buf.append(label)
 
     def _on_tool_end(self, ok: bool, detail: str,
                      turn_id: int = 0, diff_preview=None):
@@ -380,19 +379,6 @@ class AgentWorker(threading.Thread):
         for sub in line.split('\n'):
             if sub.strip():
                 self.tools_buf.append(f"    {sub}")
-
-
-# ---------------------------------------------------------------------------
-# Agent tool names — routed to sub-agent output window
-# ---------------------------------------------------------------------------
-
-_AGENT_TOOLS: set[str] = {
-    "spawn_agent", "agent_status", "collect_agent", "collect_any",
-    "agent_message", "agent_read", "agent_extend", "agent_cancel",
-    "agent_handoff", "agent_inbox", "agent_subscribe",
-    "fan_out", "fan_in", "pipeline", "barrier", "scatter_gather",
-    "wait_for_agent",
-}
 
 
 # ---------------------------------------------------------------------------
@@ -422,7 +408,6 @@ class MiniAgentTUI:
         self.thinking_buf = ChatBuffer()
         self.subagent_bufs: dict[str, ChatBuffer] = {}  # per-task-id buffers
         self._subagent_dead: set[str] = set()  # agents to remove next sync
-        self.subagent_buf = ChatBuffer()  # legacy single buffer for agent tool commands
 
         # Startup info
         self.tools_buf.append(f"mini_agent — {self.config.model}")
@@ -567,8 +552,7 @@ class MiniAgentTUI:
     def _strip_ansi(text: str) -> str:
         """Strip ANSI escape sequences (colour codes, etc.) so they don't
         corrupt the prompt-toolkit alternate screen."""
-        import re
-        return re.sub(r'\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07]*\x07|\x1b[PX^_].*?\x1b\\', '', text)
+        return _ANSI_RE.sub('', text)
 
     def _drain_subagent_queue(self):
         """Drain sub-agent streaming tokens from tui_queue into per-task buffers."""
@@ -624,16 +608,16 @@ class MiniAgentTUI:
         on every refresh cycle.  Skips buffers that haven't changed (dirty
         tracking) to keep input responsive during fast typing."""
         # Guard: TextAreas not yet created (before _build_layout runs)
-        if not hasattr(self, 'chat_area') or self.chat_area is None:
+        if self.chat_area is None:
             return
 
         if self.tools_area is not None and self.tools_buf.dirty:
-            self.tools_area.text = self.tools_buf.get_text()
+            self.tools_area.text = self.tools_buf.consume_text()
             self.tools_area.buffer.cursor_position = \
                 len(self.tools_area.buffer.text)
 
         if self.thinking_area is not None and self.thinking_buf.dirty:
-            self.thinking_area.text = self.thinking_buf.get_text()
+            self.thinking_area.text = self.thinking_buf.consume_text()
             self.thinking_area.buffer.cursor_position = \
                 len(self.thinking_area.buffer.text)
 
@@ -663,7 +647,7 @@ class MiniAgentTUI:
                 self.subagent_areas[tid] = area
                 needs_rebuild = True
             if buf.dirty:
-                self.subagent_areas[tid].text = buf.get_text()
+                self.subagent_areas[tid].text = buf.consume_text()
                 self.subagent_areas[tid].buffer.cursor_position = \
                     len(self.subagent_areas[tid].buffer.text)
 
@@ -683,7 +667,7 @@ class MiniAgentTUI:
         self._subagent_dead.clear()
 
         if self.chat_area is not None and self.chat_buf.dirty:
-            self.chat_area.text = self.chat_buf.get_text()
+            self.chat_area.text = self.chat_buf.consume_text()
             self.chat_area.buffer.cursor_position = \
                 len(self.chat_area.buffer.text)
 
@@ -758,7 +742,6 @@ class MiniAgentTUI:
             chat_buf=self.chat_buf,
             tools_buf=self.tools_buf,
             thinking_buf=self.thinking_buf,
-            subagent_bufs=self.subagent_bufs,
         )
         self.worker.start()
         return True
@@ -784,7 +767,6 @@ class MiniAgentTUI:
             self._total_turns = 0
             self._total_tokens = 0
             self.tools_buf.append("--- conversation cleared ---")
-            self.subagent_buf.append("--- conversation cleared ---")
             return
 
         if cmd == "/help":
@@ -795,7 +777,7 @@ class MiniAgentTUI:
                 "/init      Reinitialize rules + toml",
                 "/stats     Show session stats",
                 "/session   new | switch | delete | list",
-                "/shell     Drop to real shell (Ctrl+D to return)",
+                "/python    Drop to Python REPL (Ctrl+D to return)",
                 "/theme     Show theme info",
                 "/workspace Switch workspace",
             ]:
@@ -906,8 +888,8 @@ class MiniAgentTUI:
             self.tools_buf.append(result.content)
             return
 
-        if cmd == "/shell":
-            self.tools_buf.append("Dropping to shell — type 'exit' or Ctrl+D to return.")
+        if cmd == "/python":
+            self.tools_buf.append("Dropping to Python REPL — type 'exit' or Ctrl+D to return.")
             self.messages = self.memory.save(self.messages)
             self.app.exit()
             import code
@@ -993,7 +975,54 @@ class MiniAgentTUI:
     # ------------------------------------------------------------------
 
     def run(self):
-        self.app.run()
+        # Register an atexit handler BEFORE running the app so it fires
+        # after prompt_toolkit's own cleanup on any exit path (Ctrl+C,
+        # Ctrl+Q, crash, KeyboardInterrupt).  Writing directly to /dev/tty
+        # avoids the risk that sys.stdout has been disconnected from the
+        # real terminal by prompt_toolkit's internal output layer.
+        import atexit
+        cleaned_up = []
+
+        def _force_terminal_reset():
+            # Only run once (atexit handlers may fire on both normal exit
+            # and during interpreter finalization).
+            if cleaned_up:
+                return
+            cleaned_up.append(True)
+            codes = [
+                '\033[?1000l',  # Disable basic mouse tracking
+                '\033[?1002l',  # Disable button-event mouse
+                '\033[?1003l',  # Disable any-event mouse
+                '\033[?1006l',  # Disable SGR mouse mode
+                '\033[?1049l',  # Exit alternate screen
+                '\033[?25h',    # Show cursor
+                '\033[0m',      # Reset SGR attributes
+            ]
+            # Prefer /dev/tty — the real terminal.  Fall back to stdout
+            # (which may work depending on how prompt_toolkit exits).
+            for target in ('/dev/tty', None):
+                try:
+                    if target is not None:
+                        f = open(target, 'w')
+                    else:
+                        f = sys.stdout
+                    for code in codes:
+                        f.write(code)
+                    f.flush()
+                    if target is not None:
+                        f.close()
+                    break  # succeeded, don't try next target
+                except (OSError, IOError):
+                    continue
+
+        atexit.register(_force_terminal_reset)
+
+        try:
+            self.app.run()
+        finally:
+            # Belt-and-suspenders: also run the reset immediately when
+            # app.run() returns, in case atexit hasn't fired yet.
+            _force_terminal_reset()
 
 
 # ---------------------------------------------------------------------------
@@ -1001,7 +1030,9 @@ class MiniAgentTUI:
 # ---------------------------------------------------------------------------
 
 def _cleanup_orphans():
-    """Kill stale pylsp processes from previous sessions."""
+    """Kill stale pylsp processes from previous sessions.
+    Called both at startup (to clean up after a previous crash) and at
+    exit (to clean up after the current session)."""
     try:
         subprocess.run(
             ["pkill", "-f", "pylsp"],
@@ -1013,13 +1044,18 @@ if __name__ == "__main__":
     # Redirect stderr to a log file so random warnings / debug prints from
     # tools and subprocess modules don't corrupt the prompt_toolkit TUI layout.
     _stderr_log_path = os.path.join(os.path.dirname(__file__), "tui_stderr.log")
+    _original_stderr = sys.stderr
     sys.stderr = open(_stderr_log_path, "a")
 
-    # Kill orphaned LSP processes from previous sessions
+    # Kill orphaned LSP processes from previous crashed sessions
     _cleanup_orphans()
 
-    # Ensure cleanup on normal exit
+    # Ensure cleanup on normal exit (also restores stderr)
     import atexit
-    atexit.register(_cleanup_orphans)
+    def _exit_handler():
+        _cleanup_orphans()
+        sys.stderr.close()
+        sys.stderr = _original_stderr
+    atexit.register(_exit_handler)
 
     MiniAgentTUI().run()

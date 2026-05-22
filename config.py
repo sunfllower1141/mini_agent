@@ -168,23 +168,6 @@ CLI_UNRESTRICTED     = "--unrestricted"
 
 
 # ---------------------------------------------------------------------------
-# MCP server config
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class McpServerConfig:
-    """One MCP server definition, parsed from ``[[mcp_server]]`` TOML blocks."""
-
-    name: str                           # unique, e.g. "filesystem"
-    command: str = ""                    # executable (required for stdio)
-    args: list[str] = field(default_factory=list)
-    env: dict[str, str] = field(default_factory=dict)
-    cwd: str = ""                       # "" means inherit workspace
-    enabled: bool = True
-
-
-# ---------------------------------------------------------------------------
 # Config object
 # ---------------------------------------------------------------------------
 
@@ -225,7 +208,6 @@ class AgentConfig:
     openai_api_key: str = DEFAULT_OPENAI_API_KEY
     approve_write_ops: bool = False
     unrestricted: bool = False
-    mcp_servers: list[McpServerConfig] = field(default_factory=list)
     socks_proxy: str = ""  # SOCKS5 proxy URL (auto-set on Windows for SSH tunnel)
 
     # ------------------------------------------------------------------
@@ -349,7 +331,6 @@ _TOML_SCHEMA: dict[str, type] = {
     "openai_api_key": str,
     "approve_write_ops": bool,
     "unrestricted": bool,
-    "mcp_server": list,
 }
 
 
@@ -362,28 +343,6 @@ def _apply_toml(config: AgentConfig, data: dict) -> None:
         if key not in _TOML_SCHEMA:
             continue
         expected = _TOML_SCHEMA[key]
-
-        # ``[[mcp_server]]`` TOML syntax produces a list of dicts.
-        if key == "mcp_server":
-            if not isinstance(value, list):
-                print(
-                    f"Warning: .mini_agent.toml key 'mcp_server' expected list, "
-                    f"got {type(value).__name__} — skipping",
-                    file=sys.stderr,
-                )
-                continue
-            for entry in value:
-                if not isinstance(entry, dict):
-                    continue
-                config.mcp_servers.append(McpServerConfig(
-                    name=entry.get("name", ""),
-                    command=entry.get("command", ""),
-                    args=entry.get("args", []),
-                    env=entry.get("env", {}),
-                    cwd=entry.get("cwd", ""),
-                    enabled=entry.get("enabled", True),
-                ))
-            continue
 
         if not isinstance(value, expected):
             print(

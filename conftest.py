@@ -5,6 +5,7 @@
 - Orders benchmarks last when included to minimize cross-test hangs.
 """
 
+import os
 import pytest
 
 
@@ -27,7 +28,7 @@ def pytest_ignore_collect(collection_path, config):
     if "venv" in parts or ".venv" in parts:
         return True
 
-    if config.getoption("--run-benchmarks", default=False):
+    if config.getoption("--run-benchmarks"):
         return False
     if collection_path.name == "test_benchmarks.py":
         return True
@@ -39,7 +40,7 @@ def pytest_collection_modifyitems(config, items) -> None:
     benchmark_items = []
     other_items = []
     for item in items:
-        if "test_benchmarks" in item.nodeid:
+        if os.path.basename(item.location[0]) == "test_benchmarks.py":
             benchmark_items.append(item)
         else:
             other_items.append(item)
