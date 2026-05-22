@@ -1029,6 +1029,19 @@ def run_agent_turn(
 
             # Plain text response — turn is finished
             if not msg.get("tool_calls"):
+                # Safety net: model returned empty tool_calls with no content —
+                # it's choking on a big task. Inject a recovery nudge and retry.
+                content = (msg.get("content") or "").strip()
+                if not content:
+                    recovery = (
+                        "You responded with empty output. This usually means "
+                        "the task was too large to process in one step. "
+                        "Break it down: pick ONE small, concrete next action "
+                        "(read a file, search for something, write one function) "
+                        "and call exactly ONE tool. Do not try to do everything at once."
+                    )
+                    messages.append({"role": "user", "content": recovery})
+                    continue  # retry the turn loop
                 if total_usage:
                     msg["_total_usage"] = total_usage
                 if turn_count > 1:

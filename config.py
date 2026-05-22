@@ -72,12 +72,12 @@ PROVIDER_DEFAULTS: dict[str, ProviderDefaults] = {
         routing_model="",
     ),
     "ollama": ProviderDefaults(
-        model="devstral-small-2:32k",
-        sub_agent_model="devstral-small-2:32k",  # local LLM: no cheaper variant installed, use same model
+        model="qwen3.6",
+        sub_agent_model="qwen3.6",  # local LLM: no cheaper variant installed, use same model
         # Camoproj VM: RTX 6000 Ada 48GB, accessible via Tailscale at 100.79.96.42
         api_url="http://100.79.96.42:11434/v1/chat/completions",
         max_tokens=8_192,
-        context_window=32_768,  # devstral-small-2:32k — reduced from 131k to fit KV cache in 48GB VRAM (100% GPU)
+        context_window=65_536,  # qwen3.6: capped at 64K to fit KV cache in 48GB VRAM
         routing_model="",
     ),
 }

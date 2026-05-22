@@ -64,8 +64,8 @@ def build_system_prompt(config: "AgentConfig") -> str:
             "step-by-step guidance for complex multi-file refactors."
         ),
         "ollama": (
-            "Note: running on local Ollama (Qwen3.6-27B). Context window is smaller "
-            "(262K tokens). Be extra vigilant about scratchpad use and avoid very long "
+            "Note: running on local Ollama (qwen3.6). Context window is smaller "
+            "(64K tokens). Be extra vigilant about scratchpad use and avoid very long "
             "conversations without pruning."
         ),
     }

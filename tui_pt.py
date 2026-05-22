@@ -966,12 +966,12 @@ class MiniAgentTUI:
             r = subprocess.run(
                 ["git", "branch", "--show-current"],
                 cwd=self.config.workspace,
-                capture_output=True, text=True, timeout=3)
+                capture_output=True, text=True, encoding="utf-8", timeout=3)
             self._git_branch = r.stdout.strip()
             r2 = subprocess.run(
                 ["git", "status", "--porcelain"],
                 cwd=self.config.workspace,
-                capture_output=True, text=True, timeout=3)
+                capture_output=True, text=True, encoding="utf-8", timeout=3)
             self._git_dirty = bool(r2.stdout.strip())
         except Exception:
             self._git_branch = ""
@@ -1010,7 +1010,7 @@ class MiniAgentTUI:
             for target in ('/dev/tty', None):
                 try:
                     if target is not None:
-                        f = open(target, 'w')
+                        f = open(target, 'w', encoding='utf-8')
                     else:
                         f = sys.stdout
                     for code in codes:
@@ -1048,11 +1048,20 @@ def _cleanup_orphans():
         pass  # pkill may not exist, or no orphans to kill
 
 if __name__ == "__main__":
+    # Ensure stdout/stderr use UTF-8 regardless of the system locale.
+    # Without this, Unicode box-drawing chars and emojis will break on
+    # terminals or CI environments that default to ASCII/Latin-1.
+    for _stream, _name in ((sys.stdout, "stdout"), (sys.stderr, "stderr")):
+        try:
+            _stream.reconfigure(encoding="utf-8")
+        except (AttributeError, OSError):
+            pass  # Python < 3.7 or already closed — ignore
+
     # Redirect stderr to a log file so random warnings / debug prints from
     # tools and subprocess modules don't corrupt the prompt_toolkit TUI layout.
     _stderr_log_path = os.path.join(os.path.dirname(__file__), "tui_stderr.log")
     _original_stderr = sys.stderr
-    sys.stderr = open(_stderr_log_path, "a")
+    sys.stderr = open(_stderr_log_path, "a", encoding="utf-8")
 
     # Kill orphaned LSP processes from previous crashed sessions
     _cleanup_orphans()
