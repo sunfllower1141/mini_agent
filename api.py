@@ -130,15 +130,18 @@ def _compute_complexity(messages: list[dict]) -> str:
 
 
 def _strip_orphaned_tool_calls(messages: list[dict]) -> list[dict]:
-    """Remove trailing assistant messages whose tool_calls lack matching
+    """Remove assistant messages whose tool_calls lack matching
     tool result messages.  Prevents 400 "insufficient tool messages
     following tool_calls" errors from the API.
 
     Returns a new list (never mutates the cached *messages* list).
     """
-    # Walk backwards tracking which tool_call_ids have been seen.
+    # First pass: walk backwards to find which tool_call_ids are satisfied.
+    # A tool_call is satisfied if a tool result with matching id appears
+    # after it (i.e., after it in forward order = before it in backward scan).
     seen_ids: set[str] = set()
-    strip_count = 0
+    # Second pass: mark indices of orphaned assistant(tool_calls) messages.
+    orphan_indices: set[int] = set()
     for i in range(len(messages) - 1, -1, -1):
         m = messages[i]
         role = m.get("role", "")
@@ -148,21 +151,16 @@ def _strip_orphaned_tool_calls(messages: list[dict]) -> list[dict]:
                 seen_ids.add(tcid)
         elif role == "assistant" and "tool_calls" in m:
             tc_ids = [tc.get("id") for tc in m.get("tool_calls", []) if tc.get("id")]
-            if all(tcid in seen_ids for tcid in tc_ids):
-                # Fully covered — not orphaned. Continue scanning.
-                continue
-            else:
-                # Orphan: assistant has tool_calls with no matching results after it.
-                strip_count += 1
-                continue
-        elif role in ("user", "system"):
-            # user / system — stop, they break the tool-result chain
-            break
-        # else: text-only assistant or other — keep scanning backwards;
-        # a text-only assistant does not break the tool-call chain, it
-        # just sits between completed tool-call blocks.
-    if strip_count:
-        return messages[:-strip_count]
+            if not tc_ids:
+                continue  # tool_calls with no ids — skip
+            if not all(tcid in seen_ids for tcid in tc_ids):
+                # Orphan: tool_calls with no matching results after it.
+                orphan_indices.add(i)
+        # NOTE: do NOT break on user/system — memory pruning may have
+        # removed tool results while leaving orphaned assistant(tool_calls)
+        # earlier in the conversation, separated by user messages.
+    if orphan_indices:
+        return [m for i, m in enumerate(messages) if i not in orphan_indices]
     return messages
 
 

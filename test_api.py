@@ -225,10 +225,9 @@ class TestStripOrphanedToolCalls(unittest.TestCase):
         self.assertEqual(len(result), 1)  # only the first user msg
         self.assertEqual(result[0]["role"], "user")
 
-    def test_user_message_after_tool_call_is_not_stripped(self):
-        # A user message after an assistant(tool_calls) breaks the tool-result
-        # chain, so the assistant is left in place (it won't be reached by the
-        # backwards scan which stops at user messages).
+    def test_user_message_after_tool_call_is_stripped(self):
+        # An assistant(tool_calls) with no matching tool results is orphaned
+        # regardless of intervening user messages — leaving it in causes a 400.
         msgs = [
             {"role": "user", "content": "read file"},
             {"role": "assistant", "content": None, "tool_calls": [
@@ -237,8 +236,10 @@ class TestStripOrphanedToolCalls(unittest.TestCase):
             {"role": "user", "content": "next request"},
         ]
         result = _strip_orphaned_tool_calls(msgs)
-        # User message at end breaks the backwards scan, so nothing stripped
-        self.assertEqual(len(result), 3)
+        # Orphaned assistant(tool_calls) is stripped even with user after it
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0]["role"], "user")
+        self.assertEqual(result[1]["role"], "user")
 
     def test_mixed_covered_and_orphaned(self):
         msgs = [
