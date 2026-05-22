@@ -14,10 +14,12 @@ venv/
 
 # Runtime data
 tui_stderr.log
-.mini_agent_memory.db
-.mini_agent_memory.db-shm
-.mini_agent_memory.db-wal
+*.db
+*.db-shm
+*.db-wal
 .mini_agent_index.json
+logs/
+api_error.log
 
 # Secrets / local config (contains API keys)
 keys
