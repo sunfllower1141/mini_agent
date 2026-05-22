@@ -221,6 +221,30 @@ def run_sub_agent(
                 _f.write(f"\n## Result\n\n{result.content}\n")
                 if result.scratchpad:
                     _f.write(f"\n## Scratchpad\n\n{result.scratchpad}\n")
+            # Auto-cleanup: keep only the most recent N reports by mtime
+            _MAX_REPORTS = 20
+            _report_dir = "reports"
+            try:
+                _all_reports = sorted(
+                    [_os.path.join(_report_dir, f) for f in _os.listdir(_report_dir) if f.endswith(".md")],
+                    key=_os.path.getmtime,
+                )
+                for _old in _all_reports[:-_MAX_REPORTS]:
+                    _os.remove(_old)
+            except OSError:
+                pass  # best-effort cleanup
+            # Auto-cleanup: keep only the most recent N stderr logs by mtime
+            _MAX_LOGS = 20
+            _log_dir = "logs"
+            try:
+                _all_logs = sorted(
+                    [_os.path.join(_log_dir, f) for f in _os.listdir(_log_dir) if f.endswith("_stderr.log")],
+                    key=_os.path.getmtime,
+                )
+                for _old in _all_logs[:-_MAX_LOGS]:
+                    _os.remove(_old)
+            except OSError:
+                pass  # best-effort cleanup
             # Smart inline preview: prioritize findings/structured content over preamble.
             # Scan for finding markers; if found, show those. Otherwise fall back to head truncation.
             _content = result.content

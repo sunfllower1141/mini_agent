@@ -147,16 +147,14 @@ def _spawn_one(
     def _runner() -> None:
         import sys as _sys
         tui_queue = getattr(_TOOL_CONTEXT, "_tui_queue", None)
-        # ---- Redirect stderr to log file to prevent TUI corruption ----
+        # ---- Redirect stderr to buffer to prevent TUI corruption ----
         # Any print(..., file=sys.stderr) from sub-agents or the tools they
         # invoke will break the prompt_toolkit alternate-screen layout.
-        # Capture stderr to a per-task log file instead.
-        import os as _os
-        _os.makedirs("logs", exist_ok=True)
-        _stderr_log_path = f"logs/sub_agent_{task_id}_stderr.log"
-        _stderr_log = open(_stderr_log_path, "a", encoding="utf-8")
+        # Capture stderr in a StringIO buffer; only flush to disk if non-empty.
+        from io import StringIO as _StringIO
+        _stderr_buf = _StringIO()
         _saved_stderr = _sys.stderr
-        _sys.stderr = _stderr_log
+        _sys.stderr = _stderr_buf
         # ---- end stderr redirect ----
         # Set depth context for tools called by this sub-agent
         current_depth = parent_depth + 1
@@ -201,9 +199,15 @@ def _spawn_one(
                 tui_queue.put(("sub_tree", "status", task_id, status))
         finally:
             config.stream = original_stream
-            # ---- Restore stderr ----
+            # ---- Restore stderr + flush buffer to disk only if non-empty ----
             _sys.stderr = _saved_stderr
-            _stderr_log.close()
+            _stderr_text = _stderr_buf.getvalue()
+            _stderr_buf.close()
+            if _stderr_text:
+                import os as _os
+                _os.makedirs("logs", exist_ok=True)
+                with open(f"logs/sub_agent_{task_id}_stderr.log", "w", encoding="utf-8") as _lf:
+                    _lf.write(_stderr_text)
             # ---- end restore stderr ----
             # Restore agent context so parent isn't polluted
             _TOOL_CONTEXT._agent_depth = parent_depth
