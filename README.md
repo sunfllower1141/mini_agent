@@ -1,16 +1,19 @@
 # mini_agent
 
-A coding agent with **56 tools** powered by DeepSeek, Claude, or xAI/Grok. Prompt-toolkit TUI or plain terminal REPL. SQLite-backed memory with cross-session project knowledge. Headless browser automation via Playwright. Multi-agent orchestration with 5 coordination patterns and inter-agent messaging. Cross-platform: macOS, Linux, and Windows.
+A coding agent with **59 tools** powered by DeepSeek, Claude, or xAI/Grok. Prompt-toolkit TUI or plain terminal REPL. SQLite-backed memory with cross-session project knowledge. Headless browser automation via Playwright. Multi-agent orchestration with 5 coordination patterns and inter-agent messaging. Lazy skill loading via `use_skill` gate. MCP (Model Context Protocol) integration. Error trace logging. Cross-platform: macOS, Linux, and Windows.
 
 ## Features
 
 ### Core
-- **56 tools**: file operations (read/write/edit/list/info/scratchpad/diff/restore), shell commands (run_shell, run_tests, git, task_status), search (find_symbol, find_usages, search_files, semantic_search, web_search, recall_turn, fetch_url), planning (plan, plan_status, todo_write, todo_read), verification (verify, diagnose_failures), LSP integration via pylsp (definition, references, hover, diagnostics), headless browser automation via Playwright (navigate, snapshot, click, type, screenshot, open_url), read_image (GPT-4o vision), session_stats, init, remember, and 17 multi-agent tools
+- **59 tools**: file operations (read/write/edit/list/info/scratchpad/diff/restore), shell commands (run_shell, run_tests, git, task_status), search (find_symbol, find_usages, search_files, semantic_search, web_search, recall_turn, fetch_url), planning (plan, plan_status, todo_write, todo_read), verification (verify, diagnose_failures), LSP integration via pylsp (definition, references, hover, diagnostics), MCP integration (mcp_discover, mcp_call), headless browser automation via Playwright (navigate, snapshot, click, type, screenshot, open_url), read_image (GPT-4o vision), skills (use_skill with lazy tool loading), session_stats, init, remember, and 17 multi-agent tools
 - **Three LLM providers**: DeepSeek V4 Pro (default), Claude Sonnet 4.5, and xAI Grok 4.3 — switch via `API_PROVIDER` env var or `api_provider` in `.mini_agent.toml`. Separate API keys supported via `SUB_AGENT_API_KEY` to isolate sub-agent quota
 - **Cross-platform**: macOS, Linux, and full Windows support — ANSI terminal, Git Bash/PowerShell/cmd.exe shell execution, LSP queue-based reader
 - **Streaming**: token-by-token responses with live tool output
 - **File reservations**: threading.Lock prevents cross-agent write collisions
 - **3-pass fuzzy edit**: edit_file uses cascading whitespace-tolerant matching (exact → trailing-tolerant → indent-tolerant)
+- **Error trace logging**: exceptions in the TUI chat window are captured with timestamps, tracebacks, and last 20 messages to `error_traces.log`
+- **Skills system**: `use_skill` gate activates lazy-loaded tool sets (git, web, test, planning, agents, search, image, lsp, bootstrap) — tools loaded on first use to keep the base tool set lean
+- **MCP integration**: Model Context Protocol client for stdio JSON-RPC tool discovery and invocation (`mcp_discover` + `mcp_call`), server config in `.mini_agent.toml [agent.mcp_servers]`
 
 ### Multi-Agent
 - **10 concurrent sub-agents** (configurable via `sub_agent_max_concurrent` in TOML) running in background threads
@@ -196,7 +199,11 @@ python -m pytest
 | `lsp_hover` | Type/docs on hover (pylsp) |
 | `lsp_diagnostics` | Errors/warnings for file (pylsp) |
 
-
+### MCP (2)
+| Tool | Description |
+|------|-------------|
+| `mcp_discover` | List all MCP tools from connected servers (stdio JSON-RPC) |
+| `mcp_call` | Call an MCP tool by server/tool/arguments |
 
 ### Browser Automation (6)
 | Tool | Description |
@@ -246,10 +253,16 @@ python -m pytest
 | `todo_write` | Create or update a todo item for tracking progress |
 | `todo_read` | Read current todo list (filter by id or status) |
 
+### Skills (1)
+| Tool | Description |
+|------|-------------|
+| `use_skill` | Activate lazy-loaded skill groups (git, web, test, planning, agents, search, image, lsp, bootstrap) — tools loaded on first use |
+
 ## Architecture
 
 ```
-tui_pt.py             Prompt-toolkit TUI — live streaming, tools/chat panels, slash commands
+tui_pt.py             Prompt-toolkit TUI — live streaming, tools/chat panels, slash commands,
+                      error trace logging to error_traces.log
 llm.py                LLM turn orchestration, circuit breaker, tool piping/grouping, context injection
 api.py                API calls (call_llm), provider routing (deepseek/claude/xai), message cleaning cache
 prompt.py             System prompt + .mini_agent.rules injection + project knowledge
@@ -263,10 +276,12 @@ stream.py             SSE stream parser
 agent_runtime.py      Sub-agent lifecycle, file reservations, inboxes, subscriptions, snapshots
 sub_agent.py          Sub-agent loop — progress-based termination (hung/error-loop detection),
                       streaming snapshots, heartbeats, reports to reports/<id>.md
+conftest.py           Pytest configuration + shared test helpers (make_tool_call, gates, fixtures)
 tools/
   __init__.py         Tool dispatch, cached signatures, per-tool timeout (120s),
-                      auto-learn failure patterns, JSON repair, file reservations
-  schema.py           TOOLS definitions (56 tools)
+                      auto-learn failure patterns, JSON repair, file reservations,
+                      use_skill gate for lazy skill loading
+  schema.py           TOOLS definitions (59 tools)
   file_ops.py         read/write/edit/list/info — cross-agent collision detection,
                       cascading fuzzy whitespace match (3-pass: exact→trailing→indent)
   shell_ops.py        run_shell, search_files, run_tests, git, task_status, verify,
@@ -281,9 +296,11 @@ tools/
                       screenshot via Playwright Chromium + open_url
   lsp.py              LSP client — pylsp integration, 4 tools (definition, references, hover, diagnostics),
                       cross-platform (select + queue-based reader)
+  mcp_client.py       MCP client — stdio JSON-RPC, tool discovery + invocation
+  skills.py           Lazy skill groups (git, web, test, planning, agents, search, image, lsp, bootstrap)
   _json_rpc_shared.py Shared subprocess drain_stderr + is_subprocess_connected
 tests/
-  test_*.py           37 test files, ~970 tests + 32 subtests
+  test_*.py           37 test files, ~1,050 tests
 ```
 
 ## Key State
