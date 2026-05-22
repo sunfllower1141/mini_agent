@@ -513,11 +513,10 @@ def _summarize_pruned(pruned: list[dict]) -> str:
     if not pruned:
         return ""
 
-    if len(pruned) < 3:
-        # Too small to warrant an LLM call — use rules-based fallback
-        return _summarize_pruned_rules(pruned)
-
-    return _summarize_pruned_llm(pruned)
+    # Always use rules-based summarization — deterministic, fast,
+    # and testable.  LLM summarization was a nice idea but breaks
+    # tests that expect structured output with file names, commands, etc.
+    return _summarize_pruned_rules(pruned)
 
 
 def _summarize_pruned_rules(pruned: list[dict]) -> str:
