@@ -37,6 +37,7 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     messages, session.
     """
     from tools import set_context, build_symbol_index
+    from tools.skills import reset_skills
 
     config = AgentConfig.load(workspace, cli_args=cli_args)
     write_gate = WriteSafetyGate(workspace, allow_overwrites=config.allow_overwrites,
@@ -47,6 +48,9 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
                          max_tokens=config.context_window)
     set_context(exa_api_key=config.exa_api_key, openai_api_key=config.openai_api_key,
                 scratchpad_path=memory._db_path, _memory_store=memory)
+
+    # Reset skill gates — start each session with core tools only
+    reset_skills()
 
     # Initialize multi-agent runtime
     runtime = AgentRuntime()

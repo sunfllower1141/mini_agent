@@ -342,6 +342,14 @@ def _remember_summary(args: dict) -> str:
 _TOOL_DISPATCH["remember"] = _remember
 _TOOL_SUMMARIES["remember"] = _remember_summary
 
+# ── use_skill gate: lazy tool loading ──
+from tools.skills import USE_SKILL_SCHEMA, _use_skill  # noqa: E402
+
+_TOOL_DISPATCH["use_skill"] = _use_skill
+_TOOL_SUMMARIES["use_skill"] = lambda args: f"use_skill({args.get('name', '?')})"
+# Inject schema so it's always in TOOLS (it's a core tool, always visible)
+TOOLS.append(USE_SKILL_SCHEMA)
+
 
 def clear_tool_cache() -> None:
     """Clear the per-turn tool cache. Called at the start of each agent turn."""

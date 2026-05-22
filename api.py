@@ -26,6 +26,7 @@ from config import AgentConfig
 from retry import _request_with_retry
 from stream import _parse_stream
 from tools.schema import TOOLS
+from tools.skills import get_active_tools
 
 # ---------------------------------------------------------------------------
 # API rate limiter — prevents thundering-herd when N sub-agents share one key
@@ -189,7 +190,7 @@ def _build_payload(
     payload: dict = {
         "model": model,
         "messages": clean_messages,
-        "tools": TOOLS,
+        "tools": get_active_tools(),
         "stream": config.stream,
         "max_tokens": config.max_tokens,
     }
