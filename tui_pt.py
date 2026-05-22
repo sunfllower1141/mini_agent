@@ -506,7 +506,6 @@ class MiniAgentTUI:
         self.tools_area = PTTextArea(
             text="",
             read_only=True,
-            focusable=True,
             scrollbar=False,
             wrap_lines=True,
             lexer=PygmentsLexer(PythonLexer),
@@ -517,7 +516,6 @@ class MiniAgentTUI:
         self.thinking_area = PTTextArea(
             text="",
             read_only=True,
-            focusable=True,
             scrollbar=False,
             wrap_lines=True,
             height=D(max=10),
@@ -546,7 +544,6 @@ class MiniAgentTUI:
         self.chat_area = PTTextArea(
             text="",
             read_only=True,
-            focusable=True,
             scrollbar=False,
             wrap_lines=True,
             style="class:text",
@@ -643,22 +640,6 @@ class MiniAgentTUI:
         except queue.Empty:
             pass  # queue drained
 
-    @staticmethod
-    def _auto_scroll(area: PTTextArea, prev_len: int = -1,
-                     prev_cursor: int = -1) -> None:
-        """Scroll *area* to the bottom, but only if the user hasn't
-        manually scrolled up.  *prev_len* is the text length before the
-        sync, *prev_cursor* is the cursor position before the sync.
-        If the text didn't grow, don't touch the cursor at all
-        (preserving any in-progress mouse selection)."""
-        buf = area.buffer
-        end = len(buf.text)
-        # Text grew AND user was at (or past) the previous end →
-        # auto-scroll to the new bottom.  Otherwise the user is
-        # reading/scrolling/selecting — leave them alone.
-        if end > prev_len and prev_cursor >= prev_len:
-            buf.cursor_position = end
-
     def _sync_display(self, app=None):
         """Sync ChatBuffers to TextArea widgets.  Called by before_render
         on every refresh cycle.  Skips buffers that haven't changed (dirty
@@ -668,18 +649,14 @@ class MiniAgentTUI:
             return
 
         if self.tools_area is not None and self.tools_buf.dirty:
-            buf = self.tools_area.buffer
-            prev_len = len(buf.text)
-            prev_cursor = buf.cursor_position
             self.tools_area.text = self.tools_buf.consume_text()
-            self._auto_scroll(self.tools_area, prev_len, prev_cursor)
+            self.tools_area.buffer.cursor_position = \
+                len(self.tools_area.buffer.text)
 
         if self.thinking_area is not None and self.thinking_buf.dirty:
-            buf = self.thinking_area.buffer
-            prev_len = len(buf.text)
-            prev_cursor = buf.cursor_position
             self.thinking_area.text = self.thinking_buf.consume_text()
-            self._auto_scroll(self.thinking_area, prev_len, prev_cursor)
+            self.thinking_area.buffer.cursor_position = \
+                len(self.thinking_area.buffer.text)
 
         # Drain sub-agent streaming queue FIRST — route tokens to per-task
         # buffers so new spawn/create messages populate subagent_bufs before
@@ -699,7 +676,6 @@ class MiniAgentTUI:
                 area = PTTextArea(
                     text="",
                     read_only=True,
-                    focusable=True,
                     scrollbar=False,
                     wrap_lines=True,
                     height=D(max=6),
@@ -708,12 +684,9 @@ class MiniAgentTUI:
                 self.subagent_areas[tid] = area
                 needs_rebuild = True
             if buf.dirty:
-                area = self.subagent_areas[tid]
-                pt_buf = area.buffer
-                prev_len = len(pt_buf.text)
-                prev_cursor = pt_buf.cursor_position
-                area.text = buf.consume_text()
-                self._auto_scroll(area, prev_len, prev_cursor)
+                self.subagent_areas[tid].text = buf.consume_text()
+                self.subagent_areas[tid].buffer.cursor_position = \
+                    len(self.subagent_areas[tid].buffer.text)
 
         # Rebuild sub-agent container if panes were added or removed
         if needs_rebuild:
@@ -731,11 +704,9 @@ class MiniAgentTUI:
         self._subagent_dead.clear()
 
         if self.chat_area is not None and self.chat_buf.dirty:
-            buf = self.chat_area.buffer
-            prev_len = len(buf.text)
-            prev_cursor = buf.cursor_position
             self.chat_area.text = self.chat_buf.consume_text()
-            self._auto_scroll(self.chat_area, prev_len, prev_cursor)
+            self.chat_area.buffer.cursor_position = \
+                len(self.chat_area.buffer.text)
 
     # ------------------------------------------------------------------
     # Key bindings
