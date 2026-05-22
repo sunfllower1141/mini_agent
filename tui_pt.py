@@ -47,6 +47,8 @@ from pygments.style import Style as PygmentsStyle
 from pygments.token import Token
 
 import re as _re
+import traceback
+from datetime import datetime, timezone
 
 from config import (
     resolve_workspace, init_session, parse_args,
@@ -171,6 +173,109 @@ STYLE = Style.from_dict({
     "pygments.literal":              _GREY_LIGHT,
 })
 
+
+# ---------------------------------------------------------------------------
+# Error trace logging — captures full context when errors hit the chat window
+# ---------------------------------------------------------------------------
+
+_ERROR_LOG_PATH: str = "error_traces.log"
+_ERROR_LOG_MAX_MESSAGES: int = 20  # last N messages to include in trace
+
+
+def _log_error_trace(
+    error: Exception,
+    messages: list[dict],
+    *,
+    turn_id: int = 0,
+) -> None:
+    """Log an error with full conversation context to error_traces.log."""
+    try:
+        ts = datetime.now(timezone.utc).isoformat()
+        tb = traceback.format_exc()
+        # Snapshot last N messages (strip image content to keep readable)
+        recent = messages[-_ERROR_LOG_MAX_MESSAGES:]
+        msg_lines = []
+        for i, m in enumerate(recent):
+            role = m.get("role", "?")
+            content = str(m.get("content", ""))
+            if isinstance(content, list):
+                # multimodal content — extract text parts only
+                content = " | ".join(
+                    p.get("text", "[image]") if isinstance(p, dict) else str(p)
+                    for p in content
+                )
+            if len(content) > 500:
+                content = content[:500] + "..."
+            tool_calls = m.get("tool_calls", [])
+            tc_names = [tc.get("function", {}).get("name", "?") for tc in tool_calls]
+            tc_str = f" [tools: {', '.join(tc_names)}]" if tc_names else ""
+            msg_lines.append(f"  [{i}] {role}{tc_str}: {content}")
+
+        entry = (
+            f"\n{'=' * 80}\n"
+            f"ERROR TRACE — {ts} — turn #{turn_id}\n"
+            f"{'=' * 80}\n"
+            f"Error: {error}\n"
+            f"{'─' * 60}\n"
+            f"Traceback:\n{tb}\n"
+            f"{'─' * 60}\n"
+            f"Last {len(recent)} messages:\n"
+            + "\n".join(msg_lines)
+            + f"\n{'─' * 60}\n"
+        )
+        with open(_ERROR_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(entry)
+    except Exception:
+        pass  # never let logging itself crash the agent
+
+
+def _log_tool_error(
+    tool_name: str,
+    error_content: str,
+    messages: list[dict],
+    *,
+    turn_id: int = 0,
+    diff_preview: str | None = None,
+) -> None:
+    """Log a tool failure with conversation context to error_traces.log."""
+    try:
+        ts = datetime.now(timezone.utc).isoformat()
+        recent = messages[-_ERROR_LOG_MAX_MESSAGES:]
+        msg_lines = []
+        for i, m in enumerate(recent):
+            role = m.get("role", "?")
+            content = str(m.get("content", ""))
+            if isinstance(content, list):
+                content = " | ".join(
+                    p.get("text", "[image]") if isinstance(p, dict) else str(p)
+                    for p in content
+                )
+            if len(content) > 500:
+                content = content[:500] + "..."
+            tool_calls = m.get("tool_calls", [])
+            tc_names = [tc.get("function", {}).get("name", "?") for tc in tool_calls]
+            tc_str = f" [tools: {', '.join(tc_names)}]" if tc_names else ""
+            msg_lines.append(f"  [{i}] {role}{tc_str}: {content}")
+
+        entry = (
+            f"\n{'=' * 80}\n"
+            f"TOOL ERROR — {ts} — turn #{turn_id}\n"
+            f"{'=' * 80}\n"
+            f"Tool: {tool_name}\n"
+            f"Error: {error_content}\n"
+        )
+        if diff_preview:
+            entry += f"{'─' * 60}\nDiff preview:\n{diff_preview}\n"
+        entry += (
+            f"{'─' * 60}\n"
+            f"Last {len(recent)} messages:\n"
+            + "\n".join(msg_lines)
+            + f"\n{'─' * 60}\n"
+        )
+        with open(_ERROR_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(entry)
+    except Exception:
+        pass  # never let logging itself crash the agent
 
 # ---------------------------------------------------------------------------
 # Chat buffer — thread-safe append-only text store
@@ -369,6 +474,9 @@ class AgentWorker(threading.Thread):
             except Exception as e:
                 if not self.cancel.is_set():
                     self.chat_buf.append(f"Error: {e}", style="msg-error")
+                    _log_error_trace(
+                        e, self.messages, turn_id=self._turn_id,
+                    )
                 continue
 
             if self.cancel.is_set():
@@ -404,6 +512,15 @@ class AgentWorker(threading.Thread):
     def _on_tool_end(self, ok: bool, detail: str,
                      turn_id: int = 0, diff_preview=None):
         self.tools_buf.append(f"  {'OK' if ok else 'ERR'} {detail}")
+        if not ok:
+            # Extract tool name from detail: "read_file · /path" → "read_file"
+            tool_name = detail.split(" · ")[0].strip() if " · " in detail else "?"
+            _log_tool_error(
+                tool_name, detail,
+                self.messages,
+                turn_id=self._turn_id,
+                diff_preview=diff_preview,
+            )
 
     def _on_tool_output(self, line: str, turn_id: int = 0):
         for sub in line.split('\n'):
@@ -871,6 +988,9 @@ class MiniAgentTUI:
                 new_data = _init_session(new_workspace)
             except Exception as exc:
                 self.tools_buf.append(f"Error: {exc}")
+                _log_error_trace(
+                    exc, self.messages, turn_id=0,
+                )
                 return
             self.config = new_data["config"]
             self.config.verbose = "--quiet" not in sys.argv

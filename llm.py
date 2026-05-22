@@ -905,9 +905,9 @@ def _tool_execution_phase(
     if not remaining:
         # All tools were already executed during streaming
         messages.append(msg)
-        # on_tool_end already fired during streaming (via _on_tool_ready)
+        # Fire on_tool_end for deferred streaming results (not fired during streaming)
         for tc, result in deferred_stream_results:
-            _append_tool_result(messages, tc, result, on_tool_end=None,
+            _append_tool_result(messages, tc, result, on_tool_end=on_tool_end,
                                 recent_keys=recent_tool_keys,
                                 lock=tool_keys_lock)
         _save_turn_summary(turn_count, msg, deferred_stream_results, messages)
@@ -918,9 +918,8 @@ def _tool_execution_phase(
     messages.append(msg)
 
     # Flush deferred tool results from streaming execution
-    # on_tool_end already fired during streaming (via _on_tool_ready)
     for tc, result in deferred_stream_results:
-        _append_tool_result(messages, tc, result, on_tool_end=None,
+        _append_tool_result(messages, tc, result, on_tool_end=on_tool_end,
                             recent_keys=recent_tool_keys,
                             lock=tool_keys_lock)
 

@@ -39,3 +39,4 @@ $HOME/
 *.toml
 reports/
 electron-ui/node_modules/
+error_traces.log
