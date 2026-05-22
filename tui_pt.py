@@ -302,15 +302,14 @@ def rounded_frame(content, title: str | None = None, width=None) -> HSplit:
 # ---------------------------------------------------------------------------
 
 class AgentWorker(threading.Thread):
-    """Runs run_agent_turn in a background thread.
+    """The ONE and only agent worker.  Lives for the lifetime of the TUI.
 
-    Callbacks append directly to thread-safe ChatBuffer instances.
-    The main thread syncs ChatBuffers → TextAreas via before_render
-    at refresh_interval (50ms), so no manual sync calls are needed.
+    Reads user messages from an input queue, runs run_agent_turn for each,
+    and writes output to ChatBuffers.  There is never a second instance.
     """
 
     def __init__(self, messages, config, write_gate, read_gate,
-                 session, turn_id: int,
+                 session, memory_store,
                  chat_buf: ChatBuffer,
                  tools_buf: ChatBuffer,
                  thinking_buf: ChatBuffer):
@@ -320,39 +319,69 @@ class AgentWorker(threading.Thread):
         self.write_gate = write_gate
         self.read_gate = read_gate
         self.session = session
-        self.turn_id = turn_id
+        self.memory_store = memory_store
         self.chat_buf = chat_buf
         self.tools_buf = tools_buf
         self.thinking_buf = thinking_buf
         self.cancel = threading.Event()
-        self._thinking_text = ""
         self._in_thinking = False
-        self._thinking_flushed = 0  # chars already written to buffer
         self.total_tokens = 0
         self.total_turns = 0
+        self._turn_id = 0
+        # Input queue — the ONE place user messages land.
+        self._input_queue: queue.Queue[str] = queue.Queue()
+
+    def submit(self, text: str) -> None:
+        """Drop a user message into the input queue.  Thread-safe."""
+        self._input_queue.put(text)
 
     def run(self):
         self.config.stream = True
-        try:
-            msg = run_agent_turn(
-                self.messages, self.config,
-                self.write_gate, self.read_gate,
-                on_token=self._on_token,
-                on_tool_start=self._on_tool_start,
-                on_tool_end=self._on_tool_end,
-                on_tool_output=self._on_tool_output,
-                cancel_event=self.cancel,
-                session=self.session,
-            )
-        except Exception as e:
-            self.chat_buf.append(f"Error: {e}", style="msg-error")
-            return
+        while True:
+            # Block until the next user message arrives.
+            first = self._input_queue.get()
+            # Drain any additional messages that queued up while we were busy.
+            texts = [first]
+            while True:
+                try:
+                    texts.append(self._input_queue.get_nowait())
+                except queue.Empty:
+                    break
+            text = "\n\n".join(texts)
 
-        if msg is not None:
-            usage = msg.get("_total_usage") or {}
-            self.total_tokens = usage.get("total_tokens", 0)
-            self.total_turns = msg.get("_turn_count", 0)
-            self.chat_buf.append("")  # blank line after agent output
+            # Reset cancel for this turn.
+            self.cancel.clear()
+
+            self._turn_id += 1
+            self.messages.append({"role": "user", "content": text})
+
+            try:
+                msg = run_agent_turn(
+                    self.messages, self.config,
+                    self.write_gate, self.read_gate,
+                    on_token=self._on_token,
+                    on_tool_start=self._on_tool_start,
+                    on_tool_end=self._on_tool_end,
+                    on_tool_output=self._on_tool_output,
+                    cancel_event=self.cancel,
+                    session=self.session,
+                )
+            except Exception as e:
+                if not self.cancel.is_set():
+                    self.chat_buf.append(f"Error: {e}", style="msg-error")
+                continue
+
+            if self.cancel.is_set():
+                continue
+
+            if msg is not None:
+                usage = msg.get("_total_usage") or {}
+                self.total_tokens += usage.get("total_tokens", 0)
+                self.total_turns += msg.get("_turn_count", 0)
+                self.chat_buf.append("")  # blank line after agent output
+
+            # Persist conversation after each turn.
+            self.messages = self.memory_store.save(self.messages)
 
     # -- callbacks ----------------------------------------------------
 
@@ -367,6 +396,7 @@ class AgentWorker(threading.Thread):
             self.thinking_buf.append_last(text)
         else:
             self.chat_buf.append_last(text, style="msg-agent")
+
     def _on_tool_start(self, summary: str, parallel: bool = False):
         label = f"⚡ {summary}" if parallel else f"🔧 {summary}"
         self.tools_buf.append(label)
@@ -423,13 +453,20 @@ class MiniAgentTUI:
         )
 
         # Sub-agent streaming queue (shared with tools via _TOOL_CONTEXT)
-        self._subagent_queue = None  # set after layout built, wired by tools
+        self._subagent_queue = queue.Queue()
+        from tools import _TOOL_CONTEXT
+        _TOOL_CONTEXT._tui_queue = self._subagent_queue
 
-        # Worker state
-        self.worker: AgentWorker | None = None
-        self._turn_id = 0
-        self._total_turns = 0
-        self._total_tokens = 0
+        # The ONE agent worker — created once, lives forever.
+        self.worker = AgentWorker(
+            self.messages, self.config,
+            self.write_gate, self.read_gate,
+            self.session, self.memory,
+            chat_buf=self.chat_buf,
+            tools_buf=self.tools_buf,
+            thinking_buf=self.thinking_buf,
+        )
+        self.worker.start()
 
         # Git status
         self._git_branch = ""
@@ -681,8 +718,7 @@ class MiniAgentTUI:
         @kb.add("c-c")
         @kb.add("c-q")
         def _(event):
-            if self.worker and self.worker.is_alive():
-                self.worker.cancel.set()
+            self.worker.cancel.set()
             self.messages = self.memory.save(self.messages)
             event.app.exit()
 
@@ -700,6 +736,7 @@ class MiniAgentTUI:
     def _on_submit(self, buffer: Buffer) -> bool:
         text = buffer.text.strip()
         if not text:
+            # Empty submit — re-display the input prompt
             return False
 
         # Route slash commands
@@ -708,42 +745,15 @@ class MiniAgentTUI:
             buffer.reset()
             return True
 
+        # Show the message in the chat log
         self.chat_buf.append(f"─ You", style="msg-user")
         self.chat_buf.append(text, style="msg-user")
-        self.chat_buf.append("", style="")  # blank line for spacing
+        self.chat_buf.append("", style="")
         buffer.reset()
-        self.messages.append({"role": "user", "content": text})
 
-        self._turn_id += 1
-        # Accumulate totals from previous worker
-        if self.worker and not self.worker.is_alive():
-            self._total_turns += self.worker.total_turns
-            self._total_tokens += self.worker.total_tokens
-            self.messages = self.memory.save(self.messages)
-        elif self.worker and self.worker.is_alive():
-            # Guard: cancel any still-running worker before starting a new one.
-            # Otherwise two workers run in parallel sharing the same buffers,
-            # producing duplicate "you" instances in the output.
-            self.worker.cancel.set()
-            self.worker.join(timeout=2.0)
-            self._total_turns += self.worker.total_turns
-            self._total_tokens += self.worker.total_tokens
-            self.messages = self.memory.save(self.messages)
-        # Wire sub-agent output queue into tool context
-        self._subagent_queue = queue.Queue()
-        from tools import _TOOL_CONTEXT
-        _TOOL_CONTEXT._tui_queue = self._subagent_queue
-
-        self.worker = AgentWorker(
-            self.messages, self.config,
-            self.write_gate, self.read_gate,
-            self.session,
-            turn_id=self._turn_id,
-            chat_buf=self.chat_buf,
-            tools_buf=self.tools_buf,
-            thinking_buf=self.thinking_buf,
-        )
-        self.worker.start()
+        # Feed to the ONE worker.  If it's mid-turn the message waits
+        # in the input queue until the current turn finishes.
+        self.worker.submit(text)
         return True
 
     # ------------------------------------------------------------------
@@ -755,17 +765,18 @@ class MiniAgentTUI:
         cmd = text.lower().strip()
 
         if cmd == "/clear":
-            # Cancel any running worker to avoid it operating on the old list
-            if self.worker and self.worker.is_alive():
-                self.worker.cancel.set()
-            self.messages = [
+            # Cancel current turn, then reset conversation
+            self.worker.cancel.set()
+            new_messages = [
                 {"role": "system", "content": build_system_prompt(self.config)},
                 {"role": "system", "content": build_startup_context(self.config.workspace)},
             ]
-            clear_api_cache()  # invalidate stale incremental-cleaning cache
+            self.messages = new_messages
+            self.worker.messages = new_messages
+            clear_api_cache()
             self.memory.clear()
-            self._total_turns = 0
-            self._total_tokens = 0
+            self.worker.total_turns = 0
+            self.worker.total_tokens = 0
             self.tools_buf.append("--- conversation cleared ---")
             return
 
@@ -785,11 +796,8 @@ class MiniAgentTUI:
             return
 
         if cmd == "/stats":
-            turns = self._total_turns
-            tokens = self._total_tokens
-            if self.worker and self.worker.total_turns:
-                turns += self.worker.total_turns
-                tokens += self.worker.total_tokens
+            turns = self.worker.total_turns
+            tokens = self.worker.total_tokens
             self.tools_buf.append(
                 f"Session: {len(self.messages)} msgs, {turns} turns, "
                 f"{tokens} tokens, {self.config.model}"
@@ -872,10 +880,9 @@ class MiniAgentTUI:
             self.messages = new_data["messages"]
             self.session.close()
             self.session = new_data["session"]
-            self.worker = None
-            self._total_turns = 0
-            self._total_tokens = 0
-            self._turn_id += 1
+            self.worker.messages = new_data["messages"]
+            self.worker.total_turns = 0
+            self.worker.total_tokens = 0
             self._refresh_git_status()
             self.tools_buf.append(f"Workspace: {new_workspace}")
             return
@@ -943,7 +950,7 @@ class MiniAgentTUI:
         if self._git_branch:
             dirty = "*" if self._git_dirty else ""
             parts.append(("class:status", f"⎇ {self._git_branch}{dirty}"))
-        if self.worker and self.worker.is_alive():
+        if self.worker.is_alive():
             parts.append(("class:status", " ●"))
             if self.worker.total_turns:
                 parts.append(("class:status",

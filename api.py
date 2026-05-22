@@ -349,7 +349,7 @@ def call_llm(
         raise APIError(status_code=r.status_code, body=str(err))
 
     if config.stream:
-        return _parse_stream(r, on_token, on_tool_ready)
+        return _parse_stream(r, on_token, on_tool_ready, cancel_event=cancel_event)
     else:
         return r.json()["choices"][0]["message"]
 

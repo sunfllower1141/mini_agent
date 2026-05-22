@@ -301,7 +301,7 @@ def _inject_interjections(messages: list[dict]) -> None:
     for msg_text in interjections:
         messages.append({
             "role": "user",
-            "content": "[User interjection while you were working] " + msg_text,
+            "content": msg_text,
         })
 
 

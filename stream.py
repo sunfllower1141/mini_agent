@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 from collections.abc import Callable
 
 import requests
@@ -24,7 +25,7 @@ THINKING_END = "\n[/thinking]"
 # SSE prefix for DeepSeek's server-sent event stream
 _SSE_PREFIX = "data: "
 
-def _parse_stream(response: requests.Response, on_token: Callable[[str], None] | None = None, on_tool_ready: Callable[[dict], None] | None = None) -> dict:
+def _parse_stream(response: requests.Response, on_token: Callable[[str], None] | None = None, on_tool_ready: Callable[[dict], None] | None = None, cancel_event: threading.Event | None = None) -> dict:
     """Parse an SSE streamed response, printing text as it arrives.
 
     Accumulates both text content and tool_calls from deltas.  Tool call
@@ -61,6 +62,8 @@ def _parse_stream(response: requests.Response, on_token: Callable[[str], None] |
         # Callers should set requests-level (connect, read) timeouts on the
         # session and consider wrapping in a timeout thread for long streams.
         for line in response.iter_lines(decode_unicode=True):
+            if cancel_event is not None and cancel_event.is_set():
+                break
             if not line or not line.startswith(_SSE_PREFIX):
                 continue
             data_str = line[len(_SSE_PREFIX):]
