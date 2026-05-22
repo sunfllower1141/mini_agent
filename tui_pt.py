@@ -34,7 +34,7 @@ from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout.containers import (
-    HSplit, VSplit, Window, to_container,
+    HSplit, VSplit, Window,
 )
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import D
@@ -557,8 +557,7 @@ class MiniAgentTUI:
         self.chat_buf = ChatBuffer()
         self.tools_buf = ChatBuffer()
         self.thinking_buf = ChatBuffer()
-        self.subagent_bufs: dict[str, ChatBuffer] = {}  # per-task-id buffers
-        self._subagent_dead: set[str] = set()  # agents to remove next sync
+        self.subagents_buf = ChatBuffer()  # single scrolling log for all sub-agent activity
 
         # Startup info
         self.tools_buf.append(f"mini_agent — {self.config.model}")
@@ -643,20 +642,20 @@ class MiniAgentTUI:
             style="class:thinking",
         )
 
-        # Sub-agent panes (left pane, under thinking) — one per task_id
-        self.subagent_areas: dict[str, PTTextArea] = {}
-        self.subagent_container = HSplit([], height=D(max=12))
-
-        # Sub-agents label
-        subagent_label = Window(
-            content=FormattedTextControl([('class:dim', ' Sub-agents')]),
-            height=1,
-            style='class:dim',
+        # Sub-agents scrolling log (single area, no per-task dynamic widgets)
+        self.subagents_area = PTTextArea(
+            text="",
+            read_only=True,
+            scrollbar=False,
+            wrap_lines=True,
+            height=D(max=10),
+            style="class:dim",
         )
 
         left_pane = rounded_frame(
             HSplit([self.tools_area, _h_line(), self.thinking_area,
-                    _h_line(), subagent_label, self.subagent_container]),
+                    _h_line(), Window(height=1, content=FormattedTextControl([('class:dim', ' Sub-agents')]), style='class:dim'),
+                    self.subagents_area]),
             title="Tools & Thinking",
             width=D(weight=40),
         )
@@ -713,51 +712,41 @@ class MiniAgentTUI:
         return _ANSI_RE.sub('', text)
 
     def _drain_subagent_queue(self):
-        """Drain sub-agent streaming tokens from tui_queue into per-task buffers."""
+        """Drain sub-agent streaming tokens into the single scrolling log."""
         q = getattr(self, "_subagent_queue", None)
         if q is None:
             return
         _strip = self._strip_ansi
+        buf = self.subagents_buf
         try:
             while True:
                 msg = q.get_nowait()
                 msg_type = msg[0]
                 if msg_type == "sub_tree":
                     _, action, task_id, *rest = msg
-                    task_id = str(task_id)
-                    if task_id not in self.subagent_bufs:
-                        self.subagent_bufs[task_id] = ChatBuffer()
+                    task_id = str(task_id)[:8]
                     if action == "spawn":
                         _parent_id, short_name, desc = rest[0], rest[1], rest[2] if len(rest) > 2 else ""
-                        self.subagent_bufs[task_id].clear()
-                        self.subagent_bufs[task_id].append(f"🤖 {_strip(short_name)} [{task_id[:8]}]")
+                        buf.append(f"🤖 {_strip(short_name)} [{task_id}]")
                         if desc:
-                            self.subagent_bufs[task_id].append(f"   {_strip(desc)}")
+                            buf.append(f"   {_strip(desc)}")
                     elif action == "status":
                         status = rest[0] if rest else "?"
                         icon = "✅" if status == "completed" else "❌" if status == "error" else "⏳"
-                        self.subagent_bufs[task_id].append(f"{icon} {_strip(status)}")
-                        # Schedule removal — completed/errored agents disappear
-                        # on the next display sync.
-                        if status in ("completed", "error"):
-                            self._subagent_dead.add(task_id)
+                        buf.append(f" {icon} [{task_id}] {_strip(status)}")
                 elif msg_type == "sub_token":
                     _, task_id, text = msg
-                    task_id = str(task_id)
-                    if task_id not in self.subagent_bufs:
-                        self.subagent_bufs[task_id] = ChatBuffer()
-                    self.subagent_bufs[task_id].append_last(_strip(text), style="")
+                    task_id = str(task_id)[:8]
+                    buf.append_last(f" [{task_id}] {_strip(text)}", style="")
                 elif msg_type == "sub_tool":
                     _, action, name, task_id, *rest = msg
-                    task_id = str(task_id)
-                    if task_id not in self.subagent_bufs:
-                        self.subagent_bufs[task_id] = ChatBuffer()
+                    task_id = str(task_id)[:8]
                     if action == "start":
-                        self.subagent_bufs[task_id].append(f"🔧 {_strip(name)}")
+                        buf.append(f" 🔧 [{task_id}] {_strip(name)}")
                     elif action == "end":
                         ok, detail = rest[0], rest[1] if len(rest) > 1 else ""
                         status = "OK" if ok else "ERR"
-                        self.subagent_bufs[task_id].append(f"  {status} {_strip(detail)}")
+                        buf.append(f"   [{task_id}] {status} {_strip(detail)}")
         except queue.Empty:
             pass  # queue drained
 
@@ -779,50 +768,12 @@ class MiniAgentTUI:
             self.thinking_area.buffer.cursor_position = \
                 len(self.thinking_area.buffer.text)
 
-        # Drain sub-agent streaming queue FIRST — route tokens to per-task
-        # buffers so new spawn/create messages populate subagent_bufs before
-        # we try to create panes for them below.
+        # Drain sub-agent streaming queue into single scrolling log
         self._drain_subagent_queue()
-
-        # Clean up panes for completed/removed sub-agents
-        active_ids = set(self.subagent_bufs.keys())
-        stale_ids = [tid for tid in self.subagent_areas if tid not in active_ids]
-        for tid in stale_ids:
-            del self.subagent_areas[tid]
-
-        # Create panes for new sub-agents and sync content
-        needs_rebuild = bool(stale_ids)
-        for tid, buf in list(self.subagent_bufs.items()):
-            if tid not in self.subagent_areas:
-                area = PTTextArea(
-                    text="",
-                    read_only=True,
-                    scrollbar=False,
-                    wrap_lines=True,
-                    height=D(max=6),
-                    style="class:dim",
-                )
-                self.subagent_areas[tid] = area
-                needs_rebuild = True
-            if buf.dirty:
-                self.subagent_areas[tid].text = buf.consume_text()
-                self.subagent_areas[tid].buffer.cursor_position = \
-                    len(self.subagent_areas[tid].buffer.text)
-
-        # Rebuild sub-agent container if panes were added or removed
-        if needs_rebuild:
-            children = []
-            for tid in sorted(self.subagent_areas.keys(), key=str):
-                if children:
-                    children.append(Window(height=1, char='─', style='class:border'))
-                children.append(to_container(self.subagent_areas[tid]))
-            self.subagent_container.children = children
-
-        # Deferred cleanup: remove completed/errored agents from buffers
-        # AFTER this sync cycle, so the "✅ completed" message is visible.
-        for tid in self._subagent_dead:
-            self.subagent_bufs.pop(tid, None)
-        self._subagent_dead.clear()
+        if self.subagents_area is not None and self.subagents_buf.dirty:
+            self.subagents_area.text = self.subagents_buf.consume_text()
+            self.subagents_area.buffer.cursor_position = \
+                len(self.subagents_area.buffer.text)
 
         if self.chat_area is not None and self.chat_buf.dirty:
             self.chat_area.text = self.chat_buf.consume_text()
