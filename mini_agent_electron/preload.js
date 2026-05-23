@@ -41,6 +41,18 @@ contextBridge.exposeInMainWorld('miniAgent', {
   // Create a new session
   newSession: (name) => ipcRenderer.invoke('session:new', name),
 
+  // Delete a session. Returns promise resolving to {ok, message?}.
+  deleteSession: (name) => {
+    return new Promise((resolve) => {
+      const handler = (_event, data) => {
+        ipcRenderer.removeListener('session:delete_result', handler);
+        resolve(data);
+      };
+      ipcRenderer.on('session:delete_result', handler);
+      ipcRenderer.invoke('session:delete', name);
+    });
+  },
+
   // Request status update
   getStatus: () => ipcRenderer.invoke('backend:get_status'),
 

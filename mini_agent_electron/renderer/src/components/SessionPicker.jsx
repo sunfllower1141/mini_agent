@@ -77,6 +77,28 @@ export default function SessionPicker({ sessionName, onSwitch }) {
     onSwitch(name);
   }, [onSwitch]);
 
+  const handleDelete = useCallback(async (e, name) => {
+    e.stopPropagation();
+    if (!window.confirm(`Delete session "${name}"? This cannot be undone.`)) return;
+    const api = window.miniAgent;
+    if (!api || !api.deleteSession) return;
+    try {
+      const result = await api.deleteSession(name);
+      if (result.ok) {
+        // Refresh the list
+        setSessions((prev) => prev.filter((s) => s !== name));
+        // If we deleted current, the backend switches to default — update current
+        if (name === current) {
+          setCurrent('default');
+        }
+      } else {
+        setError(result.message || 'Delete failed');
+      }
+    } catch (e) {
+      setError('Delete failed');
+    }
+  }, [current]);
+
   const handleNewSubmit = useCallback((e) => {
     if (e.key === 'Enter') {
       const name = newName.trim();
@@ -114,7 +136,8 @@ export default function SessionPicker({ sessionName, onSwitch }) {
               onClick={() => handleSelect(s)}
             >
               {s === current && <span className="session-check">✓ </span>}
-              {s}
+              <span className="session-name">{s}</span>
+              <span className="session-delete" onClick={(e) => handleDelete(e, s)} title="Delete session">✕</span>
             </div>
           ))}
           <div className="session-dropdown-divider" />

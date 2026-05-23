@@ -324,6 +324,9 @@ html, body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 .session-dropdown-item:hover {
   background: rgba(187, 134, 252, 0.12);
@@ -334,6 +337,32 @@ html, body {
 
 .session-check {
   color: var(--accent);
+  margin-right: 2px;
+}
+
+.session-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.session-delete {
+  flex-shrink: 0;
+  margin-left: 8px;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 11px;
+  color: var(--dim);
+  opacity: 0;
+  transition: opacity 0.1s;
+  cursor: pointer;
+}
+.session-dropdown-item:hover .session-delete {
+  opacity: 1;
+}
+.session-delete:hover {
+  color: var(--red);
+  background: rgba(136, 86, 232, 0.15);
 }
 
 .session-dropdown-divider {

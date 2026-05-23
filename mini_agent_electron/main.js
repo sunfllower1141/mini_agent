@@ -208,6 +208,10 @@ function handlePythonMessage(msg) {
       win.webContents.send('session:list_result', data);
       break;
 
+    case 'session_delete_result':
+      win.webContents.send('session:delete_result', data);
+      break;
+
     default:
       console.log('Unknown message type from Python:', type);
   }
@@ -250,6 +254,10 @@ function setupIPC() {
 
   ipcMain.handle('session:new', async (event, name) => {
     sendToPython({ type: 'session_new', name });
+  });
+
+  ipcMain.handle('session:delete', async (event, name) => {
+    sendToPython({ type: 'session_delete', name });
   });
 
   ipcMain.handle('workspace:save', async (event, workspacePath) => {

@@ -486,6 +486,24 @@ def main() -> None:
                 runner._total_tokens = 0
                 runner.send_status()
 
+        elif msg_type == "session_delete":
+            from config import delete_session
+            name = msg.get("name", "")
+            if not name:
+                send_msg({"type": "session_list_result", "error": "Session name required."})
+            else:
+                ok, msg_text = delete_session(runner.workspace, name)
+                if ok and name == getattr(runner, '_session_name', None):
+                    # Deleted the current session — switch to default
+                    from config import switch_session
+                    sd = switch_session(runner.workspace, "default", runner.memory, runner.config)
+                    runner.memory = sd["memory"]
+                    runner.messages = sd["messages"]
+                    runner._total_turns = 0
+                    runner._total_tokens = 0
+                send_msg({"type": "session_delete_result", "ok": ok, "message": msg_text})
+                runner.send_status()
+
         elif msg_type == "shutdown":
             break
 
