@@ -11,6 +11,30 @@ const path = require('path');
 const fs = require('fs');
 
 // ---------------------------------------------------------------------------
+// Load .env file — GUI apps on macOS don't inherit shell profile vars
+// ---------------------------------------------------------------------------
+
+function loadEnvFile(filePath) {
+  if (!fs.existsSync(filePath)) return;
+  const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx === -1) continue;
+    const key = trimmed.slice(0, eqIdx).trim();
+    const value = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, '');
+    if (key && !process.env[key]) {
+      process.env[key] = value;
+    }
+  }
+}
+
+// Load .env from project root (mini_agent/) and ~/.mini_agent_env
+loadEnvFile(path.join(__dirname, '..', '.env'));
+loadEnvFile(path.join(require('os').homedir(), '.mini_agent_env'));
+
+// ---------------------------------------------------------------------------
 // Python backend process
 // ---------------------------------------------------------------------------
 
@@ -31,7 +55,14 @@ function spawnPythonBackend(workspacePath) {
     env.MINI_AGENT_WORKSPACE = workspacePath;
   }
 
-  const proc = spawn('python3', [backendScript], {
+  // Prefer venv python, fall back to system python3.
+  const venvPython = path.join(__dirname, '..', 'venv', 'bin', 'python3');
+  const pythonBin = fs.existsSync(venvPython) ? venvPython : 'python3';
+
+  console.log(`Using Python: ${pythonBin}`);
+  console.log(`DEEPSEEK_API_KEY: ${env.DEEPSEEK_API_KEY ? 'set' : 'not set'}`);
+
+  const proc = spawn(pythonBin, [backendScript], {
     env,
     cwd: path.join(__dirname, '..'),
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -58,8 +89,17 @@ function spawnPythonBackend(workspacePath) {
   });
 
   proc.stderr.on('data', (data) => {
-    // Python stderr goes to console for debugging
-    process.stderr.write(`[python:stderr] ${data}`);
+    // Forward Python stderr to Electron console AND tools log.
+    // Don't use stream:error — that's for actual agent errors, not
+    // startup/model-loading stderr (HF warnings, tqdm bars, etc.).
+    const text = data.toString().trim();
+    if (text) {
+      process.stderr.write(`[python:stderr] ${data}`);
+      const win = BrowserWindow.getAllWindows()[0];
+      if (win) {
+        win.webContents.send('backend:response', { lines: [`stderr: ${text}`], target: 'tools' });
+      }
+    }
   });
 
   proc.on('close', (code) => {
@@ -102,7 +142,7 @@ function handlePythonMessage(msg) {
     case 'ready':
       pythonReady = true;
       flushPending();
-      win.webContents.send('backend:status', { ready: true });
+      win.webContents.send('backend:status', { ready: true, model: data.model });
       break;
 
     case 'token':
@@ -199,10 +239,21 @@ function createWindow() {
     trafficLightPosition: { x: 12, y: 12 },
   });
 
-  win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  const isDev = process.argv.includes('--dev');
+  if (isDev) {
+    // Load from Vite dev server
+    const VITE_URL = 'http://localhost:5173';
+    win.loadURL(VITE_URL).catch(() => {
+      // Fallback: load built files if dev server isn't running
+      win.loadFile(path.join(__dirname, 'renderer', 'dist', 'index.html'));
+    });
+  } else {
+    // Production: load built files
+    win.loadFile(path.join(__dirname, 'renderer', 'dist', 'index.html'));
+  }
 
   // Open DevTools in dev mode
-  if (process.argv.includes('--dev')) {
+  if (isDev) {
     win.webContents.openDevTools({ mode: 'detach' });
   }
 

@@ -258,8 +258,10 @@ body::-webkit-scrollbar,
    --------------------------------------------------------------------------- */
 .status-bar {
   display: flex;
+  align-items: center;
   gap: 0;
   padding: 6px 0 2px 0;
+  min-height: 24px;
   flex-shrink: 0;
   user-select: none;
   font-size: 12px;
@@ -288,13 +290,35 @@ body::-webkit-scrollbar,
 /* ---------------------------------------------------------------------------
    Message styles
    --------------------------------------------------------------------------- */
-.msg-user     { color: var(--accent); }
+.msg-user     { color: #b0b0b0; }
 .msg-agent    { color: var(--text); }
 .msg-error    { color: var(--red); }
 .msg-thinking { color: var(--thinking); }
+
+/* Character-level fade-in for smooth streaming */
+.stream-char {
+  animation: charFadeIn 0.35s ease-out;
+}
+@keyframes charFadeIn {
+  from { opacity: 0; filter: blur(2px); }
+  to   { opacity: 1; filter: blur(0); }
+}
+/* First char of a new block gets a slightly longer intro */
+.stream-char:first-child {
+  animation-duration: 0.5s;
+}
 .msg-tool-ok  { color: var(--dim); }
 .msg-tool-err { color: var(--red); }
 .msg-status   { color: var(--dim); font-style: italic; }
+
+/* Syntax highlighting spans */
+.syn-keyword   { color: #8b9dc3; } /* muted blue-purple */
+.syn-string    { color: var(--green); }
+.syn-number    { color: var(--yellow); }
+.syn-comment   { color: var(--thinking); }
+.syn-boolean   { color: var(--red); }
+.syn-decorator { color: #8b9dc3; }
+.syn-path      { color: var(--accent); }
 
 /* Inline SVG icons (Lucide) */
 .tool-icon {

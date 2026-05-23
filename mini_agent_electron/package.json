@@ -5,9 +5,17 @@
   "main": "main.js",
   "scripts": {
     "start": "./electron-dist/Electron.app/Contents/MacOS/Electron .",
-    "dev": "./electron-dist/Electron.app/Contents/MacOS/Electron . --dev"
+    "dev": "./electron-dist/Electron.app/Contents/MacOS/Electron . --dev",
+    "build": "npx vite build",
+    "dev:renderer": "npx vite --config vite.config.js"
   },
   "dependencies": {
-    "electron": "^42.2.0"
+    "electron": "^42.2.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.0.2",
+    "vite": "^8.0.14"
   }
 }

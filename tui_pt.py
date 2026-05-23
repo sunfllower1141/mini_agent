@@ -791,11 +791,28 @@ class MiniAgentTUI:
         kb = KeyBindings()
 
         @kb.add("c-c")
+        def _(event):
+            # First Ctrl+C cancels current turn; second exits
+            if self.worker.is_alive() and not self.worker.cancel.is_set():
+                self.worker.cancel.set()
+                self.tools_buf.append("--- cancelled (Ctrl+C) ---", style="red")
+            else:
+                self.worker.cancel.set()
+                self.messages = self.memory.save(self.messages)
+                event.app.exit()
+
         @kb.add("c-q")
         def _(event):
             self.worker.cancel.set()
             self.messages = self.memory.save(self.messages)
             event.app.exit()
+
+        @kb.add("escape")
+        def _(event):
+            # Escape cancels current turn without quitting
+            if self.worker.is_alive():
+                self.worker.cancel.set()
+                self.tools_buf.append("--- cancelled (Esc) ---", style="red")
 
         @kb.add("enter")
         def _(event):

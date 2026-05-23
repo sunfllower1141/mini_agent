@@ -80,6 +80,71 @@ function appendIconLine(el, iconSVG, text, cssClass) {
 }
 
 // ---------------------------------------------------------------------------
+// Syntax highlighting — lightweight regex-based colorizer
+// ---------------------------------------------------------------------------
+
+const SYN_PATTERNS = [
+  // Comments (must come before strings to avoid matching inside)
+  { re: /#[^\n]*/g,              cls: 'syn-comment' },
+  { re: /\/\/[^\n]*/g,           cls: 'syn-comment' },
+  // Strings
+  { re: /"[^"]*"/g,              cls: 'syn-string' },
+  { re: /'[^']*'/g,              cls: 'syn-string' },
+  { re: /`[^`]*`/g,              cls: 'syn-string' },
+  // Decorators
+  { re: /@\w+/g,                 cls: 'syn-decorator' },
+  // Python/JS keywords
+  { re: /\b(def|class|return|import|from|if|else|elif|try|except|finally|with|as|for|while|in|not|and|or|is|lambda|yield|raise|pass|break|continue|async|await|function|const|let|var|export|default|new|throw|catch|typeof|instanceof)\b/g, cls: 'syn-keyword' },
+  // Booleans / nil
+  { re: /\b(True|False|None|true|false|null|undefined|NaN|Infinity)\b/g, cls: 'syn-boolean' },
+  // Numbers
+  { re: /\b\d+\.?\d*\b/g,        cls: 'syn-number' },
+  // File paths
+  { re: /(?:^|\s)([~/][^\s,:;]*\/[^\s,:;]+)/g, cls: 'syn-path' },
+];
+
+function highlightSyntax(text) {
+  // Escape HTML first
+  let html = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+  // Apply each pattern — use placeholder tokens to avoid overlap
+  const tokens = [];
+  SYN_PATTERNS.forEach(({ re, cls }) => {
+    html = html.replace(re, (match) => {
+      const idx = tokens.length;
+      tokens.push(`<span class="${cls}">${match}</span>`);
+      return `\x00${idx}\x00`;
+    });
+  });
+
+  // Restore tokens (unescape the null bytes we used as placeholders)
+  html = html.replace(/\x00(\d+)\x00/g, (_, i) => tokens[+i]);
+
+  return html;
+}
+
+function appendHighlighted(el, text, cssClass) {
+  if (!text && text !== '') return;
+  const div = document.createElement('div');
+  div.innerHTML = highlightSyntax(text);
+  if (cssClass) div.className = cssClass;
+  el.appendChild(div);
+  scrollToBottom(el);
+}
+
+function highlightElement(el) {
+  // Convert all child divs from textContent to highlighted innerHTML
+  for (const child of el.children) {
+    if (child.textContent && !child.querySelector('span')) {
+      child.innerHTML = highlightSyntax(child.textContent);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Streaming state
 // ---------------------------------------------------------------------------
 
@@ -160,7 +225,7 @@ function setupListeners() {
     const lines = data.line.split('\n');
     for (const line of lines) {
       if (line.trim()) {
-        appendLine(toolsLog, `    ${line}`, 'dim');
+        appendHighlighted(toolsLog, `    ${line}`, 'dim');
       }
     }
   });
@@ -223,7 +288,6 @@ function handleSubmit(text) {
   }
 
   // Show user message in chat
-  appendLine(chatLog, '── You', 'msg-user');
   appendLine(chatLog, text, 'msg-user');
   appendLine(chatLog, '', '');
 
