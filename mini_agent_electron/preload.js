@@ -16,6 +16,9 @@ contextBridge.exposeInMainWorld('miniAgent', {
   // Cancel current turn
   cancel: () => ipcRenderer.invoke('backend:cancel'),
 
+  // Open native directory picker for workspace selection
+  openWorkspace: () => ipcRenderer.invoke('dialog:openWorkspace'),
+
   // Request status update
   getStatus: () => ipcRenderer.invoke('backend:get_status'),
 

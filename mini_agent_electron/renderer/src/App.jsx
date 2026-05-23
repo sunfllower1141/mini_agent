@@ -252,6 +252,39 @@ function AppShell() {
     }
   }, [handleSubmit]);
 
+  // Drag-and-drop files into the input
+  const handleDragOver = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDrop = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const files = e.dataTransfer?.files;
+    if (!files || files.length === 0) return;
+    const paths = [];
+    for (const file of files) {
+      // Electron adds the real OS path as `file.path`
+      if (file.path) paths.push(file.path);
+    }
+    if (paths.length > 0 && inputRef.current) {
+      const current = inputRef.current.value;
+      inputRef.current.value = current ? `${current} ${paths.join(' ')}` : paths.join(' ');
+      inputRef.current.focus();
+    }
+  }, []);
+
+  // Click workspace to change it
+  const handleWorkspaceClick = useCallback(async () => {
+    const api = window.miniAgent;
+    if (!api) return;
+    const newPath = await api.openWorkspace();
+    if (newPath) {
+      handleSubmit(`/workspace ${newPath}`);
+    }
+  }, [handleSubmit]);
+
   // Cancel handler — immediately reset UI, then tell backend
   const handleCancel = useCallback(() => {
     window.miniAgent?.cancel();
@@ -361,12 +394,14 @@ function AppShell() {
                 ref={inputRef}
                 type="text"
                 id="user-input"
-                placeholder="Type a message or /command..."
+                placeholder="Type a message, /command, or drop files here..."
                 autoFocus
                 autoComplete="off"
                 spellCheck="false"
                 disabled={inputDisabled}
                 onKeyDown={handleKeyDown}
+                onDragOver={handleDragOver}
+                onDrop={handleDrop}
               />
             </div>
           </div>
@@ -392,7 +427,7 @@ function AppShell() {
           {restoredCount != null && (
             <span id="restored-info">restored {restoredCount} msgs</span>
           )}
-          <span id="workspace-info">{workspace}</span>
+          <span id="workspace-info" className="clickable" onClick={handleWorkspaceClick} title="Click to change workspace">{workspace}</span>
           <span id="header-session" className="dim">{sessionName}</span>
         </div>
       </div>

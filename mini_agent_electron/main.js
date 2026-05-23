@@ -5,7 +5,7 @@
  * between the renderer (via IPC) and the Python process (via JSON-lines
  * on stdin/stdout).
  */
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
@@ -234,6 +234,17 @@ function setupIPC() {
     // Return cached status immediately so the renderer never starts blank.
     // The async response will update via backend:status event when it arrives.
     return lastStatus || { ready: false };
+  });
+
+  ipcMain.handle('dialog:openWorkspace', async () => {
+    const win = BrowserWindow.getAllWindows()[0];
+    if (!win) return null;
+    const result = await dialog.showOpenDialog(win, {
+      title: 'Select Workspace',
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (result.canceled || !result.filePaths.length) return null;
+    return result.filePaths[0];
   });
 }
 

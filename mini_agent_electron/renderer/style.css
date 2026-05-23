@@ -273,6 +273,13 @@ html, body {
   gap: 12px;
 }
 
+#workspace-info.clickable {
+  cursor: pointer;
+}
+#workspace-info.clickable:hover {
+  color: var(--text);
+}
+
 /* ---------------------------------------------------------------------------
    Colour utility classes
    --------------------------------------------------------------------------- */
