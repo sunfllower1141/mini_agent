@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import useSmoothStream from './hooks/useSmoothStream';
-import LogLine, { extractSvgFromText } from './components/LogLine';
+import LogLine, { extractSvgFromText, splitTextAndSvgs } from './components/LogLine';
 import CodeBlock from './components/CodeBlock';
 import LogPanel from './components/LogPanel';
 import RoundedFrame from './components/RoundedFrame';
@@ -418,32 +418,44 @@ function AppShell() {
           <div id="chat-log" ref={chatLogRef} className="log scrollable text">
             {chatLines.map((line, i) => {
               if (line.cls === 'msg-agent') {
-                const svgExtracted = extractSvgFromText(line.text);
-                const mdText = svgExtracted ? svgExtracted.text : line.text;
+                const segments = splitTextAndSvgs(line.text);
                 return (
                   <div key={`line-${i}`} className="msg-agent">
-                    {svgExtracted && (
-                      <span className="emoji-icon" dangerouslySetInnerHTML={{ __html: svgExtracted.svgIcon }} />
-                    )}
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {mdText}
-                    </ReactMarkdown>
+                    {segments.map((seg, j) => {
+                      if (seg.type === 'svg') {
+                        return (
+                          <span key={`svg-${j}`} className="emoji-icon" dangerouslySetInnerHTML={{ __html: seg.value }} />
+                        );
+                      }
+                      if (!seg.value.trim()) return null;
+                      return (
+                        <ReactMarkdown key={`md-${j}`} remarkPlugins={[remarkGfm]}>
+                          {seg.value}
+                        </ReactMarkdown>
+                      );
+                    })}
                   </div>
                 );
               }
               return <LogLine key={`line-${i}`} line={line} />;
             })}
             {chatStream.displayedText && (() => {
-              const svgExtracted = extractSvgFromText(chatStream.displayedText);
-              const mdText = svgExtracted ? svgExtracted.text : chatStream.displayedText;
+              const segments = splitTextAndSvgs(chatStream.displayedText);
               return (
                 <div className="msg-agent">
-                  {svgExtracted && (
-                    <span className="emoji-icon" dangerouslySetInnerHTML={{ __html: svgExtracted.svgIcon }} />
-                  )}
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {mdText}
-                  </ReactMarkdown>
+                  {segments.map((seg, j) => {
+                    if (seg.type === 'svg') {
+                      return (
+                        <span key={`svg-${j}`} className="emoji-icon" dangerouslySetInnerHTML={{ __html: seg.value }} />
+                      );
+                    }
+                    if (!seg.value.trim()) return null;
+                    return (
+                      <ReactMarkdown key={`md-${j}`} remarkPlugins={[remarkGfm]}>
+                        {seg.value}
+                      </ReactMarkdown>
+                    );
+                  })}
                 </div>
               );
             })()}
