@@ -346,7 +346,6 @@ export default function App() {
         <span className="dim"> mini_agent — </span>
         <span id="header-model" className="text">{modelName}</span>
       </div>
-      <div className="hr" />
 
       {/* Body: two panels */}
       <div id="body-panels">
@@ -433,7 +432,6 @@ export default function App() {
         </div>
       </div>
 
-      <div className="hr" />
 
       {/* Status bar */}
       <div id="status-bar" className="status-bar dim">
