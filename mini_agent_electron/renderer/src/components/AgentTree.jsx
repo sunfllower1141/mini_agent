@@ -1,6 +1,7 @@
 import { useMemo, useCallback, useEffect, useState, useRef } from 'react';
 import {
   ReactFlow,
+  ReactFlowProvider,
   Background,
   Controls,
   MiniMap,
@@ -109,6 +110,14 @@ function AgentNode({ data }) {
 
 const nodeTypes = { agentNode: AgentNode };
 
+export default function AgentTree({ agents }) {
+  return (
+    <ReactFlowProvider>
+      <AgentTreeInner agents={agents} />
+    </ReactFlowProvider>
+  );
+}
+
 // ─── Tooltip (positioned via portal over ReactFlow) ─────────────────────────
 function Tooltip({ agent, position }) {
   if (!agent || !position) return null;
@@ -188,7 +197,7 @@ function LoadingDots() {
 // ══════════════════════════════════════════════════════════════════════════════
 // Main component
 // ══════════════════════════════════════════════════════════════════════════════
-export default function AgentTree({ agents }) {
+function AgentTreeInner({ agents }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [hoveredAgent, setHoveredAgent] = useState(null);
