@@ -14,8 +14,9 @@
   --green:    #8bc48b;
   --yellow:   #d4b866;
   --red:      #e0556a;
-  --thinking: #555555;
-  --pulse:    #9b7ec4;
+  --thinking: #7b71a0;
+  --pulse:         #9b7ec4;
+  --final-thought: #a8c8a0;
 
   --font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono',
                   'Menlo', 'Consolas', 'DejaVu Sans Mono', monospace;
@@ -291,7 +292,7 @@ body::-webkit-scrollbar,
    Message styles
    --------------------------------------------------------------------------- */
 .msg-user     { color: #b0b0b0; }
-.msg-agent    { color: var(--text); }
+.msg-agent    { color: var(--final-thought); }
 .msg-error    { color: var(--red); }
 .msg-thinking { color: var(--thinking); }
 
