@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { Highlight, themes } from 'prism-react-renderer';
 import useSmoothStream from './hooks/useSmoothStream';
 
 
@@ -24,9 +25,54 @@ function CharStream({ text, className = '' }) {
 }
 
 // ---------------------------------------------------------------------------
+// Syntax-highlighted code block using prism-react-renderer
+// ---------------------------------------------------------------------------
+const LANG_MAP = {
+  py: 'python', js: 'javascript', jsx: 'javascript', ts: 'typescript',
+  tsx: 'typescript', json: 'json', css: 'css', html: 'html', sh: 'bash',
+  bash: 'bash', zsh: 'bash', yaml: 'yaml', yml: 'yaml', toml: 'toml',
+  md: 'markdown', sql: 'sql', rs: 'rust', go: 'go', java: 'java',
+  c: 'c', cpp: 'cpp', h: 'c', rb: 'ruby', Makefile: 'makefile',
+};
+
+function guessLang(toolName, filePath) {
+  if (toolName === 'run_shell') return 'bash';
+  if (filePath) {
+    const ext = filePath.split('.').pop().toLowerCase();
+    if (LANG_MAP[ext]) return LANG_MAP[ext];
+    const base = filePath.split('/').pop();
+    if (LANG_MAP[base]) return LANG_MAP[base];
+  }
+  return 'text';
+}
+
+function CodeBlock({ code, language = 'text' }) {
+  return (
+    <div className="code-block">
+      <Highlight theme={themes.palenight} code={code} language={language}>
+        {({ style, tokens, getLineProps, getTokenProps }) => (
+          <pre style={{ ...style, background: 'transparent', margin: 0, padding: '4px 0' }}>
+            {tokens.map((line, i) => (
+              <div key={i} {...getLineProps({ line })}>
+                {line.map((token, key) => (
+                  <span key={key} {...getTokenProps({ token })} />
+                ))}
+              </div>
+            ))}
+          </pre>
+        )}
+      </Highlight>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // A single log line — supports plain text, icons, HTML, and markdown
 // ---------------------------------------------------------------------------
 function LogLine({ line }) {
+  if (line.component) {
+    return <div className={line.cls || ''}>{line.component}</div>;
+  }
   if (line.html) {
     return <div className={line.cls || ''} dangerouslySetInnerHTML={{ __html: line.html }} />;
   }
@@ -128,6 +174,9 @@ export default function App() {
   const chatLogRef = useRef(null);
   const inThinkingRef = useRef(false);
   const submitTimeoutRef = useRef(null);
+  const toolOutputBuf = useRef([]);
+  const toolOutputLang = useRef('text');
+  const toolLinesRef = useRef(null);
 
   // Helper to add a line to any log
   const addLine = useCallback((setter) => (line) => {
@@ -192,22 +241,46 @@ export default function App() {
 
     unsubs.push(api.on('stream:tool_start', (data) => {
       addToolLine({ text: '', cls: 'tool-separator' });
-      addToolLine({ text: data.summary, cls: 'dim' });
+      // Color-code the tool name
+      const summary = data.summary;
+      const parenIdx = summary.indexOf('(');
+      let toolName, toolArgs;
+      if (parenIdx > 0) {
+        toolName = summary.slice(0, parenIdx);
+        toolArgs = summary.slice(parenIdx);
+      } else {
+        toolName = summary;
+        toolArgs = '';
+      }
+      addToolLine({
+        html: `<span class="accent">${toolName}</span><span class="dim">${toolArgs}</span>`,
+        cls: '',
+      });
+      // Reset output buffer for this tool call
+      toolOutputBuf.current = [];
+      toolOutputLang.current = guessLang(toolName, toolArgs);
+    }));
+
+    unsubs.push(api.on('stream:tool_output', (data) => {
+      const lines = data.line.split('\n');
+      for (const line of lines) {
+        toolOutputBuf.current.push(line);
+      }
     }));
 
     unsubs.push(api.on('stream:tool_end', (data) => {
       const status = data.ok ? 'OK' : 'ERR';
       const cls = data.ok ? 'msg-tool-ok' : 'msg-tool-err';
       addToolLine({ text: `  ${status} ${data.detail}`, cls });
-    }));
-
-    unsubs.push(api.on('stream:tool_output', (data) => {
-      const lines = data.line.split('\n');
-      for (const line of lines) {
-        if (line.trim()) {
-          addToolLine({ text: line, cls: 'dim' });
-        }
+      // Add syntax-highlighted output block
+      const code = toolOutputBuf.current.join('\n').trim();
+      if (code) {
+        addToolLine({
+          component: <CodeBlock code={code} language={toolOutputLang.current} />,
+          cls: '',
+        });
       }
+      toolOutputBuf.current = [];
     }));
 
     unsubs.push(api.on('stream:turn_complete', (data) => {

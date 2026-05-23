@@ -313,6 +313,17 @@ body::-webkit-scrollbar,
   user-select: none;
 }
 
+/* Syntax-highlighted code blocks in tools panel */
+.code-block {
+  margin: 4px 0;
+  font-size: 0.75em;
+  overflow-x: auto;
+}
+.code-block pre {
+  font-family: var(--font-family);
+  font-size: inherit;
+}
+
 /* Character-level fade-in for smooth streaming */
 .stream-char {
   animation: charFadeIn 0.35s ease-out;
