@@ -14,9 +14,9 @@
   --green:    #8bc48b;
   --yellow:   #d4b866;
   --red:      #e0556a;
-  --thinking: #7b71a0;
-  --pulse:         #9b7ec4;
-  --final-thought: #a8c8a0;
+  --thinking: #5a5378;
+  --pulse:         #7b71a0;
+  --final-thought: #7b71a0;
 
   --font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono',
                   'Menlo', 'Consolas', 'DejaVu Sans Mono', monospace;
@@ -251,7 +251,7 @@ body::-webkit-scrollbar,
   padding: 0;
 }
 
-#user-input::placeholder { color: var(--thinking); }
+#user-input::placeholder { color: var(--dim); }
 #user-input:disabled { opacity: 0.5; }
 
 /* ---------------------------------------------------------------------------
@@ -291,10 +291,18 @@ body::-webkit-scrollbar,
 /* ---------------------------------------------------------------------------
    Message styles
    --------------------------------------------------------------------------- */
-.msg-user     { color: #b0b0b0; }
-.msg-agent    { color: var(--final-thought); }
+.msg-user     { color: #b0b0b0; margin-bottom: 0.5em; }
+.msg-agent    { color: var(--final-thought); margin-bottom: 1em; }
 .msg-error    { color: var(--red); }
 .msg-thinking { color: var(--thinking); }
+.msg-agent-pending { min-height: 1em; }
+.msg-separator {
+  height: 0;
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 12px 0 8px 0;
+  user-select: none;
+}
 
 /* Character-level fade-in for smooth streaming */
 .stream-char {

@@ -103,6 +103,7 @@ export default function App() {
 
   const inputRef = useRef(null);
   const thinkingLogRef = useRef(null);
+  const chatLogRef = useRef(null);
   const inThinkingRef = useRef(false);
   const submitTimeoutRef = useRef(null);
 
@@ -192,8 +193,7 @@ export default function App() {
       if (agentText) {
         setChatLines((prev) => {
           const updated = [...prev];
-          // replace last empty placeholder with agent response
-          if (updated.length > 0 && updated[updated.length - 1].text === '') {
+          if (updated.length > 0 && updated[updated.length - 1].cls === 'msg-agent-pending') {
             updated[updated.length - 1] = { text: agentText, cls: 'msg-agent' };
           } else {
             updated.push({ text: agentText, cls: 'msg-agent' });
@@ -249,9 +249,10 @@ export default function App() {
 
     setChatLines((prev) => [
       ...prev,
+      ...(prev.length > 0 ? [{ text: '', cls: 'msg-separator' }] : []),
       { text, cls: 'msg-user' },
-      { text: '', cls: '' },
-      { text: '', cls: '' },
+      { text: '', cls: 'msg-separator' },
+      { text: '', cls: 'msg-agent-pending' },
     ]);
     chatStream.reset();
 
@@ -285,7 +286,7 @@ export default function App() {
     if (agentText) {
       setChatLines((prev) => {
         const updated = [...prev];
-        if (updated.length > 0 && updated[updated.length - 1].text === '') {
+        if (updated.length > 0 && updated[updated.length - 1].cls === 'msg-agent-pending') {
           updated[updated.length - 1] = { text: agentText, cls: 'msg-agent' };
         }
         return updated;
@@ -305,6 +306,13 @@ export default function App() {
       thinkingLogRef.current.scrollTop = thinkingLogRef.current.scrollHeight;
     }
   }, [thinking.displayedText]);
+
+  // Auto-scroll chat log
+  useEffect(() => {
+    if (chatLogRef.current) {
+      chatLogRef.current.scrollTop = chatLogRef.current.scrollHeight;
+    }
+  }, [chatLines, chatStream.displayedText]);
 
   // Auto-focus input on mount
   useEffect(() => {
@@ -338,7 +346,7 @@ export default function App() {
 
         {/* Right pane: Chat */}
         <RoundedFrame id="right-pane" title="Chat">
-          <div id="chat-log" className="log scrollable text">
+          <div id="chat-log" ref={chatLogRef} className="log scrollable text">
             {chatLines.map((line, i) => <LogLine key={`line-${i}`} line={line} />)}
             {chatStream.displayedText && (
               <CharStream text={chatStream.displayedText} className="msg-agent" />
