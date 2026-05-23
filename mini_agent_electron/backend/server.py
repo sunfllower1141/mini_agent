@@ -240,9 +240,16 @@ class AgentRunner:
         except Exception as e:
             if not self._cancel_event.is_set():
                 send_msg({"type": "error", "message": str(e)})
-            return
+                return
+            # Fall through to send turn_complete for cancellation
 
         if self._cancel_event.is_set():
+            send_msg({
+                "type": "turn_complete",
+                "usage": {"total_tokens": self._total_tokens, "prompt_tokens": 0, "completion_tokens": 0},
+                "turn_count": self._total_turns,
+                "cancelled": True,
+            })
             return
 
         if msg is not None:
