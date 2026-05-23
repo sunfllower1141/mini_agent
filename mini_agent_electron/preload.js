@@ -4,7 +4,7 @@
  * Exposes a safe `miniAgent` API to the renderer via contextBridge.
  * All Python communication goes through IPC to the main process.
  */
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('miniAgent', {
   // Send user message to agent
@@ -21,6 +21,58 @@ contextBridge.exposeInMainWorld('miniAgent', {
 
   // Request status update
   getStatus: () => ipcRenderer.invoke('backend:get_status'),
+
+  // --- File drop bridge ---
+  // Registers a callback that receives an array of absolute file paths
+  // whenever the user drops files from the OS onto the window.
+  // Returns an unsubscribe function.
+  onFileDrop: (callback) => {
+    const inputFrame = () => document.getElementById('input-frame');
+    const handler = (e) => {
+      const frame = inputFrame();
+      if (frame) frame.classList.remove('drag-over');
+      // Must preventDefault BEFORE reading paths — Electron's default
+      // is to navigate to / open the dropped file.
+      e.preventDefault();
+      e.stopPropagation();
+      const files = e.dataTransfer?.files;
+      if (!files || files.length === 0) return;
+      const paths = [];
+      for (let i = 0; i < files.length; i++) {
+        // File.path was removed in Electron 32; use webUtils instead
+        const p = webUtils.getPathForFile(files[i]);
+        if (p) paths.push(p);
+      }
+      if (paths.length === 0) return;
+      callback(paths);
+    };
+    const dragOver = (e) => {
+      const files = e.dataTransfer?.files;
+      if (!files || files.length === 0) return;
+      // Always prevent default for file drags — do NOT gate on file.path,
+      // because file.path may only be populated on drop, not dragover.
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'copy';
+      const frame = inputFrame();
+      if (frame) frame.classList.add('drag-over');
+    };
+    const dragLeave = (e) => {
+      // Only remove when actually leaving the document
+      if (e.target === document.documentElement || e.target === document.body) {
+        const frame = inputFrame();
+        if (frame) frame.classList.remove('drag-over');
+      }
+    };
+    document.addEventListener('dragover', dragOver);
+    document.addEventListener('dragleave', dragLeave);
+    document.addEventListener('drop', handler);
+    return () => {
+      document.removeEventListener('dragover', dragOver);
+      document.removeEventListener('dragleave', dragLeave);
+      document.removeEventListener('drop', handler);
+    };
+  },
 
   // --- Event listeners (renderer subscribes) ---
   on: (channel, callback) => {

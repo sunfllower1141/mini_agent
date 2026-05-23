@@ -210,6 +210,12 @@ html, body {
   border-color: var(--accent);
 }
 
+#input-frame.drag-over {
+  border-color: var(--accent);
+  background: rgba(187, 134, 252, 0.06);
+  box-shadow: 0 0 0 1px rgba(187, 134, 252, 0.25);
+}
+
 #input-frame .frame-left,
 #input-frame .frame-right,
 #input-frame .frame-top,

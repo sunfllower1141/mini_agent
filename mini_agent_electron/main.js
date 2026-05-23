@@ -288,6 +288,16 @@ function createWindow() {
     win.webContents.openDevTools({ mode: 'detach' });
   }
 
+  // Block file-drop navigation — the preload handles drag-and-drop to
+  // extract file paths and feed them into the user input.  This is a
+  // safety net in case the preload's preventDefault doesn't fire first.
+  win.webContents.on('will-navigate', (event, url) => {
+    const parsed = require('url').parse(url);
+    if (parsed.protocol === 'file:') {
+      event.preventDefault();
+    }
+  });
+
   return win;
 }
 

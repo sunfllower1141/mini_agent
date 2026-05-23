@@ -41,6 +41,7 @@ function AppShell() {
   const inThinkingRef = useRef(false);
   const submitTimeoutRef = useRef(null);
   const toolOutputStack = useRef([]); // stack of buffers for parallel tool calls
+  const [inputValue, setInputValue] = useState('');
 
   // Helper to add a line to any log
   const addLine = useCallback((setter) => (line) => {
@@ -209,7 +210,7 @@ function AppShell() {
 
     if (text.startsWith('/')) {
       window.miniAgent.command(text);
-      inputRef.current.value = '';
+      setInputValue('');
       // /clear also wipes the renderer's chat & tool logs immediately
       if (text.trim().toLowerCase() === '/clear') {
         setChatLines([]);
@@ -233,7 +234,7 @@ function AppShell() {
 
     setIsLive(true);
     setInputDisabled(true);
-    inputRef.current.value = '';
+    setInputValue('');
 
     window.miniAgent.submit(text);
 
@@ -252,27 +253,24 @@ function AppShell() {
     }
   }, [handleSubmit]);
 
-  // Drag-and-drop files into the input
-  const handleDragOver = useCallback((e) => {
-    e.preventDefault();
-    e.stopPropagation();
+  const handleChange = useCallback((e) => {
+    setInputValue(e.target.value);
   }, []);
 
-  const handleDrop = useCallback((e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const files = e.dataTransfer?.files;
-    if (!files || files.length === 0) return;
-    const paths = [];
-    for (const file of files) {
-      // Electron adds the real OS path as `file.path`
-      if (file.path) paths.push(file.path);
-    }
-    if (paths.length > 0 && inputRef.current) {
-      const current = inputRef.current.value;
-      inputRef.current.value = current ? `${current} ${paths.join(' ')}` : paths.join(' ');
-      inputRef.current.focus();
-    }
+  // Drag-and-drop: use the preload bridge which can read Electron's File.path.
+  // The preload manages dragOver/drop at the document level and calls our
+  // callback with absolute file paths.
+  useEffect(() => {
+    const api = window.miniAgent;
+    if (!api || !api.onFileDrop) return;
+    const unsub = api.onFileDrop((paths) => {
+      setInputValue((prev) => {
+        const appended = paths.join(' ');
+        return prev ? `${prev} ${appended}` : appended;
+      });
+      inputRef.current?.focus();
+    });
+    return () => unsub();
   }, []);
 
   // Click workspace to change it
@@ -306,6 +304,7 @@ function AppShell() {
     }
     setIsLive(false);
     setInputDisabled(false);
+    setInputValue('');
     inputRef.current?.focus();
   }, [chatStream, thinking]);
 
@@ -399,9 +398,9 @@ function AppShell() {
                 autoComplete="off"
                 spellCheck="false"
                 disabled={inputDisabled}
+                value={inputValue}
+                onChange={handleChange}
                 onKeyDown={handleKeyDown}
-                onDragOver={handleDragOver}
-                onDrop={handleDrop}
               />
             </div>
           </div>
