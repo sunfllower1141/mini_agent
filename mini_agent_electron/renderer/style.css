@@ -322,8 +322,6 @@ html, body {
   color: var(--text);
   font-size: 12px;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -353,12 +351,7 @@ html, body {
   border-radius: 3px;
   font-size: 11px;
   color: var(--dim);
-  opacity: 0;
-  transition: opacity 0.1s;
   cursor: pointer;
-}
-.session-dropdown-item:hover .session-delete {
-  opacity: 1;
 }
 .session-delete:hover {
   color: var(--red);
