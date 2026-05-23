@@ -24,6 +24,9 @@ const turnCounter   = $('#turn-counter');
 const turnCount     = $('#turn-count');
 const tokenCounter  = $('#token-counter');
 const tokenCount    = $('#token-count');
+const workspaceInfo = $('#workspace-info');
+const restoredInfo  = $('#restored-info');
+const headerSession = $('#header-session');
 
 // ---------------------------------------------------------------------------
 // Auto-scroll helpers
@@ -64,6 +67,7 @@ function appendLastLine(el, text, cssClass) {
 let inThinking = false;
 let needsChatNewline = false;
 let currentToolCount = 0;
+const _shownStatus = {};  // dedupe startup status lines
 
 // ---------------------------------------------------------------------------
 // Backend event handlers
@@ -71,22 +75,32 @@ let currentToolCount = 0;
 
 function setupListeners() {
   window.miniAgent.on('backend:status', (data) => {
-    if (data.ready) {
-      appendLine(toolsLog, 'mini_agent backend ready', 'dim');
-      headerModel.textContent = data.model || 'mini_agent';
+    // Header — update model name from any message that carries it
+    if (data.model) {
+      headerModel.textContent = data.model;
     }
+    // Session name → header center
+    if (data.session_name) {
+      headerSession.textContent = data.session_name;
+    }
+    // Startup line — only once
+    if (data.ready && !_shownStatus.ready) {
+      appendLine(toolsLog, 'backend ready', 'dim');
+      _shownStatus.ready = true;
+    }
+    // Workspace → footer right
     if (data.workspace) {
-      appendLine(toolsLog, `Workspace: ${data.workspace}`, 'dim');
+      workspaceInfo.textContent = data.workspace;
     }
+    // Git branch → footer left
     if (data.git_branch) {
       const dirty = data.git_dirty ? '*' : '';
       gitStatus.textContent = `⎇ ${data.git_branch}${dirty}`;
     }
+    // Restored count → footer right
     if (data.restored_count) {
-      appendLine(toolsLog, `Restored ${data.restored_count} messages`, 'dim');
-    }
-    if (data.model) {
-      headerModel.textContent = data.model;
+      restoredInfo.textContent = `restored ${data.restored_count} msgs`;
+      restoredInfo.classList.remove('hidden');
     }
   });
 
@@ -135,6 +149,7 @@ function setupListeners() {
   });
 
   window.miniAgent.on('stream:turn_complete', (data) => {
+    clearTimeout(submitTimeout);
     if (data.usage) {
       const tok = data.usage.total_tokens || 0;
       if (tok) {
@@ -153,6 +168,7 @@ function setupListeners() {
   });
 
   window.miniAgent.on('stream:error', (data) => {
+    clearTimeout(submitTimeout);
     appendLine(chatLog, `Error: ${data.message}`, 'msg-error');
     liveIndicator.classList.add('hidden');
     userInput.disabled = false;
@@ -173,6 +189,8 @@ function setupListeners() {
     }
   });
 }
+
+let submitTimeout = null;
 
 // ---------------------------------------------------------------------------
 // Input handling
@@ -195,6 +213,17 @@ function handleSubmit(text) {
   // Show live indicator
   liveIndicator.classList.remove('hidden');
   userInput.disabled = true;
+
+  // Safety: re-enable input after 120s even if backend never responds
+  clearTimeout(submitTimeout);
+  submitTimeout = setTimeout(() => {
+    if (userInput.disabled) {
+      liveIndicator.classList.add('hidden');
+      userInput.disabled = false;
+      userInput.focus();
+      appendLine(toolsLog, 'Timed out waiting for backend response', 'red');
+    }
+  }, 120_000);
 
   // Send to backend
   window.miniAgent.submit(text);
@@ -245,12 +274,6 @@ function handleCommand(cmd) {
 // ---------------------------------------------------------------------------
 
 userInput.addEventListener('keydown', (e) => {
-  // Ctrl+C or Ctrl+Q — handled by main process (app quit)
-  if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'q')) {
-    window.miniAgent.cancel();
-    return;
-  }
-
   // Enter to submit
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
@@ -259,6 +282,30 @@ userInput.addEventListener('keydown', (e) => {
     if (text) handleSubmit(text);
   }
 });
+
+// Global Escape key — cancel current turn (works even when input is disabled)
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && userInput.disabled) {
+    e.preventDefault();
+    doCancel();
+  }
+});
+
+// Click on live indicator to cancel
+liveIndicator.addEventListener('click', () => {
+  if (userInput.disabled) {
+    doCancel();
+  }
+});
+
+function doCancel() {
+  clearTimeout(submitTimeout);
+  window.miniAgent.cancel();
+  appendLine(toolsLog, '--- cancelled ---', 'red');
+  liveIndicator.classList.add('hidden');
+  userInput.disabled = false;
+  userInput.focus();
+}
 
 // ---------------------------------------------------------------------------
 // Startup

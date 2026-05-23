@@ -21,18 +21,13 @@
   --font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono',
                   'Menlo', 'Consolas', 'DejaVu Sans Mono', monospace;
   --font-size: 13px;
-  --line-height: 1.45;
-  --border-width: 1px;
+  --line-height: 1.5;
 }
 
 /* ---------------------------------------------------------------------------
    Reset & Base
    --------------------------------------------------------------------------- */
-*, *::before, *::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 html, body {
   height: 100%;
@@ -49,7 +44,7 @@ html, body {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  padding: 4px 8px;
+  padding: 12px 16px;
   gap: 0;
 }
 
@@ -57,19 +52,25 @@ html, body {
    Header
    --------------------------------------------------------------------------- */
 .header {
-  padding: 2px 0;
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 16px 8px 70px;  /* left padding clears macOS traffic lights */
   user-select: none;
-  -webkit-app-region: drag;  /* make header draggable on macOS */
+  -webkit-app-region: drag;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 /* ---------------------------------------------------------------------------
-   Horizontal rule (using border characters)
+   Divider
    --------------------------------------------------------------------------- */
 .hr {
   height: 1px;
   background: var(--border);
   flex-shrink: 0;
-  margin: 1px 0;
+  margin: 4px 0;
+  opacity: 0.5;
 }
 
 /* ---------------------------------------------------------------------------
@@ -78,8 +79,8 @@ html, body {
 #body-panels {
   display: flex;
   flex: 1;
-  gap: 0;
-  min-height: 0;  /* critical for flex shrinking */
+  gap: 10px;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -88,6 +89,10 @@ html, body {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  background: var(--surface);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  overflow: hidden;
 }
 
 #right-pane {
@@ -95,53 +100,35 @@ html, body {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  margin-left: 0;
+  background: var(--surface);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  overflow: hidden;
 }
 
 /* ---------------------------------------------------------------------------
-   Rounded frames (using Unicode box-drawing chars in HTML)
+   Rounded frames — hide the ASCII border cruft, use CSS borders instead
    --------------------------------------------------------------------------- */
 .rounded-frame {
   display: flex;
   flex-direction: column;
-  margin: 2px 0;
+  margin: 0;
+  flex: 1;
+  min-height: 0;
 }
 
 .frame-top, .frame-bottom {
-  display: flex;
-  flex-shrink: 0;
-  height: 1.4em;
-  line-height: 1.4em;
-  user-select: none;
+  display: none;  /* hide ASCII frame borders */
 }
 
-.border-char {
-  color: var(--border);
-  flex-shrink: 0;
-}
-
-.border-fill {
-  flex: 1;
-  overflow: hidden;
-}
-
-.frame-title {
-  color: var(--border);
-  padding: 0 2px;
-  flex-shrink: 0;
+.frame-left, .frame-right {
+  display: none;
 }
 
 .frame-body {
   display: flex;
   flex: 1;
   min-height: 0;
-}
-
-.frame-left, .frame-right {
-  width: 1ch;
-  flex-shrink: 0;
-  color: var(--border);
-  user-select: none;
 }
 
 .frame-content {
@@ -151,6 +138,14 @@ html, body {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  padding: 8px 10px;
+  gap: 4px;
+}
+
+/* Pane section labels */
+.frame-content::before {
+  content: '';
+  display: none;
 }
 
 /* ---------------------------------------------------------------------------
@@ -162,28 +157,30 @@ html, body {
   white-space: pre-wrap;
   word-break: break-word;
   min-height: 0;
+  padding: 2px 0;
 }
 
-.log::-webkit-scrollbar {
-  width: 4px;
-}
+.log::-webkit-scrollbar { width: 5px; }
+.log::-webkit-scrollbar-track { background: transparent; }
+.log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.log::-webkit-scrollbar-thumb:hover { background: var(--dim); }
 
-.log::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.log::-webkit-scrollbar-thumb {
-  background: var(--surface);
-  border-radius: 2px;
-}
-
-.log::-webkit-scrollbar-thumb:hover {
-  background: var(--border);
+/* Left pane area labels */
+.sub-label {
+  flex-shrink: 0;
+  padding: 6px 0 2px 0;
+  user-select: none;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
 }
 
 /* Fixed-height areas */
 .thinking-log {
-  max-height: 10em;
+  max-height: 12em;
   flex-shrink: 0;
 }
 
@@ -192,22 +189,34 @@ html, body {
   flex-shrink: 0;
 }
 
-.sub-label {
-  flex-shrink: 0;
-  padding: 1px 0;
-  user-select: none;
-}
-
 /* Scrollable fills remaining space */
-.scrollable {
-  flex: 1;
-}
+.scrollable { flex: 1; }
 
 /* ---------------------------------------------------------------------------
-   Input
+   Input area
    --------------------------------------------------------------------------- */
 #input-frame {
-  flex-shrink: 0;
+  flex: 0 0 auto;
+  margin-top: 8px;
+  background: var(--surface);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  transition: border-color 0.15s ease;
+}
+
+#input-frame:focus-within {
+  border-color: var(--accent);
+}
+
+#input-frame .frame-left,
+#input-frame .frame-right,
+#input-frame .frame-top,
+#input-frame .frame-bottom {
+  display: none;
+}
+
+#input-frame .frame-content {
+  padding: 8px 12px;
 }
 
 #input-container {
@@ -217,9 +226,11 @@ html, body {
 }
 
 .prompt {
-  color: var(--dim);
+  color: var(--accent);
   flex-shrink: 0;
   user-select: none;
+  font-weight: 600;
+  margin-right: 6px;
 }
 
 #user-input {
@@ -235,9 +246,8 @@ html, body {
   padding: 0;
 }
 
-#user-input::placeholder {
-  color: var(--thinking);
-}
+#user-input::placeholder { color: var(--thinking); }
+#user-input:disabled { opacity: 0.5; }
 
 /* ---------------------------------------------------------------------------
    Status bar
@@ -245,13 +255,18 @@ html, body {
 .status-bar {
   display: flex;
   gap: 0;
-  padding: 2px 0;
+  padding: 6px 0 2px 0;
   flex-shrink: 0;
   user-select: none;
+  font-size: 12px;
 }
 
-.status-bar span {
-  margin-right: 8px;
+.status-bar span { margin-right: 12px; }
+
+.status-right {
+  margin-left: auto;
+  display: flex;
+  gap: 12px;
 }
 
 /* ---------------------------------------------------------------------------
@@ -267,7 +282,7 @@ html, body {
 .pulse    { color: var(--pulse); }
 
 /* ---------------------------------------------------------------------------
-   Message styles (used by JS when appending to logs)
+   Message styles
    --------------------------------------------------------------------------- */
 .msg-user     { color: var(--accent); }
 .msg-agent    { color: var(--text); }
@@ -275,17 +290,31 @@ html, body {
 .msg-thinking { color: var(--thinking); }
 .msg-tool-ok  { color: var(--dim); }
 .msg-tool-err { color: var(--red); }
-.msg-status   { color: var(--thinking); }
+.msg-status   { color: var(--dim); font-style: italic; }
+
+/* ---------------------------------------------------------------------------
+   Live indicator (clickable to cancel)
+   --------------------------------------------------------------------------- */
+#live-indicator {
+  cursor: pointer;
+  user-select: none;
+  color: var(--pulse);
+  animation: pulse-glow 1.2s ease-in-out infinite;
+}
+
+#live-indicator:hover { opacity: 0.6; }
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
 
 /* ---------------------------------------------------------------------------
    Hidden
    --------------------------------------------------------------------------- */
-.hidden { display: none; }
+.hidden { display: none !important; }
 
 /* ---------------------------------------------------------------------------
    Selection
    --------------------------------------------------------------------------- */
-::selection {
-  background: var(--surface);
-  color: var(--text);
-}
+::selection { background: var(--accent); color: var(--bg); }

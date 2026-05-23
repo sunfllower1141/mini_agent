@@ -148,10 +148,19 @@ class AgentRunner:
 
     def send_status(self) -> None:
         """Send current status to Electron."""
+        # Derive session name from memory db path
+        session_name = "default"
+        db_path = getattr(self.memory, '_db_path', '')
+        if db_path:
+            import re
+            m = re.search(r'_session_(.+)\.db$', db_path)
+            if m:
+                session_name = m.group(1)
         status = {
             "type": "status",
             "model": self.config.model,
             "workspace": self.workspace,
+            "session_name": session_name,
             "git_branch": self._git_branch,
             "git_dirty": self._git_dirty,
         }
