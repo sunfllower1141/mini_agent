@@ -1,18 +1,30 @@
-import { useState, useMemo, useCallback } from 'react';
-import Tree from 'react-d3-tree';
+import { useMemo, useCallback, useEffect, useState, useRef } from 'react';
+import {
+  ReactFlow,
+  Background,
+  Controls,
+  MiniMap,
+  useNodesState,
+  useEdgesState,
+  useReactFlow,
+} from '@xyflow/react';
+import '@xyflow/react/dist/style.css';
+import ELK from 'elkjs/lib/elk.bundled.js';
+
+const elk = new ELK();
 
 /**
- * AgentTree — hierarchical agent visualization using react-d3-tree.
+ * AgentTree — hierarchical agent visualization using React Flow + elkjs.
  *
- * Converts our flat agent map to a nested tree that D3 lays out automatically.
- * Uses foreignObject for rich HTML node cards with status dots, colors, and hover effects.
+ * Converts our flat agent map into an auto-laid-out node/edge graph.
+ * Real React components for subagent cards (no SVG foreignObject hack).
  *
  * Props:
  *   agents: object { [task_id]: { name, desc, parent_id, toolCalls, thoughts, output, ok } }
  */
 
-// ─── Data transformation: flat agent map → nested D3 tree ──────────────
-function buildTreeData(agents) {
+// ─── ELK graph builder (flat agent map → nested ELK tree) ────────────────────
+function buildElkTree(agents) {
   const ids = Object.keys(agents);
   if (ids.length === 0) return null;
 
@@ -26,142 +38,88 @@ function buildTreeData(agents) {
   }
 
   function buildSubtree(taskId) {
-    const agent = agents[taskId];
     const childIds = (childrenOf.get(taskId) || []).filter(id => agents[id]);
     return {
-      name: agent?.name || taskId,
-      attributes: {
-        taskId,
-        ok: agent?.ok,
-        desc: agent?.desc || '',
-        toolCalls: agent?.toolCalls || [],
-        thoughts: agent?.thoughts || [],
-        output: agent?.output || '',
-      },
+      id: taskId,
+      width: 160,
+      height: 40,
       children: childIds.map(buildSubtree),
     };
   }
 
-  const rootChildIds = childrenOf.get('orchestrator') || [];
   return {
-    name: '🧠 Orchestrator',
-    attributes: {
-      taskId: 'orchestrator',
-      isOrchestrator: true,
-      agentCount: ids.length,
+    id: '__root__',
+    layoutOptions: {
+      'elk.algorithm': 'layered',
+      'elk.direction': 'DOWN',
+      'elk.spacing.nodeNode': '50',
+      'elk.layered.spacing.nodeNodeBetweenLayers': '70',
+      'elk.edgeRouting': 'ORTHOGONAL',
     },
-    children: rootChildIds.map(buildSubtree),
+    children: [
+      {
+        id: 'orchestrator',
+        width: 170,
+        height: 48,
+        children: (childrenOf.get('orchestrator') || []).map(buildSubtree),
+      },
+    ],
   };
 }
 
-// ─── Custom node renderer (foreignObject for rich HTML) ─────────────────
-function renderForeignObjectNode({ nodeDatum, toggleNode, onNodeClick }) {
-  const attrs = nodeDatum.attributes || {};
-  const { taskId, isOrchestrator, ok, name, desc } = attrs;
+// ─── Agent node card (React component — no foreignObject!) ──────────────────
+function AgentNode({ data }) {
+  const { agent, isOrchestrator } = data;
 
   if (isOrchestrator) {
     return (
-      <g>
-        <foreignObject width={160} height={40} x={-80} y={-20}>
-          <div
-            xmlns="http://www.w3.org/1999/xhtml"
-            style={{
-              width: '100%', height: '100%',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: 'rgba(30, 30, 46, 0.95)',
-              border: '2px solid var(--accent)',
-              borderRadius: 8,
-              color: 'var(--accent)',
-              fontSize: 12,
-              fontWeight: 700,
-              fontFamily: 'var(--font-family)',
-              cursor: 'pointer',
-              boxSizing: 'border-box',
-            }}
-          >
-            {nodeDatum.name}
-          </div>
-        </foreignObject>
-      </g>
+      <div className="agent-rf-node agent-rf-node--orch">
+        🧠 Orchestrator
+      </div>
     );
   }
 
-  // Sub-agent card
+  const ok = agent?.ok;
   const statusColor = ok === true ? 'var(--green)'
     : ok === false ? 'var(--red)'
     : 'var(--pulse)';
   const statusIcon = ok === true ? '✓'
     : ok === false ? '✗'
     : '●';
-  const shortName = (name || taskId || '').slice(0, 18);
-  const hasInfo = desc || (attrs.toolCalls?.length > 0);
+  const shortName = (agent?.name || '').slice(0, 18);
+  const toolCount = agent?.toolCalls?.length || 0;
 
   return (
-    <g>
-      {/* transparent hit area for hover/click */}
-      <circle cx={0} cy={0} r={18} fill="transparent" style={{ cursor: 'pointer' }} />
-      {/* card */}
-      <foreignObject width={150} height={38} x={-75} y={-19}>
-        <div
-          xmlns="http://www.w3.org/1999/xhtml"
-          style={{
-            width: '100%', height: '100%',
-            display: 'flex', alignItems: 'center',
-            padding: '0 10px',
-            gap: 8,
-            background: 'rgba(49, 50, 68, 0.85)',
-            border: `1.5px solid var(--border)`,
-            borderRadius: 6,
-            fontFamily: 'var(--font-family)',
-            fontSize: 10,
-            color: 'var(--accent)',
-            cursor: 'pointer',
-            boxSizing: 'border-box',
-            transition: 'border-color 0.15s, background 0.15s',
-            overflow: 'hidden',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {/* status dot */}
-          <span style={{
-            width: 7, height: 7, minWidth: 7,
-            borderRadius: '50%',
-            background: statusColor,
-            display: 'inline-block',
-          }} />
-          {/* name */}
-          <span style={{
-            flex: 1,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            fontSize: 10,
-          }}>{shortName}</span>
-          {/* status icon */}
-          <span style={{
-            color: statusColor,
-            fontSize: 11,
-            fontWeight: 700,
-            minWidth: 12,
-            textAlign: 'right',
-          }}>{statusIcon}</span>
-        </div>
-      </foreignObject>
-    </g>
+    <div className="agent-rf-node agent-rf-node--sub">
+      <span
+        className="agent-rf-node__dot"
+        style={{ background: statusColor }}
+      />
+      <span className="agent-rf-node__name">{shortName}</span>
+      {toolCount > 0 && (
+        <span className="agent-rf-node__tools dim">{toolCount}t</span>
+      )}
+      <span
+        className="agent-rf-node__status"
+        style={{ color: statusColor }}
+      >{statusIcon}</span>
+    </div>
   );
 }
 
-// ─── Tooltip (rendered as overlay, positioned by mouse) ─────────────────
+const nodeTypes = { agentNode: AgentNode };
+
+// ─── Tooltip (positioned via portal over ReactFlow) ─────────────────────────
 function Tooltip({ agent, position }) {
   if (!agent || !position) return null;
 
-  const attrs = agent.attributes || {};
-  const { taskId, desc, toolCalls, thoughts, output, ok } = attrs;
+  const { taskId, desc, toolCalls, thoughts, output, ok, name } = agent.attributes || agent;
 
   return (
     <div
       className="agent-tree-tooltip"
       style={{
-        left: position.x + 12,
+        left: position.x + 14,
         top: position.y - 10,
         position: 'fixed',
         zIndex: 1000,
@@ -169,7 +127,7 @@ function Tooltip({ agent, position }) {
       }}
     >
       <div className="agent-tree-tooltip-header">
-        <span className="accent">{agent.name || taskId}</span>
+        <span className="accent">{name || taskId}</span>
         <span className="dim" style={{ fontSize: 9, marginLeft: 6 }}>{taskId?.slice(0, 8)}</span>
       </div>
 
@@ -222,34 +180,126 @@ function Tooltip({ agent, position }) {
   );
 }
 
-// ─── Loading dots ───────────────────────────────────────────────────────
+// ─── Loading dots ───────────────────────────────────────────────────────────
 function LoadingDots() {
   return <span className="loading-dots"><span>.</span><span>.</span><span>.</span></span>;
 }
 
-// ─── Main component ────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// Main component
+// ══════════════════════════════════════════════════════════════════════════════
 export default function AgentTree({ agents }) {
-  const [hoveredNode, setHoveredNode] = useState(null);
+  const [nodes, setNodes, onNodesChange] = useNodesState([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [hoveredAgent, setHoveredAgent] = useState(null);
   const [tooltipPos, setTooltipPos] = useState(null);
 
-  const treeData = useMemo(() => buildTreeData(agents), [agents]);
+  const { fitView } = useReactFlow();
+  const prevCountRef = useRef(0);
+
   const ids = Object.keys(agents);
 
-  const handleNodeMouseOver = useCallback((nodeDatum, e) => {
-    setHoveredNode(nodeDatum);
-    setTooltipPos({ x: e.clientX, y: e.clientY });
+  // Run elkjs layout whenever the agents map changes
+  useEffect(() => {
+    const elkTree = buildElkTree(agents);
+    if (!elkTree) {
+      setNodes([]);
+      setEdges([]);
+      return;
+    }
+
+    let cancelled = false;
+
+    elk.layout(elkTree).then((layout) => {
+      if (cancelled) return;
+
+      const newNodes = [];
+      const newEdges = [];
+
+      function walk(node, parentId) {
+        newNodes.push({
+          id: node.id,
+          position: { x: node.x || 0, y: node.y || 0 },
+          data: {
+            agent: node.id === 'orchestrator' ? null : agents[node.id],
+            isOrchestrator: node.id === 'orchestrator',
+          },
+          type: 'agentNode',
+          sourcePosition: 'bottom',
+          targetPosition: 'top',
+          draggable: false,
+        });
+
+        if (parentId) {
+          const childAgent = agents[node.id];
+          const isRunning = childAgent?.ok == null;
+          newEdges.push({
+            id: `${parentId}->${node.id}`,
+            source: parentId,
+            target: node.id,
+            type: 'smoothstep',
+            animated: isRunning,
+            style: {
+              stroke: isRunning ? 'var(--pulse)' : 'var(--border)',
+              strokeWidth: isRunning ? 2 : 1,
+            },
+          });
+        }
+
+        if (node.children) {
+          for (const child of node.children) {
+            walk(child, node.id);
+          }
+        }
+      }
+
+      for (const child of layout.children || []) {
+        walk(child, null);
+      }
+
+      setNodes(newNodes);
+      setEdges(newEdges);
+
+      // Auto-fit on first load or when agent count changes
+      if (prevCountRef.current !== ids.length) {
+        prevCountRef.current = ids.length;
+        // Schedule fitView after React renders the new nodes
+        requestAnimationFrame(() => {
+          fitView({ padding: 0.2, duration: 300 });
+        });
+      }
+    });
+
+    return () => { cancelled = true; };
+  }, [agents, setNodes, setEdges, fitView, ids.length]);
+
+  // ── Event handlers ────────────────────────────────────────────────────────
+  const onNodeMouseEnter = useCallback((event, node) => {
+    const agent = agents[node.id];
+    if (!agent) return;
+    setHoveredAgent({
+      attributes: {
+        ...agent,
+        taskId: node.id,
+        name: agent.name || node.id,
+        ok: agent.ok,
+      },
+      name: agent.name || node.id,
+    });
+    setTooltipPos({ x: event.clientX, y: event.clientY });
+  }, [agents]);
+
+  const onNodeMouseMove = useCallback((event) => {
+    setTooltipPos((prev) => prev ? { x: event.clientX, y: event.clientY } : null);
   }, []);
 
-  const handleNodeMouseMove = useCallback((e) => {
-    setTooltipPos({ x: e.clientX, y: e.clientY });
-  }, []);
-
-  const handleNodeMouseOut = useCallback(() => {
-    setHoveredNode(null);
+  const onNodeMouseLeave = useCallback(() => {
+    setHoveredAgent(null);
     setTooltipPos(null);
   }, []);
 
-  if (ids.length === 0 || !treeData) {
+  // ── Empty state ──────────────────────────────────────────────────────────
+  if (ids.length === 0) {
     return (
       <div className="agent-tree-empty">
         No active sub-agents
@@ -262,7 +312,7 @@ export default function AgentTree({ agents }) {
 
   return (
     <div className="agent-tree-container">
-      {/* Mini status bar */}
+      {/* Status bar */}
       <div className="agent-tree-status">
         <span className="dim" style={{ fontSize: 10 }}>
           {ids.length} agent{ids.length !== 1 ? 's' : ''}
@@ -279,32 +329,46 @@ export default function AgentTree({ agents }) {
         </span>
       </div>
 
-      {/* D3 Tree */}
-      <div className="agent-tree-svg-wrapper" style={{ width: '100%', height: 400 }}>
-        <Tree
-          data={treeData}
-          orientation="vertical"
-          pathFunc="step"
-          translate={{ x: 200, y: 50 }}
-          zoom={0.7}
-          scaleExtent={{ min: 0.3, max: 2 }}
-          separation={{ siblings: 1.5, nonSiblings: 2 }}
-          nodeSize={{ x: 180, y: 70 }}
-          renderCustomNodeElement={(rd3tProps) =>
-            renderForeignObjectNode(rd3tProps)
-          }
-          onNodeMouseOver={handleNodeMouseOver}
-          onNodeMouseMove={handleNodeMouseMove}
-          onNodeMouseOut={handleNodeMouseOut}
-          enableLegacyTransitions={false}
-          collapsible={false}
-          depthFactor={80}
-        />
+      {/* ReactFlow canvas */}
+      <div className="agent-tree-rf-wrapper">
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          nodeTypes={nodeTypes}
+          onNodeMouseEnter={onNodeMouseEnter}
+          onNodeMouseMove={onNodeMouseMove}
+          onNodeMouseLeave={onNodeMouseLeave}
+          nodesDraggable={false}
+          nodesConnectable={false}
+          elementsSelectable={false}
+          minZoom={0.2}
+          maxZoom={2.5}
+          defaultEdgeOptions={{
+            style: { stroke: 'var(--border)', strokeWidth: 1 },
+          }}
+          proOptions={{ hideAttribution: true }}
+        >
+          <Background color="var(--border)" gap={24} size={0.4} />
+          <Controls
+            className="rf-controls"
+            showInteractive={false}
+          />
+          <MiniMap
+            className="rf-minimap"
+            nodeStrokeColor="var(--border)"
+            nodeColor="#313244"
+            maskColor="rgba(0,0,0,0.4)"
+            pannable
+            zoomable
+          />
+        </ReactFlow>
       </div>
 
       {/* Tooltip portal */}
-      {hoveredNode && tooltipPos && (
-        <Tooltip agent={hoveredNode} position={tooltipPos} />
+      {hoveredAgent && tooltipPos && (
+        <Tooltip agent={hoveredAgent} position={tooltipPos} />
       )}
     </div>
   );

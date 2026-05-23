@@ -208,17 +208,99 @@ html, body {
   border-bottom: 1px solid var(--border);
 }
 
-.agent-tree-svg-wrapper {
+/* React Flow wrapper */
+.agent-tree-rf-wrapper {
   flex: 1;
-  overflow: auto;
   min-height: 0;
-  padding: 0;
 }
 
-.agent-tree-svg {
-  display: block;
-  min-width: 100%;
-  min-height: 100%;
+/* ── React Flow custom node cards ───────────────────────────────── */
+.agent-rf-node {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-family: var(--font-family);
+  font-size: 11px;
+  color: var(--accent);
+  cursor: pointer;
+  box-sizing: border-box;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.agent-rf-node--orch {
+  width: 170px;
+  height: 48px;
+  justify-content: center;
+  background: rgba(30, 30, 46, 0.95);
+  border: 2px solid var(--accent);
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.agent-rf-node--sub {
+  width: 160px;
+  height: 40px;
+  background: rgba(49, 50, 68, 0.88);
+  border: 1.5px solid var(--border);
+}
+
+.agent-rf-node--sub:hover {
+  border-color: var(--accent);
+  background: rgba(69, 71, 90, 0.92);
+}
+
+.agent-rf-node__dot {
+  width: 7px;
+  height: 7px;
+  min-width: 7px;
+  border-radius: 50%;
+}
+
+.agent-rf-node__name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10px;
+}
+
+.agent-rf-node__tools {
+  font-size: 9px;
+  color: var(--dim);
+}
+
+.agent-rf-node__status {
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 12px;
+  text-align: right;
+}
+
+/* React Flow controls theming */
+.rf-controls {
+  background: var(--bg) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+}
+
+.rf-controls button {
+  background: var(--bg) !important;
+  border-color: var(--border) !important;
+  fill: var(--accent) !important;
+}
+
+.rf-controls button:hover {
+  background: var(--surface) !important;
+}
+
+.rf-minimap {
+  background: var(--bg) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 6px !important;
 }
 
 /* Loading dots animation */
