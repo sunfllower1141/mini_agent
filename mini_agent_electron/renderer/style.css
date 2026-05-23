@@ -14,7 +14,7 @@
   --green:    #bb86fc;
   --yellow:   #d0b8ff;
   --red:      #8856e8;
-  --thinking: #4d4570;
+  --thinking: #ff6eb0;
   --pulse:         #9b80e8;
   --final-thought: #a890f0;
 
@@ -419,7 +419,7 @@ html, body {
 .text     { color: var(--text); }
 .dim      { color: var(--dim); }
 .accent   { color: var(--accent); }
-.thinking { color: var(--thinking); }
+.thinking { color: var(--thinking); text-shadow: 0 0 8px rgba(255, 110, 176, 0.35); }
 .red      { color: var(--red); }
 .green    { color: var(--green); }
 .yellow   { color: var(--yellow); }
@@ -431,7 +431,7 @@ html, body {
 .msg-user     { color: var(--text); margin-bottom: 0.5em; opacity: 0.8; }
 .msg-agent    { color: var(--final-thought); margin-bottom: 1em; }
 .msg-error    { color: var(--red); }
-.msg-thinking { color: var(--thinking); }
+.msg-thinking { color: var(--thinking); text-shadow: 0 0 8px rgba(255, 110, 176, 0.35); }
 .msg-agent-pending { min-height: 1em; }
 .msg-separator {
   height: 0;
