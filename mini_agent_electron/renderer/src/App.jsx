@@ -207,7 +207,27 @@ function AppShell() {
 
   // Submit handler
   const handleSubmit = useCallback((text) => {
-    if (!text || inputDisabled) return;
+    if (!text) return;
+
+    // Allow /clear (and cancel) even during an active turn so the user
+    // isn't trapped in a runaway agent loop. Reject all other input.
+    if (inputDisabled) {
+      if (text.trim().toLowerCase() === '/clear') {
+        window.miniAgent.cancel();          // kill running turn
+        setChatLines([]);
+        setToolsLines([]);
+        setSubagentLines([]);
+        chatStream.reset();
+        thinking.reset();
+        setThinkingOutput('');
+        setIsLive(false);
+        setInputDisabled(false);
+        setInputValue('');
+        inputRef.current?.focus();
+        window.miniAgent.command('/clear'); // tell backend to wipe memory
+      }
+      return;
+    }
 
     if (text.startsWith('/')) {
       window.miniAgent.command(text);
@@ -411,7 +431,6 @@ function AppShell() {
                 autoFocus
                 autoComplete="off"
                 spellCheck="false"
-                disabled={inputDisabled}
                 value={inputValue}
                 onChange={handleChange}
                 onKeyDown={handleKeyDown}
