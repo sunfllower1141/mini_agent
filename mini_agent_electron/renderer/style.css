@@ -7,6 +7,7 @@
    --------------------------------------------------------------------------- */
 :root {
   --bg:       #000000;
+  --surface:  #313244;
   --border:   #2d2840;
   --accent:   #bb86fc;
   --text:     #cdc4e4;
@@ -433,6 +434,25 @@ html, body {
 .msg-error    { color: var(--red); }
 .msg-thinking { color: var(--thinking); text-shadow: 0 0 8px rgba(255, 110, 176, 0.35); }
 .msg-agent-pending { min-height: 1em; }
+
+/* Code blocks (Shiki syntax highlighting) */
+.code-block {
+  margin: 0.5em 0;
+  padding: 0.75em 1em;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.25);
+  overflow-x: auto;
+  font-size: 0.85em;
+  line-height: 1.5;
+}
+.code-block pre {
+  margin: 0;
+}
+.code-block code {
+  font-family: var(--font-family);
+}
+
 .msg-separator {
   height: 0;
   border: none;
@@ -452,6 +472,40 @@ html, body {
 
 /* Plain tool output */
 .tool-out { margin: 2px 0 4px 0; font-size: 0.82em; overflow-x: auto; white-space: pre-wrap; }
+
+/* Syntax-highlighted code blocks (Shiki output) */
+.code-block {
+  margin: 2px 0 4px 0;
+  font-size: 0.82em;
+  overflow-x: auto;
+}
+.code-block pre {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', 'Menlo', monospace;
+  line-height: 1.5;
+  tab-size: 4;
+}
+.code-block code {
+  font-family: inherit;
+  font-size: inherit;
+}
+/* Shiki output wrapper — ensure the pre inside renders correctly */
+.shiki-wrapper {
+  overflow-x: auto;
+}
+.shiki-wrapper pre {
+  margin: 0 !important;
+  padding: 10px 14px !important;
+  border-radius: 6px;
+  font-family: var(--font-family) !important;
+  font-size: 0.9em;
+  line-height: 1.55;
+  tab-size: 4;
+  overflow-x: auto;
+}
 .code-label {
   font-size: 0.8em;
   text-transform: uppercase;
@@ -515,17 +569,12 @@ html, body {
   color: var(--green);
 }
 .msg-agent pre {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 10px 14px;
   overflow-x: auto;
-  margin: 8px 0;
+  margin: 4px 0;
 }
 .msg-agent pre code {
   background: none;
   padding: 0;
-  color: var(--text);
 }
 .msg-agent a {
   color: var(--accent);
@@ -566,6 +615,7 @@ html, body {
 /* Markdown lines in the tools panel (dim context) */
 .md-line {
   margin: 0;
+  white-space: normal;
 }
 .md-line code {
   background: rgba(255, 255, 255, 0.05);
@@ -575,17 +625,12 @@ html, body {
   color: var(--green);
 }
 .md-line pre {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 6px 10px;
   overflow-x: auto;
   margin: 4px 0;
 }
 .md-line pre code {
   background: none;
   padding: 0;
-  color: var(--dim);
 }
 .md-line a {
   color: var(--accent);

@@ -358,6 +358,26 @@ class AgentRunner:
             send_msg({"type": "response", "lines": [f"Exported to {fname}"]})
             return
 
+        if cmd == "/test-svg":
+            lines = [
+                "✅ SVG icon test — check-circle",
+                "❌ SVG icon test — x-circle",
+                "⚠️ SVG icon test — warning",
+                "💡 SVG icon test — lightbulb",
+                "📁 SVG icon test — folder",
+                "🔧 SVG icon test — wrench",
+                "🚀 SVG icon test — rocket",
+                "⭐ SVG icon test — star",
+                "🐛 SVG icon test — bug",
+                "🔥 SVG icon test — fire",
+                "💥 SVG icon test — burst",
+            ]
+            send_msg({
+                "type": "response",
+                "lines": [clean_text(l) for l in lines],
+            })
+            return
+
         if cmd == "/init":
             from tools.file_ops import _init_rules
             rg = ReadSafetyGate(self.config.workspace)

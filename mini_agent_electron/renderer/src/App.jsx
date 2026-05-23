@@ -2,12 +2,28 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import useSmoothStream from './hooks/useSmoothStream';
-import LogLine from './components/LogLine';
+import LogLine, { extractSvgFromText } from './components/LogLine';
+import CodeBlock from './components/CodeBlock';
 import LogPanel from './components/LogPanel';
 import RoundedFrame from './components/RoundedFrame';
 import CharStream from './components/CharStream';
 import ErrorBoundary from './components/ErrorBoundary';
 import SessionPicker from './components/SessionPicker';
+
+
+// Shared components map for ReactMarkdown — wires CodeBlock for syntax highlighting.
+// Used in the thinking pane (left side) where syntax highlighting is desired.
+const markdownComponents = {
+  pre({ children }) {
+    return <>{children}</>;
+  },
+  code({ className, children, inline, ...props }) {
+    const match = /language-(\w+)/.exec(className || '');
+    const lang = match ? match[1] : undefined;
+    const code = String(children).replace(/\n$/, '');
+    return <CodeBlock code={code} language={lang} inline={inline} />;
+  },
+};
 
 
 // ---------------------------------------------------------------------------
@@ -127,15 +143,16 @@ function AppShell() {
         cls: '',
       });
       // Push a new buffer for this tool call (stack supports parallel calls)
-      toolOutputStack.current.push([]);
+      // Track tool name alongside the buffer for language detection
+      toolOutputStack.current.push({ lines: [], toolName: data.summary });
     }));
 
     unsubs.push(api.on('stream:tool_output', (data) => {
       const lines = data.line.split('\n');
-      const buf = toolOutputStack.current[toolOutputStack.current.length - 1];
-      if (buf) {
+      const entry = toolOutputStack.current[toolOutputStack.current.length - 1];
+      if (entry) {
         for (const line of lines) {
-          buf.push(line);
+          entry.lines.push(line);
         }
       }
     }));
@@ -144,16 +161,21 @@ function AppShell() {
       const status = data.ok ? 'OK' : 'ERR';
       const cls = data.ok ? 'msg-tool-ok' : 'msg-tool-err';
       // Pop this tool's buffer from the stack (supports parallel calls)
-      const buf = toolOutputStack.current.pop() || [];
-      const bufCode = buf.join('\n').trim();
+      const entry = toolOutputStack.current.pop() || { lines: [], toolName: '' };
+      const bufCode = entry.lines.join('\n').trim();
       const code = bufCode || (data.content || '').trim();
-      // When output is present, show it in a plain pre block
+      // When output is present, show it with syntax highlighting
       if (code) {
-        addToolLine({ text: `  ${status}`, cls });
-        addToolLine({
-          component: <pre className="tool-out">{code}</pre>,
-          cls: '',
-        });
+        const isSingleLine = !code.includes('\n');
+        if (isSingleLine) {
+          addToolLine({ text: `  ${status}  ${code}`, cls });
+        } else {
+          addToolLine({ text: `  ${status}`, cls });
+          addToolLine({
+            component: <CodeBlock code={code} fontSize="0.75em" />,
+            cls: '',
+          });
+        }
       } else {
         addToolLine({ text: `  ${status} ${data.detail}`, cls });
       }
@@ -166,9 +188,9 @@ function AppShell() {
         setChatLines((prev) => {
           const updated = [...prev];
           if (updated.length > 0 && updated[updated.length - 1].cls === 'msg-agent-pending') {
-            updated[updated.length - 1] = { text: agentText, cls: 'msg-agent' };
+            updated[updated.length - 1] = { text: agentText, cls: 'msg-agent', markdown: true };
           } else {
-            updated.push({ text: agentText, cls: 'msg-agent' });
+            updated.push({ text: agentText, cls: 'msg-agent', markdown: true });
           }
           return updated;
         });
@@ -381,7 +403,7 @@ function AppShell() {
             )}
             {thinkingOutput && !thinking.displayedText && (
               <div className="msg-thinking">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}
 >{thinkingOutput}</ReactMarkdown>
               </div>
             )}
@@ -396,23 +418,35 @@ function AppShell() {
           <div id="chat-log" ref={chatLogRef} className="log scrollable text">
             {chatLines.map((line, i) => {
               if (line.cls === 'msg-agent') {
+                const svgExtracted = extractSvgFromText(line.text);
+                const mdText = svgExtracted ? svgExtracted.text : line.text;
                 return (
                   <div key={`line-${i}`} className="msg-agent">
+                    {svgExtracted && (
+                      <span className="emoji-icon" dangerouslySetInnerHTML={{ __html: svgExtracted.svgIcon }} />
+                    )}
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {line.text}
+                      {mdText}
                     </ReactMarkdown>
                   </div>
                 );
               }
               return <LogLine key={`line-${i}`} line={line} />;
             })}
-            {chatStream.displayedText && (
-              <div className="msg-agent">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {chatStream.displayedText}
-                </ReactMarkdown>
-              </div>
-            )}
+            {chatStream.displayedText && (() => {
+              const svgExtracted = extractSvgFromText(chatStream.displayedText);
+              const mdText = svgExtracted ? svgExtracted.text : chatStream.displayedText;
+              return (
+                <div className="msg-agent">
+                  {svgExtracted && (
+                    <span className="emoji-icon" dangerouslySetInnerHTML={{ __html: svgExtracted.svgIcon }} />
+                  )}
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {mdText}
+                  </ReactMarkdown>
+                </div>
+              );
+            })()}
           </div>
         </RoundedFrame>
       </div>

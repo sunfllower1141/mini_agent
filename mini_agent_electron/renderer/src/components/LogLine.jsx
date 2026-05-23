@@ -1,5 +1,15 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import CodeBlock from './CodeBlock';
+
+const markdownComponents = {
+  code({ className, children, inline, ...props }) {
+    const match = /language-(\w+)/.exec(className || '');
+    const lang = match ? match[1] : undefined;
+    const code = String(children).replace(/\n$/, '');
+    return <CodeBlock code={code} language={lang} inline={inline} highlight={false} />;
+  },
+};
 
 /**
  * A single log line — supports plain text, SVG icons, markdown,
@@ -36,7 +46,7 @@ function isSafeEmojiSvg(svg) {
 
 // Extract an SVG icon from the start of a text string.
 // Returns { svgIcon, text } if found, or null.
-function extractSvgFromText(text) {
+export function extractSvgFromText(text) {
   if (!text || typeof text !== 'string') return null;
   const m = text.match(/^(<svg\b[^>]*>.*?<\/svg>)\s*(.*)$/s);
   if (!m) return null;
@@ -78,15 +88,24 @@ export default function LogLine({ line }) {
 
   // Markdown rendering (NO allowDangerousHtml — LLM output is sanitised)
   if (line.markdown) {
+    const extracted = extractSvgFromText(line.text);
+    const mdText = extracted ? extracted.text : line.text;
     return (
-      <div className={`md-line ${line.cls || ''}`}>
+      <div className={`md-line ${line.cls || ''}`} style={{ whiteSpace: 'normal' }}>
+        {extracted && (
+          <span
+            className="emoji-icon"
+            dangerouslySetInnerHTML={{ __html: extracted.svgIcon }}
+          />
+        )}
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           components={{
             p: ({ children }) => <span>{children}</span>,
+            ...markdownComponents,
           }}
         >
-          {line.text}
+          {mdText}
         </ReactMarkdown>
       </div>
     );
