@@ -172,7 +172,7 @@ function AppShell() {
         } else {
           addToolLine({ text: `  ${status}`, cls });
           addToolLine({
-            component: <CodeBlock code={code} fontSize="0.75em" />,
+            component: <CodeBlock code={code} fontSize="0.75em" toolName={entry.toolName} />,
             cls: '',
           });
         }

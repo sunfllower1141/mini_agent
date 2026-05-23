@@ -693,3 +693,19 @@ html, body {
    Selection
    --------------------------------------------------------------------------- */
 ::selection { background: var(--accent); color: var(--bg); }
+
+/* ---------------------------------------------------------------------------
+   Shiki syntax highlighter — inherit tool-pane background, no boxes
+   --------------------------------------------------------------------------- */
+.shiki {
+  background: transparent !important;
+}
+.shiki code,
+.shiki pre {
+  background: transparent !important;
+}
+
+/* Wrapper around all Shiki-highlighted blocks — ensure nothing sneaks through */
+.shiki-block {
+  background: transparent !important;
+}
