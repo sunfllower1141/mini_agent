@@ -210,6 +210,15 @@ function AppShell() {
     if (text.startsWith('/')) {
       window.miniAgent.command(text);
       inputRef.current.value = '';
+      // /clear also wipes the renderer's chat & tool logs immediately
+      if (text.trim().toLowerCase() === '/clear') {
+        setChatLines([]);
+        setToolsLines([]);
+        setSubagentLines([]);
+        chatStream.reset();
+        thinking.reset();
+        setThinkingOutput('');
+      }
       return;
     }
 
