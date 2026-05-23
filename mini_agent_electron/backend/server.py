@@ -165,8 +165,7 @@ class AgentRunner:
             "git_branch": self._git_branch,
             "git_dirty": self._git_dirty,
         }
-        if len(self.messages) > 2:
-            status["restored_count"] = len(self.messages) - 2
+        status["restored_count"] = max(0, len(self.messages) - 2)
         send_msg(status)
 
     def _refresh_git_status(self) -> None:
