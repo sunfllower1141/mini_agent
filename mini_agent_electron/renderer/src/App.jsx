@@ -50,14 +50,12 @@ function AppShell() {
   const addToolLine = useCallback((line) => addLine(setToolsLines)(line), [addLine]);
   const addSubLine = useCallback((line) => addLine(setSubagentLines)(line), [addLine]);
 
-  // Setup listeners
+  // Status / init — fetched once on mount (empty deps to avoid re-render loop)
   useEffect(() => {
     const api = window.miniAgent;
     if (!api) return;
 
-    const unsubs = [];
-
-    unsubs.push(api.on('backend:status', (data) => {
+    const onStatus = (data) => {
       if (data.model != null) setModelName(data.model);
       if (data.session_name != null) setSessionName(data.session_name);
       if (data.workspace != null) setWorkspace(data.workspace);
@@ -69,24 +67,25 @@ function AppShell() {
       if (data.ready) {
         addToolLine({ text: 'backend ready', cls: 'dim' });
       }
-    }));
+    };
+    const unsub = api.on('backend:status', onStatus);
 
     // Fetch cached status from main process (handles race where backend
     // sent status before our listener was registered)
     api.getStatus?.().then((data) => {
       if (!data) return;
-      if (data.model != null) setModelName(data.model);
-      if (data.session_name != null) setSessionName(data.session_name);
-      if (data.workspace != null) setWorkspace(data.workspace);
-      if (data.git_branch != null) {
-        setGitBranch(data.git_branch);
-        setGitDirty(!!data.git_dirty);
-      }
-      if (data.restored_count != null) setRestoredCount(data.restored_count);
-      if (data.ready) {
-        addToolLine({ text: 'backend ready', cls: 'dim' });
-      }
+      onStatus(data);
     });
+
+    return () => unsub();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Stream listeners
+  useEffect(() => {
+    const api = window.miniAgent;
+    if (!api) return;
+
+    const unsubs = [];
 
     unsubs.push(api.on('stream:token', (data) => {
       if (inThinkingRef.current) {
@@ -202,7 +201,7 @@ function AppShell() {
     }));
 
     return () => unsubs.forEach((fn) => fn());
-  }, [addToolLine, thinking, chatStream]);
+  }, []); // stable: addToolLine/thinking/chatStream callbacks are useCallback-wrapped
 
   // Submit handler
   const handleSubmit = useCallback((text) => {
