@@ -346,21 +346,26 @@ html, body {
 
 .session-delete-btn {
   flex-shrink: 0;
-  margin-left: 8px;
-  padding: 1px 6px;
-  border: 1px solid var(--red);
-  border-radius: 4px;
-  font-size: 14px;
-  font-weight: 700;
-  line-height: 1.2;
-  color: var(--red);
+  margin-left: 6px;
+  padding: 0 4px;
+  border: none;
+  border-radius: 3px;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1;
+  color: var(--dim);
+  opacity: 0;
   background: transparent;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+.session-dropdown-item:hover .session-delete-btn {
+  opacity: 0.5;
 }
 .session-delete-btn:hover {
-  color: #fff;
-  background: var(--red);
+  opacity: 1 !important;
+  color: var(--red);
+  background: rgba(207, 102, 121, 0.12);
 }
 
 .session-dropdown-divider {
