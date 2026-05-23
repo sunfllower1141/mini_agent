@@ -559,7 +559,7 @@ html, body {
    Message styles
    --------------------------------------------------------------------------- */
 .msg-user     { color: var(--text); margin-bottom: 0.5em; opacity: 0.8; }
-.msg-agent    { color: var(--final-thought); margin-bottom: 1em; }
+.msg-agent    { color: var(--final-thought); margin-bottom: 1em; display: flex; flex-wrap: wrap; align-items: baseline; }
 .msg-error    { color: var(--red); }
 .msg-thinking { color: var(--thinking); text-shadow: 0 0 8px rgba(255, 110, 176, 0.35); }
 .msg-agent-pending { min-height: 1em; }
