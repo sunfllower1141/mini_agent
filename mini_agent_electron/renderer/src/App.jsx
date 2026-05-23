@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import useSmoothStream from './hooks/useSmoothStream';
-import { highlightSyntax } from './utils/syntax';
 
 // ---------------------------------------------------------------------------
 // Inline SVG icons (same as before)
@@ -22,7 +23,7 @@ function CharStream({ text, className = '' }) {
 }
 
 // ---------------------------------------------------------------------------
-// A single log line
+// A single log line — supports plain text, icons, HTML, and markdown
 // ---------------------------------------------------------------------------
 function LogLine({ line }) {
   if (line.html) {
@@ -30,6 +31,25 @@ function LogLine({ line }) {
   }
   if (line.icon) {
     return <div className={line.cls || ''} dangerouslySetInnerHTML={{ __html: `${line.icon} ${line.text}` }} />;
+  }
+  if (line.markdown) {
+    return (
+      <div className={`md-line ${line.cls || ''}`}>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          allowDangerousHtml={true}
+          components={{
+            p: ({ children }) => <span>{children}</span>,
+          }}
+        >
+          {line.text}
+        </ReactMarkdown>
+      </div>
+    );
+  }
+  // Plain text — if it contains SVG icons (from emoji replacement), render as HTML
+  if (line.text && line.text.includes('<svg')) {
+    return <div className={line.cls || ''} dangerouslySetInnerHTML={{ __html: line.text }} />;
   }
   return <div className={line.cls || ''}>{line.text}</div>;
 }
@@ -100,6 +120,7 @@ export default function App() {
   const [turnCountVal, setTurnCountVal] = useState(null);
   const [tokenCountVal, setTokenCountVal] = useState(null);
   const [inputDisabled, setInputDisabled] = useState(false);
+  const [thinkingOutput, setThinkingOutput] = useState('');
 
   const inputRef = useRef(null);
   const thinkingLogRef = useRef(null);
@@ -160,11 +181,12 @@ export default function App() {
     unsubs.push(api.on('stream:thinking_start', () => {
       inThinkingRef.current = true;
       thinking.reset();
+      setThinkingOutput('');
     }));
 
     unsubs.push(api.on('stream:thinking_end', () => {
       inThinkingRef.current = false;
-      thinking.flush();
+      setThinkingOutput(thinking.flush());
     }));
 
     unsubs.push(api.on('stream:tool_start', (data) => {
@@ -182,7 +204,7 @@ export default function App() {
       const lines = data.line.split('\n');
       for (const line of lines) {
         if (line.trim()) {
-          addToolLine({ html: highlightSyntax(`    ${line}`), cls: 'dim' });
+          addToolLine({ text: line, cls: 'dim', markdown: true });
         }
       }
     }));
@@ -283,6 +305,9 @@ export default function App() {
     clearTimeout(submitTimeoutRef.current);
     inThinkingRef.current = false;
     const agentText = chatStream.flush();
+    const thinkText = thinking.flush();
+    if (thinkText) setThinkingOutput(thinkText);
+    thinking.reset();
     if (agentText) {
       setChatLines((prev) => {
         const updated = [...prev];
@@ -293,8 +318,6 @@ export default function App() {
       });
       chatStream.reset();
     }
-    thinking.flush();
-    thinking.reset();
     setIsLive(false);
     setInputDisabled(false);
     inputRef.current?.focus();
@@ -338,6 +361,11 @@ export default function App() {
             {thinking.displayedText && (
               <CharStream text={thinking.displayedText} className="msg-thinking" />
             )}
+            {thinkingOutput && !thinking.displayedText && (
+              <div className="msg-thinking">
+                <ReactMarkdown remarkPlugins={[remarkGfm]} allowDangerousHtml={true}>{thinkingOutput}</ReactMarkdown>
+              </div>
+            )}
           </div>
           <div className="hr" />
           <div className="sub-label dim"> Sub-agents</div>
@@ -347,9 +375,24 @@ export default function App() {
         {/* Right pane: Chat */}
         <RoundedFrame id="right-pane" title="Chat">
           <div id="chat-log" ref={chatLogRef} className="log scrollable text">
-            {chatLines.map((line, i) => <LogLine key={`line-${i}`} line={line} />)}
+            {chatLines.map((line, i) => {
+              if (line.cls === 'msg-agent') {
+                return (
+                  <div key={`line-${i}`} className="msg-agent">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} allowDangerousHtml={true}>
+                      {line.text}
+                    </ReactMarkdown>
+                  </div>
+                );
+              }
+              return <LogLine key={`line-${i}`} line={line} />;
+            })}
             {chatStream.displayedText && (
-              <CharStream text={chatStream.displayedText} className="msg-agent" />
+              <div className="msg-agent">
+                <ReactMarkdown remarkPlugins={[remarkGfm]} allowDangerousHtml={true}>
+                  {chatStream.displayedText}
+                </ReactMarkdown>
+              </div>
             )}
           </div>
         </RoundedFrame>

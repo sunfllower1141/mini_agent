@@ -52,6 +52,7 @@ from stream import THINKING_START, THINKING_END
 from safety import ReadSafetyGate, WriteSafetyGate
 from prompt import build_system_prompt
 from api import clear_api_cache
+from emoji_svg import clean_text
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +77,7 @@ def read_msg() -> dict | None:
             return None
         return json.loads(line)
     except (json.JSONDecodeError, EOFError, IOError) as e:
-        send_msg({"type": "error", "message": f"Parse error: {e}"})
+        send_msg({"type": "error", "message": clean_text(f"Parse error: {e}")})
         return None
 
 
@@ -99,16 +100,16 @@ class StreamCallbacks:
             self._in_thinking = False
             send_msg({"type": "thinking_end"})
             return
-        send_msg({"type": "token", "text": text})
+        send_msg({"type": "token", "text": clean_text(text)})
 
     def on_tool_start(self, summary: str, parallel: bool = False) -> None:
-        send_msg({"type": "tool_start", "summary": summary, "parallel": parallel})
+        send_msg({"type": "tool_start", "summary": clean_text(summary), "parallel": parallel})
 
     def on_tool_end(self, ok: bool, detail: str, turn_id: int = 0, diff_preview=None) -> None:
-        send_msg({"type": "tool_end", "ok": ok, "detail": detail})
+        send_msg({"type": "tool_end", "ok": ok, "detail": clean_text(detail)})
 
     def on_tool_output(self, line: str, turn_id: int = 0) -> None:
-        send_msg({"type": "tool_output", "line": line})
+        send_msg({"type": "tool_output", "line": clean_text(line)})
 
 
 # ---------------------------------------------------------------------------
@@ -239,9 +240,14 @@ class AgentRunner:
             )
         except Exception as e:
             if not self._cancel_event.is_set():
-                send_msg({"type": "error", "message": str(e)})
-                return
-            # Fall through to send turn_complete for cancellation
+                send_msg({"type": "error", "message": clean_text(str(e))})
+            # Always send turn_complete so the renderer resets its loading state
+            send_msg({
+                "type": "turn_complete",
+                "usage": {"total_tokens": self._total_tokens, "prompt_tokens": 0, "completion_tokens": 0},
+                "turn_count": self._total_turns,
+            })
+            return
 
         if self._cancel_event.is_set():
             send_msg({
@@ -377,7 +383,7 @@ class AgentRunner:
             try:
                 new_data = init_session(new_workspace)
             except Exception as exc:
-                send_msg({"type": "error", "message": str(exc)})
+                send_msg({"type": "error", "message": clean_text(str(exc))})
                 return
             self.config = new_data["config"]
             self.write_gate = new_data["write_gate"]
@@ -438,7 +444,7 @@ def main() -> None:
             break
 
         else:
-            send_msg({"type": "error", "message": f"Unknown message type: {msg_type}"})
+            send_msg({"type": "error", "message": clean_text(f"Unknown message type: {msg_type}")})
 
     # Cleanup
     try:

@@ -89,16 +89,11 @@ function spawnPythonBackend(workspacePath) {
   });
 
   proc.stderr.on('data', (data) => {
-    // Forward Python stderr to Electron console AND tools log.
-    // Don't use stream:error — that's for actual agent errors, not
-    // startup/model-loading stderr (HF warnings, tqdm bars, etc.).
+    // Log Python stderr to Electron console only — not the tools panel.
+    // HF warnings, tqdm bars, etc. are noise in the UI.
     const text = data.toString().trim();
     if (text) {
       process.stderr.write(`[python:stderr] ${data}`);
-      const win = BrowserWindow.getAllWindows()[0];
-      if (win) {
-        win.webContents.send('backend:response', { lines: [`stderr: ${text}`], target: 'tools' });
-      }
     }
   });
 
@@ -106,6 +101,21 @@ function spawnPythonBackend(workspacePath) {
     console.log(`Python backend exited with code ${code}`);
     pythonReady = false;
     pythonProcess = null;
+    // Auto-restart on unexpected exit (not a clean shutdown)
+    if (code !== 0 && code !== null) {
+      const win = BrowserWindow.getAllWindows()[0];
+      if (win) win.webContents.send('stream:error', { message: `Backend crashed (exit ${code}). Restarting...` });
+      setTimeout(() => {
+        if (!pythonProcess) {
+          pythonProcess = spawnPythonBackend(workspacePath);
+  if (!pythonProcess) {
+    const win = BrowserWindow.getAllWindows()[0];
+    if (win) win.webContents.send('stream:error', { message: 'Backend server.py not found.' });
+    console.error('Backend script not found — agent will not start.');
+  }
+        }
+      }, 1500);
+    }
   });
 
   proc.on('error', (err) => {
@@ -118,11 +128,15 @@ function spawnPythonBackend(workspacePath) {
 }
 
 function sendToPython(msg) {
-  if (!pythonProcess || !pythonProcess.stdin.writable) {
+  if (!pythonProcess || !pythonProcess.stdin || !pythonProcess.stdin.writable) {
     pendingRequests.push(msg);
     return;
   }
-  pythonProcess.stdin.write(JSON.stringify(msg) + '\n');
+  try {
+    pythonProcess.stdin.write(JSON.stringify(msg) + '\n');
+  } catch (e) {
+    pendingRequests.push(msg);
+  }
 }
 
 function flushPending() {
@@ -289,11 +303,15 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-  if (pythonProcess) {
-    pythonProcess.stdin.write(JSON.stringify({ type: 'shutdown' }) + '\n');
-    pythonProcess.stdin.end();
+  if (pythonProcess && pythonProcess.stdin && !pythonProcess.killed) {
+    try {
+      pythonProcess.stdin.write(JSON.stringify({ type: 'shutdown' }) + '\n');
+      pythonProcess.stdin.end();
+    } catch (e) { /* ignore */ }
     setTimeout(() => {
-      if (pythonProcess) pythonProcess.kill();
+      if (pythonProcess && !pythonProcess.killed) {
+        try { pythonProcess.kill(); } catch (e) { /* ignore */ }
+      }
     }, 2000);
   }
   if (process.platform !== 'darwin') {
