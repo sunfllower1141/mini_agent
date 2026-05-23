@@ -137,7 +137,7 @@ export default function SessionPicker({ sessionName, onSwitch }) {
             >
               {s === current && <span className="session-check">✓ </span>}
               <span className="session-name">{s}</span>
-              <span className="session-delete" onClick={(e) => handleDelete(e, s)} title="Delete session">✕</span>
+              <button className="session-delete-btn" onClick={(e) => handleDelete(e, s)} title={`Delete "${s}"`} aria-label={`Delete session ${s}`}>×</button>
             </div>
           ))}
           <div className="session-dropdown-divider" />

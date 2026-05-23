@@ -344,21 +344,23 @@ html, body {
   flex: 1;
 }
 
-.session-delete {
+.session-delete-btn {
   flex-shrink: 0;
   margin-left: 8px;
-  padding: 0 5px;
-  border-radius: 3px;
-  font-size: 13px;
-  line-height: 1;
+  padding: 1px 6px;
+  border: 1px solid var(--red);
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.2;
   color: var(--red);
-  opacity: 0.65;
+  background: transparent;
   cursor: pointer;
-  transition: opacity 0.15s, background 0.15s;
+  transition: all 0.15s;
 }
-.session-delete:hover {
-  opacity: 1;
-  background: rgba(207, 102, 121, 0.25);
+.session-delete-btn:hover {
+  color: #fff;
+  background: var(--red);
 }
 
 .session-dropdown-divider {
