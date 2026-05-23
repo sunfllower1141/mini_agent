@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import useSmoothStream from './hooks/useSmoothStream';
+import { CodeBlock } from './utils/syntax';
 
 // ---------------------------------------------------------------------------
 // Inline SVG icons (same as before)
@@ -40,6 +41,7 @@ function LogLine({ line }) {
           allowDangerousHtml={true}
           components={{
             p: ({ children }) => <span>{children}</span>,
+            code: CodeBlock,
           }}
         >
           {line.text}
@@ -363,7 +365,7 @@ export default function App() {
             )}
             {thinkingOutput && !thinking.displayedText && (
               <div className="msg-thinking">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} allowDangerousHtml={true}>{thinkingOutput}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} allowDangerousHtml={true} components={{ code: CodeBlock }}>{thinkingOutput}</ReactMarkdown>
               </div>
             )}
           </div>
@@ -379,7 +381,7 @@ export default function App() {
               if (line.cls === 'msg-agent') {
                 return (
                   <div key={`line-${i}`} className="msg-agent">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]} allowDangerousHtml={true}>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} allowDangerousHtml={true} components={{ code: CodeBlock }}>
                       {line.text}
                     </ReactMarkdown>
                   </div>
@@ -389,7 +391,7 @@ export default function App() {
             })}
             {chatStream.displayedText && (
               <div className="msg-agent">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} allowDangerousHtml={true}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} allowDangerousHtml={true} components={{ code: CodeBlock }}>
                   {chatStream.displayedText}
                 </ReactMarkdown>
               </div>
