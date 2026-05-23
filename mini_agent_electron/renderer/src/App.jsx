@@ -206,7 +206,7 @@ export default function App() {
       const lines = data.line.split('\n');
       for (const line of lines) {
         if (line.trim()) {
-          addToolLine({ text: line, cls: 'dim', markdown: true });
+          addToolLine({ text: line, cls: 'dim' });
         }
       }
     }));
@@ -247,13 +247,9 @@ export default function App() {
     }));
 
     unsubs.push(api.on('backend:response', (data) => {
-      if (data.lines) {
+      if (data.lines && data.target === 'chat') {
         for (const line of data.lines) {
-          if (data.target === 'chat') {
-            setChatLines((prev) => [...prev, { text: line, cls: 'msg-status' }]);
-          } else {
-            addToolLine({ text: line, cls: 'dim' });
-          }
+          setChatLines((prev) => [...prev, { text: line, cls: 'msg-status' }]);
         }
       }
     }));
