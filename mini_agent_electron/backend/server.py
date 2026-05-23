@@ -442,6 +442,50 @@ def main() -> None:
         elif msg_type == "get_status":
             runner.send_status()
 
+        elif msg_type == "session_list":
+            from config import list_sessions
+            sessions = list_sessions(runner.workspace)
+            current = ""
+            db_path = getattr(runner.memory, '_db_path', '')
+            if db_path:
+                import re
+                m = re.search(r'_session_(.+)\.db$', db_path)
+                current = m.group(1) if m else "default"
+            else:
+                current = "default"
+            send_msg({"type": "session_list_result", "sessions": sessions, "current": current})
+
+        elif msg_type == "session_switch":
+            from config import switch_session
+            name = msg.get("name", "")
+            if not name:
+                send_msg({"type": "session_list_result", "error": "Session name required."})
+            else:
+                runner.messages = runner.memory.save(runner.messages)
+                runner.memory.close()
+                sd = switch_session(runner.workspace, name, runner.memory, runner.config)
+                runner.memory = sd["memory"]
+                runner.messages = sd["messages"]
+                runner._total_turns = 0
+                runner._total_tokens = 0
+                runner.send_status()
+
+        elif msg_type == "session_new":
+            from config import switch_session
+            name = msg.get("name", "")
+            if not name:
+                send_msg({"type": "session_list_result", "error": "Session name required."})
+            else:
+                # switch_session creates a new session if it doesn't exist
+                sd = switch_session(runner.workspace, name, runner.memory, runner.config)
+                runner.messages = runner.memory.save(runner.messages)
+                runner.memory.close()
+                runner.memory = sd["memory"]
+                runner.messages = sd["messages"]
+                runner._total_turns = 0
+                runner._total_tokens = 0
+                runner.send_status()
+
         elif msg_type == "shutdown":
             break
 

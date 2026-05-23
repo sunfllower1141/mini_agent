@@ -204,6 +204,10 @@ function handlePythonMessage(msg) {
       win.webContents.send('backend:response', data);
       break;
 
+    case 'session_list_result':
+      win.webContents.send('session:list_result', data);
+      break;
+
     default:
       console.log('Unknown message type from Python:', type);
   }
@@ -234,6 +238,18 @@ function setupIPC() {
     // Return cached status immediately so the renderer never starts blank.
     // The async response will update via backend:status event when it arrives.
     return lastStatus || { ready: false };
+  });
+
+  ipcMain.handle('session:list', async () => {
+    sendToPython({ type: 'session_list' });
+  });
+
+  ipcMain.handle('session:switch', async (event, name) => {
+    sendToPython({ type: 'session_switch', name });
+  });
+
+  ipcMain.handle('session:new', async (event, name) => {
+    sendToPython({ type: 'session_new', name });
   });
 
   ipcMain.handle('workspace:save', async (event, workspacePath) => {

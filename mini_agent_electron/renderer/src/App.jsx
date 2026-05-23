@@ -7,6 +7,7 @@ import LogPanel from './components/LogPanel';
 import RoundedFrame from './components/RoundedFrame';
 import CharStream from './components/CharStream';
 import ErrorBoundary from './components/ErrorBoundary';
+import SessionPicker from './components/SessionPicker';
 
 
 // ---------------------------------------------------------------------------
@@ -284,6 +285,18 @@ function AppShell() {
     }
   }, [handleSubmit]);
 
+  // Session picker handler
+  const handleSessionSwitch = useCallback((name, isNew) => {
+    const api = window.miniAgent;
+    if (!api) return;
+    if (isNew) {
+      api.newSession(name);
+    } else {
+      api.switchSession(name);
+    }
+    // Session name in footer will update via backend:status event
+  }, []);
+
   // Cancel handler — immediately reset UI, then tell backend
   const handleCancel = useCallback(() => {
     window.miniAgent?.cancel();
@@ -428,7 +441,7 @@ function AppShell() {
             <span id="restored-info">restored {restoredCount} msgs</span>
           )}
           <span id="workspace-info" className="clickable" onClick={handleWorkspaceClick} title="Click to change workspace">{workspace}</span>
-          <span id="header-session" className="dim">{sessionName}</span>
+          <SessionPicker sessionName={sessionName} onSwitch={handleSessionSwitch} />
         </div>
       </div>
     </div>

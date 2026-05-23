@@ -22,6 +22,25 @@ contextBridge.exposeInMainWorld('miniAgent', {
   // Persist workspace across restarts
   saveWorkspace: (path) => ipcRenderer.invoke('workspace:save', path),
 
+  // --- Session management ---
+  // List sessions in current workspace. Returns promise resolving to {sessions, current, error?}.
+  listSessions: () => {
+    return new Promise((resolve) => {
+      const handler = (_event, data) => {
+        ipcRenderer.removeListener('session:list_result', handler);
+        resolve(data);
+      };
+      ipcRenderer.on('session:list_result', handler);
+      ipcRenderer.invoke('session:list');
+    });
+  },
+
+  // Switch to an existing session
+  switchSession: (name) => ipcRenderer.invoke('session:switch', name),
+
+  // Create a new session
+  newSession: (name) => ipcRenderer.invoke('session:new', name),
+
   // Request status update
   getStatus: () => ipcRenderer.invoke('backend:get_status'),
 

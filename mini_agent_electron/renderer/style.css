@@ -287,6 +287,101 @@ html, body {
 }
 
 /* ---------------------------------------------------------------------------
+   Session picker dropdown
+   --------------------------------------------------------------------------- */
+.session-picker {
+  position: relative;
+}
+
+.session-label.clickable {
+  cursor: pointer;
+}
+.session-label.clickable:hover {
+  color: var(--text);
+}
+
+.session-dropdown {
+  position: absolute;
+  bottom: 100%;
+  right: 0;
+  margin-bottom: 6px;
+  background: #15121f;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-width: 200px;
+  max-height: 280px;
+  overflow-y: auto;
+  z-index: 100;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  padding: 4px 0;
+}
+
+.session-dropdown-item {
+  padding: 6px 12px;
+  cursor: pointer;
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-dropdown-item:hover {
+  background: rgba(187, 134, 252, 0.12);
+}
+.session-dropdown-item.session-current {
+  color: var(--accent);
+}
+
+.session-check {
+  color: var(--accent);
+}
+
+.session-dropdown-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 8px;
+  opacity: 0.5;
+}
+
+.session-new-item {
+  color: var(--dim);
+  font-style: italic;
+}
+.session-new-item:hover {
+  color: var(--text);
+}
+
+.session-new-input {
+  padding: 2px 8px;
+  cursor: default;
+}
+.session-new-input:hover {
+  background: none;
+}
+.session-new-field {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--accent);
+  outline: none;
+  color: var(--text);
+  font-family: var(--font-family);
+  font-size: 12px;
+  width: 100%;
+  padding: 4px 0;
+  caret-color: var(--accent);
+}
+.session-new-field::placeholder {
+  color: var(--dim);
+}
+
+.session-dropdown-error,
+.session-dropdown-empty,
+.session-dropdown-loading {
+  padding: 8px 12px;
+  font-size: 12px;
+}
+
+/* ---------------------------------------------------------------------------
    Colour utility classes
    --------------------------------------------------------------------------- */
 .text     { color: var(--text); }
