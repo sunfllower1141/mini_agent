@@ -480,6 +480,53 @@ class AgentRunner:
             })
             return
 
+        if cmd == "/demo-tree":
+            import threading
+            import time as _time
+
+            def _send_tree_demo():
+                agents = [
+                    ("task_alpha", "orchestrator", "ALPHA", "Search all source files for 'TODO' comments"),
+                    ("task_bravo", "orchestrator", "BRAVO", "Count lines of code in renderer/src/"),
+                    ("task_charlie", "orchestrator", "CHARLIE", "Check package.json for outdated deps"),
+                    ("task_delta", "orchestrator", "DELTA", "Generate a dependency graph from imports"),
+                ]
+                # Start all 4
+                for tid, pid, name, desc in agents:
+                    send_msg({"type": "subagent_start", "task_id": tid, "parent_id": pid, "name": name, "desc": desc})
+
+                # Tool calls + thoughts for each
+                tool_data = [
+                    ("task_alpha", "grep_search", 'pattern="TODO" path="."', "Searching renderer/src/ for TODO markers..."),
+                    ("task_bravo", "run_shell", "find renderer/src -name '*.jsx' | xargs wc -l", "Counting JSX files..."),
+                    ("task_charlie", "read_file", "package.json", "Reading dependency manifest..."),
+                    ("task_delta", "run_shell", "pipdeptree --json", "Building import tree..."),
+                ]
+                for tid, tool, args, thought in tool_data:
+                    send_msg({"type": "subagent_thought", "task_id": tid, "text": thought})
+                    send_msg({"type": "subagent_tool_start", "task_id": tid, "tool_name": tool, "tool_args": args})
+                    _time.sleep(0.1)
+                    send_msg({"type": "subagent_tool_end", "task_id": tid, "tool_name": tool, "ok": True, "content": f"Done ({tid})"})
+
+                # More thoughts for agents that are still "thinking"
+                extra_thoughts = [
+                    ("task_alpha", "Found 42 TODO markers in 8 files."),
+                    ("task_bravo", "Counted 2,847 lines across 12 JSX files."),
+                    ("task_charlie", "3 packages have newer versions available."),
+                    ("task_delta", "Generated DOT graph with 23 nodes, 41 edges."),
+                ]
+                for tid, thought in extra_thoughts:
+                    send_msg({"type": "subagent_thought", "task_id": tid, "text": thought})
+
+                # End all
+                for tid, _, name, _ in agents:
+                    send_msg({"type": "subagent_end", "task_id": tid, "ok": True, "content": f"{name} completed successfully."})
+
+                send_msg({"type": "response", "lines": ["--- Demo tree injected ---"]})
+
+            threading.Thread(target=_send_tree_demo, daemon=True).start()
+            return
+
         if cmd == "/init":
             from tools.file_ops import _init_rules
             rg = ReadSafetyGate(self.config.workspace)

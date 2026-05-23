@@ -480,27 +480,27 @@ function AppShell() {
 
       {/* Body: three panels */}
       <div id="body-panels">
-        {/* Left pane: Tools & Thinking */}
-        <RoundedFrame id="left-pane" title="Tools &amp; Thinking">
-          <LogPanel id="tools-log" className="scrollable dim" lines={toolsLines} />
-          <div className="hr" />
-          <div id="thinking-log" ref={thinkingLogRef} className="log thinking-log thinking">
-            {thinking.displayedText && (
-              <CharStream text={thinking.displayedText} className="msg-thinking" />
-            )}
-            {!thinking.displayedText && thinkingBlocks.map((block, i) => (
-              <div key={i} className="msg-thinking">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}
+        {/* Left stack: Tools & Thinking + Agent Tree */}
+        <div id="left-stack">
+          <RoundedFrame id="left-pane" title="Tools &amp; Thinking">
+            <LogPanel id="tools-log" className="scrollable dim" lines={toolsLines} />
+            <div className="hr" />
+            <div id="thinking-log" ref={thinkingLogRef} className="log thinking-log thinking">
+              {thinking.displayedText && (
+                <CharStream text={thinking.displayedText} className="msg-thinking" />
+              )}
+              {!thinking.displayedText && thinkingBlocks.map((block, i) => (
+                <div key={i} className="msg-thinking">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}
 >{block}</ReactMarkdown>
-              </div>
-            ))}
+                </div>
+              ))}
+            </div>
+          </RoundedFrame>
+          <div id="agent-tree-panel">
+            <AgentTree agents={subagentData} />
           </div>
-        </RoundedFrame>
-
-        {/* Middle pane: Sub-agent Tree */}
-        <RoundedFrame id="mid-pane" title="Sub-agents" className={Object.keys(subagentData).length === 0 ? 'collapsed' : ''}>
-          <AgentTree agents={subagentData} />
-        </RoundedFrame>
+        </div>
 
         {/* Right pane: Chat */}
         <RoundedFrame id="right-pane" title="Chat">
