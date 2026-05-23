@@ -251,6 +251,7 @@ export default function App() {
       ...prev,
       { text, cls: 'msg-user' },
       { text: '', cls: '' },
+      { text: '', cls: '' },
     ]);
     chatStream.reset();
 
