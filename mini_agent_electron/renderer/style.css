@@ -335,6 +335,8 @@ body::-webkit-scrollbar,
   user-select: none;
   color: var(--pulse);
   animation: pulse-glow 1.2s ease-in-out infinite;
+  padding: 2px 8px;
+  border-radius: 3px;
 }
 
 #live-indicator:hover { opacity: 0.6; }
