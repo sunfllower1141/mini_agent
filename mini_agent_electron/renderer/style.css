@@ -304,6 +304,15 @@ body::-webkit-scrollbar,
   user-select: none;
 }
 
+.tool-separator {
+  height: 0;
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 10px 0 6px 0;
+  opacity: 0.4;
+  user-select: none;
+}
+
 /* Character-level fade-in for smooth streaming */
 .stream-char {
   animation: charFadeIn 0.35s ease-out;

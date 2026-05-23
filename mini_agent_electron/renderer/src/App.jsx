@@ -7,8 +7,8 @@ import useSmoothStream from './hooks/useSmoothStream';
 // ---------------------------------------------------------------------------
 // Inline SVG icons (same as before)
 // ---------------------------------------------------------------------------
-const ICON_TOOL = `<svg class="tool-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>`;
-const ICON_PARALLEL = `<svg class="tool-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="M2.6 12.08l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.91"/><path d="M2.6 18.08l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.91"/></svg>`;
+
+
 
 // ---------------------------------------------------------------------------
 // Character-level fade-in: renders text as spans, new chars animate in
@@ -191,8 +191,8 @@ export default function App() {
     }));
 
     unsubs.push(api.on('stream:tool_start', (data) => {
-      const icon = data.parallel ? ICON_PARALLEL : ICON_TOOL;
-      addToolLine({ icon, text: data.summary, cls: 'dim' });
+      addToolLine({ text: '', cls: 'tool-separator' });
+      addToolLine({ text: data.summary, cls: 'dim' });
     }));
 
     unsubs.push(api.on('stream:tool_end', (data) => {
