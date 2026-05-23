@@ -347,15 +347,18 @@ html, body {
 .session-delete {
   flex-shrink: 0;
   margin-left: 8px;
-  padding: 0 4px;
+  padding: 0 5px;
   border-radius: 3px;
-  font-size: 11px;
-  color: var(--dim);
+  font-size: 13px;
+  line-height: 1;
+  color: var(--red);
+  opacity: 0.65;
   cursor: pointer;
+  transition: opacity 0.15s, background 0.15s;
 }
 .session-delete:hover {
-  color: var(--red);
-  background: rgba(136, 86, 232, 0.15);
+  opacity: 1;
+  background: rgba(207, 102, 121, 0.25);
 }
 
 .session-dropdown-divider {
