@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline';">
+  <title>mini_agent</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <div id="header" class="header">
+      <span class="dim"> mini_agent — </span><span id="header-model" class="text">starting...</span>
+    </div>
+
+    <!-- Horizontal rule -->
+    <div class="hr"></div>
+
+    <!-- Body: two panels -->
+    <div id="body-panels">
+      <!-- Left pane: Tools & Thinking -->
+      <div id="left-pane" class="panel rounded-frame">
+        <div class="frame-top">
+          <span class="border-char">╭</span><!--
+          --><span class="frame-title"> Tools &amp; Thinking </span><!--
+          --><span class="border-char border-fill">─</span><!--
+          --><span class="border-char">╮</span>
+        </div>
+        <div class="frame-body">
+          <div class="frame-left"></div>
+          <div class="frame-content">
+            <!-- Tools log -->
+            <div id="tools-log" class="log scrollable dim"></div>
+            <!-- Divider -->
+            <div class="hr"></div>
+            <!-- Thinking log -->
+            <div id="thinking-log" class="log thinking-log thinking"></div>
+            <!-- Divider -->
+            <div class="hr"></div>
+            <!-- Sub-agents label -->
+            <div class="sub-label dim"> Sub-agents</div>
+            <!-- Sub-agents log -->
+            <div id="subagents-log" class="log subagents-log dim"></div>
+          </div>
+          <div class="frame-right"></div>
+        </div>
+        <div class="frame-bottom">
+          <span class="border-char">╰</span><!--
+          --><span class="border-char border-fill">─</span><!--
+          --><span class="border-char">╯</span>
+        </div>
+      </div>
+
+      <!-- Right pane: Chat -->
+      <div id="right-pane" class="panel rounded-frame">
+        <div class="frame-top">
+          <span class="border-char">╭</span><!--
+          --><span class="frame-title"> Chat </span><!--
+          --><span class="border-char border-fill">─</span><!--
+          --><span class="border-char">╮</span>
+        </div>
+        <div class="frame-body">
+          <div class="frame-left"></div>
+          <div class="frame-content">
+            <div id="chat-log" class="log scrollable text"></div>
+          </div>
+          <div class="frame-right"></div>
+        </div>
+        <div class="frame-bottom">
+          <span class="border-char">╰</span><!--
+          --><span class="border-char border-fill">─</span><!--
+          --><span class="border-char">╯</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Input -->
+    <div id="input-frame" class="rounded-frame">
+      <div class="frame-top">
+        <span class="border-char">╭</span><!--
+        --><span class="border-char border-fill">─ Input ─</span><!--
+        --><span class="border-char border-fill">─</span><!--
+        --><span class="border-char">╮</span>
+      </div>
+      <div class="frame-body">
+        <div class="frame-left"></div>
+        <div class="frame-content">
+          <div id="input-container">
+            <span class="prompt">> </span>
+            <input type="text" id="user-input" placeholder="Type a message or /command..."
+                   autofocus autocomplete="off" spellcheck="false">
+          </div>
+        </div>
+        <div class="frame-right"></div>
+      </div>
+      <div class="frame-bottom">
+        <span class="border-char">╰</span><!--
+        --><span class="border-char border-fill">─</span><!--
+        --><span class="border-char">╯</span>
+      </div>
+    </div>
+
+    <!-- Horizontal rule -->
+    <div class="hr"></div>
+
+    <!-- Status bar -->
+    <div id="status-bar" class="status-bar dim">
+      <span id="git-status"></span>
+      <span id="live-indicator" class="hidden"> ●</span>
+      <span id="turn-counter" class="hidden"> ↻ turn <span id="turn-count">0</span></span>
+      <span id="token-counter" class="hidden"> ⊙ <span id="token-count">0</span> tok</span>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

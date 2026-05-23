@@ -405,6 +405,146 @@ def _inject_plan_status(messages: list[dict]) -> None:
 
 
 
+def _inject_system_reminder(messages: list[dict], *, turn_count: int) -> None:
+    """Re-inject critical rules near end of long contexts to fight
+    'instruction centrifugation' — the system prompt fading as context grows.
+
+    Triggers when message count > 20 (~6-7 turns), repeats every 12 messages.
+    """
+    if len(messages) <= 20:
+        return
+    # Repeat every 12 messages after initial threshold
+    if not hasattr(_inject_system_reminder, '_last_msg_count'):
+        _inject_system_reminder._last_msg_count = 0
+    if len(messages) - _inject_system_reminder._last_msg_count < 12:
+        return
+    _inject_system_reminder._last_msg_count = len(messages)
+
+    reminder = (
+        "⚠️ SYSTEM REMINDER (context is long — critical rules):\n\n"
+        "LOOP PREVENTION:\n"
+        "- Same tool + same args 2x = STUCK. Switch approach immediately.\n"
+        "- edit_file MUST be preceded by read_file in the same batch.\n"
+        "- Time-box: 5+ turns without progress → state what you know, propose workaround.\n"
+        "- Context grows stale — trust write_scratchpad and plan over old tool results.\n\n"
+        "EFFICIENCY:\n"
+        "- Batch ALL independent tool calls in ONE response (parallel execution).\n"
+        "- Update write_scratchpad every 3 turns.\n"
+        "- Long commands: background=True, poll task_status once.\n\n"
+        "CURRENT TURN: {turn_count}. Remember: stale context is worse than no context."
+    ).format(turn_count=turn_count)
+
+    messages.append({"role": "user", "content": reminder, "_transient": True})
+
+
+def _compress_stale_tool_results(messages: list[dict]) -> None:
+    """Compress tool results older than 15 messages behind the tail
+    to first-line only, saving context while preserving key info.
+
+    Only compresses tool messages whose content has multiple lines.
+    Already-compressed results (marked with '… (truncated)') are skipped.
+    """
+    STALE_THRESHOLD = 15
+    tail = len(messages)
+    for i, m in enumerate(messages):
+        if m.get("role") != "tool":
+            continue
+        age = tail - i
+        if age <= STALE_THRESHOLD:
+            continue
+        content = m.get("content", "")
+        if not isinstance(content, str):
+            continue
+        if "… (truncated)" in content or "… (compressed)" in content:
+            continue
+        lines = content.split("\n")
+        if len(lines) <= 2:
+            continue
+        first_line = lines[0]
+        total_lines = len(lines)
+        total_chars = len(content)
+        m["content"] = (
+            f"{first_line}\n… (compressed: {total_lines} lines, {total_chars} chars)"
+        )
+
+
+def _inject_failure_pattern_warnings(messages: list[dict], *, turn_count: int) -> None:
+    """Inject failure pattern warnings for pending tool calls.
+
+    Checks the FailurePatternStore for known failure patterns matching
+    the tool calls about to be made, and warns the agent preemptively.
+    Only triggers every 3 turns to avoid spamming.
+    """
+    if turn_count % 3 != 0:
+        return
+    try:
+        fps = getattr(_TOOL_CONTEXT, "_failure_pattern_store", None)
+        if fps is None:
+            return
+        # Look at last assistant message for pending tool calls
+        for msg in reversed(messages):
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                from tools.failure_learning import build_self_learning_context
+                warning = build_self_learning_context(fps, msg["tool_calls"])
+                if warning:
+                    messages.append({
+                        "role": "user",
+                        "content": warning,
+                        "_transient": True,
+                    })
+                return
+    except (AttributeError, KeyError, ValueError, TypeError):
+        pass
+
+
+def _inject_self_critique(messages: list[dict], *, turn_count: int) -> None:
+    """Inject self-critique context when failure clusters are detected.
+
+    Uses the SelfCritique instance to analyze recent tool results and
+    generate corrective guidance when the agent appears stuck.
+    """
+    try:
+        sc = getattr(_TOOL_CONTEXT, "_self_critique", None)
+        if sc is None:
+            return
+        # Collect recent tool results from messages
+        recent_results: list[tuple[dict, object]] = []
+        from tools import ToolResult as TR
+        for msg in reversed(messages):
+            if msg.get("role") == "tool":
+                tcid = msg.get("tool_call_id", "")
+                # Find the matching tool call
+                for prev_msg in messages:
+                    if prev_msg.get("role") == "assistant":
+                        for tc in prev_msg.get("tool_calls", []):
+                            if tc.get("id") == tcid:
+                                try:
+                                    import json
+                                    data = json.loads(msg.get("content", "{}"))
+                                    result = TR(
+                                        success=data.get("success", False),
+                                        content=data.get("content", ""),
+                                        hint=data.get("hint", ""),
+                                    )
+                                    recent_results.append((tc, result))
+                                except (json.JSONDecodeError, TypeError):
+                                    pass
+                                break
+            if len(recent_results) >= 10:  # Only analyze last 10 tool results
+                break
+
+        if recent_results:
+            critique_msg = sc.assess_turn_results(recent_results, turn_count)
+            if critique_msg:
+                messages.append({
+                    "role": "user",
+                    "content": critique_msg,
+                    "_transient": True,
+                })
+    except (AttributeError, KeyError, ValueError, TypeError):
+        pass
+
+
 def _inject_strategy_hint(messages: list[dict]) -> None:
     """#5 Auto tool strategy hints — suggest optimal search tool."""
     try:
@@ -459,6 +599,12 @@ def _inject_context(
     _inject_scratchpad_nudge(messages, turn_count=turn_count)
     _inject_strategy_hint(messages)
     _inject_plan_status(messages)
+    _inject_failure_pattern_warnings(messages, turn_count=turn_count)
+    _inject_self_critique(messages, turn_count=turn_count)
+
+    # Context-quality defences (research-backed: 25% fill degrades quality)
+    _compress_stale_tool_results(messages)
+    _inject_system_reminder(messages, turn_count=turn_count)
 
 
 def _apply_pipe(tc: dict, i: int,

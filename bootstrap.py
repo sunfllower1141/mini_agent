@@ -90,6 +90,16 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     set_context(exa_api_key=config.exa_api_key, openai_api_key=config.openai_api_key,
                 scratchpad_path=memory._db_path, _memory_store=memory)
 
+    # Initialize self-learning systems (FailurePatternStore + SelfCritique)
+    try:
+        from tools.failure_learning import FailurePatternStore, SelfCritique
+        fps = FailurePatternStore(memory._db_path)
+        fps.init_schema()
+        sc = SelfCritique()
+        set_context(_failure_pattern_store=fps, _self_critique=sc)
+    except Exception:
+        pass  # Self-learning is best-effort, never blocks startup
+
     # Reset skill gates — start each session with core tools only
     reset_skills()
 

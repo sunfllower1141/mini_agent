@@ -49,6 +49,10 @@ _REMEMBER_SCHEMA = {
                 "detail": {
                     "type": "string",
                     "description": "The learning itself — what to remember, the pattern, workaround, or convention."
+                },
+                "category": {
+                    "type": "string",
+                    "description": "Optional: category hint (tool_usage, code_pattern, error_pattern, convention, architecture, workaround, dependency, general). Auto-detected if omitted."
                 }
             },
             "required": ["topic", "detail"]
@@ -146,6 +150,8 @@ class AgentContext:
         self._plan_steps: list[str] = []
         self._plan_done: set[int] = set()
         self._memory_store = None  # MemoryStore instance (set by init_session)
+        self._failure_pattern_store = None  # FailurePatternStore (set by init_session)
+        self._self_critique = None  # SelfCritique instance (set by init_session)
 
 
 _TOOL_CONTEXT = AgentContext()
@@ -261,15 +267,27 @@ def _remember(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResu
     """Store a project-level learning that persists across sessions.
 
     Saved to the ``project_knowledge`` table in the session SQLite DB.
+    Auto-categorizes the learning if no category is provided.
     Returns a summary of what was stored.
     """
     topic = args.get("topic", "")
     detail = args.get("detail", "")
+    category = args.get("category", "")
     if not topic.strip():
         return ToolResult(
             success=False,
             content="Missing required parameter: 'topic' (short topic label for this learning).",
         )
+
+    # Auto-categorize if no category provided
+    if not category:
+        try:
+            from tools.failure_learning import suggest_category, KNOWLEDGE_CATEGORIES
+            category = suggest_category(topic, detail)
+            if category not in KNOWLEDGE_CATEGORIES:
+                category = "general"
+        except ImportError:
+            category = "general"
 
     memory_store = getattr(_TOOL_CONTEXT, "_memory_store", None)
     topic_preview = topic[:200] + ("..." if len(topic) > 200 else "")
@@ -279,7 +297,7 @@ def _remember(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResu
             conn = memory_store._get_conn()
             conn.execute(
                 "INSERT INTO project_knowledge (category, summary, detail) VALUES (?, ?, ?)",
-                (topic, topic, detail),
+                (category, topic, detail),
             )
             conn.commit()
         except Exception as e:
@@ -290,7 +308,7 @@ def _remember(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResu
         return ToolResult(
             success=True,
             content=(
-                f"Stored in project knowledge:\\n"
+                f"Stored in project knowledge [{category}]:\\n"
                 f"  Topic: {topic_preview}\\n"
                 f"  Detail: {detail_preview}"
             ),
@@ -304,7 +322,7 @@ def _remember(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResu
             conn = sqlite3.connect(db_path)
             conn.execute(
                 "INSERT INTO project_knowledge (category, summary, detail) VALUES (?, ?, ?)",
-                (topic, topic, detail),
+                (category, topic, detail),
             )
             conn.commit()
             conn.close()
@@ -316,7 +334,7 @@ def _remember(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResu
         return ToolResult(
             success=True,
             content=(
-                f"Stored in project knowledge (DB fallback):\\n"
+                f"Stored in project knowledge (DB fallback) [{category}]:\\n"
                 f"  Topic: {topic_preview}\\n"
                 f"  Detail: {detail_preview}"
             ),
@@ -325,7 +343,7 @@ def _remember(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResu
     return ToolResult(
         success=True,
         content=(
-            f"Remember noted (no persistent storage available):\\n"
+            f"Remember noted (no persistent storage available) [{category}]:\\n"
             f"  Topic: {topic_preview}"
         ),
     )
@@ -690,6 +708,20 @@ def _learn_from_failure(name: str, result: "ToolResult | None") -> None:
                 detail=detail,
                 importance=importance,
             )
+
+        # --- Also record in structured FailurePatternStore for cross-session pattern matching ---
+        pattern_store = getattr(_TOOL_CONTEXT, "_failure_pattern_store", None)
+        if pattern_store is not None:
+            try:
+                # Extract args from result context (best-effort)
+                fix_strategy = recovery or ""
+                pattern_store.record_failure(
+                    tool_name=name,
+                    error_content=content,
+                    fix_strategy=fix_strategy,
+                )
+            except Exception:
+                pass  # Never let failure recording crash the agent
     except (KeyError, ValueError, TypeError, AttributeError, sqlite3.Error):
         pass  # Never let auto-learn crash tool execution
 

@@ -1,0 +1,291 @@
+/* ==========================================================================
+   style.css — Catppuccin Mocha theme for mini_agent Electron
+   ========================================================================== */
+
+/* ---------------------------------------------------------------------------
+   CSS Variables — Catppuccin Mocha palette
+   --------------------------------------------------------------------------- */
+:root {
+  --bg:       #1e1e2e;
+  --surface:  #313244;
+  --border:   #45475a;
+  --accent:   #89b4fa;
+  --text:     #cdd6f4;
+  --dim:      #6c7086;
+  --green:    #a6e3a1;
+  --yellow:   #f9e2af;
+  --red:      #f38ba8;
+  --thinking: #585b70;
+  --pulse:    #cba6f7;
+
+  --font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono',
+                  'Menlo', 'Consolas', 'DejaVu Sans Mono', monospace;
+  --font-size: 13px;
+  --line-height: 1.45;
+  --border-width: 1px;
+}
+
+/* ---------------------------------------------------------------------------
+   Reset & Base
+   --------------------------------------------------------------------------- */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-family);
+  font-size: var(--font-size);
+  line-height: var(--line-height);
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  padding: 4px 8px;
+  gap: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Header
+   --------------------------------------------------------------------------- */
+.header {
+  padding: 2px 0;
+  user-select: none;
+  -webkit-app-region: drag;  /* make header draggable on macOS */
+}
+
+/* ---------------------------------------------------------------------------
+   Horizontal rule (using border characters)
+   --------------------------------------------------------------------------- */
+.hr {
+  height: 1px;
+  background: var(--border);
+  flex-shrink: 0;
+  margin: 1px 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Body panels
+   --------------------------------------------------------------------------- */
+#body-panels {
+  display: flex;
+  flex: 1;
+  gap: 0;
+  min-height: 0;  /* critical for flex shrinking */
+  overflow: hidden;
+}
+
+#left-pane {
+  flex: 40;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+#right-pane {
+  flex: 60;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin-left: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Rounded frames (using Unicode box-drawing chars in HTML)
+   --------------------------------------------------------------------------- */
+.rounded-frame {
+  display: flex;
+  flex-direction: column;
+  margin: 2px 0;
+}
+
+.frame-top, .frame-bottom {
+  display: flex;
+  flex-shrink: 0;
+  height: 1.4em;
+  line-height: 1.4em;
+  user-select: none;
+}
+
+.border-char {
+  color: var(--border);
+  flex-shrink: 0;
+}
+
+.border-fill {
+  flex: 1;
+  overflow: hidden;
+}
+
+.frame-title {
+  color: var(--border);
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+
+.frame-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.frame-left, .frame-right {
+  width: 1ch;
+  flex-shrink: 0;
+  color: var(--border);
+  user-select: none;
+}
+
+.frame-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ---------------------------------------------------------------------------
+   Log areas (scrollable)
+   --------------------------------------------------------------------------- */
+.log {
+  overflow-y: auto;
+  overflow-x: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+  min-height: 0;
+}
+
+.log::-webkit-scrollbar {
+  width: 4px;
+}
+
+.log::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.log::-webkit-scrollbar-thumb {
+  background: var(--surface);
+  border-radius: 2px;
+}
+
+.log::-webkit-scrollbar-thumb:hover {
+  background: var(--border);
+}
+
+/* Fixed-height areas */
+.thinking-log {
+  max-height: 10em;
+  flex-shrink: 0;
+}
+
+.subagents-log {
+  max-height: 10em;
+  flex-shrink: 0;
+}
+
+.sub-label {
+  flex-shrink: 0;
+  padding: 1px 0;
+  user-select: none;
+}
+
+/* Scrollable fills remaining space */
+.scrollable {
+  flex: 1;
+}
+
+/* ---------------------------------------------------------------------------
+   Input
+   --------------------------------------------------------------------------- */
+#input-frame {
+  flex-shrink: 0;
+}
+
+#input-container {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.prompt {
+  color: var(--dim);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+#user-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-family: var(--font-family);
+  font-size: var(--font-size);
+  line-height: var(--line-height);
+  caret-color: var(--accent);
+  padding: 0;
+}
+
+#user-input::placeholder {
+  color: var(--thinking);
+}
+
+/* ---------------------------------------------------------------------------
+   Status bar
+   --------------------------------------------------------------------------- */
+.status-bar {
+  display: flex;
+  gap: 0;
+  padding: 2px 0;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.status-bar span {
+  margin-right: 8px;
+}
+
+/* ---------------------------------------------------------------------------
+   Colour utility classes
+   --------------------------------------------------------------------------- */
+.text     { color: var(--text); }
+.dim      { color: var(--dim); }
+.accent   { color: var(--accent); }
+.thinking { color: var(--thinking); }
+.red      { color: var(--red); }
+.green    { color: var(--green); }
+.yellow   { color: var(--yellow); }
+.pulse    { color: var(--pulse); }
+
+/* ---------------------------------------------------------------------------
+   Message styles (used by JS when appending to logs)
+   --------------------------------------------------------------------------- */
+.msg-user     { color: var(--accent); }
+.msg-agent    { color: var(--text); }
+.msg-error    { color: var(--red); }
+.msg-thinking { color: var(--thinking); }
+.msg-tool-ok  { color: var(--dim); }
+.msg-tool-err { color: var(--red); }
+.msg-status   { color: var(--thinking); }
+
+/* ---------------------------------------------------------------------------
+   Hidden
+   --------------------------------------------------------------------------- */
+.hidden { display: none; }
+
+/* ---------------------------------------------------------------------------
+   Selection
+   --------------------------------------------------------------------------- */
+::selection {
+  background: var(--surface);
+  color: var(--text);
+}

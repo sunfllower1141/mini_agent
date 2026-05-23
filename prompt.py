@@ -140,88 +140,51 @@ _STATIC_PROMPT = (
     "When asked about yourself or this project, use find_symbol / read_file to consult "
     "the relevant module rather than guessing.\n"
     "\n"
+    "TOOLS & SKILLS:\n"
+    "- Start with ~11 core tools. Use **use_skill(\"name\")** to unlock more:\n"
+    "    agents, git, test, lsp, web, planning, search, image, tasks, bootstrap\n"
+    "- Each skill adds 2-15 tools. The API `tools` parameter only includes\n"
+    "  core + activated skill schemas (not all 63 tools).\n"
+    "\n"
     "WEB SEARCH (trigger FIRST, every turn):\n"
-    "Use web_search and fetch_url aggressively. One search saves 20-100 turns of guessing.\n"
-    "Triggers: ANY library/API/framework, error messages, 'how do I', external APIs, "
-    "2 failed approaches, 'research'/'look up', version-specific docs.\n"
-    "3+ failed attempts on same problem → MUST web_search before 4th.\n"
-    "Search with version numbers/years, exact errors in quotes, then fetch_url best result.\n"
+    "Use web_search and fetch_url aggressively. 3+ failed attempts = MUST search.\n"
     "\n"
     "Behavior:\n"
     "- Be direct and concise. Prefer normal answers when no tool is needed.\n"
-    "- Choose tools by capability, not by hardcoded names.\n"
     "\n"
     "Loop prevention (CRITICAL):\n"
-    "- Same tool + same args 2 consecutive times = STUCK. Do NOT call a 3rd time.\n"
-    "- Long commands (>10s): use background=True IMMEDIATELY. Poll task_status once.\n"
-    "- edit_file MUST be preceded by read_file in same batch. 3 consecutive failures = loop.\n"
-    "- Time-box investigations: 5+ turns without progress → state what you know, propose workaround.\n"
-    "- Update write_scratchpad every 3 turns. Record decisions, not just progress.\n"
-    "- Context grows stale: rely on scratchpad and plan, not memory of old tool results.\n"
+    "- Same tool + same args 2x = STUCK. Switch approach immediately.\n"
+    "- Long commands (>10s): background=True. Poll task_status once.\n"
+    "- edit_file MUST be preceded by read_file in same batch.\n"
+    "- Time-box: 5+ turns without progress → state what you know, propose workaround.\n"
+    "- Update write_scratchpad every 3 turns.\n"
+    "- Context grows stale: rely on scratchpad and plan, not old tool results.\n"
     "\n"
-    "Parallel tool execution (ALWAYS batch independent calls):\n"
-    "- Request ALL independent tool calls in ONE response. Don't wait for each result.\n"
-    "- State your plan in 1-3 sentences before executing non-trivial tasks.\n"
-    "- MANDATORY: web_search BEFORE any implementation involving APIs, libraries, or formats.\n"
+    "Parallel tool execution: batch ALL independent tool calls in ONE response.\n"
     "\n"
     "Scratchpad & memory:\n"
     "- write_scratchpad: working note across turns. Update after every tool round.\n"
-    "- remember: long-term cross-session memory. Store corrections, gotchas, conventions immediately.\n"
-    "- Check project_knowledge (injected at startup) before rediscovering past learnings.\n"
-    "\n"
-    "Tool-specific guidance:\n"
-    "- find_symbol: fastest for function/class lookup (indexed). search_files: only for content patterns.\n"
-    "- lsp_definition/references/hover/diagnostics: precise code intelligence via pylsp.\n"
-    "- edit_file: 3-pass fuzzy match (exact→trailing-tolerant→indent-tolerant). Read file first.\n"
-    "- run_shell: truncates at 500 lines, 60s timeout. Use background=True for long commands.\n"
-    "- run_tests: use 'path' param for fast feedback on changed files before full suite.\n"
-    "- Tool failures include 'hint' field — check it for fix suggestions.\n"
-    "- Read-only tools are cached within a turn. Prefer fresh reads over manual caching.\n"
+    "- remember: long-term cross-session memory.\n"
+    "- Check project_knowledge (injected at startup) before rediscovering.\n"
     "\n"
     "Code changes:\n"
     "- Keep modules small, single-purpose. No circular imports, no global mutable state.\n"
     "- Use named constants, type hints, clear names. Every feature needs a test.\n"
-    "- Run relevant tests after each change. Diagnose failures before more changes.\n"
-    "- Prefer small incremental edits. If change touches >3 core files, explain plan first.\n"
-    "- Consult README.md for architecture. Update it after completed changes.\n"
+    "- Run relevant tests after each change. Prefer small incremental edits.\n"
     "- Confirm plan with user before starting new features.\n"
     "\n"
-    "Task planning:\n"
-    "- Use plan() for multi-step work. Call plan_status(step=N) after each step.\n"
-    "- Active plan shown each turn. Auto-clears when all done.\n"
+    "Task planning: use plan() for multi-step work. plan_status(step=N) after each.\n"
     "\n"
-    "Multi-agent delegation (decompose aggressively):\n"
-    "- Spawn sub-agents whenever 2+ independent parts exist. Default: parallelize, not serialize.\n"
-    "- Heuristics: 3+ independent files→one per file; distinct phases→pipeline; N similar items→scatter_gather.\n"
-    "- spawn_agent returns task_id immediately. Use agent_status for non-blocking poll.\n"
-    "- collect_agent blocks for full result (30s timeout). collect_any grabs first done.\n"
-    "- Sub-agents share workspace and tools, depth 1 only. Spawn multiple in ONE batch for parallelism.\n"
-    "- Sub-agent 'Turn budget exhausted' may mean work was done on disk — check filesystem first.\n"
+    "Multi-agent: spawn_agent for independent sub-tasks (use_skill('agents')\n"
+    "first). Orchestrate, don't duplicate. Patterns: fan_out, fan_in, pipeline,\n"
+    "barrier, scatter_gather.\n"
     "\n"
-    "Orchestrator mode (CRITICAL):\n"
-    "- Once you spawn sub-agents, you are an orchestrator, NOT a worker. Do NOT duplicate delegated work.\n"
-    "- Your job: monitor (agent_status), extend (agent_extend +10 turns, max 35), collect (collect_agent/any).\n"
-    "- LLM generation is SLOW: large writes take 2-5+ MINUTES. A stale snapshot during generation is NORMAL.\n"
-    "- Only cancel if: 35 turns exhausted OR same error 3+ consecutive checks.\n"
-    "- wait_for_agent blocks with exponential backoff (saves tokens vs repeated collect_any).\n"
-    "- Track task IDs, progress, and extensions in scratchpad.\n"
+    "Inter-agent: agent_message (broadcast), agent_handoff (typed structured\n"
+    "result), agent_inbox (per-agent), agent_subscribe.\n"
     "\n"
-    "Inter-agent communication:\n"
-    "- agent_message: broadcast text to all agents. agent_read: read broadcasts.\n"
-    "- agent_handoff: typed structured result. Types: handoff.result/request/ack, status.heartbeat/error, coord.*.\n"
-    "- agent_inbox: read typed inbox for any agent. Check your own inbox every turn while orchestrating.\n"
-    "- agent_subscribe: narrow message types per agent.\n"
-    "- agent_status auto-captures snapshots (turn, tool, result, scratchpad, errors) — primary check tool.\n"
+    "Code analysis: diff, verify, diagnose_failures, find_usages, restore_file.\n"
     "\n"
-    "Coordination patterns: fan_out (parallel workers), fan_in (collect all), pipeline (sequential stages), "
-    "barrier (synchronize), scatter_gather (template across items).\n"
-    "\n"
-    "Code analysis: diff (unstaged changes), verify (lint+tests for session changes), diagnose_failures "
-    "(structured failure summary), find_usages (all references), restore_file (undo last write/edit).\n"
-    "\n"
-    "Session tools: session_stats (turns/tokens/agents), recall_turn (recover pruned context).\n"
-    "\n"
-    "External: read_image (GPT-4o vision for screenshots/diagrams).\n"
+    "Session: session_stats, recall_turn. External: read_image.\n"
 )
 
 # ---------------------------------------------------------------------------
@@ -278,11 +241,12 @@ def build_startup_context(
     except (OSError, _sp.TimeoutExpired):
         pass
 
-    # 3. Project knowledge (cross-session learnings, if available)
+    # 3. Project knowledge (cross-session learnings, grouped by category)
     if knowledge:
         lines = []
         session_entries = [e for e in knowledge if e.get("category") == "session_summary"]
         other_entries = [e for e in knowledge if e.get("category") != "session_summary"]
+
         if session_entries:
             summary = session_entries[0].get("summary", "")
             detail = session_entries[0].get("detail", "")
@@ -290,14 +254,39 @@ def build_startup_context(
             lines.append(f"{summary}")
             if detail:
                 lines.append(f"{detail}")
+
         if other_entries:
-            lines.append("\n## Project Learnings (from past sessions)")
+            # Group by category for cleaner presentation
+            from collections import defaultdict
+            by_cat: dict[str, list[dict]] = defaultdict(list)
             for entry in other_entries:
                 cat = entry.get("category", "general")
-                s = entry.get("summary", "")
-                d = entry.get("detail", "")
-                tags = f"[{cat}]"
-                lines.append(f"- {tags} {s}" + (f" — {d}" if d else ""))
+                by_cat[cat].append(entry)
+
+            CATEGORY_LABELS = {
+                "tool_usage": "Tool Usage Patterns",
+                "code_pattern": "Code Patterns & Conventions",
+                "error_pattern": "Known Error Patterns & Fixes",
+                "convention": "Project Conventions",
+                "architecture": "Architecture Insights",
+                "workaround": "Known Workarounds",
+                "dependency": "Dependencies & Setup",
+                "error": "Learned Error Patterns",
+                "general": "General Learnings",
+            }
+
+            lines.append("\n## Project Learnings (from past sessions)")
+            for cat, cat_label in CATEGORY_LABELS.items():
+                entries = by_cat.get(cat, [])
+                if entries:
+                    lines.append(f"\n### {cat_label}")
+                    for entry in entries[:8]:  # Cap per category
+                        s = entry.get("summary", "")
+                        d = entry.get("detail", "")
+                        hits = entry.get("hits", 0)
+                        hit_info = f" [{hits}× used]" if hits > 1 else ""
+                        lines.append(f"- {s}{hit_info}" + (f" — {d}" if d else ""))
+
         parts.append("\n".join(lines))
 
     return "\n".join(parts) + "\n"

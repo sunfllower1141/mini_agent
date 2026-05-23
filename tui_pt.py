@@ -180,6 +180,7 @@ STYLE = Style.from_dict({
 
 _ERROR_LOG_PATH: str = "error_traces.log"
 _ERROR_LOG_MAX_MESSAGES: int = 20  # last N messages to include in trace
+_ERROR_LOG_LOCK: threading.Lock = threading.Lock()  # protects concurrent error logging
 
 
 def _log_error_trace(
@@ -223,8 +224,9 @@ def _log_error_trace(
             + "\n".join(msg_lines)
             + f"\n{'─' * 60}\n"
         )
-        with open(_ERROR_LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(entry)
+        with _ERROR_LOG_LOCK:
+            with open(_ERROR_LOG_PATH, "a", encoding="utf-8") as f:
+                f.write(entry)
     except Exception:
         pass  # never let logging itself crash the agent
 
@@ -272,8 +274,9 @@ def _log_tool_error(
             + "\n".join(msg_lines)
             + f"\n{'─' * 60}\n"
         )
-        with open(_ERROR_LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(entry)
+        with _ERROR_LOG_LOCK:
+            with open(_ERROR_LOG_PATH, "a", encoding="utf-8") as f:
+                f.write(entry)
     except Exception:
         pass  # never let logging itself crash the agent
 

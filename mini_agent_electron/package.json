@@ -1,0 +1,13 @@
+{
+  "name": "mini-agent-electron",
+  "version": "1.0.0",
+  "description": "Electron GUI for mini_agent — Catppuccin Mocha themed terminal-style AI assistant",
+  "main": "main.js",
+  "scripts": {
+    "start": "./electron-dist/Electron.app/Contents/MacOS/Electron .",
+    "dev": "./electron-dist/Electron.app/Contents/MacOS/Electron . --dev"
+  },
+  "dependencies": {
+    "electron": "^42.2.0"
+  }
+}

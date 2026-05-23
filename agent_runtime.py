@@ -150,6 +150,7 @@ class AgentRuntime:
     """
 
     _ABSOLUTE_MAX_TURNS: int = 200  # generous hard cap for extend_turns()
+    _INBOX_CAP: int = 500  # max messages per-agent inbox (ring-buffer)
 
     def __init__(self) -> None:
         self._lock = threading.Lock()

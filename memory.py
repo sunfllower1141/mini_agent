@@ -165,30 +165,33 @@ def _total_tokens(messages: list[dict]) -> int:
     every turn as the conversation grows.
     """
     global _ACCUM_COUNT, _ACCUM_TOTAL, _ACCUM_LIST_ID
-    n = len(messages)
-    # Detect in-place modification: same length but different list identity
-    # or content (compression reuses the same list object but mutates messages).
-    list_id = id(messages)
-    if n >= _ACCUM_COUNT and list_id == _ACCUM_LIST_ID:
-        # Only count new messages appended since last call
-        new_tokens = sum(_estimate_tokens(m) for m in messages[_ACCUM_COUNT:])
-        _ACCUM_TOTAL += new_tokens
-        _ACCUM_COUNT = n
-    else:
-        # List shrank (pruned), messages mutated in-place, or new list — full recount
-        _ACCUM_TOTAL = sum(_estimate_tokens(m) for m in messages)
-        _ACCUM_COUNT = n
-        _ACCUM_LIST_ID = list_id
-    return _ACCUM_TOTAL
+    with _ACCUM_LOCK:
+        n = len(messages)
+        # Detect in-place modification: same length but different list identity
+        # or content (compression reuses the same list object but mutates messages).
+        list_id = id(messages)
+        if n >= _ACCUM_COUNT and list_id == _ACCUM_LIST_ID:
+            # Only count new messages appended since last call
+            new_tokens = sum(_estimate_tokens(m) for m in messages[_ACCUM_COUNT:])
+            _ACCUM_TOTAL += new_tokens
+            _ACCUM_COUNT = n
+        else:
+            # List shrank (pruned), messages mutated in-place, or new list — full recount
+            _ACCUM_TOTAL = sum(_estimate_tokens(m) for m in messages)
+            _ACCUM_COUNT = n
+            _ACCUM_LIST_ID = list_id
+        return _ACCUM_TOTAL
 
 
 
 # Running accumulator for _total_tokens.
 # _ACCUM_LIST_ID tracks the Python list identity so we detect in-place
 # mutation (compression reuses the same list object but changes content).
+# Protected by _ACCUM_LOCK for thread safety (sub-agents may call concurrently).
 _ACCUM_COUNT: int = 0
 _ACCUM_TOTAL: int = 0
 _ACCUM_LIST_ID: int = 0
+_ACCUM_LOCK: threading.Lock = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -817,6 +820,29 @@ class MemoryStore:
                 "created_at TEXT NOT NULL DEFAULT (datetime('now')),"
                 "updated_at TEXT NOT NULL DEFAULT (datetime('now'))"
                 ")"
+            )
+            # Failure patterns table — self-learning from tool failures (MPR/VIGIL-inspired)
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS failure_patterns ("
+                "id              INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "tool_name       TEXT    NOT NULL,"
+                "error_fingerprint TEXT  NOT NULL,"
+                "args_signature  TEXT    NOT NULL DEFAULT '',"
+                "fix_strategy    TEXT    NOT NULL DEFAULT '',"
+                "success_count   INTEGER NOT NULL DEFAULT 0,"
+                "failure_count   INTEGER NOT NULL DEFAULT 1,"
+                "confidence      REAL    NOT NULL DEFAULT 0.0,"
+                "last_seen       TEXT    NOT NULL DEFAULT (datetime('now')),"
+                "created_at      TEXT    NOT NULL DEFAULT (datetime('now'))"
+                ")"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_fp_tool_err"
+                " ON failure_patterns(tool_name, error_fingerprint)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_fp_confidence"
+                " ON failure_patterns(confidence DESC)"
             )
             conn.commit()
         except sqlite3.Error:
