@@ -63,5 +63,15 @@ export default function useSmoothStream({ speed = 8 } = {}) {
     return fullRef.current;
   }, []);
 
+  // Cleanup RAF on unmount to avoid setState on unmounted component
+  useEffect(() => {
+    return () => {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
+  }, []);
+
   return { displayedText, addChunk, reset, flush };
 }

@@ -41,6 +41,7 @@ loadEnvFile(path.join(require('os').homedir(), '.mini_agent_env'));
 let pythonProcess = null;
 let pythonReady = false;
 let pendingRequests = [];
+let lastStatus = null; // cached status for renderer to fetch on mount
 
 function spawnPythonBackend(workspacePath) {
   const backendScript = path.join(__dirname, 'backend', 'server.py');
@@ -157,6 +158,7 @@ function handlePythonMessage(msg) {
     case 'ready':
       pythonReady = true;
       flushPending();
+      lastStatus = { ...lastStatus, ready: true, model: data.model };
       win.webContents.send('backend:status', { ready: true, model: data.model });
       break;
 
@@ -193,6 +195,7 @@ function handlePythonMessage(msg) {
       break;
 
     case 'status':
+      lastStatus = { ...data, ready: pythonReady };
       win.webContents.send('backend:status', data);
       break;
 
@@ -228,7 +231,9 @@ function setupIPC() {
 
   ipcMain.handle('backend:get_status', async () => {
     sendToPython({ type: 'get_status' });
-    return { ok: true };
+    // Return cached status immediately so the renderer never starts blank.
+    // The async response will update via backend:status event when it arrives.
+    return lastStatus || { ready: false };
   });
 }
 

@@ -38,14 +38,6 @@ html, body {
   font-size: var(--font-size);
   line-height: var(--line-height);
   -webkit-font-smoothing: antialiased;
-  scrollbar-width: none;          /* Firefox */
-  -ms-overflow-style: none;       /* IE / old Edge */
-}
-
-html::-webkit-scrollbar,
-body::-webkit-scrollbar,
-*::-webkit-scrollbar {
-  display: none;                  /* Chrome, Safari, Electron */
 }
 
 #app {
@@ -164,6 +156,11 @@ body::-webkit-scrollbar,
   word-break: break-word;
   min-height: 0;
   padding: 2px 0;
+}
+
+.log {
+  scrollbar-width: thin;                     /* Firefox */
+  scrollbar-color: var(--border) transparent; /* Firefox */
 }
 
 .log::-webkit-scrollbar { width: 5px; }

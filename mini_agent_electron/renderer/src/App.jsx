@@ -12,7 +12,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 // ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
-function App() {
+function AppShell() {
   // Log state — arrays of { text, cls?, html?, icon? }
   const [toolsLines, setToolsLines] = useState([]);
   const [subagentLines, setSubagentLines] = useState([]);
@@ -40,7 +40,7 @@ function App() {
   const chatLogRef = useRef(null);
   const inThinkingRef = useRef(false);
   const submitTimeoutRef = useRef(null);
-  const toolOutputBuf = useRef([]);
+  const toolOutputStack = useRef([]); // stack of buffers for parallel tool calls
 
   // Helper to add a line to any log
   const addLine = useCallback((setter) => (line) => {
@@ -71,7 +71,8 @@ function App() {
       }
     }));
 
-    // Fetch initial status (may have fired before we mounted)
+    // Fetch cached status from main process (handles race where backend
+    // sent status before our listener was registered)
     api.getStatus?.().then((data) => {
       if (!data) return;
       if (data.model != null) setModelName(data.model);
@@ -82,6 +83,9 @@ function App() {
         setGitDirty(!!data.git_dirty);
       }
       if (data.restored_count != null) setRestoredCount(data.restored_count);
+      if (data.ready) {
+        addToolLine({ text: 'backend ready', cls: 'dim' });
+      }
     });
 
     unsubs.push(api.on('stream:token', (data) => {
@@ -105,7 +109,7 @@ function App() {
 
     unsubs.push(api.on('stream:tool_start', (data) => {
       addToolLine({ text: '', cls: 'tool-separator' });
-      // Color-code the tool name
+      // Color-code the tool name using structured data (not HTML strings)
       const summary = data.summary;
       const parenIdx = summary.indexOf('(');
       let toolName, toolArgs;
@@ -117,25 +121,30 @@ function App() {
         toolArgs = '';
       }
       addToolLine({
-        html: `<span class="accent">${toolName}</span><span class="dim">${toolArgs}</span>`,
+        toolName,
+        toolArgs,
         cls: '',
       });
-      // Reset output buffer for this tool call
-      toolOutputBuf.current = [];
+      // Push a new buffer for this tool call (stack supports parallel calls)
+      toolOutputStack.current.push([]);
     }));
 
     unsubs.push(api.on('stream:tool_output', (data) => {
       const lines = data.line.split('\n');
-      for (const line of lines) {
-        toolOutputBuf.current.push(line);
+      const buf = toolOutputStack.current[toolOutputStack.current.length - 1];
+      if (buf) {
+        for (const line of lines) {
+          buf.push(line);
+        }
       }
     }));
 
     unsubs.push(api.on('stream:tool_end', (data) => {
       const status = data.ok ? 'OK' : 'ERR';
       const cls = data.ok ? 'msg-tool-ok' : 'msg-tool-err';
-      // Build the code block content (streamed or full)
-      const bufCode = toolOutputBuf.current.join('\n').trim();
+      // Pop this tool's buffer from the stack (supports parallel calls)
+      const buf = toolOutputStack.current.pop() || [];
+      const bufCode = buf.join('\n').trim();
       const code = bufCode || (data.content || '').trim();
       // When output is present, show it in a plain pre block
       if (code) {
@@ -147,7 +156,6 @@ function App() {
       } else {
         addToolLine({ text: `  ${status} ${data.detail}`, cls });
       }
-      toolOutputBuf.current = [];
     }));
 
     unsubs.push(api.on('stream:turn_complete', (data) => {
@@ -194,7 +202,7 @@ function App() {
     }));
 
     return () => unsubs.forEach((fn) => fn());
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [addToolLine, thinking, chatStream]);
 
   // Submit handler
   const handleSubmit = useCallback((text) => {
@@ -299,7 +307,7 @@ function App() {
             )}
             {thinkingOutput && !thinking.displayedText && (
               <div className="msg-thinking">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} allowDangerousHtml={true}
+                <ReactMarkdown remarkPlugins={[remarkGfm]}
 >{thinkingOutput}</ReactMarkdown>
               </div>
             )}
@@ -316,8 +324,7 @@ function App() {
               if (line.cls === 'msg-agent') {
                 return (
                   <div key={`line-${i}`} className="msg-agent">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]} allowDangerousHtml={true}
->
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
                       {line.text}
                     </ReactMarkdown>
                   </div>
@@ -327,8 +334,7 @@ function App() {
             })}
             {chatStream.displayedText && (
               <div className="msg-agent">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} allowDangerousHtml={true}
->
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
                   {chatStream.displayedText}
                 </ReactMarkdown>
               </div>
@@ -339,14 +345,7 @@ function App() {
 
       {/* Input */}
       <div id="input-frame" className="rounded-frame">
-        <div className="frame-top">
-          <span className="border-char">╭</span>
-          <span className="border-char border-fill">─ Input ─</span>
-          <span className="border-char border-fill">─</span>
-          <span className="border-char">╮</span>
-        </div>
         <div className="frame-body">
-          <div className="frame-left"></div>
           <div className="frame-content">
             <div id="input-container">
               <span className="prompt">{'>'}</span>
@@ -363,12 +362,6 @@ function App() {
               />
             </div>
           </div>
-          <div className="frame-right"></div>
-        </div>
-        <div className="frame-bottom">
-          <span className="border-char">╰</span>
-          <span className="border-char border-fill">─</span>
-          <span className="border-char">╯</span>
         </div>
       </div>
 
@@ -403,10 +396,10 @@ function App() {
 // ---------------------------------------------------------------------------
 // Root export — wraps App in Error Boundary
 // ---------------------------------------------------------------------------
-export default function Root() {
+export default function App() {
   return (
     <ErrorBoundary>
-      <App />
+      <AppShell />
     </ErrorBoundary>
   );
 }
