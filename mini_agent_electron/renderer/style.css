@@ -316,9 +316,12 @@ body::-webkit-scrollbar,
 .stream-char:first-child {
   animation-duration: 0.5s;
 }
-.msg-tool-ok  { color: var(--dim); }
-.msg-tool-err { color: var(--red); }
+.msg-tool-ok  { color: var(--dim); font-size: 0.75em; }
+.msg-tool-err { color: var(--red); font-size: 0.75em; }
 .msg-status   { color: var(--dim); font-style: italic; }
+
+/* shrink all lines inside the tools panel */
+#tools-log, .tools-log .log-line { font-size: 0.75em; }
 
 /* ---------------------------------------------------------------------------
    Prism syntax highlighting — Cyberpunk / Synthwave theme
