@@ -276,6 +276,29 @@ export default function App() {
     }
   }, [handleSubmit]);
 
+  // Cancel handler — immediately reset UI, then tell backend
+  const handleCancel = useCallback(() => {
+    window.miniAgent?.cancel();
+    clearTimeout(submitTimeoutRef.current);
+    inThinkingRef.current = false;
+    const agentText = chatStream.flush();
+    if (agentText) {
+      setChatLines((prev) => {
+        const updated = [...prev];
+        if (updated.length > 0 && updated[updated.length - 1].text === '') {
+          updated[updated.length - 1] = { text: agentText, cls: 'msg-agent' };
+        }
+        return updated;
+      });
+      chatStream.reset();
+    }
+    thinking.flush();
+    thinking.reset();
+    setIsLive(false);
+    setInputDisabled(false);
+    inputRef.current?.focus();
+  }, [chatStream, thinking]);
+
   // Auto-scroll thinking log
   useEffect(() => {
     if (thinkingLogRef.current) {
@@ -367,7 +390,7 @@ export default function App() {
           {gitBranch && `⎇ ${gitBranch}${gitDirty ? '*' : ''}`}
         </span>
         {isLive && (
-          <span id="live-indicator" onClick={() => window.miniAgent?.cancel()} title="Cancel"> ●</span>
+          <span id="live-indicator" onClick={handleCancel} title="Cancel"> ●</span>
         )}
         {turnCountVal != null && (
           <span id="turn-counter"> ↻ turn <span id="turn-count">{turnCountVal}</span></span>
