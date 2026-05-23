@@ -3,9 +3,9 @@
  * (The old ASCII border characters ╭─╮ / ╰─╯ were hidden by CSS and
  *  are now removed entirely.)
  */
-export default function RoundedFrame({ id, title, children }) {
+export default function RoundedFrame({ id, title, children, className }) {
   return (
-    <div id={id} className="panel rounded-frame">
+    <div id={id} className={`panel rounded-frame${className ? ` ${className}` : ''}`}>
       <div className="frame-body">
         <div className="frame-content">{children}</div>
       </div>

@@ -129,15 +129,37 @@ function spawnPythonBackend(workspacePath) {
   return proc;
 }
 
+// Lock to prevent concurrent stdin writes (flushPending + IPC handler race).
+// Without this, two write() calls can interleave, producing a corrupt JSON
+// line that the Python backend fails to parse with "Expecting value...".
+let _stdinLock = false;
+let _stdinQueue = [];
+
+function _stdinWriteUnlocked(msg) {
+  try {
+    pythonProcess.stdin.write(JSON.stringify(msg) + '\n');
+  } catch (e) {
+    pendingRequests.push(msg);
+  }
+}
+
 function sendToPython(msg) {
   if (!pythonProcess || !pythonProcess.stdin || !pythonProcess.stdin.writable) {
     pendingRequests.push(msg);
     return;
   }
-  try {
-    pythonProcess.stdin.write(JSON.stringify(msg) + '\n');
-  } catch (e) {
-    pendingRequests.push(msg);
+  if (_stdinLock) {
+    _stdinQueue.push(msg);
+    return;
+  }
+  _stdinLock = true;
+  _stdinWriteUnlocked(msg);
+  _stdinLock = false;
+  // Drain any queued messages
+  while (_stdinQueue.length > 0) {
+    _stdinLock = true;
+    _stdinWriteUnlocked(_stdinQueue.shift());
+    _stdinLock = false;
   }
 }
 
@@ -192,6 +214,30 @@ function handlePythonMessage(msg) {
 
     case 'error':
       win.webContents.send('stream:error', data);
+      break;
+
+    case 'subagent_start':
+      win.webContents.send('stream:subagent_start', data);
+      break;
+
+    case 'subagent_output':
+      win.webContents.send('stream:subagent_output', data);
+      break;
+
+    case 'subagent_end':
+      win.webContents.send('stream:subagent_end', data);
+      break;
+
+    case 'subagent_tool_start':
+      win.webContents.send('stream:subagent_tool_start', data);
+      break;
+
+    case 'subagent_tool_end':
+      win.webContents.send('stream:subagent_tool_end', data);
+      break;
+
+    case 'subagent_thought':
+      win.webContents.send('stream:subagent_thought', data);
       break;
 
     case 'status':

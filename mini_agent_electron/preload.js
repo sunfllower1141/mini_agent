@@ -119,6 +119,12 @@ contextBridge.exposeInMainWorld('miniAgent', {
       'stream:thinking_end',
       'stream:turn_complete',
       'stream:error',
+      'stream:subagent_start',
+      'stream:subagent_output',
+      'stream:subagent_end',
+      'stream:subagent_tool_start',
+      'stream:subagent_tool_end',
+      'stream:subagent_thought',
       'backend:status',
       'backend:response',
     ];

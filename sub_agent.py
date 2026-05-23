@@ -59,6 +59,7 @@ def run_sub_agent(
     tui_task_id: str = "",  # task_id for TUI streaming prefix
     task_id: str = "",     # task_id for direct runtime lookup (avoids O(N) scan)
     parent_task_id: str = "",  # orchestrator task_id for agent_handoff targeting
+    subagent_callback: callable | None = None,  # for Electron UI sub-agent pane events
 ) -> SubAgentResult:
     """Run a sub-agent loop in the current thread (called from a background thread).
 
@@ -258,6 +259,7 @@ def run_sub_agent(
                 _idx = _content.find(_marker)
                 if _idx != -1 and _idx < _best_idx:
                     _best_idx = _idx
+            _preview_start = 0
             if _best_idx < len(_content) and _best_idx > 0:
                 # Found a marker — show from 50 chars before it, or from start if near beginning
                 _preview_start = max(0, _best_idx - 50)
@@ -389,6 +391,15 @@ def run_sub_agent(
                             thought_snippet="".join(_stream_buf[-6:])[-200:],  # last ~6 chunks, capped
                             streamed_tokens=_stream_count[0],
                         )
+                    # Emit thought to Electron UI callback (batched every ~20 tokens to avoid spam)
+                    if subagent_callback and _stream_count[0] % 20 == 0:
+                        try:
+                            subagent_callback("thought", {
+                                "task_id": task_id,
+                                "text": "".join(_stream_buf[-20:]),
+                            })
+                        except Exception:
+                            pass  # best-effort
                 return _wrapped
 
             _tq = tui_queue or getattr(_TOOL_CONTEXT, "_tui_queue", None)
@@ -582,6 +593,15 @@ def run_sub_agent(
             _tq = tui_queue or getattr(_TOOL_CONTEXT, "_tui_queue", None)
             if _tq is not None:
                 tui_queue.put(("sub_tool", "start", name, getattr(_TOOL_CONTEXT, "_agent_task_id", "")))
+            # Emit tool_start to Electron UI callback
+            if subagent_callback:
+                try:
+                    _fn = tc.get("function", {})
+                    _tname = _fn.get("name", "")
+                    _targs = _fn.get("arguments", "{}")
+                    subagent_callback("tool_start", {"task_id": task_id, "tool_name": _tname, "tool_args": _targs})
+                except Exception:
+                    pass  # best-effort; don't crash sub-agent for UI event failures
 
             # --- Depth guard: block spawn/status/collect at max depth ---
             if current_depth >= max_depth and name in ("spawn_agent", "agent_status", "collect_agent", "collect_any", "agent_extend"):
@@ -670,6 +690,17 @@ def run_sub_agent(
                 ok = result.success
                 detail = result.content[:100] if result.content else ""
                 tui_queue.put(("sub_tool", "end", name, getattr(_TOOL_CONTEXT, "_agent_task_id", ""), ok, detail))
+            # Emit tool_end to Electron UI callback
+            if subagent_callback:
+                try:
+                    subagent_callback("tool_end", {
+                        "task_id": task_id,
+                        "tool_name": name,
+                        "ok": result.success,
+                        "content": result.content[:500] if result.content else "",
+                    })
+                except Exception:
+                    pass  # best-effort
 
         # --- Auto-snapshot: record status every turn so the parent can peek
         #     with agent_status without waiting for a heartbeat. ---

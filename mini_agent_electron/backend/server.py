@@ -59,11 +59,18 @@ from emoji_svg import clean_text
 # JSON-lines transport
 # ---------------------------------------------------------------------------
 
+_stdout_lock = threading.Lock()
+
 def send_msg(msg: dict) -> None:
-    """Write a JSON message to stdout followed by newline, then flush."""
+    """Write a JSON message to stdout followed by newline, then flush.
+
+    Thread-safe: multiple sub-agent threads may call this concurrently
+    via the subagent_callback.  The lock prevents interleaved writes.
+    """
     line = json.dumps(msg, ensure_ascii=False, default=str)
-    sys.stdout.write(line + "\n")
-    sys.stdout.flush()
+    with _stdout_lock:
+        sys.stdout.write(line + "\n")
+        sys.stdout.flush()
 
 
 def read_msg() -> dict | None:
@@ -77,7 +84,13 @@ def read_msg() -> dict | None:
             return None
         return json.loads(line)
     except (json.JSONDecodeError, EOFError, IOError) as e:
-        send_msg({"type": "error", "message": clean_text(f"Parse error: {e}")})
+        # Log parse errors to stderr instead of flooding the UI.
+        # Most common cause: concurrent stdin writes from Electron's
+        # flushPending() and an IPC handler producing an interleaved line.
+        # Show the raw line (truncated) so we can diagnose.
+        import sys as _sys
+        raw_preview = repr(line)[:120]
+        print(f"[server] Ignoring stdin parse error ({raw_preview}): {e}", file=_sys.stderr, flush=True)
         return None
 
 
@@ -111,6 +124,26 @@ class StreamCallbacks:
     def on_tool_output(self, line: str, turn_id: int = 0) -> None:
         send_msg({"type": "tool_output", "line": clean_text(line)})
 
+    # -- sub-agent events (wired to _TOOL_CONTEXT._subagent_callback) --
+
+    def on_subagent_start(self, task_id: str, parent_id: str, name: str, desc: str) -> None:
+        send_msg({"type": "subagent_start", "task_id": task_id, "parent_id": parent_id, "name": name, "desc": clean_text(desc)})
+
+    def on_subagent_output(self, task_id: str, line: str) -> None:
+        send_msg({"type": "subagent_output", "task_id": task_id, "line": clean_text(line)})
+
+    def on_subagent_end(self, task_id: str, ok: bool, content: str) -> None:
+        send_msg({"type": "subagent_end", "task_id": task_id, "ok": ok, "content": clean_text(content[:500])})
+
+    def on_subagent_tool_start(self, task_id: str, tool_name: str, tool_args: str) -> None:
+        send_msg({"type": "subagent_tool_start", "task_id": task_id, "tool_name": tool_name, "tool_args": tool_args})
+
+    def on_subagent_tool_end(self, task_id: str, tool_name: str, ok: bool, content: str) -> None:
+        send_msg({"type": "subagent_tool_end", "task_id": task_id, "tool_name": tool_name, "ok": ok, "content": clean_text(content[:500])})
+
+    def on_subagent_thought(self, task_id: str, text: str) -> None:
+        send_msg({"type": "subagent_thought", "task_id": task_id, "text": clean_text(text)})
+
 
 # ---------------------------------------------------------------------------
 # Agent runner — runs in a background thread so the main thread can accept
@@ -139,6 +172,13 @@ class AgentRunner:
         self._input_queue: list[str] = []
         self._input_lock = threading.Lock()
         self._callbacks = StreamCallbacks()
+
+        # Sub-agent auto-report tracking:
+        #   _pending_subagents  – set of task_ids spawned during the current turn.
+        #   _auto_report_flag   – prevents double-queuing a synthesis prompt.
+        # Reset at the start of each turn in _run_turn.
+        self._pending_subagents: set[str] = set()
+        self._auto_report_flag: bool = False
 
         # Git status
         self._git_branch = ""
@@ -224,7 +264,65 @@ class AgentRunner:
 
     def _run_turn(self, text: str) -> None:
         """Execute a single agent turn."""
+        # Belt-and-suspenders: sub-agents may mutate config.stream when they
+        # share the same config object.  Force it back to True for the
+        # orchestrator so streaming always works.
+        self.config.stream = True
         self.messages.append({"role": "user", "content": text})
+
+        # Reset sub-agent auto-report tracking for this turn
+        self._pending_subagents.clear()
+        self._auto_report_flag = False
+
+        # Wire sub-agent events to Electron via a callback on the tool context.
+        # The callback is called from _spawn_one (agent_ops.py) on sub-agent
+        # lifecycle events (start, output, end).
+        #
+        # IMPORTANT: We set this once during init() and NEVER clear it after
+        # run_agent_turn returns.  If we clear it, sub-agents spawned by other
+        # sub-agents (grandchildren) won't find a callback because the parent
+        # turn may have already finished and cleared it.  The callback closure
+        # captures `self` (AgentRunner) which lives for the whole session, so
+        # it's safe to keep permanently.
+        from tools import _TOOL_CONTEXT
+        if getattr(_TOOL_CONTEXT, "_subagent_callback", None) is None:
+            def _sub_cb(event_type: str, data: dict) -> None:
+                if event_type == "start":
+                    task_id = data.get("task_id", "")
+                    self._pending_subagents.add(task_id)
+                    self._callbacks.on_subagent_start(
+                        task_id, data.get("parent_id", ""),
+                        data.get("name", ""), data.get("desc", ""))
+                elif event_type == "output":
+                    self._callbacks.on_subagent_output(
+                        data.get("task_id", ""), data.get("line", ""))
+                elif event_type == "end":
+                    task_id = data.get("task_id", "")
+                    self._pending_subagents.discard(task_id)
+                    self._callbacks.on_subagent_end(
+                        task_id, data.get("ok", False),
+                        data.get("content", ""))
+                    # Auto-report: if all sub-agents from this turn
+                    # have finished, queue a synthesis prompt so the
+                    # orchestrator processes and reports their results.
+                    if not self._pending_subagents and not self._auto_report_flag:
+                        self._auto_report_flag = True
+                        self.submit(
+                            "[Report: All sub-agents have completed. "
+                            "Synthesize their results and report to the user.]"
+                        )
+                elif event_type == "tool_start":
+                    self._callbacks.on_subagent_tool_start(
+                        data.get("task_id", ""), data.get("tool_name", ""),
+                        data.get("tool_args", ""))
+                elif event_type == "tool_end":
+                    self._callbacks.on_subagent_tool_end(
+                        data.get("task_id", ""), data.get("tool_name", ""),
+                        data.get("ok", False), data.get("content", ""))
+                elif event_type == "thought":
+                    self._callbacks.on_subagent_thought(
+                        data.get("task_id", ""), data.get("text", ""))
+            _TOOL_CONTEXT._subagent_callback = _sub_cb
 
         try:
             msg = run_agent_turn(
@@ -238,6 +336,8 @@ class AgentRunner:
                 session=self.session,
             )
         except Exception as e:
+            # Safety: reset thinking flag so a stuck marker doesn't persist
+            self._callbacks._in_thinking = False
             if not self._cancel_event.is_set():
                 send_msg({"type": "error", "message": clean_text(str(e))})
             # Always send turn_complete so the renderer resets its loading state
@@ -247,6 +347,8 @@ class AgentRunner:
                 "turn_count": self._total_turns,
             })
             return
+        # Safety: reset thinking flag so a stuck marker doesn't persist across turns
+        self._callbacks._in_thinking = False
 
         if self._cancel_event.is_set():
             send_msg({

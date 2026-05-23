@@ -5,6 +5,7 @@ import useSmoothStream from './hooks/useSmoothStream';
 import LogLine, { extractSvgFromText, splitTextAndSvgs } from './components/LogLine';
 import CodeBlock from './components/CodeBlock';
 import LogPanel from './components/LogPanel';
+import AgentTree from './components/AgentTree';
 import RoundedFrame from './components/RoundedFrame';
 import CharStream from './components/CharStream';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -32,8 +33,10 @@ const markdownComponents = {
 function AppShell() {
   // Log state — arrays of { text, cls?, html?, icon? }
   const [toolsLines, setToolsLines] = useState([]);
-  const [subagentLines, setSubagentLines] = useState([]);
   const [chatLines, setChatLines] = useState([]);
+
+  // Sub-agent data — { [task_id]: { name, desc, toolCalls: [], thoughts: [], output: "", ok: null } }
+  const [subagentData, setSubagentData] = useState({});
 
   // Smooth streaming for thinking & chat
   const thinking = useSmoothStream({ speed: 10 });
@@ -50,7 +53,7 @@ function AppShell() {
   const [turnCountVal, setTurnCountVal] = useState(null);
   const [tokenCountVal, setTokenCountVal] = useState(null);
   const [inputDisabled, setInputDisabled] = useState(false);
-  const [thinkingOutput, setThinkingOutput] = useState('');
+  const [thinkingBlocks, setThinkingBlocks] = useState([]);
 
   const inputRef = useRef(null);
   const thinkingLogRef = useRef(null);
@@ -66,7 +69,6 @@ function AppShell() {
   }, []);
 
   const addToolLine = useCallback((line) => addLine(setToolsLines)(line), [addLine]);
-  const addSubLine = useCallback((line) => addLine(setSubagentLines)(line), [addLine]);
 
   // Status / init — fetched once on mount (empty deps to avoid re-render loop)
   useEffect(() => {
@@ -116,12 +118,12 @@ function AppShell() {
     unsubs.push(api.on('stream:thinking_start', () => {
       inThinkingRef.current = true;
       thinking.reset();
-      setThinkingOutput('');
     }));
 
     unsubs.push(api.on('stream:thinking_end', () => {
       inThinkingRef.current = false;
-      setThinkingOutput(thinking.flush());
+      const flushed = thinking.flush();
+      if (flushed) setThinkingBlocks((prev) => [...prev, flushed]);
     }));
 
     unsubs.push(api.on('stream:tool_start', (data) => {
@@ -224,6 +226,91 @@ function AppShell() {
       }
     }));
 
+    // --- Sub-agent events ---
+    unsubs.push(api.on('stream:subagent_start', (data) => {
+      setSubagentData((prev) => ({
+        ...prev,
+        [data.task_id]: {
+          name: data.name,
+          desc: data.desc,
+          parent_id: data.parent_id || 'orchestrator',
+          toolCalls: [],
+          thoughts: [],
+          output: '',
+          ok: null,
+        },
+      }));
+    }));
+
+    unsubs.push(api.on('stream:subagent_tool_start', (data) => {
+      setSubagentData((prev) => {
+        const agent = prev[data.task_id];
+        if (!agent) return prev;
+        return {
+          ...prev,
+          [data.task_id]: {
+            ...agent,
+            toolCalls: [...agent.toolCalls, {
+              toolName: data.tool_name,
+              toolArgs: data.tool_args ? `(${data.tool_args.slice(0, 80)})` : '',
+              ok: null,
+            }],
+          },
+        };
+      });
+    }));
+
+    unsubs.push(api.on('stream:subagent_tool_end', (data) => {
+      setSubagentData((prev) => {
+        const agent = prev[data.task_id];
+        if (!agent) return prev;
+        const toolCalls = [...agent.toolCalls];
+        // Mark the last matching tool call as complete
+        for (let i = toolCalls.length - 1; i >= 0; i--) {
+          if (toolCalls[i].toolName === data.tool_name && toolCalls[i].ok === null) {
+            toolCalls[i] = { ...toolCalls[i], ok: data.ok, result: data.content?.slice(0, 200) };
+            break;
+          }
+        }
+        return { ...prev, [data.task_id]: { ...agent, toolCalls } };
+      });
+    }));
+
+    unsubs.push(api.on('stream:subagent_thought', (data) => {
+      setSubagentData((prev) => {
+        const agent = prev[data.task_id];
+        if (!agent) return prev;
+        // Keep last 30 thought chunks to avoid unbounded growth
+        const thoughts = [...agent.thoughts, data.text].slice(-30);
+        return { ...prev, [data.task_id]: { ...agent, thoughts } };
+      });
+    }));
+
+    unsubs.push(api.on('stream:subagent_output', (data) => {
+      // subagent_output is still sent for backward compat; accumulate into thoughts
+      setSubagentData((prev) => {
+        const agent = prev[data.task_id];
+        if (!agent) return prev;
+        const thoughts = [...agent.thoughts, data.line].slice(-30);
+        return { ...prev, [data.task_id]: { ...agent, thoughts } };
+      });
+    }));
+
+    unsubs.push(api.on('stream:subagent_end', (data) => {
+      setSubagentData((prev) => {
+        const agent = prev[data.task_id];
+        if (!agent) return prev;
+        return {
+          ...prev,
+          [data.task_id]: {
+            ...agent,
+            ok: data.ok,
+            output: data.content || '',
+          },
+        };
+      });
+    }));
+
     return () => unsubs.forEach((fn) => fn());
   }, []); // stable: addToolLine/thinking/chatStream callbacks are useCallback-wrapped
 
@@ -238,7 +325,7 @@ function AppShell() {
         window.miniAgent.cancel();          // kill running turn
         setChatLines([]);
         setToolsLines([]);
-        setSubagentLines([]);
+        setSubagentData({});
         chatStream.reset();
         thinking.reset();
         setThinkingOutput('');
@@ -258,7 +345,7 @@ function AppShell() {
       if (text.trim().toLowerCase() === '/clear') {
         setChatLines([]);
         setToolsLines([]);
-        setSubagentLines([]);
+        setSubagentData({});
         chatStream.reset();
         thinking.reset();
         setThinkingOutput('');
@@ -391,7 +478,7 @@ function AppShell() {
         <span id="header-model" className="text">{modelName}</span>
       </div>
 
-      {/* Body: two panels */}
+      {/* Body: three panels */}
       <div id="body-panels">
         {/* Left pane: Tools & Thinking */}
         <RoundedFrame id="left-pane" title="Tools &amp; Thinking">
@@ -401,16 +488,18 @@ function AppShell() {
             {thinking.displayedText && (
               <CharStream text={thinking.displayedText} className="msg-thinking" />
             )}
-            {thinkingOutput && !thinking.displayedText && (
-              <div className="msg-thinking">
+            {!thinking.displayedText && thinkingBlocks.map((block, i) => (
+              <div key={i} className="msg-thinking">
                 <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}
->{thinkingOutput}</ReactMarkdown>
+>{block}</ReactMarkdown>
               </div>
-            )}
+            ))}
           </div>
-          <div className="hr" />
-          <div className="sub-label dim"> Sub-agents</div>
-          <LogPanel id="subagents-log" className="subagents-log dim" lines={subagentLines} />
+        </RoundedFrame>
+
+        {/* Middle pane: Sub-agent Tree */}
+        <RoundedFrame id="mid-pane" title="Sub-agents" className={Object.keys(subagentData).length === 0 ? 'collapsed' : ''}>
+          <AgentTree agents={subagentData} />
         </RoundedFrame>
 
         {/* Right pane: Chat */}

@@ -86,7 +86,7 @@ html, body {
 }
 
 #left-pane {
-  flex: 40;
+  flex: 30;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -95,8 +95,28 @@ html, body {
   overflow: hidden;
 }
 
+#mid-pane {
+  flex: 30;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+  transition: flex 0.35s ease, opacity 0.28s ease, border-width 0.35s ease, min-width 0.35s ease;
+}
+
+#mid-pane.collapsed {
+  flex: 0 0 0px;
+  min-width: 0;
+  opacity: 0;
+  border-width: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
 #right-pane {
-  flex: 60;
+  flex: 40;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -169,27 +189,136 @@ html, body {
 .log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 .log::-webkit-scrollbar-thumb:hover { background: var(--dim); }
 
-/* Left pane area labels */
-.sub-label {
-  flex-shrink: 0;
-  padding: 6px 0 2px 0;
-  user-select: none;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--dim);
-  border-top: 1px solid var(--border);
-  margin-top: 4px;
+/* ---------------------------------------------------------------------------
+   Agent Tree — 2D tree visualization
+   --------------------------------------------------------------------------- */
+.agent-tree-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
 }
 
-/* Fixed-height areas */
+.agent-tree-status {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  user-select: none;
+  border-bottom: 1px solid var(--border);
+}
+
+.agent-tree-svg-wrapper {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+  padding: 0;
+}
+
+.agent-tree-svg {
+  display: block;
+  min-width: 100%;
+  min-height: 100%;
+}
+
+/* Loading dots animation */
+.loading-dots span {
+  animation: dotPulse 1.4s infinite;
+  opacity: 0;
+}
+.loading-dots span:nth-child(1) { animation-delay: 0s; }
+.loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+.loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes dotPulse {
+  0%   { opacity: 0; }
+  50%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* Empty state */
+.agent-tree-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--dim);
+  font-size: 12px;
+}
+
+/* ─── Tooltip ─────────────────────────────────────────────────────────── */
+.agent-tree-tooltip {
+  position: absolute;
+  z-index: 50;
+  width: 300px;
+  max-height: 60vh;
+  overflow-y: auto;
+  background: #15121f;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  animation: tooltipFadeIn 0.15s ease-out;
+}
+
+@keyframes tooltipFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.agent-tree-tooltip-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.agent-tree-tooltip-section {
+  margin-bottom: 6px;
+}
+
+.agent-tree-tooltip-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--dim);
+  margin-bottom: 2px;
+  user-select: none;
+}
+
+.agent-tree-tooltip-text {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.agent-tree-tooltip-tool-line {
+  padding: 1px 0;
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-tree-tooltip-thoughts {
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+/* Custom scrollbar for tooltip */
+.agent-tree-tooltip::-webkit-scrollbar { width: 4px; }
+.agent-tree-tooltip::-webkit-scrollbar-track { background: transparent; }
+.agent-tree-tooltip::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* Fixed-height thinking area (left pane) */
 .thinking-log {
   max-height: 12em;
-  flex-shrink: 0;
-}
-
-.subagents-log {
-  max-height: 10em;
   flex-shrink: 0;
 }
 
@@ -682,6 +811,19 @@ html, body {
 @keyframes pulse-glow {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
+}
+
+/* Sub-agent thought streaming — each new chunk fades + slides up */
+@keyframes thoughtPop {
+  from { opacity: 0; transform: translateY(4px); filter: blur(1px); }
+  to   { opacity: 1; transform: translateY(0);    filter: blur(0); }
+}
+.thought-chunk {
+  animation: thoughtPop 0.35s ease-out;
+}
+/* Only the last chunk gets the pop — earlier ones are static */
+.thought-chunk:not(:last-child) {
+  animation: none;
 }
 
 /* ---------------------------------------------------------------------------

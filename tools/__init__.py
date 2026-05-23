@@ -152,6 +152,7 @@ class AgentContext:
         self._memory_store = None  # MemoryStore instance (set by init_session)
         self._failure_pattern_store = None  # FailurePatternStore (set by init_session)
         self._self_critique = None  # SelfCritique instance (set by init_session)
+        self._subagent_callback: callable | None = None  # (event_type, data) for Electron sub-agent events
 
 
 _TOOL_CONTEXT = AgentContext()

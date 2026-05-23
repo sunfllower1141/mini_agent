@@ -128,6 +128,7 @@ def _spawn_one(
     parent_depth: int = 0,
     max_depth: int = 3,
     parent_task_id: str = "",
+    subagent_callback: callable | None = None,
 ) -> str:
     """Spawn a single sub-agent thread. Returns the task_id."""
     from tools import _TOOL_CONTEXT
@@ -144,9 +145,21 @@ def _spawn_one(
         short_name = "agent"
     short_name = short_name.lower()[:24]
 
+    # Capture the sub-agent callback NOW (before the thread starts) to avoid
+    # a race condition: the parent clears _TOOL_CONTEXT._subagent_callback
+    # after run_agent_turn returns, which may happen before the sub-agent
+    # thread gets to read it.  Capturing here in the parent thread guarantees
+    # we have the right value.
+    if subagent_callback is None:
+        subagent_callback = getattr(_TOOL_CONTEXT, "_subagent_callback", None)
+    # DEBUG: log whether the callback was captured
+    import sys as _sys_debug
+    _sys_debug.__stderr__.write(f"[DEBUG _spawn_one] task={short_name} callback={'SET' if subagent_callback else 'NONE'}\n")
+
     def _runner() -> None:
         import sys as _sys
         tui_queue = getattr(_TOOL_CONTEXT, "_tui_queue", None)
+        sub_cb = subagent_callback  # captured in parent thread, no race
         # ---- Redirect stderr to buffer to prevent TUI corruption ----
         # Any print(..., file=sys.stderr) from sub-agents or the tools they
         # invoke will break the prompt_toolkit alternate-screen layout.
@@ -162,6 +175,9 @@ def _spawn_one(
         _TOOL_CONTEXT._agent_max_depth = max_depth
         _TOOL_CONTEXT._agent_task_id = task_id
         original_stream = config.stream
+        # Notify Electron via sub-agent callback (if wired)
+        if sub_cb:
+            sub_cb("start", {"task_id": task_id, "parent_id": parent_task_id, "name": short_name, "desc": task})
         try:
             if visible:
                 config.stream = True
@@ -190,8 +206,12 @@ def _spawn_one(
                 tui_task_id=task_id,
                 task_id=task_id,
                 parent_task_id=parent_task_id,
+                subagent_callback=sub_cb,
             )
             runtime.store_result(task_id, result)
+            # Notify Electron via sub-agent callback (if wired)
+            if sub_cb:
+                sub_cb("end", {"task_id": task_id, "ok": result.success, "content": result.content[:500]})
             # Signal TUI to hide sub-agent streaming pane
             if tui_queue is not None:
                 tui_queue.put(("sub_done", task_id))
