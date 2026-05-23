@@ -236,6 +236,12 @@ function setupIPC() {
     return lastStatus || { ready: false };
   });
 
+  ipcMain.handle('workspace:save', async (event, workspacePath) => {
+    const persistedFile = path.join(require('os').homedir(), '.mini_agent_workspace');
+    fs.writeFileSync(persistedFile, workspacePath, 'utf-8');
+    return { ok: true };
+  });
+
   ipcMain.handle('dialog:openWorkspace', async () => {
     const win = BrowserWindow.getAllWindows()[0];
     if (!win) return null;
@@ -309,15 +315,23 @@ app.whenReady().then(() => {
   setupIPC();
   createWindow();
 
-  // Resolve workspace: command-line arg, env var, or cwd
+  // Resolve workspace: CLI flag > persisted file > env var > cwd
   const workspaceArg = process.argv.find(a => a.startsWith('--workspace='));
   let workspacePath = null;
   if (workspaceArg) {
     workspacePath = workspaceArg.split('=')[1];
-  } else if (process.env.MINI_AGENT_WORKSPACE) {
-    workspacePath = process.env.MINI_AGENT_WORKSPACE;
   } else {
-    workspacePath = process.cwd();
+    // Try persisted workspace from last session
+    const persistedFile = path.join(require('os').homedir(), '.mini_agent_workspace');
+    if (fs.existsSync(persistedFile)) {
+      const persisted = fs.readFileSync(persistedFile, 'utf-8').trim();
+      if (persisted && fs.existsSync(persisted)) {
+        workspacePath = persisted;
+      }
+    }
+  }
+  if (!workspacePath) {
+    workspacePath = process.env.MINI_AGENT_WORKSPACE || process.cwd();
   }
 
   pythonProcess = spawnPythonBackend(workspacePath);

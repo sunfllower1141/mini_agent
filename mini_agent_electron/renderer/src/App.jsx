@@ -279,6 +279,7 @@ function AppShell() {
     if (!api) return;
     const newPath = await api.openWorkspace();
     if (newPath) {
+      api.saveWorkspace(newPath);
       handleSubmit(`/workspace ${newPath}`);
     }
   }, [handleSubmit]);

@@ -380,12 +380,14 @@ class AgentRunner:
                 return
             self.messages = self.memory.save(self.messages)
             self.memory.close()
+            self.workspace = new_workspace
             try:
                 new_data = init_session(new_workspace)
             except Exception as exc:
                 send_msg({"type": "error", "message": clean_text(str(exc))})
                 return
             self.config = new_data["config"]
+            self.config.stream = True
             self.write_gate = new_data["write_gate"]
             self.read_gate = new_data["read_gate"]
             self.memory = new_data["memory"]

@@ -19,6 +19,9 @@ contextBridge.exposeInMainWorld('miniAgent', {
   // Open native directory picker for workspace selection
   openWorkspace: () => ipcRenderer.invoke('dialog:openWorkspace'),
 
+  // Persist workspace across restarts
+  saveWorkspace: (path) => ipcRenderer.invoke('workspace:save', path),
+
   // Request status update
   getStatus: () => ipcRenderer.invoke('backend:get_status'),
 
