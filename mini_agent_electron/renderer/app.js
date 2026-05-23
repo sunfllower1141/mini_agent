@@ -12,6 +12,16 @@
 
 const $ = (sel) => document.querySelector(sel);
 
+// ---------------------------------------------------------------------------
+// Lucide SVG icons (MIT) — minimal inline line-art
+// ---------------------------------------------------------------------------
+
+const ICON_TOOL = `<svg class="tool-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>`;
+
+const ICON_PARALLEL = `<svg class="tool-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="M2.6 12.08l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.91"/><path d="M2.6 18.08l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.91"/></svg>`;
+
+// ---------------------------------------------------------------------------
+
 const toolsLog      = $('#tools-log');
 const thinkingLog   = $('#thinking-log');
 const subagentsLog  = $('#subagents-log');
@@ -57,6 +67,15 @@ function appendLastLine(el, text, cssClass) {
   } else {
     appendLine(el, text, cssClass);
   }
+  scrollToBottom(el);
+}
+
+function appendIconLine(el, iconSVG, text, cssClass) {
+  if (!text && text !== '') return;
+  const div = document.createElement('div');
+  div.innerHTML = `${iconSVG} ${text}`;
+  if (cssClass) div.className = cssClass;
+  el.appendChild(div);
   scrollToBottom(el);
 }
 
@@ -127,10 +146,8 @@ function setupListeners() {
 
   window.miniAgent.on('stream:tool_start', (data) => {
     currentToolCount++;
-    const label = data.parallel
-      ? `⚡ ${data.summary}`
-      : `🔧 ${data.summary}`;
-    appendLine(toolsLog, label, 'dim');
+    const icon = data.parallel ? ICON_PARALLEL : ICON_TOOL;
+    appendIconLine(toolsLog, icon, data.summary, 'dim');
   });
 
   window.miniAgent.on('stream:tool_end', (data) => {

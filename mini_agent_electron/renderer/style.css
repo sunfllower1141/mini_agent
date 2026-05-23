@@ -6,17 +6,16 @@
    CSS Variables — Catppuccin Mocha palette
    --------------------------------------------------------------------------- */
 :root {
-  --bg:       #1e1e2e;
-  --surface:  #313244;
-  --border:   #45475a;
-  --accent:   #89b4fa;
-  --text:     #cdd6f4;
-  --dim:      #6c7086;
-  --green:    #a6e3a1;
-  --yellow:   #f9e2af;
-  --red:      #f38ba8;
-  --thinking: #585b70;
-  --pulse:    #cba6f7;
+  --bg:       #121212;
+  --border:   #3a3a3a;
+  --accent:   #6b8cce;
+  --text:     #c8c8c8;
+  --dim:      #6b6b6b;
+  --green:    #8bc48b;
+  --yellow:   #d4b866;
+  --red:      #e0556a;
+  --thinking: #555555;
+  --pulse:    #9b7ec4;
 
   --font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono',
                   'Menlo', 'Consolas', 'DejaVu Sans Mono', monospace;
@@ -38,6 +37,14 @@ html, body {
   font-size: var(--font-size);
   line-height: var(--line-height);
   -webkit-font-smoothing: antialiased;
+  scrollbar-width: none;          /* Firefox */
+  -ms-overflow-style: none;       /* IE / old Edge */
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+*::-webkit-scrollbar {
+  display: none;                  /* Chrome, Safari, Electron */
 }
 
 #app {
@@ -89,7 +96,6 @@ html, body {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  background: var(--surface);
   border-radius: 10px;
   border: 1px solid var(--border);
   overflow: hidden;
@@ -100,7 +106,6 @@ html, body {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  background: var(--surface);
   border-radius: 10px;
   border: 1px solid var(--border);
   overflow: hidden;
@@ -198,14 +203,13 @@ html, body {
 #input-frame {
   flex: 0 0 auto;
   margin-top: 8px;
-  background: var(--surface);
   border-radius: 8px;
   border: 1px solid var(--border);
   transition: border-color 0.15s ease;
 }
 
 #input-frame:focus-within {
-  border-color: var(--accent);
+  border-color: #4a4a4a;
 }
 
 #input-frame .frame-left,
@@ -291,6 +295,13 @@ html, body {
 .msg-tool-ok  { color: var(--dim); }
 .msg-tool-err { color: var(--red); }
 .msg-status   { color: var(--dim); font-style: italic; }
+
+/* Inline SVG icons (Lucide) */
+.tool-icon {
+  display: inline;
+  vertical-align: -2px;
+  margin-right: 5px;
+}
 
 /* ---------------------------------------------------------------------------
    Live indicator (clickable to cancel)
