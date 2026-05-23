@@ -50,11 +50,13 @@ function buildElkTree(agents) {
 
   return {
     id: '__root__',
+    width: 1,
+    height: 1,
     layoutOptions: {
       'elk.algorithm': 'layered',
       'elk.direction': 'DOWN',
-      'elk.spacing.nodeNode': '50',
-      'elk.layered.spacing.nodeNodeBetweenLayers': '70',
+      'elk.spacing.nodeNode': '60',
+      'elk.layered.spacing.nodeNodeBetweenLayers': '80',
       'elk.edgeRouting': 'ORTHOGONAL',
     },
     children: [
@@ -248,9 +250,10 @@ function AgentTreeInner({ agents }) {
             target: node.id,
             type: 'smoothstep',
             animated: isRunning,
+            markerEnd: { type: 'arrowclosed', width: 14, height: 14, color: isRunning ? 'var(--pulse)' : 'var(--dim)' },
             style: {
-              stroke: isRunning ? 'var(--pulse)' : 'var(--border)',
-              strokeWidth: isRunning ? 2 : 1,
+              stroke: isRunning ? 'var(--pulse)' : 'var(--dim)',
+              strokeWidth: isRunning ? 2.5 : 1.5,
             },
           });
         }
@@ -355,11 +358,12 @@ function AgentTreeInner({ agents }) {
           minZoom={0.2}
           maxZoom={2.5}
           defaultEdgeOptions={{
-            style: { stroke: 'var(--border)', strokeWidth: 1 },
+            style: { stroke: 'var(--dim)', strokeWidth: 1.5 },
+            markerEnd: { type: 'arrowclosed', width: 14, height: 14, color: 'var(--dim)' },
           }}
           proOptions={{ hideAttribution: true }}
         >
-          <Background color="var(--border)" gap={24} size={0.4} />
+          <Background color="var(--dim)" gap={24} size={0.5} />
           <Controls
             className="rf-controls"
             showInteractive={false}

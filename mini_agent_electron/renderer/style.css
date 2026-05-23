@@ -237,6 +237,7 @@ html, body {
   justify-content: center;
   background: rgba(30, 30, 46, 0.95);
   border: 2px solid var(--accent);
+  box-shadow: 0 0 12px rgba(187, 134, 252, 0.25);
   font-weight: 700;
   font-size: 12px;
 }
@@ -244,13 +245,14 @@ html, body {
 .agent-rf-node--sub {
   width: 160px;
   height: 40px;
-  background: rgba(49, 50, 68, 0.88);
-  border: 1.5px solid var(--border);
+  background: rgba(49, 50, 68, 0.92);
+  border: 1.5px solid var(--dim);
 }
 
 .agent-rf-node--sub:hover {
   border-color: var(--accent);
-  background: rgba(69, 71, 90, 0.92);
+  background: rgba(69, 71, 90, 0.95);
+  box-shadow: 0 0 8px rgba(187, 134, 252, 0.15);
 }
 
 .agent-rf-node__dot {
