@@ -4,14 +4,13 @@
   "description": "Electron GUI for mini_agent — Catppuccin Mocha themed terminal-style AI assistant",
   "main": "main.js",
   "scripts": {
-    "start": "./electron-dist/Electron.app/Contents/MacOS/Electron .",
-    "dev": "./electron-dist/Electron.app/Contents/MacOS/Electron . --dev",
+    "start": "electron .",
+    "dev": "electron . --dev",
     "build": "npx vite build",
     "dev:renderer": "npx vite --config vite.config.js"
   },
   "dependencies": {
     "electron": "^42.2.0",
-    "prism-react-renderer": "^2.4.1",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-markdown": "^10.1.0",

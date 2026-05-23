@@ -829,7 +829,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "lsp_definition",
-            "description": "Go to definition using the Language Server Protocol. Given a file path and a position (line, character), returns the location(s) where the symbol is defined. Requires pylsp for Python files.",
+            "description": "Go to definition using the Language Server Protocol. Given a file path and a position (line, character), returns the location(s) where the symbol is defined. Requires pylsp for Python or typescript-language-server for JS/TS.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -854,7 +854,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "lsp_references",
-            "description": "Find all references to a symbol using the Language Server Protocol. Given a file path and position, returns all locations that reference the symbol. Requires pylsp for Python files.",
+            "description": "Find all references to a symbol using the Language Server Protocol. Given a file path and position, returns all locations that reference the symbol. Requires pylsp for Python or typescript-language-server for JS/TS.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -883,7 +883,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "lsp_hover",
-            "description": "Get hover information (type, docs, signature) for a symbol using the Language Server Protocol. Given a file path and position, returns documentation for the symbol at that location. Requires pylsp for Python files.",
+            "description": "Get hover information (type, docs, signature) for a symbol using the Language Server Protocol. Given a file path and position, returns documentation for the symbol at that location. Requires pylsp for Python or typescript-language-server for JS/TS.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -908,7 +908,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "lsp_diagnostics",
-            "description": "Get diagnostics (errors, warnings, hints) for a file using the Language Server Protocol. Opens the document and collects published diagnostics. Requires pylsp for Python files.",
+            "description": "Get diagnostics (errors, warnings, hints) for a file using the Language Server Protocol. Opens the document and collects published diagnostics. Requires pylsp for Python or typescript-language-server for JS/TS.",
             "parameters": {
                 "type": "object",
                 "properties": {

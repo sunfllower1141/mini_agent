@@ -1245,7 +1245,7 @@ def _append_tool_result(
     tool_name = tc.get("function", {}).get("name", "?")
     tool_call_id = tc.get("id", "?")
     if on_tool_end is not None:
-        on_tool_end(result.success, detail, diff_preview=result.diff_preview)
+        on_tool_end(result.success, detail, diff_preview=result.diff_preview, content=result.content)
     messages.append({
         "role": "tool",
         "tool_call_id": tc["id"],

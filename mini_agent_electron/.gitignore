@@ -3,3 +3,14 @@ dist/
 __pycache__/
 *.pyc
 .env
+
+# Electron binaries
+electron-dist/
+*.zip
+
+# Mini agent runtime artifacts
+.mini_agent*
+.mini_agent_backups/
+*.db
+*.db-wal
+*.db-shm

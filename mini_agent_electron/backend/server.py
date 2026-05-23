@@ -105,8 +105,8 @@ class StreamCallbacks:
     def on_tool_start(self, summary: str, parallel: bool = False) -> None:
         send_msg({"type": "tool_start", "summary": clean_text(summary), "parallel": parallel})
 
-    def on_tool_end(self, ok: bool, detail: str, turn_id: int = 0, diff_preview=None) -> None:
-        send_msg({"type": "tool_end", "ok": ok, "detail": clean_text(detail)})
+    def on_tool_end(self, ok: bool, detail: str, turn_id: int = 0, diff_preview=None, content: str = "") -> None:
+        send_msg({"type": "tool_end", "ok": ok, "detail": clean_text(detail), "content": clean_text(content)})
 
     def on_tool_output(self, line: str, turn_id: int = 0) -> None:
         send_msg({"type": "tool_output", "line": clean_text(line)})

@@ -1,152 +1,18 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Highlight, themes } from 'prism-react-renderer';
 import useSmoothStream from './hooks/useSmoothStream';
+import LogLine from './components/LogLine';
+import LogPanel from './components/LogPanel';
+import RoundedFrame from './components/RoundedFrame';
+import CharStream from './components/CharStream';
+import ErrorBoundary from './components/ErrorBoundary';
 
-
-// ---------------------------------------------------------------------------
-// Inline SVG icons (same as before)
-// ---------------------------------------------------------------------------
-
-
-
-// ---------------------------------------------------------------------------
-// Character-level fade-in: renders text as spans, new chars animate in
-// ---------------------------------------------------------------------------
-function CharStream({ text, className = '' }) {
-  return (
-    <span className={className}>
-      {[...text].map((ch, i) => (
-        <span key={i} className="stream-char">{ch}</span>
-      ))}
-    </span>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Syntax-highlighted code block using prism-react-renderer
-// ---------------------------------------------------------------------------
-const LANG_MAP = {
-  py: 'python', js: 'javascript', jsx: 'javascript', ts: 'typescript',
-  tsx: 'typescript', json: 'json', css: 'css', html: 'html', sh: 'bash',
-  bash: 'bash', zsh: 'bash', yaml: 'yaml', yml: 'yaml', toml: 'toml',
-  md: 'markdown', sql: 'sql', rs: 'rust', go: 'go', java: 'java',
-  c: 'c', cpp: 'cpp', h: 'c', rb: 'ruby', Makefile: 'makefile',
-};
-
-function guessLang(toolName, filePath) {
-  if (toolName === 'run_shell') return 'bash';
-  if (filePath) {
-    const ext = filePath.split('.').pop().toLowerCase();
-    if (LANG_MAP[ext]) return LANG_MAP[ext];
-    const base = filePath.split('/').pop();
-    if (LANG_MAP[base]) return LANG_MAP[base];
-  }
-  return 'text';
-}
-
-function CodeBlock({ code, language = 'text' }) {
-  return (
-    <div className="code-block">
-      <Highlight theme={themes.palenight} code={code} language={language}>
-        {({ style, tokens, getLineProps, getTokenProps }) => (
-          <pre style={{ ...style, background: 'transparent', margin: 0, padding: '4px 0' }}>
-            {tokens.map((line, i) => (
-              <div key={i} {...getLineProps({ line })}>
-                {line.map((token, key) => (
-                  <span key={key} {...getTokenProps({ token })} />
-                ))}
-              </div>
-            ))}
-          </pre>
-        )}
-      </Highlight>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// A single log line — supports plain text, icons, HTML, and markdown
-// ---------------------------------------------------------------------------
-function LogLine({ line }) {
-  if (line.component) {
-    return <div className={line.cls || ''}>{line.component}</div>;
-  }
-  if (line.html) {
-    return <div className={line.cls || ''} dangerouslySetInnerHTML={{ __html: line.html }} />;
-  }
-  if (line.icon) {
-    return <div className={line.cls || ''} dangerouslySetInnerHTML={{ __html: `${line.icon} ${line.text}` }} />;
-  }
-  if (line.markdown) {
-    return (
-      <div className={`md-line ${line.cls || ''}`}>
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          allowDangerousHtml={true}
-          components={{
-            p: ({ children }) => <span>{children}</span>,
-          }}
-        >
-          {line.text}
-        </ReactMarkdown>
-      </div>
-    );
-  }
-  // Plain text — if it contains SVG icons (from emoji replacement), render as HTML
-  if (line.text && line.text.includes('<svg')) {
-    return <div className={line.cls || ''} dangerouslySetInnerHTML={{ __html: line.text }} />;
-  }
-  return <div className={line.cls || ''}>{line.text}</div>;
-}
-
-// ---------------------------------------------------------------------------
-// Auto-scrolling log container
-// ---------------------------------------------------------------------------
-function LogPanel({ id, className, lines, children }) {
-  const ref = useRef(null);
-  useEffect(() => {
-    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
-  }, [lines, children]);
-  return (
-    <div id={id} ref={ref} className={`log ${className || ''}`}>
-      {lines && lines.map((line, i) => <LogLine key={i} line={line} />)}
-      {children}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Rounded frame wrapper for panels
-// ---------------------------------------------------------------------------
-function RoundedFrame({ id, title, children }) {
-  return (
-    <div id={id} className="panel rounded-frame">
-      <div className="frame-top">
-        <span className="border-char">╭</span>
-        <span className="frame-title"> {title} </span>
-        <span className="border-char border-fill">─</span>
-        <span className="border-char">╮</span>
-      </div>
-      <div className="frame-body">
-        <div className="frame-left"></div>
-        <div className="frame-content">{children}</div>
-        <div className="frame-right"></div>
-      </div>
-      <div className="frame-bottom">
-        <span className="border-char">╰</span>
-        <span className="border-char border-fill">─</span>
-        <span className="border-char">╯</span>
-      </div>
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
-export default function App() {
+function App() {
   // Log state — arrays of { text, cls?, html?, icon? }
   const [toolsLines, setToolsLines] = useState([]);
   const [subagentLines, setSubagentLines] = useState([]);
@@ -175,8 +41,6 @@ export default function App() {
   const inThinkingRef = useRef(false);
   const submitTimeoutRef = useRef(null);
   const toolOutputBuf = useRef([]);
-  const toolOutputLang = useRef('text');
-  const toolLinesRef = useRef(null);
 
   // Helper to add a line to any log
   const addLine = useCallback((setter) => (line) => {
@@ -258,7 +122,6 @@ export default function App() {
       });
       // Reset output buffer for this tool call
       toolOutputBuf.current = [];
-      toolOutputLang.current = guessLang(toolName, toolArgs);
     }));
 
     unsubs.push(api.on('stream:tool_output', (data) => {
@@ -271,14 +134,18 @@ export default function App() {
     unsubs.push(api.on('stream:tool_end', (data) => {
       const status = data.ok ? 'OK' : 'ERR';
       const cls = data.ok ? 'msg-tool-ok' : 'msg-tool-err';
-      addToolLine({ text: `  ${status} ${data.detail}`, cls });
-      // Add syntax-highlighted output block
-      const code = toolOutputBuf.current.join('\n').trim();
+      // Build the code block content (streamed or full)
+      const bufCode = toolOutputBuf.current.join('\n').trim();
+      const code = bufCode || (data.content || '').trim();
+      // When output is present, show it in a plain pre block
       if (code) {
+        addToolLine({ text: `  ${status}`, cls });
         addToolLine({
-          component: <CodeBlock code={code} language={toolOutputLang.current} />,
+          component: <pre className="tool-out">{code}</pre>,
           cls: '',
         });
+      } else {
+        addToolLine({ text: `  ${status} ${data.detail}`, cls });
       }
       toolOutputBuf.current = [];
     }));
@@ -529,5 +396,17 @@ export default function App() {
         </div>
       </div>
     </div>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Root export — wraps App in Error Boundary
+// ---------------------------------------------------------------------------
+export default function Root() {
+  return (
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   );
 }

@@ -105,14 +105,15 @@ function spawnPythonBackend(workspacePath) {
     if (code !== 0 && code !== null) {
       const win = BrowserWindow.getAllWindows()[0];
       if (win) win.webContents.send('stream:error', { message: `Backend crashed (exit ${code}). Restarting...` });
+      const restartWorkspace = workspacePath;
       setTimeout(() => {
         if (!pythonProcess) {
-          pythonProcess = spawnPythonBackend(workspacePath);
-  if (!pythonProcess) {
-    const win = BrowserWindow.getAllWindows()[0];
-    if (win) win.webContents.send('stream:error', { message: 'Backend server.py not found.' });
-    console.error('Backend script not found — agent will not start.');
-  }
+          pythonProcess = spawnPythonBackend(restartWorkspace);
+          if (!pythonProcess) {
+            const win = BrowserWindow.getAllWindows()[0];
+            if (win) win.webContents.send('stream:error', { message: 'Backend server.py not found.' });
+            console.error('Backend script not found — agent will not start.');
+          }
         }
       }, 1500);
     }

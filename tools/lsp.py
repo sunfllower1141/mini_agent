@@ -47,6 +47,12 @@ _LANGUAGE_CONFIG: dict[str, tuple[str, str, list[str]]] = {
     ".py": ("python", "pylsp", []),
     ".pyi": ("python", "pylsp", []),
     ".pyx": ("python", "pylsp", []),
+    ".js": ("javascript", "typescript-language-server", ["--stdio"]),
+    ".jsx": ("javascriptreact", "typescript-language-server", ["--stdio"]),
+    ".ts": ("typescript", "typescript-language-server", ["--stdio"]),
+    ".tsx": ("typescriptreact", "typescript-language-server", ["--stdio"]),
+    ".mjs": ("javascript", "typescript-language-server", ["--stdio"]),
+    ".cjs": ("javascript", "typescript-language-server", ["--stdio"]),
 }
 
 
@@ -744,8 +750,7 @@ def _lsp_definition(args: dict, _write_gate, _read_gate) -> ToolResult:
         return ToolResult(
             success=False,
             content=f"No LSP server available for file: {file_path}",
-            hint="Only Python files (.py) are supported via pylsp. "
-                 "Ensure pylsp is installed.",
+            hint="Supported: .py/.pyi/.pyx (pylsp), .js/.jsx/.ts/.tsx/.mjs/.cjs (typescript-language-server).",
         )
     return conn.definition(file_path, line, character)
 
@@ -767,8 +772,7 @@ def _lsp_references(args: dict, _write_gate, _read_gate) -> ToolResult:
         return ToolResult(
             success=False,
             content=f"No LSP server available for file: {file_path}",
-            hint="Only Python files (.py) are supported via pylsp. "
-                 "Ensure pylsp is installed.",
+            hint="Supported: .py/.pyi/.pyx (pylsp), .js/.jsx/.ts/.tsx/.mjs/.cjs (typescript-language-server).",
         )
     return conn.references(file_path, line, character, include_declaration)
 
@@ -789,8 +793,7 @@ def _lsp_hover(args: dict, _write_gate, _read_gate) -> ToolResult:
         return ToolResult(
             success=False,
             content=f"No LSP server available for file: {file_path}",
-            hint="Only Python files (.py) are supported via pylsp. "
-                 "Ensure pylsp is installed.",
+            hint="Supported: .py/.pyi/.pyx (pylsp), .js/.jsx/.ts/.tsx/.mjs/.cjs (typescript-language-server).",
         )
     return conn.hover(file_path, line, character)
 
@@ -809,8 +812,7 @@ def _lsp_diagnostics(args: dict, _write_gate, _read_gate) -> ToolResult:
         return ToolResult(
             success=False,
             content=f"No LSP server available for file: {file_path}",
-            hint="Only Python files (.py) are supported via pylsp. "
-                 "Ensure pylsp is installed.",
+            hint="Supported: .py/.pyi/.pyx (pylsp), .js/.jsx/.ts/.tsx/.mjs/.cjs (typescript-language-server).",
         )
     return conn.get_diagnostics(file_path)
 

@@ -313,15 +313,15 @@ body::-webkit-scrollbar,
   user-select: none;
 }
 
-/* Syntax-highlighted code blocks in tools panel */
-.code-block {
-  margin: 4px 0;
-  font-size: 0.75em;
-  overflow-x: auto;
-}
-.code-block pre {
-  font-family: var(--font-family);
-  font-size: inherit;
+/* Plain tool output */
+.tool-out { margin: 2px 0 4px 0; font-size: 0.82em; overflow-x: auto; white-space: pre-wrap; }
+.code-label {
+  font-size: 0.8em;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--dim);
+  padding: 4px 12px 0 12px;
+  user-select: none;
 }
 
 /* Character-level fade-in for smooth streaming */
@@ -342,73 +342,6 @@ body::-webkit-scrollbar,
 
 /* shrink all lines inside the tools panel */
 #tools-log, .tools-log .log-line { font-size: 0.75em; }
-
-/* ---------------------------------------------------------------------------
-   Prism syntax highlighting — Cyberpunk / Synthwave theme
-   --------------------------------------------------------------------------- */
-/* comments — muted purple, italic */
-.token.comment,
-.token.prolog,
-.token.doctype,
-.token.cdata       { color: #9a85d0; font-style: italic; }
-
-/* punctuation — muted lavender */
-.token.punctuation { color: #b0a8c8; }
-
-/* strings — bright lavender */
-.token.string,
-.token.char,
-.token.attr-value  { color: #b388ff; }
-
-/* numbers, booleans — medium purple */
-.token.number,
-.token.boolean,
-.token.constant    { color: #c490e0; }
-
-/* keywords — magenta-purple */
-.token.keyword     { color: #cc55dd; font-style: italic; }
-
-/* function names — light purple */
-.token.function,
-.token.class-name  { color: #d4b0ff; }
-
-/* builtins, types — vibrant purple */
-.token.builtin,
-.token.symbol      { color: #9b80e8; }
-
-/* operators — soft lavender */
-.token.operator,
-.token.entity,
-.token.url          { color: #c8b0f0; }
-
-/* attributes, selectors, tags — bright purple */
-.token.attr-name,
-.token.selector,
-.token.tag          { color: #c4a4ff; }
-
-/* properties — medium purple */
-.token.property     { color: #9e88e8; }
-
-/* at-rules (@import, @media) — pink-purple */
-.token.atrule       { color: #d088e0; }
-
-/* namespace — dim purple */
-.token.namespace    { color: #8a84a0; opacity: 0.75; }
-
-/* regex — deep purple-red */
-.token.regex        { color: #c060e0; }
-
-/* inserted — light purple */
-.token.inserted     { color: #a8c0e8; }
-
-/* deleted — deep purple */
-.token.deleted      { color: #c060e0; text-decoration: line-through; }
-
-/* important — bold magenta-purple */
-.token.important    { color: #cc55dd; font-weight: bold; }
-
-/* variables — soft purple */
-.token.variable     { color: #c8a0e0; }
 
 /* ---------------------------------------------------------------------------
    Markdown-rendered content (react-markdown) in agent messages
