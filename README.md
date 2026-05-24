@@ -5,16 +5,27 @@ Multi-agent orchestration, SQLite memory, headless browser, and an Electron desk
 
 ## Quick Start
 
+### Prerequisites
+
+| Tool | Version | Install |
+|------|---------|---------|
+| **Python** | 3.10+ | [python.org](https://www.python.org/downloads/) |
+| **Node.js** | 18+ | [nodejs.org](https://nodejs.org/) |
+| **ripgrep** | any | `brew install ripgrep` (macOS) / `apt install ripgrep` (Linux) |
+
+### One-step install
+
 ```bash
 git clone https://github.com/GabrielMalone/mini_agent.git
 cd mini_agent
-pip install -r requirements.txt
+bash setup.sh        # checks prerequisites, installs deps, builds renderer
+```
 
-# Create .env with your API key:
-echo 'DEEPSEEK_API_KEY="sk-..."' > .env
+### Launch
 
-# Run the Electron app
-cd mini_agent_electron && npm install && npm start
+```bash
+cd mini_agent_electron
+npm start            # auto-builds renderer if needed, then opens the desktop app
 ```
 
 ## Features
@@ -53,12 +64,26 @@ make test                 # same, via Makefile
 
 ## Electron App
 
-See [`mini_agent_electron/`](mini_agent_electron/) — Electron desktop GUI with Catppuccin Mocha theme, streaming chat, session picker, workspace management, and drag-drop file support.
+The desktop GUI lives in [`mini_agent_electron/`](mini_agent_electron/). It has:
+
+- Streaming chat with Markdown + syntax-highlighted code blocks
+- Session picker with SQLite-backed conversation history
+- Workspace management (sandboxed read/write by default)
+- Drag-and-drop file support
+- Agent tree visualization (React Flow)
+- In-app settings for API keys (persisted to `~/.mini_agent_env`)
 
 ```bash
 cd mini_agent_electron
-npm install && npm start
+npm run dev          # development mode with hot-reload + DevTools
+npm start            # production mode
 ```
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Submit message |
+| `Shift+Enter` | New line |
+| `Escape` | Cancel streaming response |
 
 ## Architecture
 
