@@ -176,6 +176,30 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     atexit.register(session.close)
     atexit.register(_shutdown_lsp)
 
+    # P2 fix: auto-capture session summary on shutdown so learnings persist
+    # across sessions. Reads scratchpad + turn history to build a concise
+    # summary that gets injected at next startup.
+    def _capture_session_summary_on_exit() -> None:
+        try:
+            import warnings
+            from tools import _TOOL_CONTEXT
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                scratchpad = memory.get_scratchpad()
+            turn_keys = sorted(getattr(_TOOL_CONTEXT, "_turn_history", {}).keys())
+            recent_turns = []
+            for k in turn_keys[-5:]:  # Last 5 turns
+                recent_turns.append(_TOOL_CONTEXT._turn_history.get(k, ""))
+            turn_text = "\n".join(recent_turns)
+            summary = scratchpad[:300] if scratchpad else turn_text[:300]
+            detail = f"Scratchpad:\n{scratchpad[:500]}\n\nTurn history:\n{turn_text[:500]}"
+            if summary.strip():
+                memory.capture_session_summary(summary[:200], detail[:1000])
+        except Exception:
+            pass  # Session summary is best-effort, never blocks shutdown
+
+    atexit.register(_capture_session_summary_on_exit)
+
     return {
         "config": config,
         "write_gate": write_gate,

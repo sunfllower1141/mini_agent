@@ -473,10 +473,8 @@ def _inject_failure_pattern_warnings(messages: list[dict], *, turn_count: int) -
 
     Checks the FailurePatternStore for known failure patterns matching
     the tool calls about to be made, and warns the agent preemptively.
-    Only triggers every 3 turns to avoid spamming.
+    Fires every turn (cooldown removed — P5 fix).
     """
-    if turn_count % 3 != 0:
-        return
     try:
         fps = getattr(_TOOL_CONTEXT, "_failure_pattern_store", None)
         if fps is None:
@@ -493,6 +491,33 @@ def _inject_failure_pattern_warnings(messages: list[dict], *, turn_count: int) -
                         "_transient": True,
                     })
                 return
+    except (AttributeError, KeyError, ValueError, TypeError):
+        pass
+
+
+def _inject_failure_pattern_warnings_for(
+    msg: dict, messages: list[dict],
+) -> None:
+    """Inject failure pattern warnings for a specific assistant message's tool calls.
+
+    Called between API call and tool execution so warnings target the
+    CURRENT turn's tool choices (P4 fix — was only pre-API-call before).
+    """
+    try:
+        fps = getattr(_TOOL_CONTEXT, "_failure_pattern_store", None)
+        if fps is None:
+            return
+        tool_calls = msg.get("tool_calls")
+        if not tool_calls:
+            return
+        from tools.failure_learning import build_self_learning_context
+        warning = build_self_learning_context(fps, tool_calls)
+        if warning:
+            messages.append({
+                "role": "user",
+                "content": warning,
+                "_transient": True,
+            })
     except (AttributeError, KeyError, ValueError, TypeError):
         pass
 
@@ -530,7 +555,7 @@ def _inject_self_critique(messages: list[dict], *, turn_count: int) -> None:
                                 except (json.JSONDecodeError, TypeError):
                                     pass
                                 break
-            if len(recent_results) >= 10:  # Only analyze last 10 tool results
+            if len(recent_results) >= 30:  # Scan last 30 tool results (was 10 — P6 fix)
                 break
 
         if recent_results:
@@ -1196,6 +1221,10 @@ def run_agent_turn(
                 return msg
 
             # ----- phase 3: tool execution -----
+            # P4 fix: inject failure pattern warnings for the NEW tool calls
+            # right before execution (was only pre-API-call before, missing
+            # the current turn's tool choices).
+            _inject_failure_pattern_warnings_for(msg, messages)
             continue_loop = _tool_execution_phase(
                 msg, messages, deferred_stream_results, executed_tool_indices,
                 write_gate, read_gate, turn_count,

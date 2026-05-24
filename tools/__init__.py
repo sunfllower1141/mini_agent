@@ -267,10 +267,13 @@ def _summarize(name: str):
 def _remember(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
     """Store a project-level learning that persists across sessions.
 
-    Saved to the ``project_knowledge`` table in the session SQLite DB.
+    Saved to the ``project_knowledge`` table via MemoryStore.add_knowledge().
     Auto-categorizes the learning if no category is provided.
+    Deduplicates by checking for an existing entry before inserting.
     Returns a summary of what was stored.
     """
+    import warnings as _warnings
+
     topic = args.get("topic", "")
     detail = args.get("detail", "")
     category = args.get("category", "")
@@ -278,6 +281,11 @@ def _remember(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResu
         return ToolResult(
             success=False,
             content="Missing required parameter: 'topic' (short topic label for this learning).",
+        )
+    if not detail.strip():
+        return ToolResult(
+            success=False,
+            content="Missing required parameter: 'detail' (the learning itself).",
         )
 
     # Auto-categorize if no category provided
@@ -288,19 +296,28 @@ def _remember(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResu
             if category not in KNOWLEDGE_CATEGORIES:
                 category = "general"
         except ImportError:
+            _warnings.warn("failure_learning not available; using category='general'")
             category = "general"
 
     memory_store = getattr(_TOOL_CONTEXT, "_memory_store", None)
     topic_preview = topic[:200] + ("..." if len(topic) > 200 else "")
     detail_preview = detail[:200] + ("..." if len(detail) > 200 else "")
+
     if memory_store is not None:
-        try:
-            conn = memory_store._get_conn()
-            conn.execute(
-                "INSERT INTO project_knowledge (category, summary, detail) VALUES (?, ?, ?)",
-                (category, topic, detail),
+        # Check for existing entry before inserting (dedup)
+        existing = memory_store.find_knowledge(category, topic)
+        if existing is not None:
+            memory_store.bump_knowledge(existing["id"])
+            return ToolResult(
+                success=True,
+                content=(
+                    f"Already known [{category}]:\\n"
+                    f"  Topic: {topic_preview}\\n"
+                    f"  (bumped hit counter)"
+                ),
             )
-            conn.commit()
+        try:
+            memory_store.add_knowledge(topic, category=category, detail=detail)
         except Exception as e:
             return ToolResult(
                 success=True,
@@ -315,18 +332,25 @@ def _remember(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResu
             ),
         )
 
-    # Fallback: try SQLite directly via scratchpad_path
+    # Fallback: try SQLite via the shared MemoryStore scratchpad_path
     db_path = getattr(_TOOL_CONTEXT, "scratchpad_path", None)
     if db_path:
         try:
-            import sqlite3
-            conn = sqlite3.connect(db_path)
-            conn.execute(
-                "INSERT INTO project_knowledge (category, summary, detail) VALUES (?, ?, ?)",
-                (category, topic, detail),
-            )
-            conn.commit()
-            conn.close()
+            from memory import MemoryStore
+            fallback_store = MemoryStore(db_path)
+            existing = fallback_store.find_knowledge(category, topic)
+            if existing is not None:
+                fallback_store.bump_knowledge(existing["id"])
+                fallback_store.close()
+                return ToolResult(
+                    success=True,
+                    content=(
+                        f"Already known (dedup) [{category}]:\\n"
+                        f"  Topic: {topic_preview}"
+                    ),
+                )
+            fallback_store.add_knowledge(topic, category=category, detail=detail)
+            fallback_store.close()
         except Exception as e:
             return ToolResult(
                 success=True,
@@ -345,7 +369,8 @@ def _remember(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResu
         success=True,
         content=(
             f"Remember noted (no persistent storage available) [{category}]:\\n"
-            f"  Topic: {topic_preview}"
+            f"  Topic: {topic_preview}\\n"
+            f"  Detail: {detail_preview}"
         ),
     )
 
@@ -646,6 +671,12 @@ def _learn_from_failure(name: str, result: "ToolResult | None") -> None:
     inject a specific recovery hint into result.hint for same-turn correction.
 
     Mutates *result* in-place to add recovery hints.
+
+    Dual-store rationale: writes to both ``project_knowledge`` (injected at
+    session start via build_startup_context, human-reviewable) and
+    ``failure_patterns`` (structured per-turn matching via
+    FailurePatternStore).  Both serve different consumers — startup context
+    vs. real-time tool guidance — so the duplication is intentional.
     """
     if result is None:
         return
@@ -666,6 +697,10 @@ def _learn_from_failure(name: str, result: "ToolResult | None") -> None:
             result.hint += "\nRecovery: " + recovery
         else:
             result.hint = recovery
+        # P7: also surface recovery in content so the LLM sees it even if
+        # it doesn't explicitly read the hint field
+        if "\nRecovery:" not in (result.content or ""):
+            result.content = (result.content or "") + "\n\n[Recovery hint] " + recovery
     elif count >= 3 and not recovery:
         # Generic escalating hint for unclassified patterns
         generic = f"Tool '{name}' failed {count} times with: {fingerprint}. Try a different approach."
@@ -673,6 +708,8 @@ def _learn_from_failure(name: str, result: "ToolResult | None") -> None:
             result.hint += "\nRecovery: " + generic
         else:
             result.hint = generic
+        if "\nRecovery:" not in (result.content or ""):
+            result.content = (result.content or "") + f"\n\n[Recovery hint] {generic}"
 
     # --- Persist to cross-session knowledge ---
     try:
@@ -856,7 +893,16 @@ def execute_tool(
     if not result.success:
         _learn_from_failure(name, result)
     else:
-        # Clear failure counters on success — the agent recovered
+        # Record success in structured pattern store so confidence increases
+        # over time as known fixes are validated (P1 fix: was just clearing
+        # in-memory counters before, leaving SQLite patterns at low confidence).
+        pattern_store = getattr(_TOOL_CONTEXT, "_failure_pattern_store", None)
+        if pattern_store is not None:
+            try:
+                pattern_store.record_success(name, args)
+            except Exception:
+                pass  # Never let auto-learn crash tool execution
+        # Clear in-memory counters on success — the agent recovered
         _TOOL_CONTEXT.__dict__.pop("_failure_patterns", None)
 
     # --- Post-edit auto-verification: run LSP diagnostics after file writes ---
