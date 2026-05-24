@@ -1,9 +1,10 @@
 {
   "name": "mini-agent-electron",
   "version": "1.0.0",
-  "description": "Electron GUI for mini_agent — Catppuccin Mocha themed terminal-style AI assistant",
+  "description": "Electron GUI for mini_agent — terminal-style AI coding assistant",
   "main": "main.js",
   "scripts": {
+    "prestart": "node -e \"if(!require('fs').existsSync('renderer/dist/index.html')){console.log('[prestart] Building renderer...');require('child_process').execSync('npx vite build',{stdio:'inherit'})}\"",
     "start": "electron .",
     "dev": "electron . --dev",
     "build": "npx vite build",

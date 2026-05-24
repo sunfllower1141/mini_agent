@@ -35,6 +35,55 @@ loadEnvFile(path.join(__dirname, '..', '.env'));
 loadEnvFile(path.join(require('os').homedir(), '.mini_agent_env'));
 
 // ---------------------------------------------------------------------------
+// API key detection
+// ---------------------------------------------------------------------------
+
+const PROVIDER_KEY_ENV = {
+  deepseek: 'DEEPSEEK_API_KEY',
+  claude: 'CLAUDE_API_KEY',
+  xai: 'XAI_API_KEY',
+  ollama: 'OLLAMA_API_KEY',
+};
+
+function detectApiKey() {
+  // Check if any provider key is set in the environment
+  for (const [provider, envName] of Object.entries(PROVIDER_KEY_ENV)) {
+    if (process.env[envName]) {
+      return { configured: true, provider, envName };
+    }
+  }
+  return { configured: false, provider: null, envName: null };
+}
+
+function apiKeyEnvFile() {
+  return path.join(require('os').homedir(), '.mini_agent_env');
+}
+
+function readEnvFile(filePath) {
+  if (!fs.existsSync(filePath)) return {};
+  const entries = {};
+  const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx === -1) continue;
+    const key = trimmed.slice(0, eqIdx).trim();
+    const value = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, '');
+    if (key) entries[key] = value;
+  }
+  return entries;
+}
+
+function writeEnvFile(filePath, entries) {
+  const lines = [];
+  for (const [key, value] of Object.entries(entries)) {
+    lines.push(`${key}=${value}`);
+  }
+  fs.writeFileSync(filePath, lines.join('\n') + '\n', 'utf-8');
+}
+
+// ---------------------------------------------------------------------------
 // Python backend process
 // ---------------------------------------------------------------------------
 
@@ -322,6 +371,79 @@ function setupIPC() {
     if (result.canceled || !result.filePaths.length) return null;
     return result.filePaths[0];
   });
+
+  // --- Settings / API key ---
+
+  ipcMain.handle('settings:getApiKeyStatus', async () => {
+    const keyInfo = detectApiKey();
+    return { configured: keyInfo.configured, provider: keyInfo.provider };
+  });
+
+  ipcMain.handle('settings:saveApiKey', async (event, provider, key) => {
+    const envName = PROVIDER_KEY_ENV[provider];
+    if (!envName) return { ok: false, error: `Unknown provider: ${provider}` };
+
+    const envFile = apiKeyEnvFile();
+    const entries = readEnvFile(envFile);
+
+    // Clear all existing provider keys so switching works cleanly
+    for (const name of Object.values(PROVIDER_KEY_ENV)) {
+      delete entries[name];
+    }
+
+    // Set the new key (empty key is valid for ollama)
+    if (key) {
+      entries[envName] = key;
+    }
+
+    writeEnvFile(envFile, entries);
+
+    // Also set in current process so respawn picks it up
+    process.env[envName] = key || '';
+    // Clear other provider keys from current process
+    for (const [p, name] of Object.entries(PROVIDER_KEY_ENV)) {
+      if (p !== provider) delete process.env[name];
+    }
+
+    return { ok: true };
+  });
+
+  ipcMain.handle('settings:restartBackend', async () => {
+    // Kill existing backend if running
+    if (pythonProcess && !pythonProcess.killed) {
+      try {
+        if (pythonProcess.stdin && pythonProcess.stdin.writable) {
+          pythonProcess.stdin.write(JSON.stringify({ type: 'shutdown' }) + '\n');
+          pythonProcess.stdin.end();
+        }
+      } catch (e) { /* ignore */ }
+      setTimeout(() => {
+        if (pythonProcess && !pythonProcess.killed) {
+          try { pythonProcess.kill(); } catch (e) { /* ignore */ }
+        }
+      }, 2000);
+    }
+
+    pythonReady = false;
+    pendingRequests = [];
+    lastStatus = null;
+
+    // Resolve workspace (same logic as app.whenReady)
+    const persistedFile = path.join(require('os').homedir(), '.mini_agent_workspace');
+    let workspacePath = null;
+    if (fs.existsSync(persistedFile)) {
+      const persisted = fs.readFileSync(persistedFile, 'utf-8').trim();
+      if (persisted && fs.existsSync(persisted)) {
+        workspacePath = persisted;
+      }
+    }
+    if (!workspacePath) {
+      workspacePath = process.env.MINI_AGENT_WORKSPACE || process.cwd();
+    }
+
+    pythonProcess = spawnPythonBackend(workspacePath);
+    return { ok: true };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -335,7 +457,7 @@ function createWindow() {
     minWidth: 800,
     minHeight: 500,
     title: `mini_agent — Electron`,
-    backgroundColor: '#1e1e2e',  // Catppuccin Mocha bg
+    backgroundColor: '#1e1e2e',  // dark base background
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -385,26 +507,41 @@ app.whenReady().then(() => {
   setupIPC();
   createWindow();
 
-  // Resolve workspace: CLI flag > persisted file > env var > cwd
-  const workspaceArg = process.argv.find(a => a.startsWith('--workspace='));
-  let workspacePath = null;
-  if (workspaceArg) {
-    workspacePath = workspaceArg.split('=')[1];
+  const keyInfo = detectApiKey();
+
+  // If no API key is configured, don't spawn the backend yet.
+  // The renderer will show SettingsPanel and the user can provide one.
+  // settings:restartBackend will spawn it after the key is saved.
+  if (!keyInfo.configured) {
+    // Tell the renderer to show the settings panel
+    lastStatus = { ready: false, reason: 'no_api_key' };
+    // Send after a short delay so the renderer's listener is registered
+    setTimeout(() => {
+      const win = BrowserWindow.getAllWindows()[0];
+      if (win) win.webContents.send('backend:status', { ready: false, reason: 'no_api_key' });
+    }, 500);
   } else {
-    // Try persisted workspace from last session
-    const persistedFile = path.join(require('os').homedir(), '.mini_agent_workspace');
-    if (fs.existsSync(persistedFile)) {
-      const persisted = fs.readFileSync(persistedFile, 'utf-8').trim();
-      if (persisted && fs.existsSync(persisted)) {
-        workspacePath = persisted;
+    // Resolve workspace: CLI flag > persisted file > env var > cwd
+    const workspaceArg = process.argv.find(a => a.startsWith('--workspace='));
+    let workspacePath = null;
+    if (workspaceArg) {
+      workspacePath = workspaceArg.split('=')[1];
+    } else {
+      // Try persisted workspace from last session
+      const persistedFile = path.join(require('os').homedir(), '.mini_agent_workspace');
+      if (fs.existsSync(persistedFile)) {
+        const persisted = fs.readFileSync(persistedFile, 'utf-8').trim();
+        if (persisted && fs.existsSync(persisted)) {
+          workspacePath = persisted;
+        }
       }
     }
-  }
-  if (!workspacePath) {
-    workspacePath = process.env.MINI_AGENT_WORKSPACE || process.cwd();
-  }
+    if (!workspacePath) {
+      workspacePath = process.env.MINI_AGENT_WORKSPACE || process.cwd();
+    }
 
-  pythonProcess = spawnPythonBackend(workspacePath);
+    pythonProcess = spawnPythonBackend(workspacePath);
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

@@ -58,7 +58,7 @@ function getHighlighter() {
         'html', 'css', 'yaml', 'sql', 'rust', 'go', 'java', 'c', 'cpp',
         'ruby', 'toml', 'ini', 'diff', 'xml',
       ],
-      themes: ['catppuccin-mocha'],
+      themes: ['dark-plus'],
       engine: createJavaScriptRegexEngine(),
     });
   }
@@ -70,8 +70,8 @@ function getHighlighter() {
 const INLINE_CODE_STYLE = {
   display: 'inline',
   whiteSpace: 'normal',
-  background: '#313244',
-  color: '#F5C2E7',
+  background: '#1a1a1a',
+  color: '#ccc',
   padding: '1px 5px',
   borderRadius: '4px',
   fontSize: '0.9em',
@@ -113,7 +113,7 @@ export default function CodeBlock({
         fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Code", monospace',
         lineHeight: '1.55', maxWidth: '100%',
       }}>
-        <code style={{ color: '#CDD6F4', whiteSpace: 'pre', display: 'block' }}>
+        <code style={{ color: '#ccc', whiteSpace: 'pre', display: 'block' }}>
           {source}
         </code>
       </pre>
@@ -144,7 +144,7 @@ function ShikiBlock({ source, lang, fontSize }) {
       if (cancelled) return;
       const result = h.codeToHtml(source, {
         lang,
-        theme: 'catppuccin-mocha',
+        theme: 'dark-plus',
       });
       if (result && typeof result.then === 'function') {
         result.then((htmlStr) => {
@@ -171,7 +171,7 @@ function ShikiBlock({ source, lang, fontSize }) {
         fontSize: fontSize || 'inherit', lineHeight: '1.55',
         background: 'transparent', borderRadius: '8px', maxWidth: '100%',
       }}>
-        <code style={{ color: '#CDD6F4', whiteSpace: 'pre', display: 'block' }}>
+        <code style={{ color: '#ccc', whiteSpace: 'pre', display: 'block' }}>
           {source}
         </code>
       </pre>
