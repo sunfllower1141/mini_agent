@@ -37,61 +37,6 @@ _AGENT_MSGS: list[dict] = []
 _AGENT_MSGS_MAX = 1000        # ring-buffer cap: keep last N messages
 _AGENT_MSGS_LOCK = threading.Lock()
 
-# --- Todo tracking: in-memory list, survives across turns ---
-_AGENT_TODOS: list[dict] = []  # [{"id": str, "content": str, "status": "pending"|"done"}]
-_AGENT_TODOS_LOCK = threading.Lock()
-
-
-@_register("todo_write")
-def _todo_write(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
-    """Create or update a todo item. Set content to empty string to delete."""
-    global _AGENT_TODOS
-    todo_id = args.get("id", "")
-    content = args.get("content", "")
-    status = args.get("status", "pending")
-    with _AGENT_TODOS_LOCK:
-        if not content and todo_id:
-            _AGENT_TODOS = [t for t in _AGENT_TODOS if t["id"] != todo_id]
-            return ToolResult(success=True, content=f"Todo '{todo_id}' deleted.")
-        if todo_id:
-            for t in _AGENT_TODOS:
-                if t["id"] == todo_id:
-                    t["content"] = content
-                    if status:
-                        t["status"] = status
-                    return ToolResult(success=True, content=f"Todo '{todo_id}' updated.")
-        new_id = todo_id or str(len(_AGENT_TODOS) + 1)
-        _AGENT_TODOS.append({"id": new_id, "content": content, "status": status})
-        return ToolResult(success=True, content=f"Todo '{new_id}' created.")
-
-
-@_register("todo_read")
-def _todo_read(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
-    """Read all todos or filter by status/id."""
-    todo_id = args.get("id", "")
-    status_filter = args.get("status", "")
-    with _AGENT_TODOS_LOCK:
-        items = _AGENT_TODOS
-        if todo_id:
-            items = [t for t in items if t["id"] == todo_id]
-        if status_filter:
-            items = [t for t in items if t["status"] == status_filter]
-        if not items:
-            return ToolResult(success=True, content="No todos found.")
-        lines = [f"{'[x]' if t['status'] == 'done' else '[ ]'} {t['id']}: {t['content']}" for t in items]
-        return ToolResult(success=True, content="\n".join(lines))
-
-
-@_summarize("todo_write")
-def _todo_write_summary(args: dict) -> str:
-    return f"todo_write({args.get('id', '?')})"
-
-
-@_summarize("todo_read")
-def _todo_read_summary(args: dict) -> str:
-    return f"todo_read({args.get('id', args.get('status', 'all'))})"
-
-
 # ---------------------------------------------------------------------------
 # spawn_agent
 # ---------------------------------------------------------------------------

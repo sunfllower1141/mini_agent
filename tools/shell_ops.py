@@ -71,9 +71,10 @@ def _is_bash_available() -> bool:
 _PYTHON_CMD: list[str] = []
 def _get_python_cmd() -> list[str]:
     """Return the best available python command as a list.
-    
+
     On Windows: tries 'py -3', then 'python3', then 'python'.
-    On Unix: tries 'python3', then 'python'.
+    On Unix: tries 'python3', versioned 'python3.X', then 'python'.
+    Prefers a Python that has pytest installed (for run_tests).
     Results are memoised in _PYTHON_CMD.
     """
     global _PYTHON_CMD
@@ -82,11 +83,33 @@ def _get_python_cmd() -> list[str]:
     if platform.system() == "Windows":
         candidates = [["py", "-3"], ["python3"], ["python"]]
     else:
-        candidates = [["python3"], ["python"]]
+        # Build candidate list: python3, then versioned python3.X (newest first),
+        # then bare python.  This covers the common case where python3 is a
+        # different install than the versioned python3.12 that has pytest.
+        candidates = [["python3"]]
+        for minor in range(14, 7, -1):  # python3.14 down to python3.8
+            candidates.append([f"python3.{minor}"])
+        candidates.append(["python"])
+    # Find all viable pythons, preferring one with pytest
+    viable: list[list[str]] = []
+    with_pytest: list[list[str]] = []
     for cmd in candidates:
         if shutil.which(cmd[0]):
-            _PYTHON_CMD = cmd
-            return _PYTHON_CMD
+            viable.append(cmd)
+            try:
+                result = subprocess.run(
+                    cmd + ["-m", "pytest", "--version"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if result.returncode == 0:
+                    with_pytest.append(cmd)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+    # Prefer a python with pytest, then any viable python, then fallback
+    preferred = with_pytest[:1] or viable[:1]
+    if preferred:
+        _PYTHON_CMD = preferred[0]
+        return _PYTHON_CMD
     # Ultimate fallback
     _PYTHON_CMD = ["python"]
     return _PYTHON_CMD

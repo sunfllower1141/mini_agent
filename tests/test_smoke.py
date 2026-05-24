@@ -121,8 +121,8 @@ class TestAllToolsDispatchable(unittest.TestCase):
         # Import tools first to trigger use_skill schema injection
         import tools  # noqa: F401
         from tools.schema import TOOLS
-        self.assertEqual(len(TOOLS), 60,
-                         f"Expected 60 tools, got {len(TOOLS)}. Update this test if changed.")
+        self.assertEqual(len(TOOLS), 59,
+                         f"Expected 59 tools, got {len(TOOLS)}. Update this test if changed.")
 
 
 class TestProjectKnowledgeMethods(unittest.TestCase):
