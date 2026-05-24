@@ -332,47 +332,17 @@ def _remember(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResu
             ),
         )
 
-    # Fallback: try SQLite via the shared MemoryStore scratchpad_path
-    db_path = getattr(_TOOL_CONTEXT, "scratchpad_path", None)
-    if db_path:
-        try:
-            from memory import MemoryStore
-            fallback_store = MemoryStore(db_path)
-            existing = fallback_store.find_knowledge(category, topic)
-            if existing is not None:
-                fallback_store.bump_knowledge(existing["id"])
-                fallback_store.close()
-                return ToolResult(
-                    success=True,
-                    content=(
-                        f"Already known (dedup) [{category}]:\\n"
-                        f"  Topic: {topic_preview}"
-                    ),
-                )
-            fallback_store.add_knowledge(topic, category=category, detail=detail)
-            fallback_store.close()
-        except Exception as e:
-            return ToolResult(
-                success=True,
-                content=f"Remember noted, but DB fallback failed: {e}",
-            )
+    # No memory store available — report non-persistent fallback.
+    # The memory store is always set during bootstrap; this path only
+    # triggers if bootstrap failed or set_context was never called.
+    memory_store = getattr(_TOOL_CONTEXT, "_memory_store", None)
+    if memory_store is None:
         return ToolResult(
             success=True,
             content=(
-                f"Stored in project knowledge (DB fallback) [{category}]:\\n"
-                f"  Topic: {topic_preview}\\n"
-                f"  Detail: {detail_preview}"
+                f"Remember noted (no persistent store — session init may have skipped)"
             ),
         )
-
-    return ToolResult(
-        success=True,
-        content=(
-            f"Remember noted (no persistent storage available) [{category}]:\\n"
-            f"  Topic: {topic_preview}\\n"
-            f"  Detail: {detail_preview}"
-        ),
-    )
 
 
 def _remember_summary(args: dict) -> str:
@@ -860,22 +830,38 @@ def execute_tool(
         accepts_on_output = "on_output" in inspect.signature(dispatch).parameters
         _DISPATCH_SIGNATURES[name] = accepts_on_output
 
-    # P3.1: Per-tool execution timeout via ThreadPoolExecutor
-    import concurrent.futures
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-        future = (
-            executor.submit(dispatch, args, write_gate, read_gate, on_output=on_output)
-            if accepts_on_output
-            else executor.submit(dispatch, args, write_gate, read_gate)
-        )
+    # P3.1: Per-tool execution timeout via background thread
+    # Using threading.Thread instead of ThreadPoolExecutor avoids
+    # creating/destroying a pool for every single tool call.
+    _result_container: list[ToolResult | Exception] = []
+
+    def _run_and_capture():
         try:
-            result = future.result(timeout=_TOOL_TIMEOUT)
-        except concurrent.futures.TimeoutError:
-            return ToolResult(
-                success=False,
-                content=f"Tool '{name}' timed out after {_TOOL_TIMEOUT}s.",
-                hint=_build_error_hint(name, error_msg=f"timed out after {_TOOL_TIMEOUT}s"),
-            )
+            if accepts_on_output:
+                _result_container.append(dispatch(args, write_gate, read_gate, on_output=on_output))
+            else:
+                _result_container.append(dispatch(args, write_gate, read_gate))
+        except Exception as exc:
+            _result_container.append(exc)
+
+    t = threading.Thread(target=_run_and_capture, daemon=True)
+    t.start()
+    t.join(timeout=_TOOL_TIMEOUT)
+    if t.is_alive():
+        # Thread still running after timeout — it's stuck.
+        # We cannot safely kill a Python thread, so return a timeout result.
+        # The daemon thread will continue running but will be terminated
+        # when the process exits.
+        return ToolResult(
+            success=False,
+            content=f"Tool '{name}' timed out after {_TOOL_TIMEOUT}s.",
+            hint=_build_error_hint(name, error_msg=f"timed out after {_TOOL_TIMEOUT}s"),
+        )
+
+    raw = _result_container[0]
+    if isinstance(raw, Exception):
+        raise raw
+    result = raw
 
     # Normalize: every failed result gets a _build_error_hint so the LLM
     # always sees the same structure (tool name, error, valid params, retry
@@ -893,17 +879,18 @@ def execute_tool(
     if not result.success:
         _learn_from_failure(name, result)
     else:
-        # Record success in structured pattern store so confidence increases
-        # over time as known fixes are validated (P1 fix: was just clearing
-        # in-memory counters before, leaving SQLite patterns at low confidence).
-        pattern_store = getattr(_TOOL_CONTEXT, "_failure_pattern_store", None)
-        if pattern_store is not None:
-            try:
-                pattern_store.record_success(name, args)
-            except Exception:
-                pass  # Never let auto-learn crash tool execution
-        # Clear in-memory counters on success — the agent recovered
-        _TOOL_CONTEXT.__dict__.pop("_failure_patterns", None)
+        # Only record success when this tool has known failure patterns;
+        # skips unnecessary DB queries for the vast majority of successful calls.
+        in_memory = _TOOL_CONTEXT.__dict__.get("_failure_patterns", {})
+        if any(k.startswith(name + ":") for k in in_memory):
+            pattern_store = getattr(_TOOL_CONTEXT, "_failure_pattern_store", None)
+            if pattern_store is not None:
+                try:
+                    pattern_store.record_success(name, args)
+                except Exception:
+                    pass  # Never let auto-learn crash tool execution
+            # Clear in-memory counters on success — the agent recovered
+            _TOOL_CONTEXT.__dict__.pop("_failure_patterns", None)
 
     # --- Post-edit auto-verification: run LSP diagnostics after file writes ---
     # Guarded by a module-level lock to prevent concurrent LSP connections

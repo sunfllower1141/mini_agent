@@ -586,8 +586,22 @@ def _inject_strategy_hint(messages: list[dict]) -> None:
             hint = "[Hint: Use find_usages to find all callers, then edit_file for targeted changes.]"
         elif any(kw in last.lower() for kw in ("semantic", "similar", "feels like", "find code that")):
             hint = "[Hint: Use semantic_search for meaning-based code search.]"
-        if hint and not any(m["role"] == "system" and m["content"] == hint for m in messages):
-            messages.insert(1, {"role": "system", "content": hint})
+        if hint:
+            # Track injected hints in a set for O(1) dedup
+            if not hasattr(_inject_strategy_hint, '_injected'):
+                _inject_strategy_hint._injected = set()
+            if hint in _inject_strategy_hint._injected:
+                return
+            _inject_strategy_hint._injected.add(hint)
+            # Insert after the last system message, or at index 1 if none found
+            insert_at = 1
+            for i in range(len(messages) - 1, -1, -1):
+                if messages[i].get("role") == "system":
+                    insert_at = i + 1
+                    break
+            # Avoid inserting beyond list bounds
+            if insert_at <= len(messages):
+                messages.insert(insert_at, {"role": "system", "content": hint})
     except (KeyError, IndexError, TypeError, ValueError):
         pass
 

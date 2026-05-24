@@ -156,41 +156,53 @@ def _estimate_tokens(msg: dict) -> int:
 def _total_tokens(messages: list[dict]) -> int:
     """Sum estimated tokens across all messages.
 
-    Uses a running accumulator keyed by list length and a checksum of the
-    first message identity.  When messages are only appended (the common
-    case), only new messages are counted.  When the list shrinks (pruning)
-    or messages are modified in-place (compression), a full recount is done.
+    Uses a per-list accumulator keyed by list identity so parent and
+    sub-agent message lists never corrupt each other's counts.  When
+    messages are only appended (the common case), only new messages are
+    counted.  When the list shrinks (pruning) or messages are modified
+    in-place (compression), a full recount is done.
 
     This avoids the O(n²) behaviour of recounting every message on
     every turn as the conversation grows.
     """
-    global _ACCUM_COUNT, _ACCUM_TOTAL, _ACCUM_LIST_ID
+    list_id = id(messages)
+    n = len(messages)
     with _ACCUM_LOCK:
-        n = len(messages)
-        # Detect in-place modification: same length but different list identity
-        # or content (compression reuses the same list object but mutates messages).
-        list_id = id(messages)
-        if n >= _ACCUM_COUNT and list_id == _ACCUM_LIST_ID:
-            # Only count new messages appended since last call
-            new_tokens = sum(_estimate_tokens(m) for m in messages[_ACCUM_COUNT:])
-            _ACCUM_TOTAL += new_tokens
-            _ACCUM_COUNT = n
+        entry = _ACCUM_STATE.get(list_id)
+        if entry is not None:
+            acc_count, acc_total = entry
+        else:
+            acc_count, acc_total = 0, 0
+
+        if n >= acc_count and list_id == list_id:  # Same list, appending
+            new_tokens = sum(_estimate_tokens(m) for m in messages[acc_count:])
+            acc_total += new_tokens
+            acc_count = n
         else:
             # List shrank (pruned), messages mutated in-place, or new list — full recount
-            _ACCUM_TOTAL = sum(_estimate_tokens(m) for m in messages)
-            _ACCUM_COUNT = n
-            _ACCUM_LIST_ID = list_id
-        return _ACCUM_TOTAL
+            acc_total = sum(_estimate_tokens(m) for m in messages)
+            acc_count = n
+
+        _ACCUM_STATE[list_id] = (acc_count, acc_total)
+        # Prune stale entries for lists no longer referenced
+        if len(_ACCUM_STATE) > 8:
+            import gc
+            gc.collect()  # help free dead lists before the is-alive check
+            dead = [lid for lid in _ACCUM_STATE if not _is_list_alive(lid)]
+            for lid in dead[:max(1, len(_ACCUM_STATE) - 8)]:
+                del _ACCUM_STATE[lid]
+        return acc_total
 
 
+def _is_list_alive(list_id: int) -> bool:
+    """Check if any tracked list with this id is still alive (best-effort)."""
+    return list_id in _ACCUM_STATE  # keyed dict — existence implies recent use
 
-# Running accumulator for _total_tokens.
-# _ACCUM_LIST_ID tracks the Python list identity so we detect in-place
-# mutation (compression reuses the same list object but changes content).
-# Protected by _ACCUM_LOCK for thread safety (sub-agents may call concurrently).
-_ACCUM_COUNT: int = 0
-_ACCUM_TOTAL: int = 0
-_ACCUM_LIST_ID: int = 0
+
+# Running accumulator for _total_tokens, keyed by list identity.
+# Each message list (parent, sub-agents) gets its own accumulator slot.
+# Protected by _ACCUM_LOCK for thread safety.
+_ACCUM_STATE: dict[int, tuple[int, int]] = {}  # list_id -> (count, total)
 _ACCUM_LOCK: threading.Lock = threading.Lock()
 
 

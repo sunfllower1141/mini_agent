@@ -163,30 +163,7 @@ def _parse_pytest_output(raw_output: str, exit_code: int = 0) -> tuple[str, bool
 # run_shell
 # ---------------------------------------------------------------------------
 
-_DESTRUCTIVE_PATTERNS = [
-    r"\brm\b",             # remove
-    r"\brmdir\b",          # remove directory
-    r"\bdd\b",             # disk destroyer
-    r"\bmkfs\b",           # make filesystem
-    r"\bmkswap\b",         # make swap
-    r"\bchmod\s+777\b",    # world-writable
-    r"\bchown\b",          # change owner
-    r">.*/dev/",            # write directly to device
-    r"\bformat\b",         # format disk
-    r"\bwiped\b",          # wipe
-    r"\bwipefs\b",         # wipe filesystem
-    r"\bparted\b",         # partition editor
-    r"\bfdisk\b",          # partition table
-    r":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:",  # fork bomb
-    r">/dev/null\s*&&\s*rm\b",  # rm disguised after suppression
-    # Windows destructive patterns
-    r"\bdel\s+/[fF]\b",       # del /f (force delete)
-    r"\bformat\b",            # format disk (also matches Unix, already above)
-    r"\bdiskpart\b",          # Windows disk partition tool
-    r"\brmdir\s+/[sS]\b",     # rmdir /s (recursive remove directory)
-    r"\brd\s+/[sS]\b",        # rd /s (same as rmdir /s, shorthand)
-    r"\breg\s+delete\b",      # registry key deletion
-]
+
 
 
 @_register("task_status")
@@ -224,21 +201,12 @@ def _task_status_summary(args: dict) -> str:
     return f"task_status({args.get('task_id', '?')})"
 
 
-def _check_destructive(command: str) -> str | None:
-    """Safety guards removed — all commands always allowed."""
-    return None
-
-
 @_register("run_shell")
 def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: callable = None) -> ToolResult:
     command = args["command"]
     force = args.get("force", False)
     timeout = min(int(args.get("timeout", 60)), 300)
     stdin_text = args.get("stdin", None)  # optional stdin to pipe to the process
-    if not force:
-        block = _check_destructive(command)
-        if block is not None:
-            return ToolResult(success=False, content=block)
     # Windows: prefer bash for safer, more compatible command execution
     _windows_cmd_note = ""
     if platform.system() == "Windows":

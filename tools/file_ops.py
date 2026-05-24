@@ -29,7 +29,9 @@ _BACKUPS: dict[str, str] = {}  # resolved_path -> backup path
 
 # Cross-turn file content cache — avoids re-reading files whose mtime hasn't changed.
 # Key: resolved path (str), Value: (content: str, mtime: float)
+# Capped at _FILE_CACHE_MAX entries; oldest entries are evicted (LRU via insertion order).
 _FILE_CACHE: dict[str, tuple[str, float]] = {}
+_FILE_CACHE_MAX = 50
 
 
 # ---------------------------------------------------------------------------
@@ -153,6 +155,9 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
     if offset == 0:
         try:
             current_mtime = os.path.getmtime(resolved)
+            # Evict oldest entry if at capacity
+            if len(_FILE_CACHE) >= _FILE_CACHE_MAX and resolved not in _FILE_CACHE:
+                _FILE_CACHE.pop(next(iter(_FILE_CACHE)), None)
             _FILE_CACHE[resolved] = (full_content, current_mtime)
         except OSError:
             pass
@@ -194,17 +199,10 @@ def _write_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
     # File reservation check — prevent sub-agent collisions
     agent_id = getattr(_current_agent_id, "task_id", None)
     if agent_id is not None:
-        from tools import _FILE_RESERVATIONS, _FILE_RESERVATIONS_LOCK
-        with _FILE_RESERVATIONS_LOCK:
-            existing = _FILE_RESERVATIONS.get(path)
-        if existing is not None and existing != agent_id:
-            return ToolResult(
-                success=False,
-                content=(
-                    f"Write blocked: '{path}' is reserved by agent '{existing[:8]}'. "
-                    f"Hint: Coordinate with the parent — only one agent should write to a file."
-                ),
-            )
+        from tools import reserve_file
+        ok, msg = reserve_file(path, agent_id)
+        if not ok:
+            return ToolResult(success=False, content=msg)
     try:
         # Generate diff preview before writing
         diff = wg.generate_diff("write_file", args)
@@ -399,17 +397,10 @@ def _apply_single_edit(
     # File reservation check — prevent sub-agent collisions
     agent_id = getattr(_current_agent_id, "task_id", None)
     if agent_id is not None:
-        from tools import _FILE_RESERVATIONS_LOCK
-        with _FILE_RESERVATIONS_LOCK:
-            existing = _FILE_RESERVATIONS.get(path)
-        if existing is not None and existing != agent_id:
-            return (path, ToolResult(
-                success=False,
-                content=(
-                    f"Edit blocked: '{path}' is reserved by agent '{existing[:8]}'. "
-                    f"Hint: Coordinate with the parent — only one agent should edit a file."
-                ),
-            ))
+        from tools import reserve_file
+        ok, msg = reserve_file(path, agent_id)
+        if not ok:
+            return (path, ToolResult(success=False, content=msg))
     resolved = safety_result.resolved_path
     try:
         with open(resolved, "r", encoding="utf-8") as f:
