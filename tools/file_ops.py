@@ -223,8 +223,8 @@ def _write_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
         if path.endswith(".py"):
             from tools.search_ops import _reindex_file
             _reindex_file(safety_result.resolved_path, wg.workspace_root)
-        # Auto plan advancement
-        _auto_advance_plan(safety_result.resolved_path, content)
+        # Auto plan advancement (file path only — full content is too noisy)
+        _auto_advance_plan(safety_result.resolved_path)
         return ToolResult(
             success=True,
             content=f"OK: wrote {len(content)} bytes to {safety_result.resolved_path}",
@@ -496,8 +496,8 @@ def _apply_single_edit(
             from tools.search_ops import _reindex_file
             _reindex_file(resolved, wg.workspace_root)
 
-        # Auto plan advancement
-        _auto_advance_plan(resolved, old)
+        # Auto plan advancement (file path only — old string is too noisy)
+        _auto_advance_plan(resolved)
 
         added = updated.count("\n") - original.count("\n")
         label = f"{replaced} occurrence(s)" if replaced > 1 else "1 occurrence"
