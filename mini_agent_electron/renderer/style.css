@@ -15,7 +15,7 @@
   --green:    #bb86fc;
   --yellow:   #d0b8ff;
   --red:      #8856e8;
-  --thinking: #ff6eb0;
+  --thinking: #a6e3a1;
   --pulse:         #9b80e8;
   --final-thought: #a890f0;
 
@@ -302,28 +302,28 @@ html, body {
   text-align: right;
 }
 
-/* React Flow controls theming */
-.rf-controls {
-  background: var(--bg) !important;
-  border: 1px solid var(--border) !important;
-  border-radius: 6px !important;
-  box-shadow: none !important;
+/* React Flow controls theming — higher-specificity selectors avoid !important */
+#agent-tree-panel .react-flow__controls {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: none;
 }
 
-.rf-controls button {
-  background: var(--bg) !important;
-  border-color: var(--border) !important;
-  fill: var(--accent) !important;
+#agent-tree-panel .react-flow__controls-button {
+  background: var(--bg);
+  border-color: var(--border);
+  fill: var(--accent);
 }
 
-.rf-controls button:hover {
-  background: var(--surface) !important;
+#agent-tree-panel .react-flow__controls-button:hover {
+  background: var(--surface);
 }
 
-.rf-minimap {
-  background: var(--bg) !important;
-  border: 1px solid var(--border) !important;
-  border-radius: 6px !important;
+#agent-tree-panel .react-flow__minimap {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
 }
 
 /* Loading dots animation */
@@ -654,7 +654,7 @@ html, body {
 .text     { color: var(--text); }
 .dim      { color: var(--dim); }
 .accent   { color: var(--accent); }
-.thinking { color: var(--thinking); text-shadow: 0 0 8px rgba(255, 110, 176, 0.35); }
+.thinking { color: var(--thinking); }
 .red      { color: var(--red); }
 .green    { color: var(--green); }
 .yellow   { color: var(--yellow); }
@@ -666,10 +666,10 @@ html, body {
 .msg-user     { color: var(--text); margin-bottom: 0.5em; opacity: 0.8; }
 .msg-agent    { color: var(--final-thought); margin-bottom: 1em; display: flex; flex-wrap: wrap; align-items: baseline; }
 .msg-error    { color: var(--red); }
-.msg-thinking { color: var(--thinking); text-shadow: 0 0 8px rgba(255, 110, 176, 0.35); }
+.msg-thinking { color: var(--thinking); }
 .msg-agent-pending { min-height: 1em; }
 
-/* Code blocks (Shiki syntax highlighting) */
+/* Code blocks — unified styling (Shiki + plain) */
 .code-block {
   margin: 0.5em 0;
   padding: 0.75em 1em;
@@ -682,9 +682,16 @@ html, body {
 }
 .code-block pre {
   margin: 0;
+  padding: 8px 12px;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', 'Menlo', monospace;
+  line-height: 1.5;
+  tab-size: 4;
 }
 .code-block code {
-  font-family: var(--font-family);
+  font-family: inherit;
+  font-size: inherit;
 }
 
 .msg-separator {
@@ -706,26 +713,6 @@ html, body {
 
 /* Plain tool output */
 .tool-out { margin: 2px 0 4px 0; font-size: 0.82em; overflow-x: auto; white-space: pre-wrap; }
-
-/* Syntax-highlighted code blocks (Shiki output) */
-.code-block {
-  margin: 2px 0 4px 0;
-  font-size: 0.82em;
-  overflow-x: auto;
-}
-.code-block pre {
-  margin: 0;
-  padding: 8px 12px;
-  border-radius: 6px;
-  overflow-x: auto;
-  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', 'Menlo', monospace;
-  line-height: 1.5;
-  tab-size: 4;
-}
-.code-block code {
-  font-family: inherit;
-  font-size: inherit;
-}
 /* Shiki output wrapper — ensure the pre inside renders correctly */
 .shiki-wrapper {
   overflow-x: auto;

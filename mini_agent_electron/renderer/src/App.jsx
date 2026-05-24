@@ -497,9 +497,11 @@ function AppShell() {
               ))}
             </div>
           </RoundedFrame>
-          <div id="agent-tree-panel">
-            <AgentTree agents={subagentData} />
-          </div>
+          {Object.keys(subagentData).length > 0 && (
+            <div id="agent-tree-panel">
+              <AgentTree agents={subagentData} />
+            </div>
+          )}
         </div>
 
         {/* Right pane: Chat */}

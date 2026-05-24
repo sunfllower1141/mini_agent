@@ -91,8 +91,8 @@ function Tooltip({ agent, position }) {
     <div
       className="agent-tree-tooltip"
       style={{
-        left: position.x + 14,
-        top: position.y - 10,
+        left: position.x + 12,
+        top: position.y + 12,
         position: 'fixed',
         zIndex: 1000,
         maxWidth: 320,
@@ -302,18 +302,20 @@ function AgentTreeInner({ agents }) {
 
   // ── Tooltip handlers ────────────────────────────────────────────
   const handleNodeMouseEnter = useCallback(
-    (_event, node) => {
+    (event, node) => {
       if (node.data?.isOrchestrator) return;
       setHoveredAgent({ agent: node.data.agent, taskId: node.id });
-      setTooltipPos({ x: node.position.x, y: node.position.y });
+      // Use viewport-relative mouse coordinates so the tooltip follows the cursor,
+      // not React Flow's internal coordinate system (which shifts on pan/zoom).
+      setTooltipPos({ x: event.clientX, y: event.clientY });
     },
     []
   );
 
   const handleNodeMouseMove = useCallback(
-    (_event, node) => {
+    (event, node) => {
       if (node.data?.isOrchestrator) return;
-      setTooltipPos({ x: node.position.x, y: node.position.y });
+      setTooltipPos({ x: event.clientX, y: event.clientY });
     },
     []
   );

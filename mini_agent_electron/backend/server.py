@@ -154,6 +154,7 @@ class AgentRunner:
     def __init__(self):
         # Bootstrap the agent session
         workspace = os.environ.get("MINI_AGENT_WORKSPACE") or resolve_workspace()
+        os.environ["MINI_AGENT_UI"] = "electron"  # injected into system prompt header
         cli = parse_args()
         data = init_session(workspace, cli_args=cli)
         self.config = data["config"]
@@ -307,9 +308,28 @@ class AgentRunner:
                     # orchestrator processes and reports their results.
                     if not self._pending_subagents and not self._auto_report_flag:
                         self._auto_report_flag = True
+                        # Collect actual results from the runtime to include
+                        # in the prompt, so the synthesis is concrete.
+                        results_summary = ""
+                        try:
+                            from tools import _TOOL_CONTEXT as _ctx
+                            rt = getattr(_ctx, "_agent_runtime", None)
+                            if rt is not None:
+                                # Gather all completed sub-agent results
+                                lines = []
+                                for tid, res in sorted(rt.results.items()):
+                                    status = "OK" if res.success else "FAIL"
+                                    preview = (res.content or "")[:200].replace("\n", " ")
+                                    lines.append(f"  [{tid}] {status}: {preview}")
+                                if lines:
+                                    results_summary = "\n" + "\n".join(lines) + "\n"
+                        except Exception:
+                            pass  # best-effort
                         self.submit(
                             "[Report: All sub-agents have completed. "
-                            "Synthesize their results and report to the user.]"
+                            "Synthesize their results and report to the user."
+                            + results_summary
+                            + "]"
                         )
                 elif event_type == "tool_start":
                     self._callbacks.on_subagent_tool_start(
