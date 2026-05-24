@@ -393,6 +393,7 @@ class TestLogToolFailure(unittest.TestCase):
 
         self.assertGreater(len(entries), 0)
         entry = entries[-1]
+        self.assertEqual(entry["event_type"], "tool_failure")
         self.assertEqual(entry["tool_name"], "edit_file")
         self.assertEqual(entry["error_fingerprint"], "not_found")
         self.assertIn("not found", entry["msg"])
@@ -430,6 +431,7 @@ class TestLogToolSuccess(unittest.TestCase):
         self.assertGreater(len(entries), 0)
         entry = entries[-1]
         self.assertEqual(entry["level"], "DEBUG")
+        self.assertEqual(entry["event_type"], "tool_success")
         self.assertEqual(entry["tool_name"], "edit_file")
         self.assertEqual(entry["turn"], 3)
         self.assertIn("edit_file", entry["msg"])

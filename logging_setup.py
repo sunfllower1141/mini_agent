@@ -112,7 +112,7 @@ class _JsonLinesFormatter(logging.Formatter):
         if record.exc_info and record.exc_info[0] is not None:
             obj["traceback"] = traceback.format_exception(*record.exc_info)
         # Attach any extra fields passed via `extra=`
-        for key in ("tool_name", "error_fingerprint", "turn", "provider", "status_code", "session"):
+        for key in ("event_type", "tool_name", "error_fingerprint", "turn", "provider", "status_code", "session"):
             val = getattr(record, key, None)
             if val is not None:
                 obj[key] = val
@@ -275,7 +275,8 @@ def log_tool_failure(
     logger.warning(
         "Tool failure | tool=%s fingerprint=%s content=%.200s",
         tool_name, fingerprint, error_content,
-        extra={"tool_name": tool_name, "error_fingerprint": fingerprint, "turn": turn},
+        extra={"event_type": "tool_failure", "tool_name": tool_name,
+               "error_fingerprint": fingerprint, "turn": turn},
     )
 
 
@@ -284,7 +285,7 @@ def log_tool_success(tool_name: str, turn: int = 0) -> None:
     logger = get_logger("tools")
     logger.debug(
         "Tool success | tool=%s", tool_name,
-        extra={"tool_name": tool_name, "turn": turn},
+        extra={"event_type": "tool_success", "tool_name": tool_name, "turn": turn},
     )
 
 
