@@ -11,6 +11,13 @@ const path = require('path');
 const fs = require('fs');
 
 // ---------------------------------------------------------------------------
+// Resource tuning — this is a text-based chat app, not a game or browser.
+// Merge GPU into main process (saves ~180 MB separate GPU process).
+app.commandLine.appendSwitch('in-process-gpu');
+// Cap V8 heap: 128 MB old-space, 16 MB nursery (young gen).
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=128 --max-semi-space-size=16');
+
+// ---------------------------------------------------------------------------
 // Load .env file — GUI apps on macOS don't inherit shell profile vars
 // ---------------------------------------------------------------------------
 

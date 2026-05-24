@@ -308,9 +308,36 @@ def _inject_interjections(messages: list[dict]) -> None:
         })
 
 
+# Consecutive read-only turn counter (resets on write/execute).
+_consecutive_read_only_turns: int = 0
+_READ_ONLY_NUDGE_THRESHOLD: int = 3  # turns of pure reads before nudge
+
+
 def _inject_progress_check(messages: list[dict], *, turn_count: int) -> None:
-    """Inject periodic progress reminder every PROGRESS_INTERVAL turns."""
-    if turn_count <= 1 or turn_count % PROGRESS_INTERVAL != 0:
+    """Inject periodic progress reminder every PROGRESS_INTERVAL turns.
+
+    Also injects a sufficiency nudge when the agent has spent several
+    consecutive turns only reading (no writes / shell executions).
+    """
+    if turn_count <= 1:
+        return
+
+    # --- Read-only sufficiency nudge (every turn, once threshold reached) ---
+    global _consecutive_read_only_turns
+    if _consecutive_read_only_turns >= _READ_ONLY_NUDGE_THRESHOLD:
+        messages.append({
+            "role": "user",
+            "content": (
+                f"You've spent {_consecutive_read_only_turns} turns reading "
+                "code without making changes. If you have enough context to "
+                "answer the user, do so NOW. If you need more, state what "
+                "SPECIFIC information you're still missing — don't just keep "
+                "reading files broadly."
+            ),
+            "_transient": True,
+        })
+
+    if turn_count % PROGRESS_INTERVAL != 0:
         return
     reminder = (
         f"You have been working for {turn_count} turns. "
@@ -372,7 +399,13 @@ def _inject_scratchpad_nudge(messages: list[dict], *, turn_count: int) -> None:
             "content": (
                 "⚠️ Your scratchpad hasn't been updated in several turns. "
                 "Consider using write_scratchpad to capture your current "
-                "plan, progress, and decisions before continuing."
+                "plan, progress, and decisions before continuing.\n\n"
+                "Good scratchpad format:\n"
+                "  GOAL: [1 line — what the user wants]\n"
+                "  DONE: [what you've accomplished so far]\n"
+                "  NEXT: [exactly what you'll do next turn — be specific]\n"
+                "  QUESTIONS: [anything you're uncertain about]\n"
+                "Keep it short — this is for YOUR memory, not the user."
             ),
             "_transient": True,
         })
@@ -412,14 +445,17 @@ def _inject_system_reminder(messages: list[dict], *, turn_count: int) -> None:
     """Re-inject critical rules near end of long contexts to fight
     'instruction centrifugation' — the system prompt fading as context grows.
 
-    Triggers when message count > 20 (~6-7 turns), repeats every 12 messages.
+    Triggers when message count > 20 (~6-7 turns), repeats every 8 messages
+    for DeepSeek (prone to tool-call loops), 12 for other providers.
     """
     if len(messages) <= 20:
         return
-    # Repeat every 12 messages after initial threshold
+    # Provider-specific interval: DeepSeek benefits from more frequent reminders
+    provider = getattr(_TOOL_CONTEXT, "_provider", None) or "deepseek"
+    _REMINDER_INTERVAL = 8 if provider == "deepseek" else 12
     if not hasattr(_TOOL_CONTEXT, '_system_reminder_last_msg_count'):
         _TOOL_CONTEXT._system_reminder_last_msg_count = 0
-    if len(messages) - _TOOL_CONTEXT._system_reminder_last_msg_count < 12:
+    if len(messages) - _TOOL_CONTEXT._system_reminder_last_msg_count < _REMINDER_INTERVAL:
         return
     _TOOL_CONTEXT._system_reminder_last_msg_count = len(messages)
 
@@ -505,8 +541,52 @@ def _inject_self_critique(messages: list[dict], *, turn_count: int) -> None:
 
     Uses the SelfCritique instance to analyze recent tool results and
     generate corrective guidance when the agent appears stuck.
+
+    Also detects consecutive same-tool failures (e.g. edit_file failing
+    3+ times with 'not found') and injects a targeted nudge.
     """
     try:
+        # --- Consecutive same-tool failure detection ---
+        _CONSECUTIVE_FAILURE_THRESHOLD = 3
+        _CRITICAL_FAILURE_TOOLS = {"edit_file", "write_file", "run_shell"}
+        recent_failures: list[tuple[str, bool]] = []  # (tool_name, success)
+        for msg in reversed(messages):
+            if msg.get("role") == "tool":
+                tcid = msg.get("tool_call_id", "")
+                for prev_msg in messages:
+                    if prev_msg.get("role") == "assistant":
+                        for tc in prev_msg.get("tool_calls", []):
+                            if tc.get("id") == tcid:
+                                name = tc.get("function", {}).get("name", "")
+                                try:
+                                    import json as _json
+                                    data = _json.loads(msg.get("content", "{}"))
+                                    success = data.get("success", True)
+                                except Exception:
+                                    success = True
+                                recent_failures.append((name, success))
+                                break
+            if len(recent_failures) >= 8:
+                break
+        # Check for consecutive same-tool failures
+        if len(recent_failures) >= _CONSECUTIVE_FAILURE_THRESHOLD:
+            first_name, _ = recent_failures[0]
+            if all(name == first_name and not success for name, success in recent_failures[:_CONSECUTIVE_FAILURE_THRESHOLD]):
+                if first_name in _CRITICAL_FAILURE_TOOLS:
+                    tool_hints = {
+                        "edit_file": "STOP using edit_file. Use read_file FIRST to see the exact text, then copy-paste the exact old_string. You're editing blind.",
+                        "write_file": "STOP using write_file repeatedly. Verify the file path and content before retrying.",
+                        "run_shell": "STOP retrying the same shell command. It's failing consistently. Try a different approach or diagnose the error output.",
+                    }
+                    hint = tool_hints.get(first_name, f"STOP retrying {first_name}. It has failed {_CONSECUTIVE_FAILURE_THRESHOLD}+ times. Switch approach.")
+                    messages.append({
+                        "role": "user",
+                        "content": f"⚠️ {hint}",
+                        "_transient": True,
+                    })
+                    return  # Don't also inject the general self-critique
+
+        # --- Original self-critique logic ---
         sc = getattr(_TOOL_CONTEXT, "_self_critique", None)
         if sc is None:
             return
@@ -549,8 +629,14 @@ def _inject_self_critique(messages: list[dict], *, turn_count: int) -> None:
 
 
 def _inject_strategy_hint(messages: list[dict]) -> None:
-    """#5 Auto tool strategy hints — suggest optimal search tool."""
+    """#5 Auto tool strategy hints — suggest optimal search tool.
+
+    Also detects when the agent is using search_files for symbol-like
+    patterns (single CamelCase/snake_case identifiers) and nudges
+    toward find_symbol instead.
+    """
     try:
+        # --- Part A: keyword-based hints from latest user message ---
         for msg in reversed(messages):
             if msg["role"] == "user":
                 last = msg["content"]
@@ -564,6 +650,33 @@ def _inject_strategy_hint(messages: list[dict]) -> None:
             hint = "[Hint: Use find_usages to find all callers, then edit_file for targeted changes.]"
         elif any(kw in last.lower() for kw in ("semantic", "similar", "feels like", "find code that")):
             hint = "[Hint: Use semantic_search for meaning-based code search.]"
+
+        # --- Part B: detect search_files being used for symbol search ---
+        if not hint:
+            import re as _re
+            _symbol_pattern = _re.compile(r"^(search_files|find_symbol|read_file)$")
+            text_patterns_seen = 0
+            for m in reversed(messages):
+                if m.get("role") == "assistant" and m.get("tool_calls"):
+                    for tc in m["tool_calls"]:
+                        fn = tc.get("function", {})
+                        name = fn.get("name", "")
+                        if name == "search_files":
+                            args_raw = fn.get("arguments", "{}")
+                            try:
+                                import json as _json
+                                args = _json.loads(args_raw) if isinstance(args_raw, str) else args_raw
+                            except Exception:
+                                args = {}
+                            pattern = args.get("pattern", "")
+                            # Symbol-like: no spaces, contains _ or mixed case
+                            if pattern and " " not in pattern and (
+                                "_" in pattern or (pattern != pattern.lower() and pattern != pattern.upper())
+                            ):
+                                text_patterns_seen += 1
+            if text_patterns_seen >= 2:
+                hint = "[Hint: You've been using search_files for patterns that look like symbol names. Try find_symbol — it's ~10x faster and gives exact line numbers.]"
+
         if hint:
             # Track injected hints in a set for O(1) dedup
             if not hasattr(_inject_strategy_hint, '_injected'):
@@ -1136,6 +1249,9 @@ def run_agent_turn(
     _scratchpad_injected = False
     _git_diff_injected = False
 
+    # Store provider on context for subsystem access (system reminder interval, etc.)
+    _TOOL_CONTEXT._provider = config.api_provider
+
     # One-time cleanup / cache invalidation
     # Note: clear_api_cache is intentionally NOT called here — the incremental
     # message-cleaning cache in api.py survives across turns since the same
@@ -1226,6 +1342,21 @@ def run_agent_turn(
             )
             # _tool_execution_phase returns False when all tools were
             # already streamed — just continue the loop.
+
+            # --- Track consecutive read-only turns ---
+            global _consecutive_read_only_turns
+            _write_tools = {"write_file", "edit_file", "run_shell"}
+            all_tool_calls = msg.get("tool_calls", [])
+            if all_tool_calls:
+                had_write = any(
+                    tc.get("function", {}).get("name", "") in _write_tools
+                    for tc in all_tool_calls
+                )
+                if had_write:
+                    _consecutive_read_only_turns = 0
+                else:
+                    _consecutive_read_only_turns += 1
+
             if not continue_loop:
                 continue
 

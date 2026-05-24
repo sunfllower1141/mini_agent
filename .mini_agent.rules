@@ -48,6 +48,14 @@
 - 827 tests currently, all must pass. Do not stack speculative fixes — verify each.
 - Use tempfile.mkdtemp for test workspaces; clean up in tearDown.
 
+## Logging
+- Logs live outside workspace at `~/.mini_agent/logs/`:
+  - `agent.log` — all tool calls, JSON-lines, rotating 5×10MB
+  - `api_error.log` — LLM API errors (HTTP status, rate limits)
+  - `error_traces.log` — full tracebacks for crashes
+- Entry point: `logging_setup.py` (see `LOG_DIR`, `get_logger()`, `log_tool_failure()`)
+- Run `tail -50 ~/.mini_agent/logs/agent.log | python3 -m json.tool` to inspect recent events
+
 ## Architecture Rules
 - Before touching >3 core files, pause and explain the plan first.
 - Reuse existing abstractions before introducing new ones. Avoid duplicate logic.
