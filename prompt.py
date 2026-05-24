@@ -23,6 +23,16 @@ def build_system_prompt(config: "AgentConfig") -> str:
     """
     workspace = os.path.abspath(config.workspace) if config.workspace else os.getcwd()
 
+    # --- Environment metadata ---
+    import datetime
+    import platform as _platform
+
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    date_str = now_utc.strftime("%Y-%m-%d %H:%M UTC")
+    os_str = f"{_platform.system()} {_platform.release()} ({_platform.platform(aliased=True, terse=True)})"
+    shell = os.environ.get("SHELL", os.environ.get("COMSPEC", "unknown"))
+    frontend = getattr(config, "frontend", "terminal") or "terminal"
+
     # --- Safety flags summary ---
     safety_lines: list[str] = []
     if config.unrestricted:
@@ -35,6 +45,10 @@ def build_system_prompt(config: "AgentConfig") -> str:
     header = (
         "\n"
         "══════════════════════════════════════════════════════════════\n"
+        f"  DATE        : {date_str}\n"
+        f"  OS          : {os_str}\n"
+        f"  SHELL       : {shell}\n"
+        f"  UI          : {frontend}\n"
         f"  WORKSPACE   : {workspace}\n"
         f"  SAFETY FLAGS:\n"
         + "\n".join(safety_lines) +
@@ -126,7 +140,7 @@ def build_system_prompt(config: "AgentConfig") -> str:
 
 _STATIC_PROMPT = (
     "You are mini_agent, a terminal AI coding assistant powered by an LLM with a "
-    "Textual TUI.  You operate on a workspace directory using the tools provided by "
+    "Electron desktop UI.  You operate on a workspace directory using the tools provided by "
     "the runtime.  Key modules:\n"
     "\n"
     "  prompt.py  — this system prompt (edit to change personality/rules)\n"

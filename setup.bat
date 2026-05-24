@@ -24,8 +24,7 @@ echo [3/3] Done!
 echo.
 echo To start:
 echo   venv\Scripts\activate.bat
-echo   python mini_agent.py            # terminal REPL
-echo   python tui_pt.py                # TUI (prompt_toolkit)
+echo   cd mini_agent_electron ^&^& npm start  # Electron desktop app
 echo.
 echo Optional flags:
 echo   --unrestricted   allow read/write outside workspace

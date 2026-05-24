@@ -1,7 +1,7 @@
 """Lint all Python source files by compiling them.
 
 Catches syntax errors that ``run_tests`` would miss if the broken module
-is never imported by a test (e.g. tui_pt.py which is the entry point).
+is never imported by a test.
 """
 
 import os

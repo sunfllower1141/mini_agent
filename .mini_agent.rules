@@ -20,7 +20,7 @@
 # llm.py             — API calls, turn orchestration, tool piping
 # memory.py          — SQLite conversation persistence + pruning
 # safety.py          — workspace read/write gates (SafetyResult dataclass)
-# tui.py             — Textual TUI frontend, themes, AgentWorker
+# agent_runtime.py   — sub-agent lifecycle, inboxes, file reservations
 # api.py             — LLM API calls (call_deepseek), message cache
 # sub_agent.py       — sub-agent engine, turn budget, pruning, Pro model
 # agent_runtime.py   — sub-agent lifecycle, inboxes, file reservations

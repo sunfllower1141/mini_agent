@@ -158,12 +158,8 @@ def _spawn_one(
 
     def _runner() -> None:
         import sys as _sys
-        tui_queue = getattr(_TOOL_CONTEXT, "_tui_queue", None)
         sub_cb = subagent_callback  # captured in parent thread, no race
-        # ---- Redirect stderr to buffer to prevent TUI corruption ----
-        # Any print(..., file=sys.stderr) from sub-agents or the tools they
-        # invoke will break the prompt_toolkit alternate-screen layout.
-        # Capture stderr in a StringIO buffer; only flush to disk if non-empty.
+        # ---- Redirect stderr to buffer to prevent UI corruption ----
         from io import StringIO as _StringIO
         _stderr_buf = _StringIO()
         _saved_stderr = _sys.stderr
@@ -181,15 +177,12 @@ def _spawn_one(
         try:
             if visible:
                 config.stream = True
-                if tui_queue is not None:
-                    tui_queue.put(("sub_token", task_id, f"[sub {task_id}] START: {task[:80]}\n"))
-                else:
-                    # Log to file instead of stderr to avoid breaking TUI layout
-                    import os as _os
-                    _os.makedirs("logs", exist_ok=True)
-                    _log_path = f"logs/sub_agent_{task_id}.log"
-                    with open(_log_path, "a", encoding="utf-8") as _lf:
-                        _lf.write(f"\n--- [sub {task_id}] START: {task[:200]} ---\n")
+                # Log to file for debugging
+                import os as _os
+                _os.makedirs("logs", exist_ok=True)
+                _log_path = f"logs/sub_agent_{task_id}.log"
+                with open(_log_path, "a", encoding="utf-8") as _lf:
+                    _lf.write(f"\n--- [sub {task_id}] START: {task[:200]} ---\n")
             else:
                 config.stream = False  # suppress raw token streaming for invisible sub-agents
             result = run_sub_agent(
@@ -202,8 +195,6 @@ def _spawn_one(
                 parent_depth=parent_depth,
                 max_depth=max_depth,
                 shared_context=shared_context,
-                tui_queue=tui_queue,
-                tui_task_id=task_id,
                 task_id=task_id,
                 parent_task_id=parent_task_id,
                 subagent_callback=sub_cb,
@@ -212,11 +203,6 @@ def _spawn_one(
             # Notify Electron via sub-agent callback (if wired)
             if sub_cb:
                 sub_cb("end", {"task_id": task_id, "ok": result.success, "content": result.content[:500]})
-            # Signal TUI to hide sub-agent streaming pane
-            if tui_queue is not None:
-                tui_queue.put(("sub_done", task_id))
-                status = "completed" if result.success else "error"
-                tui_queue.put(("sub_tree", "status", task_id, status))
         finally:
             config.stream = original_stream
             # ---- Restore stderr + flush buffer to disk only if non-empty ----
@@ -252,12 +238,6 @@ def _spawn_one(
     # Set subscriptions if provided
     if subscriptions is not None:
         runtime.set_subscriptions(task_id, subscriptions)
-    # Push tree spawn message via the context queue
-    from tools import _TOOL_CONTEXT
-    tui_queue = getattr(_TOOL_CONTEXT, "_tui_queue", None)
-    if tui_queue is not None:
-        desc = task[:60].replace("\n", " ")
-        tui_queue.put(("sub_tree", "spawn", task_id, parent_id, short_name, desc))
     thread.start()
     return task_id
 

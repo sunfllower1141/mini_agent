@@ -33,11 +33,9 @@ Quick reference of tool categories and counts. See README for overview.
 - `remember` tool for manual capture; auto-learn from failures
 - Scratchpad persists across turns
 
-## Interfaces
+## Interface
 
-- **`tui_pt.py`** — prompt-toolkit TUI with live streaming, tools/chat panels, slash commands
-- **`tui.py`** — Textual TUI (backup)
-- **Electron** — desktop GUI in `mini_agent_electron/`
+- **Electron** — desktop GUI in `mini_agent_electron/` with live streaming, tools/chat panels, slash commands
 
 ## Test Coverage
 

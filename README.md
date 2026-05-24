@@ -13,8 +13,8 @@ pip install -r requirements.txt
 # Create .env with your API key:
 echo 'DEEPSEEK_API_KEY="sk-..."' > .env
 
-# Run
-python tui_pt.py
+# Run the Electron app
+cd mini_agent_electron && npm install && npm start
 ```
 
 ## Features
@@ -23,7 +23,7 @@ python tui_pt.py
 - **Multi-agent**: up to 10 concurrent sub-agents with fan-out/in, pipeline, barrier, scatter-gather patterns. Inter-agent messaging with typed handoffs.
 - **Memory**: SQLite-backed conversation store with token-aware pruning and cross-session project knowledge
 - **Providers**: DeepSeek (default), Claude Sonnet 4.5, xAI Grok 4.3 — auto-detect or set `API_PROVIDER`
-- **Interfaces**: prompt-toolkit TUI (`tui_pt.py`), Electron desktop app (`mini_agent_electron/`)
+- **Interface**: Electron desktop app (`mini_agent_electron/`)
 - **Skills**: lazy-load tool groups via `use_skill` — git, web, test, planning, agents, search, image, lsp
 - **Safety**: workspace read/write gates, backup-before-write, diff previews, confirm mode
 - **Cross-platform**: macOS, Linux, Windows
@@ -63,7 +63,7 @@ npm install && npm start
 ## Architecture
 
 ```
-tui_pt.py ──→ llm.py ──→ api.py ──→ DeepSeek / Claude / xAI
+Electron ──→ server.py ──→ llm.py ──→ api.py ──→ DeepSeek / Claude / xAI
                 │
     ┌───────────┼───────────┐
     ▼           ▼           ▼

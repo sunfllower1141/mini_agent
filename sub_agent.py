@@ -55,8 +55,6 @@ def run_sub_agent(
     max_depth: int = 3,
     shared_context: str = "",
     stream: bool = False,
-    tui_queue=None,       # Queue for TUI subagent pane streaming
-    tui_task_id: str = "",  # task_id for TUI streaming prefix
     task_id: str = "",     # task_id for direct runtime lookup (avoids O(N) scan)
     parent_task_id: str = "",  # orchestrator task_id for agent_handoff targeting
     subagent_callback: callable | None = None,  # for Electron UI sub-agent pane events
@@ -402,24 +400,17 @@ def run_sub_agent(
                             pass  # best-effort
                 return _wrapped
 
-            _tq = tui_queue or getattr(_TOOL_CONTEXT, "_tui_queue", None)
-            if _tq is not None:
-                def _on_token_sub(t: str) -> None:
-                    _tq.put(("sub_token", tui_task_id, t))
-                on_token = _make_streaming_wrapper(_on_token_sub)
-            else:
-                # Write streaming tokens to log file instead of stderr
-                # to avoid breaking TUI layouts.
-                import os as _os
-                _os.makedirs("logs", exist_ok=True)
-                _log_path = f"logs/sub_agent_{task_id}.log"
-                def _on_token_log(t: str) -> None:
-                    try:
-                        with open(_log_path, "a", encoding="utf-8") as _lf:
-                            _lf.write(t)
-                    except OSError:
-                        pass  # best-effort logging
-                on_token = _make_streaming_wrapper(_on_token_log)
+            # Write streaming tokens to log file for debugging
+            import os as _os
+            _os.makedirs("logs", exist_ok=True)
+            _log_path = f"logs/sub_agent_{task_id}.log"
+            def _on_token_log(t: str) -> None:
+                try:
+                    with open(_log_path, "a", encoding="utf-8") as _lf:
+                        _lf.write(t)
+                except OSError:
+                    pass  # best-effort logging
+            on_token = _make_streaming_wrapper(_on_token_log)
         try:
             # Sub-agents use a cheaper/faster model for worker tasks.
             # Save and restore to avoid mutating the shared config object.
@@ -589,10 +580,7 @@ def run_sub_agent(
             fn = tc.get("function", {})
             name = fn.get("name", "")
 
-            # Stream tool start to TUI
-            _tq = tui_queue or getattr(_TOOL_CONTEXT, "_tui_queue", None)
-            if _tq is not None:
-                tui_queue.put(("sub_tool", "start", name, getattr(_TOOL_CONTEXT, "_agent_task_id", "")))
+
             # Emit tool_start to Electron UI callback
             if subagent_callback:
                 try:
@@ -684,12 +672,7 @@ def run_sub_agent(
                 "tool_call_id": tc["id"],
                 "content": json.dumps({"success": result.success, "content": r_content}),
             })
-            # Stream tool end to TUI
-            _tq = tui_queue or getattr(_TOOL_CONTEXT, "_tui_queue", None)
-            if _tq is not None:
-                ok = result.success
-                detail = result.content[:100] if result.content else ""
-                tui_queue.put(("sub_tool", "end", name, getattr(_TOOL_CONTEXT, "_agent_task_id", ""), ok, detail))
+
             # Emit tool_end to Electron UI callback
             if subagent_callback:
                 try:

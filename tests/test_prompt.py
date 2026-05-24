@@ -81,7 +81,7 @@ class TestBuildSystemPrompt(unittest.TestCase):
         prompt = build_system_prompt(self._config())
         self.assertIn("prompt.py", prompt)
         self.assertIn("config.py", prompt)
-        self.assertIn("tui.py", prompt)
+        self.assertIn("agent_runtime.py", prompt)
         self.assertIn("llm.py", prompt)
         self.assertIn("memory.py", prompt)
         self.assertIn("tools/", prompt)

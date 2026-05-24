@@ -208,6 +208,7 @@ class AgentConfig:
     openai_api_key: str = DEFAULT_OPENAI_API_KEY
     approve_write_ops: bool = False
     unrestricted: bool = False
+    frontend: str = "terminal"  # "terminal", "electron" — injected into system prompt
     socks_proxy: str = ""  # SOCKS5 proxy URL (auto-set on Windows for SSH tunnel)
     mcp_servers: dict = field(default_factory=dict)  # {name: {command: [...], env: {...}}}
 
@@ -518,6 +519,10 @@ def _apply_env_overrides(config: AgentConfig) -> None:
     if os.environ.get(ENV_AGENT_WORKSPACE):
         config.workspace = os.environ[ENV_AGENT_WORKSPACE]
 
+    # --- frontend / UI mode ---
+    if os.environ.get("MINI_AGENT_UI"):
+        config.frontend = os.environ["MINI_AGENT_UI"]
+
     # --- third-party keys ---
     if os.environ.get(ENV_EXA_API_KEY):
         config.exa_api_key = os.environ[ENV_EXA_API_KEY]
@@ -601,12 +606,9 @@ def parse_args(argv: list[str] | None = None) -> object:
     # ----- UI selection (prompt_toolkit TUI by default) -----
     parser.add_argument(
         "--no-ui", action="store_true", default=None,
-        help="Run the plain stdin REPL (mini_agent.py) instead of the prompt_toolkit TUI",
+        help="Run the plain stdin REPL instead of the Electron UI",
     )
-    parser.add_argument(
-        "--legacy-tui", action="store_true", default=None,
-        help="Launch the legacy Textual TUI (tui.py) instead of the prompt_toolkit TUI",
-    )
+
     parser.add_argument(
         "--theme", default=None,
         help="Initial UI theme (slate, dawn, sepia, ember, midnight, cobalt, neon, forest, dracula)",
@@ -623,7 +625,7 @@ def resolve_workspace(override: str | None = None) -> str:
 
     *override* takes priority (from argparse).  Falls back to sys.argv,
     then AGENT_WORKSPACE env var, then cwd.
-    Used by both the terminal REPL (mini_agent.py) and TUI (tui.py).
+    Used by the terminal REPL and Electron backend.
     """
     if override is not None:
         return override
@@ -639,7 +641,7 @@ def resolve_workspace(override: str | None = None) -> str:
 # Backward-compatible re-exports (at end of file to avoid circular imports)
 # ---------------------------------------------------------------------------
 # These functions have been moved to dedicated modules but are re-exported
-# here so existing callers (tui.py, tui_pt.py, mini_agent.py, eval/runner.py,
+# here so existing callers (mini_agent.py, eval/runner.py,
 # tests) continue to work unchanged.
 
 from bootstrap import init_session  # noqa: F401, E402
