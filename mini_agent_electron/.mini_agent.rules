@@ -12,3 +12,50 @@
 
 ## Module Map
   server.py  # auto-detected
+
+## CSS Layout Rules — read before touching any stylesheet
+When adding or debugging CSS in this project, always verify these:
+
+### 1. HEIGHT INHERITANCE CHAIN
+`height: 100%` resolves against the parent's *computed* height. If the parent
+has `height: auto` (default), 100% resolves to `auto` — effectively no height.
+- Trace every element from leaf to `<html>`: each ancestor must have an explicit
+  height OR the leaf must use `100vh`/viewport units.
+- This project uses `html,body{height:100%}` → `#app{height:100vh}` → flex
+  children with `flex:1`. Preserve this chain.
+
+### 2. FLEX OVERFLOW GOTCHA (min-height/min-width)
+Flex children have implicit `min-height: auto` / `min-width: auto`, which
+prevents them from shrinking below their content's intrinsic size.
+- Any flex child that should scroll MUST have `min-height: 0` (or `min-width: 0`).
+- Fixed-size siblings in the same flex need `flex-shrink: 0`.
+- This project already does this on `#body-panels`, `#left-stack`, `#left-pane`,
+  `#right-pane`, `.log`, `.frame-content`. Do not remove these.
+
+### 3. SCROLL CONTAINER DIMENSIONS
+`overflow-y: auto` only shows scrollbars when content overflows. Overflow
+requires a constrained height — without one, the element just grows.
+- Every `overflow-y: auto` must have a height constraint: either `flex: 1`
+  inside a flex column (with `min-height: 0`), or an explicit height.
+- An `overflow-y: auto` element with `height: auto` (default) will never scroll.
+
+### 4. Z-INDEX REQUIRES NON-STATIC POSITION
+`z-index` is ignored on elements with `position: static` (the default).
+- Always verify the element has `position: relative | absolute | fixed | sticky`.
+
+### 5. CSS-ONLY: NO !important WITHOUT A COMMENT
+`!important` breaks the cascade and causes specificity wars. If you must use it
+(there are a few legitimate cases), add a comment explaining why.
+
+### 6. BORDER-BOX IS GLOBAL
+`*, *::before, *::after { box-sizing: border-box }` is set. Padding is included
+in width/height calculations. Don't add manual width corrections for padding.
+
+### 7. DIAGNOSTIC CHECKLIST (before any CSS change)
+- [ ] Can I trace the height chain from this element to `<html>`?
+- [ ] If this is a flex child that scrolls, does it have `min-height: 0`?
+- [ ] If this has `overflow-y: auto`, does it have a height constraint?
+- [ ] If this has `z-index`, does it have a non-static `position`?
+- [ ] Am I adding `!important`? If so, why not use higher specificity instead?
+- [ ] Am I mixing `gap` and `margin` on the same flex container? Pick one.
+- [ ] Have I checked the element's computed height/width in DevTools?

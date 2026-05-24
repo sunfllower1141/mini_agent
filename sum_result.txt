@@ -1,4 +1,0 @@
-## Findings
-| Exit Code | Stdout | Stderr |
-|-----------|--------|--------|
-| 0 | Hello from sub-agent 2\nAgent 2 done | (empty) |

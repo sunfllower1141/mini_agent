@@ -259,10 +259,10 @@ function AgentTreeInner({ agents }) {
               type: 'arrowclosed',
               width: 14,
               height: 14,
-              color: isRunning ? '#9b80e8' : '#6e6390',
+              color: isRunning ? '#999' : '#555',
             },
             style: {
-              stroke: isRunning ? '#9b80e8' : '#6e6390',
+              stroke: isRunning ? '#999' : '#555',
               strokeWidth: isRunning ? 2.5 : 1.5,
             },
           };
@@ -365,7 +365,7 @@ function AgentTreeInner({ agents }) {
       {process.env.NODE_ENV !== 'production' && (
         <div style={{
           position: 'absolute', top: 4, right: 4, zIndex: 100,
-          background: 'rgba(0,20,40,0.85)', color: '#8bf', fontSize: 9,
+          background: 'rgba(20,20,20,0.85)', color: '#aaa', fontSize: 9,
           fontFamily: 'monospace', padding: '2px 6px', borderRadius: 4,
         }}>
           agents:{debugInfo.agentCount} nodes:{debugInfo.nodeCount} edges:{debugInfo.edgeCount}

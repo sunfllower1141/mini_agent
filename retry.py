@@ -14,6 +14,10 @@ import threading
 
 import requests
 
+from logging_setup import get_logger
+
+_retry_log = get_logger("retry")
+
 # ---------------------------------------------------------------------------
 # Retry configuration
 # ---------------------------------------------------------------------------
@@ -70,6 +74,7 @@ def _request_with_retry(
                 if cancel_event is not None and cancel_event.wait(delay):
                     return None  # cancelled during wait
             else:
+                _retry_log.warning("Retries exhausted (%d): %s %s", _MAX_RETRIES, r.status_code, r.text[:200])
                 return r  # exhausted retries — return last response (caller checks r.ok)
         except requests.RequestException as exc:
             last_exc = exc
@@ -84,7 +89,7 @@ def _request_with_retry(
                 if cancel_event is not None and cancel_event.wait(delay):
                     return None  # cancelled during wait
             else:
-                raise  # exhausted retries, re-raise
+                _retry_log.warning("Retries exhausted after network errors (%d): %s", _MAX_RETRIES, exc)
 
     if last_exc is not None:  # pragma: no cover
         raise last_exc  # pragma: no cover

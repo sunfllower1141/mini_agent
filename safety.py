@@ -29,8 +29,8 @@ def _safe_resolve(root: str, path: str) -> str:
     joined = os.path.join(root, path)
     try:
         return os.path.realpath(joined)
-    except OSError:
-        # Windows: realpath fails on non-existent paths.
+    except FileNotFoundError:
+        # realpath fails on non-existent paths (especially Windows);
         # abspath + normpath gives a safe canonical form.
         return os.path.normpath(os.path.abspath(joined))
 

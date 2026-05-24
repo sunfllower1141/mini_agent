@@ -56,6 +56,7 @@ def _color_enabled() -> bool:
 
 _RESET  = "\033[0m"
 DIM     = "\033[2m"
+GREEN   = "\033[32m"
 _RED    = "\033[31m"
 _GREEN  = "\033[32m"
 _YELLOW = "\033[33m"

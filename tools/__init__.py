@@ -22,6 +22,7 @@ Submodules:
     lsp         — lsp_definition, lsp_references, lsp_hover, lsp_diagnostics
 """
 
+import contextvars
 import json
 import re
 import sqlite3
@@ -32,6 +33,9 @@ from dataclasses import dataclass
 
 from safety import ReadSafetyGate, WriteSafetyGate
 from tools.schema import TOOLS
+from logging_setup import get_logger, log_tool_failure, log_tool_success, log_error_trace
+
+_log = get_logger("tools")
 
 # Hardcoded core schema for remember — always present even if schema.py is missing
 _REMEMBER_SCHEMA = {
@@ -155,7 +159,44 @@ class AgentContext:
         self._subagent_callback: callable | None = None  # (event_type, data) for Electron sub-agent events
 
 
-_TOOL_CONTEXT = AgentContext()
+_TOOL_CONTEXT_VAR: contextvars.ContextVar[AgentContext] = contextvars.ContextVar(
+    "tool_context", default=AgentContext()
+)
+
+
+class _ContextProxy:
+    """Proxy that transparently delegates attribute access to the current
+    ``AgentContext`` inside a ``ContextVar``.  Each thread / async task
+    gets its own copy, so concurrent tool execution (background shells,
+    sub-agents, etc.) cannot cross-contaminate context state."""
+
+    __slots__ = ("_cv",)
+
+    def __init__(self, cv: contextvars.ContextVar):
+        super().__setattr__("_cv", cv)
+
+    def __getattr__(self, name: str):
+        return getattr(self._cv.get(), name)
+
+    def __setattr__(self, name: str, value):
+        if name == "_cv":
+            super().__setattr__(name, value)
+        else:
+            setattr(self._cv.get(), name, value)
+
+    def __delattr__(self, name: str):
+        delattr(self._cv.get(), name)
+
+    @property
+    def __dict__(self):
+        return self._cv.get().__dict__
+
+    def get(self) -> AgentContext:
+        """Explicit accessor for the raw ``AgentContext`` (rarely needed)."""
+        return self._cv.get()
+
+
+_TOOL_CONTEXT = _ContextProxy(_TOOL_CONTEXT_VAR)
 
 # Per-turn cache for read-only tools. Cleared by run_agent_turn each turn.
 # Key: (tool_name, sorted_args_json). Cached read_file/file_info/etc.
@@ -655,7 +696,10 @@ def _learn_from_failure(name: str, result: "ToolResult | None") -> None:
     fingerprint = _fingerprint_error(name, content)
 
     # Track failures per (name, fingerprint) in process memory
-    patterns = _TOOL_CONTEXT.__dict__.setdefault("_failure_patterns", {})
+    patterns = getattr(_TOOL_CONTEXT, "_failure_patterns", None)
+    if patterns is None:
+        patterns = {}
+        _TOOL_CONTEXT._failure_patterns = patterns
     key = f"{name}:{fingerprint}"
     count = patterns.get(key, 0) + 1
     patterns[key] = count
@@ -729,9 +773,9 @@ def _learn_from_failure(name: str, result: "ToolResult | None") -> None:
                     fix_strategy=fix_strategy,
                 )
             except Exception:
-                pass  # Never let failure recording crash the agent
+                _log.warning("FailurePatternStore.record_failure failed", exc_info=True)
     except (KeyError, ValueError, TypeError, AttributeError, sqlite3.Error):
-        pass  # Never let auto-learn crash tool execution
+        _log.warning("_learn_from_failure failed", exc_info=True)
 
 
 def execute_tool(
@@ -877,8 +921,10 @@ def execute_tool(
 
     # --- Auto-learn from tool failures (pattern detection + escalation) ---
     if not result.success:
+        log_tool_failure(name, result.content)
         _learn_from_failure(name, result)
     else:
+        log_tool_success(name)
         # Only record success when this tool has known failure patterns;
         # skips unnecessary DB queries for the vast majority of successful calls.
         in_memory = _TOOL_CONTEXT.__dict__.get("_failure_patterns", {})
@@ -888,7 +934,7 @@ def execute_tool(
                 try:
                     pattern_store.record_success(name, args)
                 except Exception:
-                    pass  # Never let auto-learn crash tool execution
+                    _log.warning("FailurePatternStore.record_success failed", exc_info=True)
             # Clear in-memory counters on success — the agent recovered
             _TOOL_CONTEXT.__dict__.pop("_failure_patterns", None)
 
@@ -904,7 +950,7 @@ def execute_tool(
                 if diag_result.success and diag_result.content:
                     result.content += "\n\n[auto-verify] LSP diagnostics:\n" + diag_result.content[:500]
         except Exception:
-            pass  # Never let auto-verify crash a successful edit
+            _log.warning("auto-verify LSP diagnostics failed for %s", file_path, exc_info=True)
 
     # Cache successful read-only results (only when not streaming)
     if cache_key and result.success:
@@ -920,7 +966,7 @@ def tool_summary(tc: dict) -> str:
     try:
         args = json.loads(fn["arguments"])
     except Exception as exc:
-        print(f"  ⚠ tool summary parse failed for '{name}': {exc}", file=sys.stderr, flush=True)
+        _log.warning("tool_summary JSON parse failed for '%s': %s", name, exc)
         args = {}
 
     summarize = _TOOL_SUMMARIES.get(name)

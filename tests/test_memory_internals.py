@@ -25,8 +25,8 @@ from memory import (
     _get_tool_content,
     _estimate_tokens,
     _total_tokens,
-    _ACCUM_COUNT,
-    _ACCUM_TOTAL,
+    _ACCUM_STATE,
+    _ACCUM_LOCK,
     _MARKDOWN_TOOL_RESULT_PREVIEW,
 )
 
@@ -626,9 +626,8 @@ class TestTotalTokens(unittest.TestCase):
 
     def setUp(self):
         # Reset accumulators before each test
-        global _ACCUM_COUNT, _ACCUM_TOTAL
-        _ACCUM_COUNT = 0
-        _ACCUM_TOTAL = 0
+        global _ACCUM_STATE
+        _ACCUM_STATE.clear()
         _clear_message_caches()
 
     def tearDown(self):

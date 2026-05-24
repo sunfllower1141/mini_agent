@@ -15,7 +15,7 @@ from collections.abc import Callable
 
 import requests
 
-from terminal import c, DIM
+from terminal import c, DIM, GREEN
 
 # Thinking-mode delimiters sent through the on_token stream
 THINKING_START = "\n[thinking] "
@@ -89,7 +89,9 @@ def _parse_stream(response: requests.Response, on_token: Callable[[str], None] |
                     if on_token:
                         on_token(delta["content"])
                     else:
-                        print(delta["content"], end="", flush=True)
+                        # In Electron/sub-agent mode, stdout is reserved for JSON messages.
+                        # Fall back to stderr so we don't break the protocol.
+                        print(delta["content"], end="", file=sys.stderr, flush=True)
 
                 # Reasoning content (thinking mode) — forward via on_token or print
                 if "reasoning_content" in delta and delta["reasoning_content"]:
@@ -103,7 +105,7 @@ def _parse_stream(response: requests.Response, on_token: Callable[[str], None] |
                     if on_token:
                         on_token(delta["reasoning_content"])
                     else:
-                        print(c(delta["reasoning_content"], DIM), end="", flush=True)
+                        print(c(delta["reasoning_content"], GREEN), end="", file=sys.stderr, flush=True)
 
                 # Tool calls — accumulate fragments by index and detect completion
                 if "tool_calls" in delta:

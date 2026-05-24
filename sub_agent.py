@@ -22,6 +22,9 @@ import uuid
 from safety import ReadSafetyGate, WriteSafetyGate
 from agent_runtime import SubAgentResult, AgentRuntime
 from api import APIError, call_llm, truncate_content
+from logging_setup import get_logger
+
+_sub_log = get_logger("sub_agent")
 
 
 # ---------------------------------------------------------------------------
@@ -397,7 +400,7 @@ def run_sub_agent(
                                 "text": "".join(_stream_buf[-20:]),
                             })
                         except Exception:
-                            pass  # best-effort
+                            _sub_log.debug("subagent callback 'thought' failed", exc_info=True)
                 return _wrapped
 
             # Write streaming tokens to log file for debugging
@@ -589,7 +592,7 @@ def run_sub_agent(
                     _targs = _fn.get("arguments", "{}")
                     subagent_callback("tool_start", {"task_id": task_id, "tool_name": _tname, "tool_args": _targs})
                 except Exception:
-                    pass  # best-effort; don't crash sub-agent for UI event failures
+                    _sub_log.debug("subagent callback 'tool_start' failed", exc_info=True)
 
             # --- Depth guard: block spawn/status/collect at max depth ---
             if current_depth >= max_depth and name in ("spawn_agent", "agent_status", "collect_agent", "collect_any", "agent_extend"):
@@ -683,7 +686,7 @@ def run_sub_agent(
                         "content": result.content[:500] if result.content else "",
                     })
                 except Exception:
-                    pass  # best-effort
+                    _sub_log.debug("subagent callback 'tool_end' failed", exc_info=True)
 
         # --- Auto-snapshot: record status every turn so the parent can peek
         #     with agent_status without waiting for a heartbeat. ---

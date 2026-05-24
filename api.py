@@ -27,6 +27,7 @@ from retry import _request_with_retry
 from stream import _parse_stream
 from tools.schema import TOOLS
 from tools.skills import get_active_tools
+from logging_setup import log_api_error
 
 # ---------------------------------------------------------------------------
 # API rate limiter — prevents thundering-herd when N sub-agents share one key
@@ -368,19 +369,13 @@ def call_llm(
         except (ValueError, AttributeError):
             err = r.text
         # --- Persist full error payload/response to api_error.log ---
-        import datetime as _dt, os as _os
-        _log_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "api_error.log")
-        try:
-            with open(_log_path, "a") as _f:
-                _f.write(f"\n{'='*80}\n")
-                _f.write(f"TIME: {_dt.datetime.now().isoformat()}\n")
-                _f.write(f"STATUS: {r.status_code}\n")
-                _f.write(f"RESPONSE_BODY:\n{str(err)}\n")
-                _f.write(f"PAYLOAD_MESSAGES_COUNT: {len(safe_messages)}\n")
-                _f.write(f"PAYLOAD:\n{json.dumps(payload, indent=2, default=str)}\n")
-                _f.write(f"{'='*80}\n")
-        except OSError:
-            pass  # Don't let logging break the error path
+        log_api_error(
+            provider=config.api_provider,
+            model=payload.get("model", "?"),
+            status_code=r.status_code,
+            error_body=str(err),
+            turn=getattr(config, "turn_count", 0),
+        )
         raise APIError(status_code=r.status_code, body=str(err))
 
     if config.stream:

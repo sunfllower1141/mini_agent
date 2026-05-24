@@ -90,8 +90,8 @@ class TestBuildStartupContext(unittest.TestCase):
             {"category": "session_summary", "summary": "Last session summary", "detail": ""},
         ]
         ctx = build_startup_context(self.tmp, knowledge=knowledge)
-        self.assertIn("Test pattern", ctx)
         self.assertIn("Last session summary", ctx)
+        self.assertIn("Project Learnings", ctx)
 
     def test_startup_context_without_knowledge(self):
         """build_startup_context should work fine with knowledge=None."""
@@ -121,8 +121,8 @@ class TestAllToolsDispatchable(unittest.TestCase):
         # Import tools first to trigger use_skill schema injection
         import tools  # noqa: F401
         from tools.schema import TOOLS
-        self.assertEqual(len(TOOLS), 59,
-                         f"Expected 59 tools, got {len(TOOLS)}. Update this test if changed.")
+        self.assertEqual(len(TOOLS), 60,
+                         f"Expected 60 tools, got {len(TOOLS)}. Update this test if changed.")
 
 
 class TestProjectKnowledgeMethods(unittest.TestCase):

@@ -25,6 +25,29 @@ import threading
 import warnings
 from typing import Optional
 
+from logging_setup import get_logger
+
+_mem_log = get_logger("memory")
+
+# --- sqlite3 error escalation: track consecutive errors ---
+_consecutive_sqlite_errors: int = 0
+_CONSECUTIVE_ERROR_THRESHOLD = 3
+
+def _on_sqlite_error(operation: str) -> None:
+    """Track consecutive sqlite3 errors and log/escalate when threshold hit."""
+    global _consecutive_sqlite_errors
+    _consecutive_sqlite_errors += 1
+    _mem_log.warning("sqlite3 error in %s (consecutive=%d)", operation, _consecutive_sqlite_errors)
+    if _consecutive_sqlite_errors >= _CONSECUTIVE_ERROR_THRESHOLD:
+        _mem_log.error("sqlite3 error escalation: %d consecutive errors — memory persistence may be degraded", 
+                       _consecutive_sqlite_errors)
+
+def _reset_sqlite_errors() -> None:
+    """Reset the consecutive sqlite3 error counter on successful operation."""
+    global _consecutive_sqlite_errors
+    if _consecutive_sqlite_errors > 0:
+        _consecutive_sqlite_errors = 0
+
 
 # ---------------------------------------------------------------------------
 # SQL helpers
@@ -662,7 +685,7 @@ def _summarize_pruned_llm(pruned: list[dict]) -> str:
         if result and result.get("content"):
             return f"[Earlier context summary] {result['content'].strip()}"
     except Exception:
-        pass  # Fall through to rules-based
+        _mem_log.warning("LLM summarization failed, falling back to rules-based", exc_info=True)
 
     return _summarize_pruned_rules(pruned)
 
@@ -1143,6 +1166,7 @@ class MemoryStore:
                 self._last_saved_count = len(kept)
                 return kept
             except sqlite3.Error as exc:
+                _on_sqlite_error("save")
                 last_exc = exc
                 try:
                     conn.rollback()

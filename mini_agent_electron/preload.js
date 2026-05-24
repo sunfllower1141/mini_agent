@@ -56,6 +56,17 @@ contextBridge.exposeInMainWorld('miniAgent', {
   // Request status update
   getStatus: () => ipcRenderer.invoke('backend:get_status'),
 
+  // --- Settings / API key management ---
+  // Check if an API key is already configured. Returns { configured, provider }.
+  getApiKeyStatus: () => ipcRenderer.invoke('settings:getApiKeyStatus'),
+
+  // Save an API key for the chosen provider to ~/.mini_agent_env.
+  // provider: 'deepseek' | 'claude' | 'xai' | 'ollama'
+  saveApiKey: (provider, key) => ipcRenderer.invoke('settings:saveApiKey', provider, key),
+
+  // Kill and restart the Python backend (called after saving a new API key).
+  restartBackend: () => ipcRenderer.invoke('settings:restartBackend'),
+
   // --- File drop bridge ---
   // Registers a callback that receives an array of absolute file paths
   // whenever the user drops files from the OS onto the window.

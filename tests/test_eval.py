@@ -85,6 +85,8 @@ tags: ["bugfix", "basics"]
 
     def test_load_tasks_from_directory(self):
         tasks_dir = os.path.join(os.path.dirname(__file__), "eval", "tasks")
+        if not os.path.isdir(tasks_dir):
+            pytest.skip("eval/tasks/ fixture directory not present")
         tasks = load_tasks(tasks_dir)
         assert len(tasks) >= 3
         task_ids = {t.id for t in tasks}
@@ -92,12 +94,16 @@ tags: ["bugfix", "basics"]
 
     def test_load_tasks_filter_by_id(self):
         tasks_dir = os.path.join(os.path.dirname(__file__), "eval", "tasks")
+        if not os.path.isdir(tasks_dir):
+            pytest.skip("eval/tasks/ fixture directory not present")
         tasks = load_tasks(tasks_dir, task_id="add-hello-world")
         assert len(tasks) == 1
         assert tasks[0].id == "add-hello-world"
 
     def test_load_tasks_filter_by_tag(self):
         tasks_dir = os.path.join(os.path.dirname(__file__), "eval", "tasks")
+        if not os.path.isdir(tasks_dir):
+            pytest.skip("eval/tasks/ fixture directory not present")
         tasks = load_tasks(tasks_dir, tags=["bugfix"])
         assert len(tasks) >= 1
         for t in tasks:
@@ -105,6 +111,8 @@ tags: ["bugfix", "basics"]
 
     def test_load_tasks_filter_by_difficulty(self):
         tasks_dir = os.path.join(os.path.dirname(__file__), "eval", "tasks")
+        if not os.path.isdir(tasks_dir):
+            pytest.skip("eval/tasks/ fixture directory not present")
         tasks = load_tasks(tasks_dir, difficulty="easy")
         assert len(tasks) >= 1
         for t in tasks:

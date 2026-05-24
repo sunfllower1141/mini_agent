@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import useSmoothStream from './hooks/useSmoothStream';
-import LogLine, { extractSvgFromText, splitTextAndSvgs } from './components/LogLine';
+import LogLine from './components/LogLine';
 import CodeBlock from './components/CodeBlock';
 import LogPanel from './components/LogPanel';
 import AgentTree from './components/AgentTree';
@@ -10,6 +10,7 @@ import RoundedFrame from './components/RoundedFrame';
 import CharStream from './components/CharStream';
 import ErrorBoundary from './components/ErrorBoundary';
 import SessionPicker from './components/SessionPicker';
+import SettingsPanel from './components/SettingsPanel';
 
 
 // Shared components map for ReactMarkdown — wires CodeBlock for syntax highlighting.
@@ -61,6 +62,7 @@ function AppShell() {
   const inThinkingRef = useRef(false);
   const submitTimeoutRef = useRef(null);
   const toolOutputStack = useRef([]); // stack of buffers for parallel tool calls
+  const [showSettings, setShowSettings] = useState(false);
   const [inputValue, setInputValue] = useState('');
 
   // Helper to add a line to any log
@@ -76,6 +78,15 @@ function AppShell() {
     if (!api) return;
 
     const onStatus = (data) => {
+      // Check for no-API-key signal from main process
+      if (data.reason === 'no_api_key') {
+        setShowSettings(true);
+        return;
+      }
+      if (data.ready) {
+        // Backend came online — hide settings if it was showing
+        setShowSettings(false);
+      }
       if (data.model != null) setModelName(data.model);
       if (data.session_name != null) setSessionName(data.session_name);
       if (data.workspace != null) setWorkspace(data.workspace);
@@ -426,6 +437,12 @@ function AppShell() {
     // Session name in footer will update via backend:status event
   }, []);
 
+  // Settings saved handler — backend will send backend:status { ready: true }
+  // which triggers setShowSettings(false) in the onStatus listener
+  const handleSettingsSaved = useCallback(() => {
+    // Let the backend:status event handle hiding the panel
+  }, []);
+
   // Cancel handler — immediately reset UI, then tell backend
   const handleCancel = useCallback(() => {
     window.miniAgent?.cancel();
@@ -509,47 +526,27 @@ function AppShell() {
           <div id="chat-log" ref={chatLogRef} className="log scrollable text">
             {chatLines.map((line, i) => {
               if (line.cls === 'msg-agent') {
-                const segments = splitTextAndSvgs(line.text);
                 return (
                   <div key={`line-${i}`} className="msg-agent">
-                    {segments.map((seg, j) => {
-                      if (seg.type === 'svg') {
-                        return (
-                          <span key={`svg-${j}`} className="emoji-icon" dangerouslySetInnerHTML={{ __html: seg.value }} />
-                        );
-                      }
-                      if (!seg.value.trim()) return null;
-                      return (
-                        <ReactMarkdown key={`md-${j}`} remarkPlugins={[remarkGfm]}>
-                          {seg.value}
-                        </ReactMarkdown>
-                      );
-                    })}
+                    {line.text.trim() && (
+                      <ReactMarkdown key={`md-${i}`} remarkPlugins={[remarkGfm]}>
+                        {line.text}
+                      </ReactMarkdown>
+                    )}
                   </div>
                 );
               }
               return <LogLine key={`line-${i}`} line={line} />;
             })}
-            {chatStream.displayedText && (() => {
-              const segments = splitTextAndSvgs(chatStream.displayedText);
-              return (
-                <div className="msg-agent">
-                  {segments.map((seg, j) => {
-                    if (seg.type === 'svg') {
-                      return (
-                        <span key={`svg-${j}`} className="emoji-icon" dangerouslySetInnerHTML={{ __html: seg.value }} />
-                      );
-                    }
-                    if (!seg.value.trim()) return null;
-                    return (
-                      <ReactMarkdown key={`md-${j}`} remarkPlugins={[remarkGfm]}>
-                        {seg.value}
-                      </ReactMarkdown>
-                    );
-                  })}
-                </div>
-              );
-            })()}
+            {chatStream.displayedText && (
+              <div className="msg-agent">
+                {chatStream.displayedText.trim() && (
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {chatStream.displayedText}
+                  </ReactMarkdown>
+                )}
+              </div>
+            )}
           </div>
         </RoundedFrame>
       </div>
@@ -600,6 +597,7 @@ function AppShell() {
           <SessionPicker sessionName={sessionName} onSwitch={handleSessionSwitch} />
         </div>
       </div>
+      {showSettings && <SettingsPanel onSaved={handleSettingsSaved} />}
     </div>
   );
 }

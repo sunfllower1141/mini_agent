@@ -8,7 +8,7 @@ import os
 import py_compile
 import unittest
 
-ROOT = os.path.dirname(__file__)
+ROOT = os.path.dirname(os.path.dirname(__file__))  # project root, not tests/
 SOURCES = [
     "llm.py",
     "prompt.py",

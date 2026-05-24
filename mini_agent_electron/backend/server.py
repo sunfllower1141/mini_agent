@@ -402,9 +402,10 @@ class AgentRunner:
 
         if cmd == "/clear":
             self._cancel_event.set()
+            knowledge = self.memory.get_top_knowledge(limit=15) if hasattr(self, 'memory') else []
             self.messages = [
                 {"role": "system", "content": build_system_prompt(self.config)},
-                {"role": "system", "content": build_startup_context(self.config.workspace)},
+                {"role": "system", "content": build_startup_context(self.config.workspace, knowledge=knowledge)},
             ]
             clear_api_cache()
             self.memory.clear()

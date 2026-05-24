@@ -28,6 +28,9 @@ from api import APIError, format_tool_detail, call_llm, call_deepseek, clear_api
 from config import AgentConfig
 from tools import execute_tool, tool_summary, clear_tool_cache, _TOOL_CONTEXT, get_modified_files
 from safety import ReadSafetyGate, WriteSafetyGate
+from logging_setup import get_logger, log_error_trace
+
+_log = get_logger("llm")
 from interject import poll_interjections
 
 
@@ -292,7 +295,7 @@ def _inject_orchestration_context(messages: list[dict]) -> None:
                 "_transient": True,
             })
     except (APIError, AttributeError, KeyError, ValueError, TypeError) as exc:
-        print(f"  ⚠ orchestration context failed: {exc}", file=sys.stderr, flush=True)
+        _log.warning("orchestration context failed: %s", exc)
 
 
 def _inject_interjections(messages: list[dict]) -> None:
@@ -414,11 +417,11 @@ def _inject_system_reminder(messages: list[dict], *, turn_count: int) -> None:
     if len(messages) <= 20:
         return
     # Repeat every 12 messages after initial threshold
-    if not hasattr(_inject_system_reminder, '_last_msg_count'):
-        _inject_system_reminder._last_msg_count = 0
-    if len(messages) - _inject_system_reminder._last_msg_count < 12:
+    if not hasattr(_TOOL_CONTEXT, '_system_reminder_last_msg_count'):
+        _TOOL_CONTEXT._system_reminder_last_msg_count = 0
+    if len(messages) - _TOOL_CONTEXT._system_reminder_last_msg_count < 12:
         return
-    _inject_system_reminder._last_msg_count = len(messages)
+    _TOOL_CONTEXT._system_reminder_last_msg_count = len(messages)
 
     reminder = (
         "⚠️ SYSTEM REMINDER (context is long — critical rules):\n\n"
@@ -468,40 +471,15 @@ def _compress_stale_tool_results(messages: list[dict]) -> None:
         )
 
 
-def _inject_failure_pattern_warnings(messages: list[dict], *, turn_count: int) -> None:
-    """Inject failure pattern warnings for pending tool calls.
-
-    Checks the FailurePatternStore for known failure patterns matching
-    the tool calls about to be made, and warns the agent preemptively.
-    Fires every turn (cooldown removed — P5 fix).
-    """
-    try:
-        fps = getattr(_TOOL_CONTEXT, "_failure_pattern_store", None)
-        if fps is None:
-            return
-        # Look at last assistant message for pending tool calls
-        for msg in reversed(messages):
-            if msg.get("role") == "assistant" and msg.get("tool_calls"):
-                from tools.failure_learning import build_self_learning_context
-                warning = build_self_learning_context(fps, msg["tool_calls"])
-                if warning:
-                    messages.append({
-                        "role": "user",
-                        "content": warning,
-                        "_transient": True,
-                    })
-                return
-    except (AttributeError, KeyError, ValueError, TypeError):
-        pass
-
-
-def _inject_failure_pattern_warnings_for(
+def _inject_failure_pattern_warnings(
     msg: dict, messages: list[dict],
 ) -> None:
-    """Inject failure pattern warnings for a specific assistant message's tool calls.
+    """Inject failure pattern warnings for an assistant message's tool calls.
 
     Called between API call and tool execution so warnings target the
-    CURRENT turn's tool choices (P4 fix — was only pre-API-call before).
+    CURRENT turn's tool choices.  (M7: deduplicated — removed the
+    pre-API-call variant that re-warned about the previous turn's
+    tool_calls that had already been warned post-API.)
     """
     try:
         fps = getattr(_TOOL_CONTEXT, "_failure_pattern_store", None)
@@ -638,7 +616,6 @@ def _inject_context(
     _inject_scratchpad_nudge(messages, turn_count=turn_count)
     _inject_strategy_hint(messages)
     _inject_plan_status(messages)
-    _inject_failure_pattern_warnings(messages, turn_count=turn_count)
     _inject_self_critique(messages, turn_count=turn_count)
 
     # Context-quality defences (research-backed: 25% fill degrades quality)
@@ -1031,12 +1008,9 @@ def _api_call_phase(
             # must be appended so the next API call doesn't get a 400
             # "insufficient tool messages following tool_calls" error.
             from tools import ToolResult as TR
-            import sys as _sys
             tool_name = tc.get("function", {}).get("name", "?")
-            _sys.stderr.write(
-                f"{type(_exc).__name__}: {_exc}\n"
-            )
-            _sys.stderr.flush()
+            log_error_trace("tool_execution_crash", f"{type(_exc).__name__}: {_exc}",
+                            exc_info=True, extra={"tool_name": tool_name})
             result = TR(
                 success=False,
                 content=f"Tool '{tool_name}' failed during streaming: {_exc}",
@@ -1238,7 +1212,7 @@ def run_agent_turn(
             # P4 fix: inject failure pattern warnings for the NEW tool calls
             # right before execution (was only pre-API-call before, missing
             # the current turn's tool choices).
-            _inject_failure_pattern_warnings_for(msg, messages)
+            _inject_failure_pattern_warnings(msg, messages)
             continue_loop = _tool_execution_phase(
                 msg, messages, deferred_stream_results, executed_tool_indices,
                 write_gate, read_gate, turn_count,

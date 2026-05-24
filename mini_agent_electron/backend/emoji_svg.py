@@ -178,7 +178,5 @@ def strip_remaining_emojis(text: str) -> str:
 
 
 def clean_text(text: str) -> str:
-    """Full pipeline: replace known emojis with SVGs, then strip any leftovers."""
-    text = replace_emojis(text)
-    text = strip_remaining_emojis(text)
+    """Pass-through — emoji-to-SVG conversion removed; emojis render natively."""
     return text

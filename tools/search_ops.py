@@ -25,6 +25,19 @@ _INDEX_MAX_MTIME: float = 0.0  # max mtime across all .py files from last build
 _INDEX_LAST_PERSIST: float = 0.0  # timestamp of last disk cache write (debounce)
 
 
+# Names we never track as references (builtins, common patterns, etc.)
+_SKIP_REF_NAMES: frozenset[str] = frozenset({
+    "self", "cls", "True", "False", "None", "int", "str", "list", "dict",
+    "set", "tuple", "bool", "float", "bytes", "type", "object", "super",
+    "range", "len", "print", "isinstance", "hasattr", "getattr", "setattr",
+    "enumerate", "zip", "map", "filter", "iter", "next", "any", "all",
+    "sorted", "reversed", "min", "max", "sum", "abs", "round", "ord", "chr",
+    "open", "Exception", "ValueError", "TypeError", "KeyError", "OSError",
+    "RuntimeError", "ImportError", "AttributeError", "StopIteration",
+    "__init__", "__name__", "__main__", "__file__", "__doc__",
+    "unittest", "TestCase", "json", "os", "sys", "re", "time",
+})
+
 # --- #8 Background indexing ---
 import threading
 _background_index_thread: threading.Thread | None = None
@@ -88,19 +101,6 @@ def build_symbol_index(root: str) -> dict[str, list[dict]]:
 
     def_pat = re.compile(r"^\s*(def|class)\s+(\w+)")
     word_pat = re.compile(r"\b(\w+)\b")
-
-    # Names we never track as references (builtins, common patterns, etc.)
-    _SKIP_REF_NAMES = frozenset({
-        "self", "cls", "True", "False", "None", "int", "str", "list", "dict",
-        "set", "tuple", "bool", "float", "bytes", "type", "object", "super",
-        "range", "len", "print", "isinstance", "hasattr", "getattr", "setattr",
-        "enumerate", "zip", "map", "filter", "iter", "next", "any", "all",
-        "sorted", "reversed", "min", "max", "sum", "abs", "round", "ord", "chr",
-        "open", "Exception", "ValueError", "TypeError", "KeyError", "OSError",
-        "RuntimeError", "ImportError", "AttributeError", "StopIteration",
-        "__init__", "__name__", "__main__", "__file__", "__doc__",
-        "unittest", "TestCase", "json", "os", "sys", "re", "time",
-    })
 
     symbol_idx: dict[str, list[dict]] = {}
     # Raw word references collected in a single pass (word, path, line, context).
@@ -527,17 +527,6 @@ def _sem_index(root: str) -> None:
     import re as _sem_re
     def_pat = _sem_re.compile(r"^\s*(def|class)\s+(\w+)")
     word_pat = _sem_re.compile(r"\b(\w+)\b")
-    _SKIP_REF_NAMES = frozenset({
-        "self", "cls", "True", "False", "None", "int", "str", "list", "dict",
-        "set", "tuple", "bool", "float", "bytes", "type", "object", "super",
-        "range", "len", "print", "isinstance", "hasattr", "getattr", "setattr",
-        "enumerate", "zip", "map", "filter", "iter", "next", "any", "all",
-        "sorted", "reversed", "min", "max", "sum", "abs", "round", "ord", "chr",
-        "open", "Exception", "ValueError", "TypeError", "KeyError", "OSError",
-        "RuntimeError", "ImportError", "AttributeError", "StopIteration",
-        "__init__", "__name__", "__main__", "__file__", "__doc__",
-        "unittest", "TestCase", "json", "os", "sys", "re", "time",
-    })
 
     old_max = _SEMANTIC_MAX_MTIME
     new_max = 0.0
