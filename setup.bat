@@ -26,16 +26,51 @@ echo [0/7] Checking prerequisites...
 
 set ERRORS=0
 
-REM Python
-where python >nul 2>nul
-if %errorlevel% equ 0 (
-    for /f "tokens=2" %%i in ('python --version 2^>^&1') do set PY_VER=%%i
-    echo   [OK] Python  (!PY_VER!)
-) else (
-    echo   [MISSING] Python 3 not found. Install from https://www.python.org/downloads/
-    echo            Make sure to check "Add Python to PATH" during install.
-    set /a ERRORS+=1
+REM Python — find the real Python, not the Microsoft Store stub
+set PYTHON_EXE=
+set PYTHON_VER=
+
+REM Check common real Python install locations first
+for %%p in (
+    "C:\Users\%USERNAME%\AppData\Local\Python\bin\python.exe"
+    "C:\Users\%USERNAME%\AppData\Local\Programs\Python\Python313\python.exe"
+    "C:\Users\%USERNAME%\AppData\Local\Programs\Python\Python312\python.exe"
+    "C:\Users\%USERNAME%\AppData\Local\Programs\Python\Python311\python.exe"
+    "C:\Users\%USERNAME%\AppData\Local\Programs\Python\Python310\python.exe"
+    "C:\Program Files\Python313\python.exe"
+    "C:\Program Files\Python312\python.exe"
+    "C:\Program Files\Python311\python.exe"
+    "C:\Program Files\Python310\python.exe"
+) do (
+    if exist %%p (
+        set "PYTHON_EXE=%%~p"
+        goto :python_found
+    )
 )
+
+REM Last resort: use 'where python' but skip the WindowsApps stub
+for /f "delims=" %%p in ('where python 2^>nul') do (
+    echo %%p | findstr /I "WindowsApps" >nul
+    if !errorlevel! neq 0 (
+        set "PYTHON_EXE=%%p"
+        goto :python_found
+    )
+)
+
+REM No real Python found
+echo   [MISSING] Python 3 not found. Install from https://www.python.org/downloads/
+echo            Make sure to check "Add Python to PATH" during install.
+echo            If Python IS installed, disable App Execution Aliases:
+echo              Settings ^> Apps ^> Advanced app settings ^> App execution aliases
+echo              Turn OFF "python.exe" and "python3.exe"
+set /a ERRORS+=1
+goto :python_done
+
+:python_found
+for /f "tokens=2" %%i in ('"%PYTHON_EXE%" --version 2^>^&1') do set PYTHON_VER=%%i
+echo   [OK] Python  (!PYTHON_VER!)  [%PYTHON_EXE%]
+
+:python_done
 
 REM Node.js
 where node >nul 2>nul
@@ -82,6 +117,7 @@ if !ERRORS! gtr 0 (
     pause
     exit /b 1
 )
+:skip_pip
 
 echo.
 
@@ -90,8 +126,12 @@ REM 1. Python virtual environment
 REM ------------------------------------------------------------------
 
 echo [1/7] Python virtual environment...
+if not defined PYTHON_EXE (
+    echo   [SKIP] No Python found, cannot create venv
+    goto :skip_venv
+)
 if not exist "venv\" (
-    python -m venv venv
+    "%PYTHON_EXE%" -m venv venv
     if %errorlevel% equ 0 (
         echo   [OK] Created venv\
     ) else (
@@ -102,15 +142,20 @@ if not exist "venv\" (
 ) else (
     echo   [OK] venv\ already exists, skipping
 )
+:skip_venv
 
 REM ------------------------------------------------------------------
 REM 2. Python dependencies
 REM ------------------------------------------------------------------
 
 echo [2/7] Python dependencies...
+if not exist "venv\Scripts\python.exe" (
+    echo   [SKIP] No venv found, cannot install Python packages
+    goto :skip_pip
+)
 call venv\Scripts\activate.bat
-python -m pip install --upgrade pip -q
-pip install -r requirements.txt -q
+venv\Scripts\python.exe -m pip install --upgrade pip -q
+venv\Scripts\pip.exe install -r requirements.txt -q
 if %errorlevel% equ 0 (
     echo   [OK] Installed Python packages
 ) else (
@@ -129,13 +174,18 @@ REM 3. Playwright browser
 REM ------------------------------------------------------------------
 
 echo [3/7] Playwright browser...
-python -m playwright install chromium --with-deps 2>nul
+if not exist "venv\Scripts\python.exe" (
+    echo   [SKIP] No venv found, cannot install Playwright browsers
+    goto :skip_playwright
+)
+venv\Scripts\python.exe -m playwright install chromium --with-deps 2>nul
 if %errorlevel% equ 0 (
     echo   [OK] Chromium browser installed for Playwright
 ) else (
     echo   [WARN] Playwright browser install failed. Web browsing tools won't work.
     echo          You can retry later: venv\Scripts\python.exe -m playwright install chromium
 )
+:skip_playwright
 
 REM ------------------------------------------------------------------
 REM 4. Node.js dependencies
