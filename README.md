@@ -7,19 +7,30 @@ Multi-agent orchestration, SQLite memory, headless browser, and an Electron desk
 
 ### Prerequisites
 
-| Tool | Version | Install |
-|------|---------|---------|
-| **Python** | 3.10+ | [python.org](https://www.python.org/downloads/) |
-| **Node.js** | 18+ | [nodejs.org](https://nodejs.org/) |
-| **ripgrep** | any | `brew install ripgrep` (macOS) / `apt install ripgrep` (Linux) |
+| Tool | Version | macOS / Linux | Windows |
+|------|---------|---------------|---------|
+| **Python** | 3.10+ | [python.org](https://www.python.org/downloads/) | [python.org](https://www.python.org/downloads/) _(check "Add Python to PATH")_ |
+| **Node.js** | 18+ | [nodejs.org](https://nodejs.org/) | [nodejs.org](https://nodejs.org/) (LTS) |
+| **ripgrep** | any | `brew install ripgrep` / `apt install ripgrep` | `winget install BurntSushi.ripgrep.MSVC` |
+| **git** | any | `brew install git` / `apt install git` | `winget install Git.Git` |
 
 ### One-step install
 
+**macOS / Linux:**
 ```bash
 git clone https://github.com/GabrielMalone/mini_agent.git
 cd mini_agent
-bash setup.sh        # checks prerequisites, installs deps, builds renderer
+bash setup.sh
 ```
+
+**Windows (Command Prompt or PowerShell):**
+```bat
+git clone https://github.com/GabrielMalone/mini_agent.git
+cd mini_agent
+setup.bat
+```
+
+The setup script checks prerequisites, creates a Python venv, installs all dependencies (including Playwright browsers), and builds the Electron renderer.
 
 ### Launch
 
@@ -27,6 +38,8 @@ bash setup.sh        # checks prerequisites, installs deps, builds renderer
 cd mini_agent_electron
 npm start            # auto-builds renderer if needed, then opens the desktop app
 ```
+
+> **Windows note:** On first launch, Windows Defender Firewall may prompt you to allow Node.js network access. Click "Allow" — the app needs this to communicate with the AI provider's API.
 
 ## Features
 

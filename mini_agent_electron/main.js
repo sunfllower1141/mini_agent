@@ -117,7 +117,7 @@ function spawnPythonBackend(workspacePath) {
   const venvPython = isWindows
     ? path.join(__dirname, '..', 'venv', 'Scripts', 'python.exe')
     : path.join(__dirname, '..', 'venv', 'bin', 'python3');
-  const fallback = isWindows ? 'python' : 'python3';
+  const fallback = isWindows ? 'python.exe' : 'python3';
   const pythonBin = fs.existsSync(venvPython) ? venvPython : fallback;
 
   console.log(`Using Python: ${pythonBin}`);

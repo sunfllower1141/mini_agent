@@ -3,17 +3,18 @@ REM setup.bat — full bootstrap for mini_agent (Windows)
 REM Run: setup.bat
 REM
 REM This script:
-REM   1. Checks for required system tools (Node.js, Python, ripgrep)
+REM   1. Checks for required system tools (Node.js, Python, ripgrep, git)
 REM   2. Creates a Python virtual environment and installs dependencies
-REM   3. Installs Node.js packages
-REM   4. Builds the Electron renderer (optional — npm start also does this)
-REM   5. Guides you through API key setup
+REM   3. Installs Playwright browser binaries
+REM   4. Installs Node.js packages
+REM   5. Builds the Electron renderer
+REM   6. Checks for .env / API keys
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
 echo.
 echo ===================================
-echo      mini_agent — setup
+echo      mini_agent — setup (Windows)
 echo ===================================
 echo.
 
@@ -21,7 +22,7 @@ REM ------------------------------------------------------------------
 REM 0. Prerequisite checks
 REM ------------------------------------------------------------------
 
-echo [0/6] Checking prerequisites...
+echo [0/7] Checking prerequisites...
 
 set ERRORS=0
 
@@ -32,6 +33,7 @@ if %errorlevel% equ 0 (
     echo   [OK] Python  (!PY_VER!)
 ) else (
     echo   [MISSING] Python 3 not found. Install from https://www.python.org/downloads/
+    echo            Make sure to check "Add Python to PATH" during install.
     set /a ERRORS+=1
 )
 
@@ -41,7 +43,7 @@ if %errorlevel% equ 0 (
     for /f "delims=" %%i in ('node --version 2^>^&1') do set NODE_VER=%%i
     echo   [OK] Node.js  (!NODE_VER!)
 ) else (
-    echo   [MISSING] Node.js not found. Install from https://nodejs.org (v18+)
+    echo   [MISSING] Node.js not found. Install from https://nodejs.org (v18+ LTS)
     set /a ERRORS+=1
 )
 
@@ -55,21 +57,23 @@ if %errorlevel% equ 0 (
     set /a ERRORS+=1
 )
 
-REM ripgrep
+REM ripgrep (strongly recommended)
 where rg >nul 2>nul
 if %errorlevel% equ 0 (
     echo   [OK] ripgrep
 ) else (
-    echo   [WARN] ripgrep (rg) not found. Install: winget install BurntSushi.ripgrep.MSVC
-    echo          Without it, file search will fall back to slower methods.
+    echo   [WARN] ripgrep (rg) not found.
+    echo          Install: winget install BurntSushi.ripgrep.MSVC
+    echo          Without it, file search falls back to slower methods.
 )
 
-REM Git (needed by some tools)
+REM Git
 where git >nul 2>nul
 if %errorlevel% equ 0 (
     echo   [OK] git
 ) else (
-    echo   [WARN] git not found. Some agent tools (git skill) won't work.
+    echo   [WARN] git not found. Some agent tools (git skill, branch detection) won't work.
+    echo         Install: winget install Git.Git
 )
 
 if !ERRORS! gtr 0 (
@@ -85,7 +89,7 @@ REM ------------------------------------------------------------------
 REM 1. Python virtual environment
 REM ------------------------------------------------------------------
 
-echo [1/6] Python virtual environment...
+echo [1/7] Python virtual environment...
 if not exist "venv\" (
     python -m venv venv
     if %errorlevel% equ 0 (
@@ -103,23 +107,41 @@ REM ------------------------------------------------------------------
 REM 2. Python dependencies
 REM ------------------------------------------------------------------
 
-echo [2/6] Python dependencies...
+echo [2/7] Python dependencies...
 call venv\Scripts\activate.bat
 python -m pip install --upgrade pip -q
 pip install -r requirements.txt -q
 if %errorlevel% equ 0 (
     echo   [OK] Installed Python packages
 ) else (
-    echo   [FAIL] pip install failed. Check requirements.txt and try again.
+    echo   [FAIL] pip install failed.
+    echo.
+    echo   Some packages (sentence-transformers) may need Visual C++ Build Tools:
+    echo     https://visualstudio.microsoft.com/visual-cpp-build-tools/
+    echo   Select "Desktop development with C++" during install.
+    echo.
     pause
     exit /b 1
 )
 
 REM ------------------------------------------------------------------
-REM 3. Node.js dependencies
+REM 3. Playwright browser
 REM ------------------------------------------------------------------
 
-echo [3/6] Node.js dependencies...
+echo [3/7] Playwright browser...
+python -m playwright install chromium --with-deps 2>nul
+if %errorlevel% equ 0 (
+    echo   [OK] Chromium browser installed for Playwright
+) else (
+    echo   [WARN] Playwright browser install failed. Web browsing tools won't work.
+    echo          You can retry later: venv\Scripts\python.exe -m playwright install chromium
+)
+
+REM ------------------------------------------------------------------
+REM 4. Node.js dependencies
+REM ------------------------------------------------------------------
+
+echo [4/7] Node.js dependencies...
 if not exist "mini_agent_electron\" (
     echo   [FAIL] mini_agent_electron\ directory not found. Are you in the repo root?
     pause
@@ -128,41 +150,47 @@ if not exist "mini_agent_electron\" (
 
 cd mini_agent_electron
 
-REM Skip npm install if node_modules already exists (faster re-runs)
 if exist "node_modules\" (
-    echo   [OK] node_modules\ already exists, checking for updates...
+    echo   [OK] node_modules\ already exists, updating...
     call npm install --silent
 ) else (
+    echo   Installing Electron + renderer packages (this may take a few minutes)...
     call npm install --silent
 )
 
 if %errorlevel% equ 0 (
     echo   [OK] Installed npm packages
 ) else (
-    echo   [FAIL] npm install failed. Check your Node.js version (need v18+).
+    echo   [FAIL] npm install failed.
+    echo.
+    echo   Common issues:
+    echo   - Node.js version too old (need v18+): node --version
+    echo   - PATH too long (Windows MAX_PATH=260). Move repo closer to drive root.
+    echo   - Network/firewall blocking npm registry.
+    echo.
     cd ..
     pause
     exit /b 1
 )
 
 REM ------------------------------------------------------------------
-REM 4. Build Electron renderer
+REM 5. Build Electron renderer
 REM ------------------------------------------------------------------
 
-echo [4/6] Building renderer...
+echo [5/7] Building renderer...
 call npm run build --silent
 if %errorlevel% equ 0 (
     echo   [OK] Renderer built -^> mini_agent_electron\renderer\dist\
 ) else (
-    echo   [WARN] Renderer build failed. npm start will auto-build on first launch.
+    echo   [WARN] Renderer build failed. npm start will auto-build on first launch anyway.
 )
 cd ..
 
 REM ------------------------------------------------------------------
-REM 5. .env file check (project root)
+REM 6. .env file check
 REM ------------------------------------------------------------------
 
-echo [5/6] Project .env file...
+echo [6/7] Project .env file...
 
 if exist ".env" (
     findstr /R "API_KEY=" .env >nul 2>nul
@@ -172,15 +200,20 @@ if exist ".env" (
         echo   [OK] .env file exists but no API_KEY entries detected
     )
 ) else (
-    echo   [INFO] No .env file in project root (optional)
-    echo          Create one to persist API keys:  notepad .env
+    echo   [INFO] No .env file in project root (optional).
+    echo          Create one to persist your API keys:
+    echo            notepad .env
+    echo.
+    echo          Example content:
+    echo            DEEPSEEK_API_KEY=sk-...
+    echo            CLAUDE_API_KEY=sk-ant-...
 )
 
 REM ------------------------------------------------------------------
-REM 6. API key check
+REM 7. API key check
 REM ------------------------------------------------------------------
 
-echo [6/6] API key check...
+echo [7/7] API key check...
 
 set KEY_FOUND=0
 if defined DEEPSEEK_API_KEY ( echo   [OK] DEEPSEEK_API_KEY is set & set KEY_FOUND=1 )
@@ -189,6 +222,7 @@ if defined XAI_API_KEY       ( echo   [OK] XAI_API_KEY is set       & set KEY_FO
 if defined OLLAMA_API_KEY    ( echo   [OK] OLLAMA_API_KEY is set    & set KEY_FOUND=1 )
 if defined OPENAI_API_KEY    ( echo   [OK] OPENAI_API_KEY is set    & set KEY_FOUND=1 )
 
+REM Also check %USERPROFILE%\.mini_agent_env (written by the app's settings panel)
 if !KEY_FOUND! equ 0 (
     if exist "%USERPROFILE%\.mini_agent_env" (
         findstr /R "DEEPSEEK_API_KEY CLAUDE_API_KEY XAI_API_KEY OLLAMA_API_KEY OPENAI_API_KEY" "%USERPROFILE%\.mini_agent_env" >nul 2>nul
@@ -203,10 +237,10 @@ if !KEY_FOUND! equ 0 (
     echo.
     echo   [WARN] No API key detected.
     echo.
-    echo   The app will show a settings panel on first launch where you can
-    echo   enter your key. Supported providers: DeepSeek, Claude, xAI, Ollama.
+    echo   On first launch the app shows a settings panel where you can enter
+    echo   your key. Supported providers: DeepSeek, Claude, xAI, Ollama.
     echo.
-    echo   Alternatively, set one now:
+    echo   Or set one now in this terminal before launching:
     echo     set DEEPSEEK_API_KEY=sk-...
     echo.
 )
@@ -229,9 +263,18 @@ echo For development mode (hot-reload renderer + DevTools):
 echo.
 echo   cd mini_agent_electron ^&^& npm run dev
 echo.
-echo Keyboard shortcuts in the app:
-echo   Enter        Submit message
-echo   Shift+Enter  New line
-echo   Escape       Cancel streaming response
+echo ---------------------------------------------------
+echo   Windows tips
+echo ---------------------------------------------------
+echo - First launch may trigger a Windows Defender Firewall popup
+echo   (Node.js needs network for the agent API). Click "Allow".
+echo.
+echo - If the window is blank/white, check that the renderer built:
+echo     cd mini_agent_electron ^&^& npm run build
+echo.
+echo - Keyboard shortcuts:
+echo     Enter        Submit message
+echo     Shift+Enter  New line
+echo     Escape       Cancel streaming response
 echo.
 pause
