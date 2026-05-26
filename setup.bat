@@ -5,8 +5,9 @@ REM
 REM This script:
 REM   1. Checks for required system tools (Node.js, Python, ripgrep)
 REM   2. Creates a Python virtual environment and installs dependencies
-REM   3. Installs Node.js packages and builds the Electron renderer
-REM   4. Gets you ready to launch with a single command
+REM   3. Installs Node.js packages
+REM   4. Builds the Electron renderer (optional — npm start also does this)
+REM   5. Guides you through API key setup
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
@@ -16,11 +17,11 @@ echo      mini_agent — setup
 echo ===================================
 echo.
 
-REM ------------------------------------------------------------------    
+REM ------------------------------------------------------------------
 REM 0. Prerequisite checks
-REM ------------------------------------------------------------------    
+REM ------------------------------------------------------------------
 
-echo [0/5] Checking prerequisites...
+echo [0/6] Checking prerequisites...
 
 set ERRORS=0
 
@@ -63,6 +64,14 @@ if %errorlevel% equ 0 (
     echo          Without it, file search will fall back to slower methods.
 )
 
+REM Git (needed by some tools)
+where git >nul 2>nul
+if %errorlevel% equ 0 (
+    echo   [OK] git
+) else (
+    echo   [WARN] git not found. Some agent tools (git skill) won't work.
+)
+
 if !ERRORS! gtr 0 (
     echo.
     echo Missing !ERRORS! required tool(s). Please install them and re-run setup.
@@ -72,61 +81,117 @@ if !ERRORS! gtr 0 (
 
 echo.
 
-REM ------------------------------------------------------------------    
+REM ------------------------------------------------------------------
 REM 1. Python virtual environment
-REM ------------------------------------------------------------------    
+REM ------------------------------------------------------------------
 
-echo [1/5] Python virtual environment...
+echo [1/6] Python virtual environment...
 if not exist "venv\" (
     python -m venv venv
-    echo   [OK] Created venv\
+    if %errorlevel% equ 0 (
+        echo   [OK] Created venv\
+    ) else (
+        echo   [FAIL] Could not create venv\. Check your Python installation.
+        pause
+        exit /b 1
+    )
 ) else (
     echo   [OK] venv\ already exists, skipping
 )
 
-REM ------------------------------------------------------------------    
+REM ------------------------------------------------------------------
 REM 2. Python dependencies
-REM ------------------------------------------------------------------    
+REM ------------------------------------------------------------------
 
-echo [2/5] Python dependencies...
+echo [2/6] Python dependencies...
 call venv\Scripts\activate.bat
-pip install --upgrade pip -q
+python -m pip install --upgrade pip -q
 pip install -r requirements.txt -q
-echo   [OK] Installed Python packages
+if %errorlevel% equ 0 (
+    echo   [OK] Installed Python packages
+) else (
+    echo   [FAIL] pip install failed. Check requirements.txt and try again.
+    pause
+    exit /b 1
+)
 
-REM ------------------------------------------------------------------    
+REM ------------------------------------------------------------------
 REM 3. Node.js dependencies
-REM ------------------------------------------------------------------    
+REM ------------------------------------------------------------------
 
-echo [3/5] Node.js dependencies...
+echo [3/6] Node.js dependencies...
+if not exist "mini_agent_electron\" (
+    echo   [FAIL] mini_agent_electron\ directory not found. Are you in the repo root?
+    pause
+    exit /b 1
+)
+
 cd mini_agent_electron
-call npm install --silent
-echo   [OK] Installed npm packages
 
-REM ------------------------------------------------------------------    
+REM Skip npm install if node_modules already exists (faster re-runs)
+if exist "node_modules\" (
+    echo   [OK] node_modules\ already exists, checking for updates...
+    call npm install --silent
+) else (
+    call npm install --silent
+)
+
+if %errorlevel% equ 0 (
+    echo   [OK] Installed npm packages
+) else (
+    echo   [FAIL] npm install failed. Check your Node.js version (need v18+).
+    cd ..
+    pause
+    exit /b 1
+)
+
+REM ------------------------------------------------------------------
 REM 4. Build Electron renderer
-REM ------------------------------------------------------------------    
+REM ------------------------------------------------------------------
 
-echo [4/5] Building renderer...
+echo [4/6] Building renderer...
 call npm run build --silent
-echo   [OK] Renderer built → mini_agent_electron\renderer\dist\
+if %errorlevel% equ 0 (
+    echo   [OK] Renderer built -^> mini_agent_electron\renderer\dist\
+) else (
+    echo   [WARN] Renderer build failed. npm start will auto-build on first launch.
+)
 cd ..
 
-REM ------------------------------------------------------------------    
-REM 5. API key check
-REM ------------------------------------------------------------------    
+REM ------------------------------------------------------------------
+REM 5. .env file check (project root)
+REM ------------------------------------------------------------------
 
-echo [5/5] API key check...
+echo [5/6] Project .env file...
+
+if exist ".env" (
+    findstr /R "API_KEY=" .env >nul 2>nul
+    if !errorlevel! equ 0 (
+        echo   [OK] .env file found with API keys
+    ) else (
+        echo   [OK] .env file exists but no API_KEY entries detected
+    )
+) else (
+    echo   [INFO] No .env file in project root (optional)
+    echo          Create one to persist API keys:  notepad .env
+)
+
+REM ------------------------------------------------------------------
+REM 6. API key check
+REM ------------------------------------------------------------------
+
+echo [6/6] API key check...
 
 set KEY_FOUND=0
 if defined DEEPSEEK_API_KEY ( echo   [OK] DEEPSEEK_API_KEY is set & set KEY_FOUND=1 )
 if defined CLAUDE_API_KEY    ( echo   [OK] CLAUDE_API_KEY is set    & set KEY_FOUND=1 )
 if defined XAI_API_KEY       ( echo   [OK] XAI_API_KEY is set       & set KEY_FOUND=1 )
 if defined OLLAMA_API_KEY    ( echo   [OK] OLLAMA_API_KEY is set    & set KEY_FOUND=1 )
+if defined OPENAI_API_KEY    ( echo   [OK] OPENAI_API_KEY is set    & set KEY_FOUND=1 )
 
 if !KEY_FOUND! equ 0 (
     if exist "%USERPROFILE%\.mini_agent_env" (
-        findstr /R "DEEPSEEK_API_KEY CLAUDE_API_KEY XAI_API_KEY OLLAMA_API_KEY" "%USERPROFILE%\.mini_agent_env" >nul 2>nul
+        findstr /R "DEEPSEEK_API_KEY CLAUDE_API_KEY XAI_API_KEY OLLAMA_API_KEY OPENAI_API_KEY" "%USERPROFILE%\.mini_agent_env" >nul 2>nul
         if !errorlevel! equ 0 (
             echo   [OK] API key found in %%USERPROFILE%%\.mini_agent_env
             set KEY_FOUND=1
@@ -148,9 +213,9 @@ if !KEY_FOUND! equ 0 (
 
 echo.
 
-REM ------------------------------------------------------------------    
+REM ------------------------------------------------------------------
 REM Done
-REM ------------------------------------------------------------------    
+REM ------------------------------------------------------------------
 
 echo ===================================
 echo      Setup complete!
@@ -163,5 +228,10 @@ echo.
 echo For development mode (hot-reload renderer + DevTools):
 echo.
 echo   cd mini_agent_electron ^&^& npm run dev
+echo.
+echo Keyboard shortcuts in the app:
+echo   Enter        Submit message
+echo   Shift+Enter  New line
+echo   Escape       Cancel streaming response
 echo.
 pause

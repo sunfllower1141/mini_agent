@@ -112,9 +112,13 @@ function spawnPythonBackend(workspacePath) {
     env.MINI_AGENT_WORKSPACE = workspacePath;
   }
 
-  // Prefer venv python, fall back to system python3.
-  const venvPython = path.join(__dirname, '..', 'venv', 'bin', 'python3');
-  const pythonBin = fs.existsSync(venvPython) ? venvPython : 'python3';
+  // Prefer venv python, fall back to system python3/python.
+  const isWindows = process.platform === 'win32';
+  const venvPython = isWindows
+    ? path.join(__dirname, '..', 'venv', 'Scripts', 'python.exe')
+    : path.join(__dirname, '..', 'venv', 'bin', 'python3');
+  const fallback = isWindows ? 'python' : 'python3';
+  const pythonBin = fs.existsSync(venvPython) ? venvPython : fallback;
 
   console.log(`Using Python: ${pythonBin}`);
   console.log(`DEEPSEEK_API_KEY: ${env.DEEPSEEK_API_KEY ? 'set' : 'not set'}`);
