@@ -40,21 +40,46 @@ else
     ERRORS=$((ERRORS + 1))
 fi
 
-# Node.js
-if command -v node &> /dev/null; then
-    NODE_VER=$(node --version)
-    echo -e "  ${GREEN}✓${NC} Node.js   (${NODE_VER})"
-else
-    echo -e "  ${RED}✗${NC} Node.js not found. Install from https://nodejs.org (v18+)"
+# Node.js — check common paths before giving up (nvm, homebrew, etc.)
+NODE_FOUND=false
+for candidate in "/usr/local/bin/node" "/opt/homebrew/bin/node"; do
+    if [ -x "$candidate" ]; then
+        NODE_VER=$("$candidate" --version 2>/dev/null)
+        echo -e "  ${GREEN}✓${NC} Node.js   (${NODE_VER}) [${candidate}]"
+        NODE_FOUND=true
+        break
+    fi
+done
+# also check nvm
+if [ "$NODE_FOUND" = false ] && [ -s "$HOME/.nvm/nvm.sh" ]; then
+    NODE_VER=$(bash -c "source $HOME/.nvm/nvm.sh 2>/dev/null && node --version" 2>/dev/null)
+    if [ -n "$NODE_VER" ]; then
+        echo -e "  ${GREEN}✓${NC} Node.js   (${NODE_VER}) [nvm]"
+        NODE_FOUND=true
+    fi
+fi
+# fallback: PATH
+if [ "$NODE_FOUND" = false ] && command -v node &>/dev/null; then
+    NODE_VER=$(node --version 2>/dev/null)
+    echo -e "  ${GREEN}✓${NC} Node.js   (${NODE_VER}) [PATH]"
+    NODE_FOUND=true
+fi
+if [ "$NODE_FOUND" = false ]; then
+    echo -e "  ${RED}✗${NC} Node.js not found."
+    echo "     Install: https://nodejs.org (v18+ LTS) or: brew install node"
+    echo "     If using nvm, run: source ~/.nvm/nvm.sh  first"
     ERRORS=$((ERRORS + 1))
 fi
 
 # npm
-if command -v npm &> /dev/null; then
-    NPM_VER=$(npm --version)
+if "$NODE_FOUND" && command -v npm &>/dev/null; then
+    NPM_VER=$(npm --version 2>/dev/null)
     echo -e "  ${GREEN}✓${NC} npm       (v${NPM_VER})"
+elif command -v npm &>/dev/null; then
+    NPM_VER=$(npm --version 2>/dev/null)
+    echo -e "  ${GREEN}✓${NC} npm       (v${NPM_VER}) [PATH]"
 else
-    echo -e "  ${RED}✗${NC} npm not found (usually bundled with Node.js)"
+    echo -e "  ${RED}✗${NC} npm not found (bundled with Node.js)"
     ERRORS=$((ERRORS + 1))
 fi
 

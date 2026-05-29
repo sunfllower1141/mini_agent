@@ -4,7 +4,7 @@
   "description": "Electron GUI for mini_agent — terminal-style AI coding assistant",
   "main": "main.js",
   "scripts": {
-    "prestart": "node -e \"if(!require('fs').existsSync('renderer/dist/index.html')){console.log('[prestart] Building renderer...');require('child_process').execSync('npx vite build',{stdio:'inherit'})}\"",
+    "prestart": "node -e \"if(!require('fs').existsSync('renderer/dist/index.html')){console.log('[prestart] Building renderer...');try{require('child_process').execSync('npx --yes vite build',{stdio:'inherit',cwd:__dirname})}catch(e){console.error('[prestart] Build failed. Run: npm run build');process.exit(1)}}\"",
     "start": "electron .",
     "dev": "electron . --dev",
     "build": "npx vite build",

@@ -16,6 +16,22 @@ Multi-agent orchestration, SQLite memory, headless browser, and an Electron desk
 
 ### One-step install
 
+Before running setup, verify your tools are reachable:
+
+```bash
+node --version   # should print v18+, v20+, or v22+
+npm --version    # should print 9+ or 10+
+python3 --version
+rg --version     # optional but recommended
+```
+
+If `node` is not found but you know it's installed:
+- **nvm users:** run `source ~/.nvm/nvm.sh` first (add to `~/.zshrc` or `~/.bashrc` to persist)
+- **Homebrew (Apple Silicon):** the path is `/opt/homebrew/bin/node` — ensure it's in your `$PATH`
+- **Windows:** the installer should add `C:\Program Files\nodejs\` to PATH; reinstall if `where node` returns nothing
+
+Then:
+
 **macOS / Linux:**
 ```bash
 git clone https://github.com/GabrielMalone/mini_agent.git
