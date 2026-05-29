@@ -72,49 +72,22 @@ echo   [OK] Python  (!PYTHON_VER!)  [%PYTHON_EXE%]
 
 :python_done
 
-REM Node.js — check common install locations first, then PATH
-set NODE_EXE=
-for %%p in (
-    "C:\Program Files\nodejs\node.exe"
-    "C:\Program Files (x86)\nodejs\node.exe"
-    "%APPDATA%\nvm\*\node.exe"
-    "%LOCALAPPDATA%\nvm\*\node.exe"
-) do (
-    if exist %%p (
-        set "NODE_EXE=%%~p"
-        goto :node_found
-    )
-)
-REM fallback: PATH
+REM Node.js
 where node >nul 2>nul
 if %errorlevel% equ 0 (
-    for /f "delims=" %%i in ('where node 2^>^&1') do set "NODE_EXE=%%i"
-    goto :node_found
+    for /f "delims=" %%i in ('node --version 2^>^&1') do set NODE_VER=%%i
+    echo   [OK] Node.js  (!NODE_VER!)
+) else (
+    echo   [MISSING] Node.js not found.
+    echo     Install from https://nodejs.org (v18+ LTS)
+    echo     If already installed, check your PATH or re-run the installer.
+    set /a ERRORS+=1
 )
-echo   [MISSING] Node.js not found. Install from https://nodejs.org (v18+ LTS)
-set /a ERRORS+=1
-goto :npm_check
 
-:node_found
-for /f "delims=" %%i in ('"%NODE_EXE%" --version 2^>^&1') do set NODE_VER=%%i
-echo   [OK] Node.js  (!NODE_VER!)  [%NODE_EXE%]
-set NODE_FOUND=1
-
-:npm_check
-REM npm — usually alongside node.exe
-if defined NODE_FOUND (
-    for %%d in ("%NODE_EXE%") do set "NODE_DIR=%%~dpd"
-    if exist "!NODE_DIR!npm.cmd" set "NPM_CMD=!NODE_DIR!npm.cmd"
-    if exist "!NODE_DIR!npm"     set "NPM_CMD=!NODE_DIR!npm"
-)
-if not defined NPM_CMD (
-    where npm >nul 2>nul
-    if %errorlevel% equ 0 (
-        for /f "delims=" %%i in ('where npm 2^>^&1') do set "NPM_CMD=%%i"
-    )
-)
-if defined NPM_CMD (
-    for /f "delims=" %%i in ('"%NPM_CMD%" --version 2^>^&1') do set NPM_VER=%%i
+REM npm
+where npm >nul 2>nul
+if %errorlevel% equ 0 (
+    for /f "delims=" %%i in ('npm --version 2^>^&1') do set NPM_VER=%%i
     echo   [OK] npm      (v!NPM_VER!)
 ) else (
     echo   [MISSING] npm not found (bundled with Node.js)
