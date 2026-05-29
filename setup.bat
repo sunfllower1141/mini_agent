@@ -75,8 +75,8 @@ echo   [OK] Python  (!PYTHON_VER!)  [%PYTHON_EXE%]
 REM Node.js
 where node >nul 2>nul
 if %errorlevel% equ 0 (
-    for /f "delims=" %%i in ('node --version 2^>^&1') do set NODE_VER=%%i
-    echo   [OK] Node.js  (!NODE_VER!)
+    node --version >nul 2>&1
+    echo   [OK] Node.js found
 ) else (
     echo   [MISSING] Node.js not found.
     echo     Install from https://nodejs.org (v18+ LTS)
@@ -87,8 +87,8 @@ if %errorlevel% equ 0 (
 REM npm
 where npm >nul 2>nul
 if %errorlevel% equ 0 (
-    for /f "delims=" %%i in ('npm --version 2^>^&1') do set NPM_VER=%%i
-    echo   [OK] npm      (v!NPM_VER!)
+    npm --version >nul 2>&1
+    echo   [OK] npm found
 ) else (
     echo   [MISSING] npm not found (bundled with Node.js)
     set /a ERRORS+=1
