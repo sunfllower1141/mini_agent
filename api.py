@@ -327,13 +327,14 @@ def call_llm(
                 clean_messages.append(_clean_message(messages[i], i, provider))
             _clean_messages_cache[list_id] = (current_len, provider, clean_messages)
 
-    # Safety net: strip orphaned tool calls/results only when the message
-    # list shrank (pruning removed messages).  During normal turn execution
-    # messages are only appended, so no new orphans can appear.
-    safe_messages = clean_messages
-    if cached_len > current_len:
-        safe_messages = _strip_orphaned_tool_calls(clean_messages)
-        safe_messages = _strip_orphaned_tool_results(safe_messages)
+    # Safety net: always strip orphaned tool calls/results.
+    # Memory pruning can remove assistant(tool_calls) messages while
+    # leaving their tool result messages, causing 400 errors like
+    # "Messages with role 'tool' must be a response to a preceding
+    # message with 'tool_calls'".  The per-call overhead is O(n) set
+    # lookups — negligible compared to the API round-trip.
+    safe_messages = _strip_orphaned_tool_calls(clean_messages)
+    safe_messages = _strip_orphaned_tool_results(safe_messages)
 
     payload = _build_payload(config, messages, safe_messages)
 
