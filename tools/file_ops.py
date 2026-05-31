@@ -120,7 +120,7 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
             pass  # fall through to normal read on stat error
 
     try:
-        with open(resolved, "r", encoding="utf-8") as f:
+        with open(resolved, "r", encoding="utf-8", errors="replace") as f:
             # Use enumerate + early break to avoid reading the whole file
             collected: list[str] = []
             total_lines = 0
@@ -403,7 +403,7 @@ def _apply_single_edit(
             return (path, ToolResult(success=False, content=msg))
     resolved = safety_result.resolved_path
     try:
-        with open(resolved, "r", encoding="utf-8") as f:
+        with open(resolved, "r", encoding="utf-8", errors="replace") as f:
             original = f.read()
         diff = wg.generate_diff("edit_file", args)
         _backup_before_write(resolved)
@@ -747,7 +747,7 @@ def _init_rules(args: dict, _wg, read_gate: ReadSafetyGate) -> ToolResult:
         sample = py_files[:min(20, len(py_files))]
         for pf in sample:
             try:
-                with open(pf, encoding="utf-8") as f:
+                with open(pf, encoding="utf-8", errors="replace") as f:
                     content = f.read(4096)
                 for line in content.split('\n')[:80]:
                     line_stripped = line.strip()

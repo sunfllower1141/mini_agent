@@ -526,7 +526,7 @@ class TestSharedContext:
 
 class TestAgentMessage:
     def setup_method(self):
-        from tools.agent_ops import _AGENT_MSGS, _AGENT_MSGS_LOCK
+        from tools.agent_messages import _AGENT_MSGS, _AGENT_MSGS_LOCK
         with _AGENT_MSGS_LOCK:
             _AGENT_MSGS.clear()
 
@@ -628,7 +628,7 @@ class TestAgentExtend:
 
 class TestAgentHandoff:
     def setup_method(self):
-        from tools.agent_ops import _AGENT_MSGS, _AGENT_MSGS_LOCK
+        from tools.agent_messages import _AGENT_MSGS, _AGENT_MSGS_LOCK
         with _AGENT_MSGS_LOCK:
             _AGENT_MSGS.clear()
 
@@ -646,7 +646,7 @@ class TestAgentHandoff:
         assert "1 total messages" in result.content
 
         # Verify the message ended up in _AGENT_MSGS
-        from tools.agent_ops import _AGENT_MSGS, _AGENT_MSGS_LOCK
+        from tools.agent_messages import _AGENT_MSGS, _AGENT_MSGS_LOCK
         with _AGENT_MSGS_LOCK:
             assert len(_AGENT_MSGS) == 1
             assert "handoff.result" in _AGENT_MSGS[0]["text"]

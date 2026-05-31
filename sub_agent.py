@@ -15,6 +15,7 @@ communication (inboxes), dependency tracking, and persistent agents.
 
 from __future__ import annotations
 
+import sys
 import threading
 import time
 import uuid
@@ -332,7 +333,7 @@ def run_sub_agent(
         if not _extension_requested and max_turns - turn_count <= 2:
             _extension_requested = True
             try:
-                from tools.agent_ops import _agent_handoff
+                from tools.agent_messages import _agent_handoff
                 _agent_handoff({
                     "type": "status.error",
                     "from": task_id,

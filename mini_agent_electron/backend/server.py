@@ -214,13 +214,13 @@ class AgentRunner:
             r = subprocess.run(
                 ["git", "branch", "--show-current"],
                 cwd=self.config.workspace,
-                capture_output=True, text=True, encoding="utf-8", timeout=3,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=3,
             )
             self._git_branch = r.stdout.strip()
             r2 = subprocess.run(
                 ["git", "status", "--porcelain"],
                 cwd=self.config.workspace,
-                capture_output=True, text=True, encoding="utf-8", timeout=3,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=3,
             )
             self._git_dirty = bool(r2.stdout.strip())
         except Exception:

@@ -49,9 +49,23 @@ lint-strict:  ## Lint with strict mode (fail on issues)
 	ruff check .
 	ruff format --check .
 
+dist:  ## Build distributable for current platform (.dmg/.exe/.AppImage)
+	bash build_dist.sh
+
+dist-mac:  ## Build macOS .dmg
+	bash build_dist.sh --mac
+
+dist-win:  ## Build Windows .exe installer
+	bash build_dist.sh --win
+
+dist-linux:  ## Build Linux .AppImage
+	bash build_dist.sh --linux
+
 clean:  ## Remove build artifacts, cache, and coverage
 	rm -rf __pycache__ .pytest_cache $(COVERAGE_DIR) .coverage
 	rm -rf .ruff_cache *.egg-info dist build
+	rm -rf pyinstaller_dist
+	rm -rf mini_agent_electron/dist-electron
 	find . -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name '*.pyc' -delete 2>/dev/null || true
 	@echo "Clean complete."

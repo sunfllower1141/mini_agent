@@ -115,10 +115,21 @@ _ROUTE_SIMPLE_KEYWORDS = re.compile(
 )
 
 
+# Cache: per-messages-list complexity result (doesn't change within a turn)
+_complexity_cache: dict[int, str] = {}
+
 def _compute_complexity(messages: list[dict]) -> str:
-    """Return 'simple' or 'complex' for the last user message, for model routing."""
+    """Return 'simple' or 'complex' for the last user message, for model routing.
+
+    Result is cached per messages list identity — complexity doesn't change
+    within a turn (only new tool results are appended, not user messages).
+    """
     if not messages:
         return "complex"
+    list_id = id(messages)
+    cached = _complexity_cache.get(list_id)
+    if cached is not None:
+        return cached
     # Check the last 2 user messages
     user_text = ""
     for m in reversed(messages):
@@ -126,9 +137,9 @@ def _compute_complexity(messages: list[dict]) -> str:
             user_text += " " + str(m.get("content", ""))
             if len(user_text) > 2000:
                 break
-    if len(user_text) < 300 and not _ROUTE_SIMPLE_KEYWORDS.search(user_text):
-        return "simple"
-    return "complex"
+    result = "simple" if (len(user_text) < 300 and not _ROUTE_SIMPLE_KEYWORDS.search(user_text)) else "complex"
+    _complexity_cache[list_id] = result
+    return result
 
 
 def _strip_orphaned_tool_calls(messages: list[dict]) -> list[dict]:
@@ -316,14 +327,13 @@ def call_llm(
                 clean_messages.append(_clean_message(messages[i], i, provider))
             _clean_messages_cache[list_id] = (current_len, provider, clean_messages)
 
-    # Safety net: strip any trailing assistant(tool_calls) messages that
-    # lack matching tool result messages.  An orphan here causes a 400
-    # "insufficient tool messages following tool_calls" from the API.
-    safe_messages = _strip_orphaned_tool_calls(clean_messages)
-    # Reverse direction: strip tool messages without a preceding
-    # assistant(tool_calls).  Prevents 400 "Messages with role 'tool'
-    # must be a response to a preceding message with 'tool_calls'".
-    safe_messages = _strip_orphaned_tool_results(safe_messages)
+    # Safety net: strip orphaned tool calls/results only when the message
+    # list shrank (pruning removed messages).  During normal turn execution
+    # messages are only appended, so no new orphans can appear.
+    safe_messages = clean_messages
+    if cached_len > current_len:
+        safe_messages = _strip_orphaned_tool_calls(clean_messages)
+        safe_messages = _strip_orphaned_tool_results(safe_messages)
 
     payload = _build_payload(config, messages, safe_messages)
 
@@ -391,3 +401,4 @@ call_deepseek = call_llm
 def clear_api_cache() -> None:
     """Clear the incremental message-cleaning cache (called at turn start)."""
     _clean_messages_cache.clear()
+    _complexity_cache.clear()

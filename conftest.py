@@ -166,7 +166,7 @@ def configured_context(tmp_path, monkeypatch):
     # Join all threads to ensure no in-flight messages land after cleanup.
     for t in list(runtime.tasks.values()):
         t.join(timeout=2)
-    from tools.agent_ops import _AGENT_MSGS, _AGENT_MSGS_LOCK
+    from tools.agent_messages import _AGENT_MSGS, _AGENT_MSGS_LOCK
 
     with _AGENT_MSGS_LOCK:
         _AGENT_MSGS.clear()

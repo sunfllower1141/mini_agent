@@ -90,7 +90,7 @@ def build_symbol_index(root: str) -> dict[str, list[dict]]:
     # Fast path: if cache exists and we know no .py file is newer, return cached data
     if cache_mtime > 0.0 and _INDEX_MAX_MTIME > 0.0 and cache_mtime >= _INDEX_MAX_MTIME:
         try:
-            cached = _json.loads(open(cache_path, encoding="utf-8").read())
+            cached = _json.loads(open(cache_path, encoding="utf-8", errors="replace").read())
             sym = {k: v for k, v in cached.get("symbols", {}).items()}
             ref = {k: v for k, v in cached.get("references", {}).items()}
             _SYMBOL_INDEX = sym
@@ -121,7 +121,7 @@ def build_symbol_index(root: str) -> dict[str, list[dict]]:
             except OSError:
                 pass
             try:
-                with open(fpath, "r", encoding="utf-8") as f:
+                with open(fpath, "r", encoding="utf-8", errors="replace") as f:
                     for lineno, line in enumerate(f, 1):
                         # Collect def/class definitions
                         m = def_pat.match(line)
@@ -176,7 +176,7 @@ def build_symbol_index(root: str) -> dict[str, list[dict]]:
     try:
         cache_path = os.path.join(root, ".mini_agent_index.json")
         tmp = cache_path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
+        with open(tmp, "w", encoding="utf-8", errors="replace") as f:
             _json.dump({"symbols": symbol_idx, "references": ref_idx}, f)
         os.replace(tmp, cache_path)  # atomic rename
     except Exception:
@@ -199,7 +199,7 @@ def _reindex_file(filepath: str, root: str) -> None:
     def_pat = _re.compile(r"^\s*(def|class)\s+(\w+)")
     new_symbols: dict[str, list[dict]] = {}
     try:
-        with open(filepath, "r", encoding="utf-8") as f:
+        with open(filepath, "r", encoding="utf-8", errors="replace") as f:
             for lineno, line in enumerate(f, 1):
                 m = def_pat.match(line)
                 if m:
@@ -230,7 +230,7 @@ def _reindex_file(filepath: str, root: str) -> None:
     if _REF_INDEX is not None:
         word_pat = _re.compile(r"\b(\w+)\b")
         try:
-            with open(filepath, "r", encoding="utf-8") as f:
+            with open(filepath, "r", encoding="utf-8", errors="replace") as f:
                 for lineno, line in enumerate(f, 1):
                     stripped = line.strip()
                     for match in word_pat.finditer(line):
@@ -255,7 +255,7 @@ def _reindex_file(filepath: str, root: str) -> None:
     try:
         cache_path = os.path.join(root, ".mini_agent_index.json")
         tmp = cache_path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
+        with open(tmp, "w", encoding="utf-8", errors="replace") as f:
             json.dump({"symbols": _SYMBOL_INDEX, "references": _REF_INDEX or {}}, f)
         os.replace(tmp, cache_path)  # atomic rename
     except Exception:
@@ -437,7 +437,7 @@ def _sem_get_model():
 def _sem_chunk_py(filepath: str) -> list[tuple[int, int, str]]:
     """Chunk a .py file at def/class boundaries. Returns (start_line, end_line, text)."""
     try:
-        with open(filepath, "r", encoding="utf-8") as f:
+        with open(filepath, "r", encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
     except (OSError, PermissionError):
         return []
@@ -558,7 +558,7 @@ def _sem_index(root: str) -> None:
 
             # --- Read file once, use for both semantic and symbol/reference indexing ---
             try:
-                with open(fpath, "r", encoding="utf-8") as f:
+                with open(fpath, "r", encoding="utf-8", errors="replace") as f:
                     file_lines = f.readlines()
             except (OSError, PermissionError):
                 continue

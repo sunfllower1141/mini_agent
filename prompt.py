@@ -98,7 +98,7 @@ def build_system_prompt(config: "AgentConfig") -> str:
         if os.path.isfile(rules_path) and rules_path not in seen:
             seen.add(rules_path)
             try:
-                with open(rules_path, encoding="utf-8") as f:
+                with open(rules_path, encoding="utf-8", errors="replace") as f:
                     rules = f.read().strip()
             except OSError:
                 rules = ""

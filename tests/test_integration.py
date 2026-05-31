@@ -102,7 +102,7 @@ def _tearDown_context(runtime, tmp_dir):
     runtime.cancel_all()
     for t in list(runtime.tasks.values()):
         t.join(timeout=2)
-    from tools.agent_ops import _AGENT_MSGS, _AGENT_MSGS_LOCK
+    from tools.agent_messages import _AGENT_MSGS, _AGENT_MSGS_LOCK
 
     with _AGENT_MSGS_LOCK:
         _AGENT_MSGS.clear()
@@ -264,7 +264,7 @@ class TestAgentHandoffIntegration(unittest.TestCase):
     """Integration: agent_handoff sends typed messages between agents."""
 
     def setUp(self):
-        from tools.agent_ops import _AGENT_MSGS, _AGENT_MSGS_LOCK
+        from tools.agent_messages import _AGENT_MSGS, _AGENT_MSGS_LOCK
 
         with _AGENT_MSGS_LOCK:
             _AGENT_MSGS.clear()
@@ -289,7 +289,7 @@ class TestAgentHandoffIntegration(unittest.TestCase):
         self.assertIn("handoff.result", result.content)
         self.assertIn("1 total messages", result.content)
 
-        from tools.agent_ops import _AGENT_MSGS, _AGENT_MSGS_LOCK
+        from tools.agent_messages import _AGENT_MSGS, _AGENT_MSGS_LOCK
 
         with _AGENT_MSGS_LOCK:
             self.assertEqual(len(_AGENT_MSGS), 1)
@@ -343,7 +343,7 @@ class TestAgentHandoffIntegration(unittest.TestCase):
         self.assertIn("handoff.result", result.content)
 
         # Verify the correlation_id was stored in the global message list
-        from tools.agent_ops import _AGENT_MSGS, _AGENT_MSGS_LOCK
+        from tools.agent_messages import _AGENT_MSGS, _AGENT_MSGS_LOCK
 
         with _AGENT_MSGS_LOCK:
             self.assertGreaterEqual(len(_AGENT_MSGS), 1)
@@ -621,7 +621,7 @@ class TestMessageBroadcastIntegration(unittest.TestCase):
     """Integration: broadcast messages and read them back."""
 
     def setUp(self):
-        from tools.agent_ops import _AGENT_MSGS, _AGENT_MSGS_LOCK
+        from tools.agent_messages import _AGENT_MSGS, _AGENT_MSGS_LOCK
 
         with _AGENT_MSGS_LOCK:
             _AGENT_MSGS.clear()

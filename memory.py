@@ -71,6 +71,18 @@ _VACUUM  = "VACUUM"
 # page count.  Avoids running VACUUM on every full-rewrite save.
 _VACUUM_FREELIST_THRESHOLD = 1000
 
+# Performance: avoid pruning on every save at long conversations.
+# Only prune when token usage exceeds this fraction of max_tokens
+# (e.g. 1.15 = only prune when 15% over budget), and skip pruning
+# for at least _PRUNE_COOLDOWN saves after a prune.
+_PRUNE_OVERAGE_BUFFER = 1.15
+_PRUNE_COOLDOWN = 3  # saves to skip before pruning again
+
+# VACUUM interval: run VACUUM every N saves regardless of freelist count.
+# This matters now that we do fewer full rewrites — the freelist may not
+# bloat rapidly but periodic compaction is still healthy.
+_VACUUM_INTERVAL = 50
+
 # Save retry: when the database is locked, retry with backoff before
 # surfacing the warning to the user.
 _SAVE_MAX_RETRIES = 3
@@ -207,19 +219,16 @@ def _total_tokens(messages: list[dict]) -> int:
             acc_count = n
 
         _ACCUM_STATE[list_id] = (acc_count, acc_total)
-        # Prune stale entries for lists no longer referenced
-        if len(_ACCUM_STATE) > 8:
-            import gc
-            gc.collect()  # help free dead lists before the is-alive check
-            dead = [lid for lid in _ACCUM_STATE if not _is_list_alive(lid)]
-            for lid in dead[:max(1, len(_ACCUM_STATE) - 8)]:
-                del _ACCUM_STATE[lid]
+        # Prune stale entries — each entry is just 2 ints, so we only
+        # trim when the dict grows unreasonably large.  No gc.collect()
+        # needed — the entries are tiny and will be naturally overwritten
+        # as message lists get recycled.
+        if len(_ACCUM_STATE) > 64:
+            # Keep only the 32 most recently updated entries
+            excess = len(_ACCUM_STATE) - 32
+            for lid in list(_ACCUM_STATE)[:excess]:
+                _ACCUM_STATE.pop(lid, None)
         return acc_total
-
-
-def _is_list_alive(list_id: int) -> bool:
-    """Check if any tracked list with this id is still alive (best-effort)."""
-    return list_id in _ACCUM_STATE  # keyed dict — existence implies recent use
 
 
 # Running accumulator for _total_tokens, keyed by list identity.
@@ -815,6 +824,8 @@ class MemoryStore:
         self._token_count: int = 0  # running accumulator for saved messages
         self._vacuum_thread: Optional[threading.Thread] = None  # background VACUUM
         self._skip_load: bool = False  # set True to skip loading knowledge/summaries (used by switch_session)
+        self._save_count: int = 0  # monotonic save counter for periodic VACUUM
+        self._prune_cooldown: int = 0  # saves remaining before next pruning allowed
 
         # Migrate from old paths if needed
         _migrate_old_paths(filepath, self._db_path)
@@ -1113,21 +1124,39 @@ class MemoryStore:
         new_tokens = sum(_estimate_tokens(m) for m in cleaned[new_start:])
         self._token_count += new_tokens
 
-        kept, pruned = _prune_by_tokens(
-            cleaned, self._max_tokens, self._max_messages,
+        # Pruning cooldown: at long conversations, skip pruning most saves
+        # to avoid the O(n) full-rewrite cost.  Only prune when the token
+        # budget is exceeded by a meaningful margin AND the cooldown has
+        # expired.
+        overage_ratio = (self._token_count / self._max_tokens) if self._max_tokens > 0 else 0.0
+        # Always prune when over the hard message count cap (max_messages),
+        # or when token budget is significantly exceeded and cooldown expired.
+        over_message_cap = len(cleaned) > self._max_messages
+        should_prune = over_message_cap or (
+            self._prune_cooldown <= 0
+            and overage_ratio > _PRUNE_OVERAGE_BUFFER
         )
-
-        # Subtract tokens for pruned messages
-        if pruned:
-            self._token_count -= sum(_estimate_tokens(m) for m in pruned)
-
-        # Inject summary of pruned context
-        if pruned:
-            summary = _summarize_pruned(pruned)
-            if summary:
-                summary_msg = {"role": "user", "content": summary}
-                kept.insert(0, summary_msg)
-                self._token_count += _estimate_tokens(summary_msg)
+        if should_prune:
+            kept, pruned = _prune_by_tokens(
+                cleaned, self._max_tokens, self._max_messages,
+            )
+            # Subtract tokens for pruned messages
+            if pruned:
+                self._token_count -= sum(_estimate_tokens(m) for m in pruned)
+            # Inject summary of pruned context
+            if pruned:
+                summary = _summarize_pruned(pruned)
+                if summary:
+                    summary_msg = {"role": "user", "content": summary}
+                    kept.insert(0, summary_msg)
+                    self._token_count += _estimate_tokens(summary_msg)
+            self._prune_cooldown = _PRUNE_COOLDOWN
+        else:
+            pruned = []
+            kept = cleaned
+            # Decrement cooldown each save
+            if self._prune_cooldown > 0:
+                self._prune_cooldown -= 1
 
         self._ensure_parent()
         last_exc = None
@@ -1154,9 +1183,14 @@ class MemoryStore:
                             [(m["role"], json.dumps(m)) for m in new_msgs],
                         )
                 conn.commit()
-                # After a full rewrite, check freelist bloat and VACUUM if needed.
-                # Avoids VACUUM on every save — only when free pages exceed threshold.
-                if need_full_rewrite:
+                # Increment save counter for periodic VACUUM
+                self._save_count += 1
+                # Trigger VACUUM on full rewrite with freelist bloat OR
+                # periodically every _VACUUM_INTERVAL saves (whichever
+                # comes first).  This keeps the DB compact even when
+                # we avoid full rewrites via the pruning cooldown.
+                should_vacuum = need_full_rewrite or (self._save_count % _VACUUM_INTERVAL == 0)
+                if should_vacuum:
                     try:
                         row = conn.execute("PRAGMA freelist_count").fetchone()
                         if row and row[0] > _VACUUM_FREELIST_THRESHOLD:
@@ -1452,7 +1486,7 @@ def _migrate_old_paths(new_filepath: str, db_path: str) -> None:
 def _migrate_json(json_path: str, db_path: str) -> None:
     """Migrate an existing JSON memory file to SQLite."""
     try:
-        with open(json_path, "r", encoding="utf-8") as f:
+        with open(json_path, "r", encoding="utf-8", errors="replace") as f:
             data = json.load(f)
     except (json.JSONDecodeError, OSError):
         return

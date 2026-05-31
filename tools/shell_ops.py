@@ -670,9 +670,6 @@ def _run_tests(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
     cmd = _get_python_cmd() + ["-m", "pytest", "-q", "--ignore=venv", "--ignore=eval", "--ignore=tests"]
     if target:
         cmd.append(target)
-    else:
-        # Full suite: add per-test timeout to prevent hangs
-        cmd.extend(["--timeout=60", "--timeout_method=thread"])
 
     try:
         proc = subprocess.Popen(
@@ -1076,7 +1073,7 @@ def _diagnose_failures(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> 
 
         # Extract lines around the function definition
         try:
-            with open(resolved, encoding="utf-8") as fh:
+            with open(resolved, encoding="utf-8", errors="replace") as fh:
                 src_lines = fh.readlines()
         except Exception as e:
             snippets.append(f"\n--- {fpath}::{func} (error reading: {e}) ---")

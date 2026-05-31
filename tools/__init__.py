@@ -70,16 +70,26 @@ if not any(td["function"]["name"] == "remember" for td in TOOLS):
 # TOOL_SCHEMA_MAP — O(1) name→schema lookup for execute_tool() validation
 # ---------------------------------------------------------------------------
 
+# Lazily-built dict mirroring TOOLS for O(1) lookup.  Invalidated when
+# TOOLS length changes (skills appending tools between turns).
+_TOOL_SCHEMA_MAP: dict[str, dict] = {}
+_TOOL_SCHEMA_MAP_LEN: int = 0
+
+
 def _get_tool_schema(name: str) -> dict | None:
     """Look up a tool's parameter schema from TOOLS at runtime.
 
-    This is done at call time (not import time) so that dynamically
-    appended tools are always included.
+    Builds an O(1) dict cache on first call; invalidates automatically
+    when TOOLS grows (skills activate new tool groups).
     """
-    for td in TOOLS:
-        if td["function"]["name"] == name:
-            return td["function"].get("parameters", {})
-    return None
+    global _TOOL_SCHEMA_MAP, _TOOL_SCHEMA_MAP_LEN
+    if len(TOOLS) != _TOOL_SCHEMA_MAP_LEN:
+        _TOOL_SCHEMA_MAP = {
+            td["function"]["name"]: td["function"].get("parameters", {})
+            for td in TOOLS
+        }
+        _TOOL_SCHEMA_MAP_LEN = len(TOOLS)
+    return _TOOL_SCHEMA_MAP.get(name)
 
 # ---------------------------------------------------------------------------
 # Structured tool result

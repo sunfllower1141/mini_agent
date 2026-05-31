@@ -112,18 +112,45 @@ function spawnPythonBackend(workspacePath) {
     env.MINI_AGENT_WORKSPACE = workspacePath;
   }
 
-  // Prefer venv python, fall back to system python3/python.
+  // Priority for Python backend:
+  //   1. Bundled PyInstaller binary (packaged via electron-builder extraResources)
+  //   2. Local venv python (dev mode)
+  //   3. System python3/python (fallback)
   const isWindows = process.platform === 'win32';
+  const isPackaged = app.isPackaged;
+
+  const bundledName = isWindows ? 'mini_agent_backend.exe' : 'mini_agent_backend';
+  const bundledPaths = isPackaged
+    ? [path.join(process.resourcesPath, 'backend', bundledName)]
+    : [path.join(__dirname, '..', 'pyinstaller_dist', bundledName)];
+
   const venvPython = isWindows
     ? path.join(__dirname, '..', 'venv', 'Scripts', 'python.exe')
     : path.join(__dirname, '..', 'venv', 'bin', 'python3');
   const fallback = isWindows ? 'python.exe' : 'python3';
-  const pythonBin = fs.existsSync(venvPython) ? venvPython : fallback;
 
-  console.log(`Using Python: ${pythonBin}`);
+  let pythonBin = null;
+  let pythonArgs = [backendScript];
+
+  // Try bundled binary first
+  for (const bp of bundledPaths) {
+    if (fs.existsSync(bp)) {
+      pythonBin = bp;
+      pythonArgs = [];  // bundled binary IS the script, no args needed
+      break;
+    }
+  }
+
+  // Fall back to venv or system python
+  if (!pythonBin) {
+    pythonBin = fs.existsSync(venvPython) ? venvPython : fallback;
+    pythonArgs = [backendScript];
+  }
+
+  console.log(`Using Python: ${pythonBin}${pythonArgs.length ? ' ' + pythonArgs[0] : ' (bundled)'}`);
   console.log(`DEEPSEEK_API_KEY: ${env.DEEPSEEK_API_KEY ? 'set' : 'not set'}`);
 
-  const proc = spawn(pythonBin, [backendScript], {
+  const proc = spawn(pythonBin, pythonArgs, {
     env,
     cwd: path.join(__dirname, '..'),
     stdio: ['pipe', 'pipe', 'pipe'],

@@ -395,7 +395,7 @@ def _load_dotenv(workspace: str) -> None:
     if not os.path.isfile(env_path):
         return
     try:
-        with open(env_path, encoding="utf-8") as f:
+        with open(env_path, encoding="utf-8", errors="replace") as f:
             for raw_line in f:
                 line = raw_line.strip()
                 if not line or line.startswith("#"):

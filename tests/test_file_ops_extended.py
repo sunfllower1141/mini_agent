@@ -575,6 +575,8 @@ class TestVerify(unittest.TestCase):
         self.write_gate, self.read_gate = _gates(self.workspace)
         from tools import _MODIFIED_FILES
         _MODIFIED_FILES.clear()
+        from tools import _TOOL_CONTEXT
+        _TOOL_CONTEXT._agent_depth = 0
         # Create a minimal test so pytest has something to run
         test_dir = os.path.join(self.workspace, "tests")
         os.makedirs(test_dir, exist_ok=True)
@@ -593,8 +595,7 @@ class TestVerify(unittest.TestCase):
         tc = _make_tool_call("verify")
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertIsInstance(result, ToolResult)
-        # verify is restricted to orchestrator — sub-agents get a block message
-        self.assertIn("restricted to the orchestrator", result.content)
+        self.assertTrue(result.success, f"Expected success but got: {result.content}")
 
     def test_with_modified_file_runs_related_tests(self):
         from tools import _MODIFIED_FILES
@@ -607,8 +608,7 @@ class TestVerify(unittest.TestCase):
         tc = _make_tool_call("verify")
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertIsInstance(result, ToolResult)
-        # verify is restricted to orchestrator — sub-agents get a block message
-        self.assertIn("restricted to the orchestrator", result.content)
+        self.assertTrue(result.success, f"Expected success but got: {result.content}")
 
     def test_returns_tool_result_not_exception(self):
         tc = _make_tool_call("verify")

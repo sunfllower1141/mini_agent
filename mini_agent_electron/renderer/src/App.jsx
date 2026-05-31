@@ -12,6 +12,11 @@ import ErrorBoundary from './components/ErrorBoundary';
 import SessionPicker from './components/SessionPicker';
 import SettingsPanel from './components/SettingsPanel';
 
+// Cap rendered DOM nodes to prevent lag at long conversations (300+ turns).
+// State arrays still hold full history; only the visible slice hits the DOM.
+const MAX_RENDERED_CHAT_LINES = 400;
+const MAX_RENDERED_TOOL_LINES = 400;
+
 
 // Shared components map for ReactMarkdown — wires CodeBlock for syntax highlighting.
 // Used in the thinking pane (left side) where syntax highlighting is desired.
@@ -500,7 +505,7 @@ function AppShell() {
         {/* Left stack: Tools & Thinking + Agent Tree */}
         <div id="left-stack">
           <RoundedFrame id="left-pane" title="Tools &amp; Thinking">
-            <LogPanel id="tools-log" className="scrollable dim" lines={toolsLines} />
+            <LogPanel id="tools-log" className="scrollable dim" lines={toolsLines.slice(-MAX_RENDERED_TOOL_LINES)} />
             <div className="hr" />
             <div id="thinking-log" ref={thinkingLogRef} className="log thinking-log thinking">
               {thinking.displayedText && (
@@ -524,7 +529,7 @@ function AppShell() {
         {/* Right pane: Chat */}
         <RoundedFrame id="right-pane" title="Chat">
           <div id="chat-log" ref={chatLogRef} className="log scrollable text">
-            {chatLines.map((line, i) => {
+            {chatLines.slice(-MAX_RENDERED_CHAT_LINES).map((line, i) => {
               if (line.cls === 'msg-agent') {
                 return (
                   <div key={`line-${i}`} className="msg-agent">
