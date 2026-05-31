@@ -132,6 +132,14 @@ def make_mock_config(**overrides) -> object:
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _mock_log_api_error():
+    """Prevent tests from writing MagicMock strings into the real api_error.log."""
+    from unittest.mock import patch
+    with patch("logging_setup.log_api_error") as mock:
+        yield mock
+
+
 @pytest.fixture
 def gates(tmp_path):
     """Safety gates rooted in a temporary directory."""
