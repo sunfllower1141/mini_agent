@@ -117,12 +117,12 @@ class TestAllToolsDispatchable(unittest.TestCase):
                           f"Tool '{name}' has no summary handler in _TOOL_SUMMARIES")
 
     def test_tool_count_matches_state_txt(self):
-        """Sanity check: 60 tools expected (includes use_skill injected by __init__.py)."""
+        """Sanity check: 66 tools expected (includes use_skill injected by __init__.py)."""
         # Import tools first to trigger use_skill schema injection
         import tools  # noqa: F401
         from tools.schema import TOOLS
-        self.assertEqual(len(TOOLS), 60,
-                         f"Expected 60 tools, got {len(TOOLS)}. Update this test if changed.")
+        self.assertEqual(len(TOOLS), 66,
+                         f"Expected 66 tools, got {len(TOOLS)}. Update this test if changed.")
 
 
 class TestProjectKnowledgeMethods(unittest.TestCase):

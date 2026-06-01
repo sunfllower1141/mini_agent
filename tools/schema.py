@@ -1258,4 +1258,174 @@ TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "alpaca_account",
+            "description": "Get your Alpaca trading account details: cash balance, buying power, portfolio value, equity, day trade count, and whether it's paper or live.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "alpaca_positions",
+            "description": "List current open positions in your Alpaca account. Optionally filter by symbol.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "Optional: filter to a specific symbol (e.g. 'AAPL'). Omit to list all positions."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "alpaca_orders",
+            "description": "List recent orders from your Alpaca account. Optionally filter by status (open, closed, all) and limit count (max 100).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "description": "Optional: filter by order status — 'open', 'closed', or 'all' (default: 'all')."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Optional: max orders to return (default 20, max 100)."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "alpaca_place_order",
+            "description": "Place a stock order via Alpaca. Supports market, limit, stop, and stop_limit orders. Use 'qty' for whole shares or 'notional' for dollar-based fractional orders. Requires symbol, side, and type at minimum.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "Stock symbol (e.g. 'AAPL', 'TSLA'). Required."
+                    },
+                    "side": {
+                        "type": "string",
+                        "description": "'buy' or 'sell'. Required."
+                    },
+                    "qty": {
+                        "type": "number",
+                        "description": "Number of shares to buy/sell. Use this OR 'notional'."
+                    },
+                    "notional": {
+                        "type": "number",
+                        "description": "Dollar amount to trade (fractional shares). Use this OR 'qty'."
+                    },
+                    "type": {
+                        "type": "string",
+                        "description": "Order type: 'market', 'limit', 'stop', or 'stop_limit'. Default: 'market'."
+                    },
+                    "time_in_force": {
+                        "type": "string",
+                        "description": "Time in force: 'day', 'gtc', 'opg', 'cls', 'ioc', 'fok'. Default: 'day'."
+                    },
+                    "limit_price": {
+                        "type": "number",
+                        "description": "Limit price (required for limit and stop_limit orders)."
+                    },
+                    "stop_price": {
+                        "type": "number",
+                        "description": "Stop price (required for stop and stop_limit orders)."
+                    }
+                },
+                "required": ["symbol", "side"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "alpaca_cancel_order",
+            "description": "Cancel an order by ID, or cancel all open orders with cancel_all=true.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "order_id": {
+                        "type": "string",
+                        "description": "ID of the order to cancel. Use this OR cancel_all."
+                    },
+                    "cancel_all": {
+                        "type": "boolean",
+                        "description": "Set to true to cancel all open orders at once."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "alpaca_bars",
+            "description": "Get historical OHLCV price bars for a symbol. Returns open, high, low, close, volume, and timestamp for each bar. Timeframes: 1min, 5min, 15min, 30min, 1hour, 1day.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "Stock symbol (e.g. 'AAPL'). Required."
+                    },
+                    "timeframe": {
+                        "type": "string",
+                        "description": "Bar size: '1min', '5min', '15min', '30min', '1hour', '1day' (default: '1day')."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max bars to return (default 20, max 200)."
+                    },
+                    "start": {
+                        "type": "string",
+                        "description": "Optional: ISO start date (e.g. '2026-01-01')."
+                    },
+                    "end": {
+                        "type": "string",
+                        "description": "Optional: ISO end date (e.g. '2026-01-31')."
+                    }
+                },
+                "required": ["symbol"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "alpaca_asset",
+            "description": "Look up an asset (stock, ETF, crypto) by symbol or ID. Returns name, class, tradability, marginability, shortability, and fractionability.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "Asset symbol (e.g. 'AAPL'). Use this OR 'asset_id'."
+                    },
+                    "asset_id": {
+                        "type": "string",
+                        "description": "Alpaca asset ID (UUID). Use this OR 'symbol'."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
 ]
