@@ -18,9 +18,11 @@ Migrates existing ``.mini_agent_memory.json`` files automatically on first run.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
+import stat
 import threading
 import warnings
 from typing import Optional
@@ -827,6 +829,13 @@ class MemoryStore:
         self._save_count: int = 0  # monotonic save counter for periodic VACUUM
         self._prune_cooldown: int = 0  # saves remaining before next pruning allowed
 
+        # Detect remote filesystems early — if the workspace is on a network
+        # mount, pre-emptively switch to a local path so that downstream
+        # consumers (FailurePatternStore, etc.) also use the correct path.
+        if _is_remote_fs(self._db_path):
+            self._db_path = _local_db_path(self._db_path)
+            _mem_log.info("remote filesystem detected — using local database: %s", self._db_path)
+
         # Migrate from old paths if needed
         _migrate_old_paths(filepath, self._db_path)
 
@@ -891,9 +900,19 @@ class MemoryStore:
                 " ON failure_patterns(confidence DESC)"
             )
             conn.commit()
-        except sqlite3.Error:
-            warnings.warn("Failed to initialize test_output table", stacklevel=2)
-            pass  # will retry on next operation
+        except sqlite3.Error as e:
+            warnings.warn(
+                f"Failed to initialize memory tables: {e}. "
+                f"(path={self._db_path})",
+                stacklevel=2,
+            )
+            # Reset connection so _get_conn() will retry (possibly with
+            # a local fallback path) on the next operation.
+            try:
+                self._conn.close()
+            except sqlite3.Error:
+                pass
+            self._conn = None
 
     @property
     def filepath(self) -> str:
@@ -914,6 +933,12 @@ class MemoryStore:
         Pings the cached connection with ``SELECT 1`` before use.
         If the connection was closed (e.g. by a forked subprocess
         or a prior error), it is transparently recreated.
+
+        On remote/network filesystems (SMB, NFS, AFP), WAL journal
+        mode is unreliable due to POSIX lock limitations.  Falls back:
+          1. journal_mode=DELETE + locking_mode=EXCLUSIVE
+          2. If even that fails, uses a local temp path
+             (~/.mini_agent/memory/<hash>.db)
         """
         if self._conn is not None:
             try:
@@ -926,14 +951,67 @@ class MemoryStore:
                     pass
                 self._conn = None
 
-        if self._conn is None:
-            self._conn = sqlite3.connect(self._db_path)
-            self._conn.execute("PRAGMA journal_mode=WAL")
+        if self._conn is not None:
+            return self._conn
+
+        # Determine the best database path and journal mode
+        db_path = self._db_path
+        use_wal = True
+
+        if _is_remote_fs(db_path):
+            use_wal = False
+            _mem_log.info("remote filesystem detected for %s — falling back to DELETE journal mode", db_path)
+
+        # Attempt 1: WAL mode on local FS (fast path)
+        if use_wal:
+            try:
+                self._conn = sqlite3.connect(db_path)
+                self._conn.execute("PRAGMA journal_mode=WAL")
+                self._conn.execute("PRAGMA synchronous=NORMAL")
+                self._conn.execute("PRAGMA cache_size=-8000")
+                self._conn.execute("PRAGMA temp_store=MEMORY")
+                self._conn.execute("PRAGMA busy_timeout=5000")
+                self._conn.execute("PRAGMA foreign_keys=ON")
+                return self._conn
+            except sqlite3.OperationalError:
+                _mem_log.warning("WAL mode failed for %s — trying DELETE journal mode", db_path)
+                try:
+                    self._conn.close()
+                except sqlite3.Error:
+                    pass
+                self._conn = None
+
+        # Attempt 2: DELETE journal mode (works on remote FS, but slower)
+        try:
+            self._conn = sqlite3.connect(db_path)
+            self._conn.execute("PRAGMA journal_mode=DELETE")
             self._conn.execute("PRAGMA synchronous=NORMAL")
+            self._conn.execute("PRAGMA locking_mode=EXCLUSIVE")
             self._conn.execute("PRAGMA cache_size=-8000")
             self._conn.execute("PRAGMA temp_store=MEMORY")
             self._conn.execute("PRAGMA busy_timeout=5000")
             self._conn.execute("PRAGMA foreign_keys=ON")
+            return self._conn
+        except sqlite3.OperationalError as e:
+            _mem_log.warning("DELETE journal mode failed for %s: %s", db_path, e)
+            try:
+                self._conn.close()
+            except sqlite3.Error:
+                pass
+            self._conn = None
+
+        # Attempt 3: Local fallback path (last resort for remote FS)
+        local_path = _local_db_path(db_path)
+        _mem_log.info("falling back to local database path: %s", local_path)
+        self._conn = sqlite3.connect(local_path)
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
+        self._conn.execute("PRAGMA cache_size=-8000")
+        self._conn.execute("PRAGMA temp_store=MEMORY")
+        self._conn.execute("PRAGMA busy_timeout=5000")
+        self._conn.execute("PRAGMA foreign_keys=ON")
+        # Update _db_path so future reconnect attempts use the local path
+        self._db_path = local_path
         return self._conn
 
     def _start_background_vacuum(self) -> None:
@@ -1386,6 +1464,52 @@ class MemoryStore:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+# Filesystem type constants for remote-filesystem detection.
+# Network filesystems that don't support POSIX locks or WAL shared memory.
+_REMOTE_FS_TYPES: frozenset[int] = frozenset({
+    0x517B,   # SMB / CIFS
+    0x6969,   # NFS
+    0x01021997,  # AFP (Apple Filing Protocol)
+    0x2FC12FC1,  # AFS (Andrew File System)
+})
+
+
+def _is_remote_fs(path: str) -> bool:
+    """Detect whether *path* lives on a network/remote filesystem.
+
+    SQLite WAL journal mode and POSIX file locking are unreliable on
+    network filesystems (SMB, NFS, AFP).  Returns True for remote paths.
+    """
+    # Quick check: macOS network mounts are under /Volumes/ (but not the
+    # root volume).  '/Volumes/Macintosh HD' is local; anything else is
+    # typically a network mount or external drive.
+    if path.startswith("/Volumes/") and path != "/Volumes/Macintosh HD" and not path.startswith("/Volumes/Macintosh HD/"):
+        return True
+    # UNC paths (SMB): //server/share/...
+    if path.startswith("//"):
+        return True
+    # Stat the mount point and check filesystem type magic numbers
+    try:
+        st = os.statvfs(path)
+        if st.f_fsid in _REMOTE_FS_TYPES:
+            return True
+    except OSError:
+        pass
+    return False
+
+
+def _local_db_path(db_path: str) -> str:
+    """Derive a local fallback path for SQLite when *db_path* is on a remote FS.
+
+    Uses ~/.mini_agent/memory/<sha256_of_original_path>.db so that
+    different workspaces get isolated databases.
+    """
+    path_hash = hashlib.sha256(db_path.encode()).hexdigest()[:16]
+    local_dir = os.path.join(os.path.expanduser("~"), ".mini_agent", "memory")
+    os.makedirs(local_dir, exist_ok=True)
+    return os.path.join(local_dir, f"{path_hash}.db")
+
 
 def _db_path(filepath: str) -> str:
     """Derive the SQLite database path from the configured filepath."""
