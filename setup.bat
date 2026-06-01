@@ -72,10 +72,9 @@ echo   [OK] Python  (!PYTHON_VER!)  [%PYTHON_EXE%]
 
 :python_done
 
-REM Node.js
-where node >nul 2>nul
-if %errorlevel% equ 0 (
-    node --version >nul 2>&1
+REM Node.js — use direct version check (more reliable than 'where node')
+node --version >nul 2>&1
+if !errorlevel! equ 0 (
     echo   [OK] Node.js found
 ) else (
     echo   [MISSING] Node.js not found.
@@ -85,9 +84,8 @@ if %errorlevel% equ 0 (
 )
 
 REM npm
-where npm >nul 2>nul
-if %errorlevel% equ 0 (
-    npm --version >nul 2>&1
+npm --version >nul 2>&1
+if !errorlevel! equ 0 (
     echo   [OK] npm found
 ) else (
     echo   [MISSING] npm not found (bundled with Node.js)
@@ -116,7 +114,8 @@ if %errorlevel% equ 0 (
 if !ERRORS! gtr 0 (
     echo.
     echo Missing !ERRORS! required tool(s). Please install them and re-run setup.
-    pause
+    echo Press any key to exit...
+    pause >nul
     exit /b 1
 )
 :skip_pip

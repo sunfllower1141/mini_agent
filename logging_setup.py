@@ -33,6 +33,18 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
 
+
+def _ts() -> str:
+    """Return an ISO-8601 UTC timestamp with microseconds (cross-platform).
+
+    Python's ``%f`` in ``strftime`` is not available on Windows, so we
+    compute the microseconds field manually from ``time.time()``.
+    """
+    t = time.time()
+    sec = int(t)
+    usec = int((t - sec) * 1_000_000)
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(t)) + f".{usec:06d}Z"
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -102,9 +114,13 @@ def has_elevated_errors(threshold: int = 5) -> bool:
 class _JsonLinesFormatter(logging.Formatter):
     """Format log records as JSON lines for machine parsing."""
 
+    def formatTime(self, record: logging.LogRecord, datefmt: str | None = None) -> str:
+        # Override to use cross-platform _ts() instead of strftime %f
+        return _ts()
+
     def format(self, record: logging.LogRecord) -> str:
         obj: dict = {
-            "ts": self.formatTime(record, datefmt="%Y-%m-%dT%H:%M:%S.%fZ"),
+            "ts": self.formatTime(record),
             "level": record.levelname,
             "logger": record.name,
             "msg": record.getMessage(),
@@ -196,7 +212,7 @@ def log_api_error(
     """Write a structured API error entry to api_error.log."""
     logger = get_logger("api")
     entry: dict = {
-        "ts": time.strftime("%Y-%m-%dT%H:%M:%S.%fZ", time.gmtime()),
+        "ts": _ts(),
         "provider": provider,
         "model": model,
         "status_code": status_code,
@@ -230,7 +246,7 @@ def log_error_trace(
     """
     logger = get_logger("traces")
     entry: dict = {
-        "ts": time.strftime("%Y-%m-%dT%H:%M:%S.%fZ", time.gmtime()),
+        "ts": _ts(),
         "type": error_type,
         "message": message,
     }
