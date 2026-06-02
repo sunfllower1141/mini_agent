@@ -158,12 +158,15 @@ class TestToolRegistration:
         """The 'desktop' skill should be in SKILLS."""
         from tools.skills import SKILLS
         assert "desktop" in SKILLS
-        assert len(SKILLS["desktop"]) == 5
+        assert len(SKILLS["desktop"]) == 16
         assert "desktop_snapshot" in SKILLS["desktop"]
         assert "desktop_click" in SKILLS["desktop"]
         assert "desktop_type" in SKILLS["desktop"]
         assert "desktop_find" in SKILLS["desktop"]
         assert "desktop_screenshot" in SKILLS["desktop"]
+        assert "desktop_apps" in SKILLS["desktop"]
+        assert "desktop_windows" in SKILLS["desktop"]
+        assert "desktop_system_info" in SKILLS["desktop"]
 
     def test_use_skill_desktop_available(self):
         """'desktop' should be listed in the use_skill schema."""

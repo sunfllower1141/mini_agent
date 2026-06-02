@@ -995,6 +995,7 @@ from tools import shell_ops   # noqa: E402, F401
 from tools import search_ops  # noqa: E402, F401
 from tools import browser_ops  # noqa: E402, F401  # browser automation tools
 from tools import desktop_ops # noqa: E402, F401  # desktop automation tools
+from tools import macos_ops   # noqa: E402, F401  # intensive macOS API integrations
 from tools import agent_ops   # noqa: E402, F401
 from tools import agent_todos  # noqa: E402, F401
 from tools import agent_patterns  # noqa: E402, F401

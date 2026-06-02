@@ -1341,4 +1341,188 @@ TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "desktop_apps",
+            "description": "List all running desktop applications with PID, name, bundle ID, and foreground status. Use this to see what's running before launching, quitting, or focusing apps.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "desktop_launch",
+            "description": "Launch a macOS application by name (e.g. 'Safari', 'Terminal', 'Visual Studio Code') or bundle ID (e.g. 'com.apple.Safari'). Uses 'open -a' under the hood.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Application name (e.g. 'Safari', 'Finder', 'Terminal') or bundle ID (e.g. 'com.apple.mail')."
+                    }
+                },
+                "required": ["name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "desktop_quit",
+            "description": "Quit a macOS application by name (e.g. 'Safari') or PID. Tries gentle quit first (osascript), then falls back to pkill for force-quit.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Application name (e.g. 'Safari', 'Terminal') or PID string."
+                    }
+                },
+                "required": ["name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "desktop_focus",
+            "description": "Bring a macOS application window to the foreground (activate it). Use after desktop_launch or to switch between running apps.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Application name to activate (e.g. 'Safari', 'Terminal')."
+                    }
+                },
+                "required": ["name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "desktop_clipboard",
+            "description": "Read from or write to the macOS system clipboard. Use action='read' to get current clipboard content, or action='write' with the text parameter to set it.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "'read' to get clipboard contents, 'write' to set clipboard to the 'text' parameter."
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "Text to copy to clipboard (only when action='write')."
+                    }
+                },
+                "required": ["action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "desktop_windows",
+            "description": "List all visible windows across all macOS applications using CGWindowList. Shows window titles, owner apps, sizes, positions, and PIDs. Much more comprehensive than desktop_snapshot which only covers the frontmost app.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "desktop_system_info",
+            "description": "Gather macOS system metrics: hostname, OS version, CPU cores, physical memory, disk usage, battery status, thermal state, load average, and system uptime. All in one call.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "desktop_key",
+            "description": "Press a macOS key combination via CGEvent (or AppleScript fallback). Examples: 'cmd+c' (copy), 'cmd+v' (paste), 'cmd+tab' (app switcher), 'cmd+shift+4' (screenshot region), 'escape', 'return', 'space', 'left', 'right', 'f5', 'f11'. Supports modifiers: cmd, shift, option/alt, ctrl.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "combo": {
+                        "type": "string",
+                        "description": "Key combination string (e.g. 'cmd+c', 'cmd+shift+4', 'cmd+tab', 'escape', 'return', 'space', 'left', 'right', 'up', 'down', 'f5', 'f11'). Modifiers: cmd, shift, option/alt, ctrl, fn."
+                    }
+                },
+                "required": ["combo"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "desktop_open",
+            "description": "Open a file, folder, or URL in the default macOS application. Files open with their associated app, folders open in Finder, URLs open in the default browser. Equivalent to the 'open' command.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "File path, folder path, or URL to open (e.g. '/Users/me/doc.pdf', '/Applications', 'https://github.com')."
+                    }
+                },
+                "required": ["target"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "desktop_reveal",
+            "description": "Reveal a file or folder in Finder (opens a Finder window with the item selected). Use this to show the user where a file is located.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute path to the file or folder to reveal in Finder."
+                    }
+                },
+                "required": ["path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "desktop_notify",
+            "description": "Post a macOS system notification (appears as a banner in Notification Center). Useful for alerting the user when a long-running task completes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Notification title (required)."
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "Notification body text (optional)."
+                    },
+                    "sound": {
+                        "type": "boolean",
+                        "description": "Play default notification sound. Default: false."
+                    }
+                },
+                "required": ["title"]
+            }
+        }
+    },
 ]
