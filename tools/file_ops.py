@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import stat as stat_module
 import shutil
+import sys
 import time
 
 from safety import ReadSafetyGate, WriteSafetyGate

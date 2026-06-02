@@ -46,6 +46,7 @@ if _parent not in sys.path:
 from config import (
     resolve_workspace, init_session, parse_args,
     build_startup_context,
+    _is_remote_workspace, _try_with_timeout,
 )
 from llm import run_agent_turn
 from stream import THINKING_START, THINKING_END
@@ -155,6 +156,14 @@ class AgentRunner:
         # Bootstrap the agent session
         workspace = os.environ.get("MINI_AGENT_WORKSPACE") or resolve_workspace()
         os.environ["MINI_AGENT_UI"] = "electron"  # injected into system prompt header
+
+        # If the workspace is on a remote filesystem, skip expensive
+        # operations (symbol index, LSP) inside init_session so the
+        # backend doesn't hang at startup.
+        if _is_remote_workspace(workspace):
+            print(f"[server] Remote workspace detected: {workspace} — using local DB and skipping index scan",
+                  file=sys.stderr, flush=True)
+
         cli = parse_args()
         data = init_session(workspace, cli_args=cli)
         self.config = data["config"]
@@ -563,30 +572,70 @@ class AgentRunner:
             if not new_path:
                 send_msg({"type": "response", "lines": ["Usage: /workspace <path>"]})
                 return
-            new_workspace = os.path.abspath(new_path)
-            if not os.path.isdir(new_workspace):
-                send_msg({"type": "response", "lines": [f"Not a directory: {new_workspace}"]})
+
+            # Resolve the path — os.path.abspath may hang on stale network mounts.
+            # Use a short timeout to avoid blocking the entire backend.
+            ok_abspath, new_workspace = _try_with_timeout(
+                lambda: os.path.abspath(new_path),
+                timeout=4.0,
+                description="os.path.abspath",
+            )
+            if not ok_abspath:
+                send_msg({"type": "error", "message": f"Timeout resolving path: {new_path}. "
+                                                       "The remote share may be unavailable."})
                 return
+
+            ok_isdir, is_dir = _try_with_timeout(
+                lambda: os.path.isdir(new_workspace),
+                timeout=4.0,
+                description="os.path.isdir",
+            )
+            if not ok_isdir or not is_dir:
+                send_msg({"type": "response", "lines": [f"Not a directory or inaccessible: {new_workspace}"]})
+                return
+
+            # Persist old session before switching
             self.messages = self.memory.save(self.messages)
             self.memory.close()
             self.workspace = new_workspace
+
+            # Notify the UI that we're loading the new workspace
+            send_msg({"type": "status", "workspace": new_workspace, "session_name": "loading...",
+                      "git_branch": "", "git_dirty": False, "restored_count": 0,
+                      "model": self.config.model})
+
+            # init_session may be slow on remote workspaces.
+            # Use a generous 15s timeout for remote paths; 8s for local.
+            init_timeout = 15.0 if _is_remote_workspace(new_workspace) else 8.0
+            ok_init, new_data = _try_with_timeout(
+                lambda: init_session(new_workspace),
+                timeout=init_timeout,
+                description="init_session",
+            )
+            if not ok_init:
+                send_msg({"type": "error", "message": f"Timeout initializing workspace: {new_workspace}. "
+                                                       "The remote share may be too slow. "
+                                                       "Try a local workspace instead."})
+                # Roll back — keep using old config
+                self.memory = None  # will be recreated below
+                return
+
             try:
-                new_data = init_session(new_workspace)
+                self.config = new_data["config"]
+                self.config.stream = True
+                self.write_gate = new_data["write_gate"]
+                self.read_gate = new_data["read_gate"]
+                self.memory = new_data["memory"]
+                self.messages = new_data["messages"]
+                self.session.close()
+                self.session = new_data["session"]
+                self._total_turns = 0
+                self._total_tokens = 0
+                self._refresh_git_status()
+                self.send_status()
+                send_msg({"type": "response", "lines": [f"Workspace set to: {new_workspace}"]})
             except Exception as exc:
                 send_msg({"type": "error", "message": clean_text(str(exc))})
-                return
-            self.config = new_data["config"]
-            self.config.stream = True
-            self.write_gate = new_data["write_gate"]
-            self.read_gate = new_data["read_gate"]
-            self.memory = new_data["memory"]
-            self.messages = new_data["messages"]
-            self.session.close()
-            self.session = new_data["session"]
-            self._total_turns = 0
-            self._total_tokens = 0
-            self._refresh_git_status()
-            self.send_status()
             return
 
         send_msg({"type": "response", "lines": [f"Unknown command: {command}"]})

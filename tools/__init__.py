@@ -20,8 +20,7 @@ Submodules:
                   agent_message, agent_read, agent_handoff, agent_inbox,
                   agent_subscribe, agent_extend, agent_cancel
     lsp         — lsp_definition, lsp_references, lsp_hover, lsp_diagnostics
-    trading_ops — alpaca_account, alpaca_positions, alpaca_orders,
-                  alpaca_place_order, alpaca_cancel_order, alpaca_bars, alpaca_asset
+
 """
 
 import contextvars
@@ -1000,7 +999,6 @@ from tools import agent_todos  # noqa: E402, F401
 from tools import agent_patterns  # noqa: E402, F401
 from tools import agent_messages  # noqa: E402, F401
 from tools import lsp         # noqa: E402, F401
-from tools import trading_ops  # noqa: E402, F401  # Alpaca trading tools
 from tools.search_ops import build_symbol_index  # noqa: E402, F401
 from tools.mcp_client import get_mcp_manager, init_mcp_servers, shutdown_mcp  # noqa: E402, F401
 

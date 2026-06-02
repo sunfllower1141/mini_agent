@@ -638,6 +638,72 @@ def resolve_workspace(override: str | None = None) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Remote-filesystem detection helpers
+# ---------------------------------------------------------------------------
+# Used by bootstrap.init_session() and server.py to skip slow operations
+# (symbol index scan, LSP init, auto-init) on network-mounted workspaces
+# and to add timeouts for path operations that can hang on stale mounts.
+
+# Filesystem type constants for remote-filesystem detection.
+# Network filesystems that don't support POSIX locks or WAL shared memory.
+_REMOTE_FS_TYPES: frozenset[int] = frozenset({
+    0x517B,      # SMB / CIFS
+    0x6969,      # NFS
+    0x01021997,  # AFP (Apple Filing Protocol)
+    0x2FC12FC1,  # AFS (Andrew File System)
+})
+
+
+def _is_remote_workspace(path: str) -> bool:
+    """Detect whether *path* lives on a network/remote filesystem.
+
+    SQLite WAL journal mode and POSIX file locking are unreliable on
+    network filesystems (SMB, NFS, AFP).  Also, os.walk() and git
+    operations can be extremely slow or hang on large remote shares.
+    """
+    # macOS network mounts are under /Volumes/ (but not the root volume).
+    # '/Volumes/Macintosh HD' is local; anything else is typically a
+    # network mount or external drive.
+    if path.startswith("/Volumes/") and path != "/Volumes/Macintosh HD" and not path.startswith("/Volumes/Macintosh HD/"):
+        return True
+    # UNC paths (SMB): //server/share/...
+    if path.startswith("//"):
+        return True
+    # Stat the mount point and check filesystem type magic numbers
+    try:
+        st = os.statvfs(path)
+        if st.f_fsid in _REMOTE_FS_TYPES:
+            return True
+    except OSError:
+        pass
+    return False
+
+
+def _try_with_timeout(fn, timeout: float = 10.0, description: str = "operation"):
+    """Run *fn* in a daemon thread, returning (True, result) on success
+    or (False, None) if the timeout expires.  On timeout the thread is
+    abandoned (cannot be safely killed in Python).
+    """
+    result = None
+    done = False
+
+    def _target():
+        nonlocal result, done
+        try:
+            result = fn()
+        finally:
+            done = True
+
+    import threading
+    t = threading.Thread(target=_target, daemon=True)
+    t.start()
+    t.join(timeout=timeout)
+    if done:
+        return True, result
+    return False, None
+
+
+# ---------------------------------------------------------------------------
 # Backward-compatible re-exports (at end of file to avoid circular imports)
 # ---------------------------------------------------------------------------
 # These functions have been moved to dedicated modules but are re-exported

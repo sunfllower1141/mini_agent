@@ -976,7 +976,8 @@ class MemoryStore:
             except sqlite3.OperationalError:
                 _mem_log.warning("WAL mode failed for %s — trying DELETE journal mode", db_path)
                 try:
-                    self._conn.close()
+                    if self._conn is not None:
+                        self._conn.close()
                 except sqlite3.Error:
                     pass
                 self._conn = None

@@ -87,14 +87,20 @@ _clean_messages_cache: dict[int, tuple[int, str, list[dict]]] = {}
 _clean_messages_cache_lock: threading.Lock = threading.Lock()
 
 
-def _clean_message(msg: dict, index: int, provider: str = "deepseek") -> dict:
+def _clean_message(msg: dict, index: int, provider: str = "deepseek") -> dict | None:
     """Clean a single message dict for sending to the API.
 
     Strips internal tracking fields (keys starting with '_'), removes the
-    ``index`` field from tool_calls.  For DeepSeek, marks the first system
-    message with ``cache_control`` for prompt caching (not supported by
-    Claude's OpenAI-compatible endpoint).
+    ``index`` field from tool_calls.  Returns ``None`` for transient
+    messages that should never be sent to the API (scratchpad nudges,
+    progress reminders, circuit breaker warnings, etc.).
+
+    For DeepSeek, marks the first system message with ``cache_control``
+    for prompt caching (not supported by Claude's OpenAI-compatible
+    endpoint).
     """
+    if msg.get("_transient"):
+        return None
     m2 = {k: v for k, v in msg.items()
           if not k.startswith("_")}
     if "tool_calls" in m2:
@@ -324,7 +330,9 @@ def call_llm(
         else:
             # Clean any new messages beyond the cached length
             for i in range(cached_len, current_len):
-                clean_messages.append(_clean_message(messages[i], i, provider))
+                cleaned = _clean_message(messages[i], i, provider)
+                if cleaned is not None:
+                    clean_messages.append(cleaned)
             _clean_messages_cache[list_id] = (current_len, provider, clean_messages)
 
     # Safety net: always strip orphaned tool calls/results.

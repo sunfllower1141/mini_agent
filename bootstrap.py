@@ -20,6 +20,8 @@ from config import (
     HTTP_READ_TIMEOUT,
     HTTP_POOL_CONNECTIONS,
     HTTP_POOL_MAXSIZE,
+    _is_remote_workspace,
+    _try_with_timeout,
 )
 from safety import ReadSafetyGate, WriteSafetyGate
 from memory import MemoryStore
@@ -107,11 +109,20 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     runtime = AgentRuntime()
     set_context(_agent_config=config, _agent_runtime=runtime)
 
-    build_symbol_index(workspace)
+    # --- workspace scanning (skip on remote filesystems to avoid hangs) ---
+    remote = _is_remote_workspace(workspace)
 
-    # Initialize LSP (pylsp) with workspace root so LSP tools work
+    if not remote:
+        build_symbol_index(workspace)
+    else:
+        print(f"  ⚠ Remote workspace detected ({workspace}) — skipping symbol index scan",
+              file=sys.stderr)
+
+    # Initialize LSP (pylsp) with workspace root so LSP tools work.
+    # Skip on remote workspaces — LSP scanning over SMB can hang.
     from tools.lsp import set_lsp_root, shutdown_lsp as _shutdown_lsp
-    set_lsp_root(workspace)
+    if not remote:
+        set_lsp_root(workspace)
 
     # Initialize MCP client with servers from config (graceful fallback if none)
     if config.mcp_servers:
@@ -135,16 +146,18 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     except Exception:
         pass  # sentence-transformers may not be installed — tolerate
 
-    # Auto-init .mini_agent.rules and .mini_agent.toml if they don't exist yet
-    rules_path = os.path.join(workspace, ".mini_agent.rules")
-    if not os.path.isfile(rules_path):
-        try:
-            from tools.file_ops import _init_rules
-            result = _init_rules({}, None, read_gate)
-            if result.success:
-                print(f"  ✨ Auto-init: {result.content[:120]}", file=sys.stderr)
-        except OSError as exc:
-            print(f"  ⚠ Auto-init skipped: {exc}", file=sys.stderr)
+    # Auto-init .mini_agent.rules and .mini_agent.toml if they don't exist yet.
+    # Skip on remote workspaces — os.path.isfile() can hang on stale SMB mounts.
+    if not remote:
+        rules_path = os.path.join(workspace, ".mini_agent.rules")
+        if not os.path.isfile(rules_path):
+            try:
+                from tools.file_ops import _init_rules
+                result = _init_rules({}, None, read_gate)
+                if result.success:
+                    print(f"  ✨ Auto-init: {result.content[:120]}", file=sys.stderr)
+            except OSError as exc:
+                print(f"  ⚠ Auto-init skipped: {exc}", file=sys.stderr)
 
     saved = memory.load()
     # Prune loaded conversation to avoid massive first-turn payload
@@ -174,7 +187,8 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
 
     # Ensure the session is closed on normal interpreter shutdown.
     atexit.register(session.close)
-    atexit.register(_shutdown_lsp)
+    if not remote:
+        atexit.register(_shutdown_lsp)
 
     # P2 fix: auto-capture session summary on shutdown so learnings persist
     # across sessions. Reads scratchpad + turn history to build a concise

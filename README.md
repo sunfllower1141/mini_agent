@@ -59,7 +59,7 @@ npm start            # auto-builds renderer if needed, then opens the desktop ap
 
 ## Features
 
-- **66 tools**: file ops, shell, search, LSP, MCP, browser automation (Playwright), vision (GPT-4o), planning, Alpaca trading
+- **60 tools**: file ops, shell, search, LSP, MCP, browser automation (Playwright), vision (GPT-4o), planning
 - **Multi-agent**: up to 10 concurrent sub-agents with fan-out/in, pipeline, barrier, scatter-gather patterns. Inter-agent messaging with typed handoffs.
 - **Memory**: SQLite-backed conversation store with token-aware pruning and cross-session project knowledge
 - **Providers**: DeepSeek (default), Claude Sonnet 4.5, xAI Grok 4.3 — auto-detect or set `API_PROVIDER`
@@ -79,9 +79,6 @@ API keys via `.env`:
 | `XAI_API_KEY` | xAI Grok |
 | `OPENAI_API_KEY` | GPT-4o vision (optional) |
 | `EXA_API_KEY` | Web search (optional) |
-| `ALPACA_API_KEY` | Alpaca trading — paper or live (optional) |
-| `ALPACA_SECRET_KEY` | Alpaca secret key (optional) |
-| `ALPACA_LIVE` | Set to `true` for live trading (default: paper) |
 
 Advanced settings in `.mini_agent.toml`: model, temperature, max tokens, sub-agent concurrency, etc.
 

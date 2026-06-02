@@ -107,6 +107,7 @@ SKILLS: dict[str, list[str]] = {
         "init",
         "session_stats",
     ],
+
 }
 
 # ── Runtime state ───────────────────────────────────────────────────────────

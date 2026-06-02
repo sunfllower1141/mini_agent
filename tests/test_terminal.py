@@ -6,7 +6,8 @@ import unittest
 from unittest.mock import patch
 
 from terminal import _color_enabled, c, format_table
-from terminal import _RED, _GREEN, _YELLOW, _CYAN, _RESET
+from terminal import _RED, _YELLOW, _CYAN, _RESET
+from terminal import GREEN
 
 
 class TestColorEnabled(unittest.TestCase):
@@ -54,8 +55,8 @@ class TestC(unittest.TestCase):
         self.assertIn("hello", result)
 
     def test_c_wraps_green(self):
-        result = c("ok", _GREEN)
-        self.assertTrue(result.startswith(_GREEN))
+        result = c("ok", GREEN)
+        self.assertTrue(result.startswith(GREEN))
         self.assertTrue(result.endswith(_RESET))
         self.assertIn("ok", result)
 
@@ -78,7 +79,7 @@ class TestC(unittest.TestCase):
     def test_c_multiple_calls_no_bleed(self):
         """Each c() call produces properly reset output."""
         r1 = c("foo", _RED)
-        r2 = c("bar", _GREEN)
+        r2 = c("bar", GREEN)
         self.assertTrue(r1.endswith(_RESET))
         self.assertTrue(r2.endswith(_RESET))
 
