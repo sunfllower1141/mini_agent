@@ -696,6 +696,173 @@ def _inject_strategy_hint(messages: list[dict]) -> None:
     except (KeyError, IndexError, TypeError, ValueError):
         pass
 
+
+def _inject_tool_graph_context(messages: list[dict]) -> None:
+    """Inject tool sequencing hints from the ToolGraph.
+
+    Analyzes recent tool usage and suggests optimal sequencing patterns
+    learned from past sessions (e.g., "after read_file, most agents follow
+    with edit_file").
+    """
+    try:
+        tg = getattr(_TOOL_CONTEXT, "_tool_graph", None)
+        if tg is None:
+            return
+
+        # Collect recent tool names from the conversation
+        recent_tools: list[str] = []
+        for msg in reversed(messages):
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                for tc in msg["tool_calls"]:
+                    name = tc.get("function", {}).get("name", "")
+                    if name:
+                        recent_tools.insert(0, name)  # chronological order
+            if len(recent_tools) >= 10:
+                break
+
+        context_msg = tg.get_tool_context_hints(recent_tools)
+        if context_msg:
+            messages.append({
+                "role": "user",
+                "content": context_msg,
+                "_transient": True,
+            })
+    except (AttributeError, KeyError, ValueError, TypeError):
+        pass
+
+
+def _inject_experience_context(
+    messages: list[dict],
+    memory_store=None,
+) -> None:
+    """Inject relevant past experiences from project_knowledge.
+
+    Searches project_knowledge for entries relevant to the current
+    conversation context and injects matching learnings.
+    """
+    if memory_store is None:
+        return
+    try:
+        from tools.failure_learning import build_experience_context
+
+        # Extract context from the last user message or recent tool outputs
+        search_context = ""
+        for msg in reversed(messages):
+            if msg.get("role") == "user" and not msg.get("_transient"):
+                search_context = msg.get("content", "")[:200]
+                break
+
+        if not search_context:
+            return
+
+        # Build experience context using a synthetic "tool call" to trigger
+        # keyword-based retrieval
+        ctx_msg = build_experience_context(
+            memory_store,
+            tool_name="",  # Empty = search all
+            args={"command": search_context},
+            limit=2,
+        )
+        if ctx_msg:
+            messages.append({
+                "role": "user",
+                "content": ctx_msg,
+                "_transient": True,
+            })
+    except (AttributeError, KeyError, ValueError, TypeError):
+        pass
+
+
+def _inject_pre_execution_context(
+    messages: list[dict],
+    pending_tool_calls: list[dict],
+    turn_count: int,
+) -> None:
+    """Inject self-learning context before executing tool calls.
+
+    Runs AFTER the API response, when we know which tools will be called.
+    Injects:
+      - Failure pattern warnings (from FailurePatternStore)
+      - Mistake notebook entries (generalized fixes)
+      - Tool graph read-before-write detection
+
+    All injected messages are marked _transient so they aren't persisted.
+    """
+    try:
+        # --- 1. Failure pattern warnings ---
+        fps = getattr(_TOOL_CONTEXT, "_failure_pattern_store", None)
+        if fps is not None:
+            from tools.failure_learning import build_self_learning_context
+            warning = build_self_learning_context(fps, pending_tool_calls)
+            if warning:
+                messages.append({
+                    "role": "user",
+                    "content": warning,
+                    "_transient": True,
+                })
+
+        # --- 2. Mistake notebook entries ---
+        mn = getattr(_TOOL_CONTEXT, "_mistake_notebook", None)
+        if mn is not None:
+            mn.distill(turn_count)  # Trigger distillation if cooldown elapsed
+            notebook_ctx = mn.build_notebook_context(
+                pending_tool_calls, turn_count=turn_count,
+            )
+            if notebook_ctx:
+                messages.append({
+                    "role": "user",
+                    "content": notebook_ctx,
+                    "_transient": True,
+                })
+
+        # --- 3. Tool graph: read-before-write detection ---
+        tg = getattr(_TOOL_CONTEXT, "_tool_graph", None)
+        if tg is not None:
+            # Collect recent tools for context
+            recent_tools: list[str] = []
+            for msg in reversed(messages):
+                if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                    for tc in msg["tool_calls"]:
+                        name = tc.get("function", {}).get("name", "")
+                        if name:
+                            recent_tools.insert(0, name)
+                if len(recent_tools) >= 10:
+                    break
+
+            gap_warning = tg.detect_read_before_write_gap(
+                pending_tool_calls, recent_tools,
+            )
+            if gap_warning:
+                messages.append({
+                    "role": "user",
+                    "content": gap_warning,
+                    "_transient": True,
+                })
+
+    except (AttributeError, KeyError, ValueError, TypeError):
+        pass
+
+
+def _record_tool_sequence_to_graph(
+    tool_results: list[tuple[dict, object]],
+) -> None:
+    """Record a turn's tool execution sequence to the ToolGraph."""
+    try:
+        tg = getattr(_TOOL_CONTEXT, "_tool_graph", None)
+        if tg is None:
+            return
+
+        tool_names = [
+            tc.get("function", {}).get("name", "")
+            for tc, _ in tool_results
+            if tc.get("function", {}).get("name", "")
+        ]
+        if len(tool_names) >= 2:
+            tg.record_turn_tool_sequence(tool_names)
+    except (AttributeError, KeyError, ValueError, TypeError):
+        pass
+
+
 def _inject_context(
     messages: list[dict],
     *,
@@ -730,6 +897,8 @@ def _inject_context(
     _inject_strategy_hint(messages)
     _inject_plan_status(messages)
     _inject_self_critique(messages, turn_count=turn_count)
+    _inject_tool_graph_context(messages)
+    _inject_experience_context(messages, memory_store=memory_store)
 
     # Context-quality defences (research-backed: 25% fill degrades quality)
     _compress_stale_tool_results(messages)
@@ -1182,6 +1351,8 @@ def _tool_execution_phase(
             _append_tool_result(messages, tc, result, on_tool_end=on_tool_end,
                                 recent_keys=recent_tool_keys,
                                 lock=tool_keys_lock)
+        # Record streaming-executed tools to ToolGraph
+        _record_tool_sequence_to_graph(deferred_stream_results)
         _save_turn_summary(turn_count, msg, deferred_stream_results, messages)
         return False  # continue the turn loop
 
@@ -1195,6 +1366,9 @@ def _tool_execution_phase(
                             recent_keys=recent_tool_keys,
                             lock=tool_keys_lock)
 
+    # --- Inject self-learning context before executing remaining tools ---
+    _inject_pre_execution_context(messages, remaining, turn_count)
+
     # Execute remaining tools with piping support
     tool_results = _execute_tools(
         remaining, messages, write_gate, read_gate,
@@ -1206,6 +1380,12 @@ def _tool_execution_phase(
         recent_tool_keys=recent_tool_keys,
         tool_keys_lock=tool_keys_lock,
     )
+
+    # --- Record tool sequence to ToolGraph for future pattern learning ---
+    # Include deferred results for complete turn picture
+    all_results = deferred_stream_results + tool_results
+    _record_tool_sequence_to_graph(all_results)
+
     _save_turn_summary(turn_count, msg, tool_results, messages)
     return True  # continue the turn loop
 

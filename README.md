@@ -60,8 +60,12 @@ npm start            # auto-builds renderer if needed, then opens the desktop ap
 ## Features
 
 - **75 tools**: file ops (with robust edit_file), shell, search, LSP, MCP, browser automation (Playwright), desktop automation (atomacos/mss), vision (GPT-4o), planning
+- **Self-learning**: the agent learns from its own mistakes across sessions. Failed tool calls are fingerprinted, clustered into patterns, and distilled into reusable fixes. Before repeating a call that's failed before, it gets a warning with what went wrong and how to fix it. Three subsystems work together:
+  - *Failure Pattern Store* — SQLite-backed database of tool failures with confidence scoring. When `edit_file` fails with "string not found" 5 times, the agent remembers and warns itself before the next attempt.
+  - *Self-Critique* — detects failure clusters mid-conversation and injects corrective guidance ("stop retrying, read the file first, try a different approach").
+  - *Mistake Notebook* — batch-clusters recurring failures across different arguments and distills generalized fixes. If "not found" happens on 3 different files, it learns a universal rule: *"Before editing, read the exact text and copy-paste it."*
 - **Multi-agent**: up to 10 concurrent sub-agents with fan-out/in, pipeline, barrier, scatter-gather patterns. Inter-agent messaging with typed handoffs.
-- **Memory**: SQLite-backed conversation store with token-aware pruning and cross-session project knowledge
+- **Memory**: SQLite-backed conversation store with token-aware pruning and cross-session project knowledge (categorized learnings with confidence scoring and relevance-based injection)
 - **Providers**: DeepSeek (default), Claude Sonnet 4.5, xAI Grok 4.3 — auto-detect or set `API_PROVIDER`
 - **Interface**: Electron desktop app (`mini_agent_electron/`)
 - **Skills**: lazy-load tool groups via `use_skill` — git, web, test, planning, agents, search, image, lsp, desktop
@@ -119,12 +123,17 @@ npm start            # production mode
 ```
 Electron ──→ server.py ──→ llm.py ──→ api.py ──→ DeepSeek / Claude / xAI
                 │
-    ┌───────────┼───────────┐
-    ▼           ▼           ▼
- tools/     memory.py   agent_runtime.py
- (75)       (SQLite)    (sub-agents)
+    ┌───────────┼───────────────┐
+    ▼           ▼               ▼
+ tools/     memory.py      agent_runtime.py
+ (75)       (SQLite)       (sub-agents)
+            │
+    ┌───────┴───────┐
+    ▼               ▼
+ failure_learning.py  project_knowledge
+ (self-learning)      (cross-session)
 ```
 
-Core modules: `config.py` (settings), `safety.py` (gates), `prompt.py` (system prompt), `memory.py` (persistence), `retry.py` (HTTP), `stream.py` (SSE).
+Core modules: `config.py` (settings), `safety.py` (gates), `prompt.py` (system prompt), `memory.py` (persistence), `failure_learning.py` (self-learning), `retry.py` (HTTP), `stream.py` (SSE).
 
 Tool implementations live in `tools/` — each module self-contained.

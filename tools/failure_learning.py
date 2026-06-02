@@ -426,17 +426,30 @@ class FailurePatternStore:
                 return None
 
     def _compute_confidence(self, success_count: int, failure_count: int) -> float:
-        """Compute a confidence score (0.0–1.0) for a pattern.
+        """Compute a confidence score (0.0–1.0) for a pattern's existence.
 
-        Uses a Bayesian-like smoothing: confidence = (success_count + 1) / (total + 2).
-        This biases toward 0.5 for patterns with few observations and moves
-        toward true rate as evidence accumulates.
+        Confidence increases with total observations (more data = more certain
+        this is a real pattern).  Starts at ~0.65 for a single observation
+        and asymptotically approaches 1.0.
+
+        Success/failure ratio affects the score: all-failure patterns get
+        slightly lower confidence than patterns with some successes
+        (indicating the fix works), but the dominant factor is sample size.
         """
         total = success_count + failure_count
         if total == 0:
             return 0.0
-        # Wilson-like: add pseudo-counts to avoid 0/1 extremes
-        return (success_count + 0.5) / (total + 1.0)
+
+        # Base: sample-size confidence (0.3–1.0 as observations grow)
+        base = 0.3 + 0.5 * (1.0 - 1.0 / (total + 1.0))
+
+        # Fix-quality bonus (0.0–0.2 extra if fix strategy works)
+        if total > 0:
+            fix_bonus = 0.2 * (success_count / total)
+        else:
+            fix_bonus = 0.0
+
+        return min(0.95, base + fix_bonus)
 
     def _prune_if_needed(self, conn: sqlite3.Connection) -> None:
         """Drop lowest-confidence patterns if over the cap."""
@@ -694,3 +707,545 @@ def build_self_learning_context(
         )
 
     return None
+
+
+
+# ---------------------------------------------------------------------------
+# MistakeNotebook — MNL-lite: batch-cluster failures, distill generalized fixes
+# ---------------------------------------------------------------------------
+
+# Minimum cluster size (shared fingerprint across different args) to create
+# a notebook entry.
+_NOTEBOOK_MIN_CLUSTER_SIZE = 3
+
+# Minimum confidence for a notebook entry to be considered "accepted"
+_NOTEBOOK_ACCEPTANCE_CONFIDENCE = 0.6
+
+# Maximum notebook entries stored (prune lowest-confidence)
+_NOTEBOOK_MAX_ENTRIES = 100
+
+# Cooldown: turns between notebook entry injections
+_NOTEBOOK_INJECTION_COOLDOWN = 5
+
+# Maximum notebook entries injected per turn
+_NOTEBOOK_MAX_INJECTED = 2
+
+MISTAKE_NOTEBOOK_DDL = """
+CREATE TABLE IF NOT EXISTS mistake_notebook (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    tool_name       TEXT    NOT NULL,
+    error_fingerprint TEXT  NOT NULL,
+    generalized_fix TEXT    NOT NULL DEFAULT '',
+    cluster_size    INTEGER NOT NULL DEFAULT 0,
+    distinct_args   INTEGER NOT NULL DEFAULT 0,
+    confidence      REAL    NOT NULL DEFAULT 0.0,
+    times_applied   INTEGER NOT NULL DEFAULT 0,
+    times_succeeded INTEGER NOT NULL DEFAULT 0,
+    last_distilled  TEXT    NOT NULL DEFAULT (datetime('now')),
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+)
+"""
+
+MISTAKE_NOTEBOOK_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_mn_tool_err ON mistake_notebook(tool_name, error_fingerprint)",
+    "CREATE INDEX IF NOT EXISTS idx_mn_confidence ON mistake_notebook(confidence DESC)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_mn_unique ON mistake_notebook(tool_name, error_fingerprint)",
+]
+
+
+class MistakeNotebook:
+    """MNL-lite: structured mistake notebook with batch-clustering.
+
+    Periodically scans failure_patterns for recurring fingerprints across
+    different argument signatures.  When a fingerprint appears with
+    multiple distinct args patterns, it distills a generalized fix and
+    stores it in the ``mistake_notebook`` table.
+
+    Uses an "accept-if-improves" rule: entries are only injected when
+    their confidence exceeds _NOTEBOOK_ACCEPTANCE_CONFIDENCE.
+
+    Inspired by: MNL (Mistake Notebook Learning) — batch-clustered
+    mistake abstraction with structured notebooks.
+    """
+
+    def __init__(self, db_path: str):
+        self._db_path = db_path
+        self._conn: sqlite3.Connection | None = None
+        self._lock = threading.Lock()
+        self._last_distill_turn = -1
+        self._last_injection_turn = -_NOTEBOOK_INJECTION_COOLDOWN
+
+    def _get_conn(self) -> sqlite3.Connection:
+        if self._conn is not None:
+            try:
+                self._conn.execute("SELECT 1")
+            except sqlite3.Error:
+                try:
+                    self._conn.close()
+                except sqlite3.Error:
+                    pass
+                self._conn = None
+        if self._conn is None:
+            self._conn = sqlite3.connect(self._db_path)
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA synchronous=NORMAL")
+            self._conn.execute("PRAGMA busy_timeout=5000")
+        return self._conn
+
+    def init_schema(self) -> None:
+        """Create mistake_notebook table and indexes."""
+        with self._lock:
+            try:
+                conn = self._get_conn()
+                conn.execute(MISTAKE_NOTEBOOK_DDL)
+                for idx_sql in MISTAKE_NOTEBOOK_INDEXES:
+                    try:
+                        conn.execute(idx_sql)
+                    except sqlite3.Error:
+                        pass
+                conn.commit()
+            except sqlite3.Error:
+                warnings.warn("Failed to init mistake_notebook table", stacklevel=2)
+
+    # ------------------------------------------------------------------
+    # Distillation: batch-cluster failure patterns into notebook entries
+    # ------------------------------------------------------------------
+
+    def distill(self, turn_count: int) -> int:
+        """Scan failure_patterns for clusters and distill generalized fixes.
+
+        Only runs every _NOTEBOOK_INJECTION_COOLDOWN turns to avoid churn.
+        Returns the number of new/updated notebook entries.
+        """
+        if turn_count - self._last_distill_turn < _NOTEBOOK_INJECTION_COOLDOWN:
+            return 0
+
+        self._last_distill_turn = turn_count
+        new_entries = 0
+
+        with self._lock:
+            try:
+                conn = self._get_conn()
+
+                # Find fingerprints that appear with >= MIN_CLUSTER_SIZE
+                # distinct args_signatures for the same tool+error combo.
+                rows = conn.execute(
+                    "SELECT tool_name, error_fingerprint,"
+                    "       COUNT(DISTINCT args_signature) as distinct_args,"
+                    "       SUM(failure_count) as total_failures,"
+                    "       SUM(success_count) as total_successes,"
+                    "       GROUP_CONCAT(fix_strategy, '|') as all_fixes"
+                    " FROM failure_patterns"
+                    " WHERE args_signature != ''"
+                    " GROUP BY tool_name, error_fingerprint"
+                    " HAVING COUNT(DISTINCT args_signature) >= ?"
+                    " ORDER BY total_failures DESC",
+                    (_NOTEBOOK_MIN_CLUSTER_SIZE,),
+                ).fetchall()
+
+                for (tool_name, fingerprint, distinct_args,
+                     total_failures, total_successes, all_fixes) in rows:
+
+                    # --- Distill best fix from collected strategies ---
+                    fixes = [
+                        f for f in (all_fixes or "").split("|")
+                        if f and f.strip()
+                    ]
+                    generalized_fix = self._distill_fix(
+                        tool_name, fingerprint, fixes,
+                    )
+
+                    # Compute confidence: aggregate across cluster
+                    total = total_failures + total_successes
+                    confidence = ((total_successes or 0) + 0.5) / (total + 1.0)
+
+                    # Upsert into mistake_notebook
+                    conn.execute(
+                        "INSERT INTO mistake_notebook"
+                        " (tool_name, error_fingerprint, generalized_fix,"
+                        "  cluster_size, distinct_args, confidence)"
+                        " VALUES (?, ?, ?, ?, ?, ?)"
+                        " ON CONFLICT(tool_name, error_fingerprint) DO UPDATE SET"
+                        "  generalized_fix = excluded.generalized_fix,"
+                        "  cluster_size = excluded.cluster_size,"
+                        "  distinct_args = excluded.distinct_args,"
+                        "  confidence = excluded.confidence,"
+                        "  last_distilled = datetime('now')",
+                        (tool_name, fingerprint, generalized_fix,
+                         total_failures, distinct_args, confidence),
+                    )
+                    new_entries += 1
+
+                conn.commit()
+
+                # Prune low-confidence entries if over cap
+                self._prune_if_needed(conn)
+
+            except sqlite3.Error:
+                pass  # Non-critical
+
+        return new_entries
+
+    def _distill_fix(
+        self,
+        tool_name: str,
+        fingerprint: str,
+        collected_fixes: list[str],
+    ) -> str:
+        """Distill a generalized fix from collected strategies.
+
+        For known fingerprints, provides tool-specific default guidance.
+        Otherwise picks the most common strategy from collected fixes.
+        """
+        # Tool-specific default guidance for common fingerprints
+        known_guidance: dict[str, dict[str, str]] = {
+            "edit_file": {
+                "not_found": (
+                    "The old_string was not found in the file. "
+                    "Use read_file FIRST to see exact text (including "
+                    "whitespace/indentation), then copy-paste the exact "
+                    "old_string. Do NOT type it from memory."
+                ),
+                "whitespace": (
+                    "Whitespace/indentation mismatch in old_string. "
+                    "Use read_file with line_numbers=true to see exact "
+                    "indentation. Copy-paste, don't retype."
+                ),
+                "ambiguous": (
+                    "old_string appears multiple times in the file. "
+                    "Use count=-1 to replace all occurrences, or include "
+                    "more surrounding context to make old_string unique."
+                ),
+            },
+            "read_file": {
+                "not_found": (
+                    "File does not exist. Use list_directory to verify "
+                    "the path, or check for typos in the filename."
+                ),
+            },
+            "run_shell": {
+                "not_found": (
+                    "Command not found. Verify it's installed (pip install "
+                    "or brew install). Check PATH and command spelling."
+                ),
+                "timed_out": (
+                    "Command timed out. Try increasing the timeout parameter "
+                    "or breaking the work into smaller steps."
+                ),
+            },
+            "search_files": {
+                "not_found": (
+                    "No matches found. Try find_symbol for symbol lookups, "
+                    "or broaden your search pattern. Consider using regex=false "
+                    "for literal text searches."
+                ),
+            },
+        }
+
+        # Check known guidance
+        tool_guidance = known_guidance.get(tool_name, {})
+        if fingerprint in tool_guidance:
+            return tool_guidance[fingerprint]
+
+        # Fallback: use most common collected fix
+        if collected_fixes:
+            from collections import Counter
+            most_common = Counter(collected_fixes).most_common(1)[0][0]
+            return most_common
+
+        return f"Unknown fix pattern for {fingerprint}. Try a different approach."
+
+    # ------------------------------------------------------------------
+    # Injection: get relevant notebook entries for context injection
+    # ------------------------------------------------------------------
+
+    def get_injectable_entries(
+        self,
+        pending_tool_calls: list[dict] | None = None,
+        *,
+        limit: int = _NOTEBOOK_MAX_INJECTED,
+    ) -> list[dict]:
+        """Return notebook entries relevant to pending tool calls.
+
+        Only returns entries with confidence >= _NOTEBOOK_ACCEPTANCE_CONFIDENCE.
+        """
+        if not pending_tool_calls:
+            return []
+
+        tool_names = list({
+            tc.get("function", {}).get("name", "")
+            for tc in pending_tool_calls
+        })
+        if not tool_names:
+            return []
+
+        with self._lock:
+            try:
+                conn = self._get_conn()
+                placeholders = ",".join("?" for _ in tool_names)
+                rows = conn.execute(
+                    f"SELECT tool_name, error_fingerprint, generalized_fix,"
+                    f"       cluster_size, confidence, times_applied, times_succeeded"
+                    f" FROM mistake_notebook"
+                    f" WHERE tool_name IN ({placeholders})"
+                    f"  AND confidence >= ?"
+                    f" ORDER BY confidence DESC LIMIT ?",
+                    (*tool_names, _NOTEBOOK_ACCEPTANCE_CONFIDENCE, limit),
+                ).fetchall()
+
+                return [
+                    {
+                        "tool_name": r[0],
+                        "error_fingerprint": r[1],
+                        "generalized_fix": r[2],
+                        "cluster_size": r[3],
+                        "confidence": r[4],
+                        "times_applied": r[5],
+                        "times_succeeded": r[6],
+                    }
+                    for r in rows
+                ]
+            except sqlite3.Error:
+                return []
+
+    def build_notebook_context(
+        self,
+        pending_tool_calls: list[dict] | None = None,
+        turn_count: int = 0,
+    ) -> str | None:
+        """Build a context message with relevant notebook entries.
+
+        Respects injection cooldown to avoid flooding.
+        """
+        if not pending_tool_calls:
+            return None
+
+        if turn_count - self._last_injection_turn < _NOTEBOOK_INJECTION_COOLDOWN:
+            return None
+
+        entries = self.get_injectable_entries(pending_tool_calls)
+        if not entries:
+            return None
+
+        self._last_injection_turn = turn_count
+
+        parts = ["MISTAKE NOTEBOOK (generalized fixes from past failures):"]
+        for e in entries:
+            confidence_pct = int(e["confidence"] * 100)
+            parts.append(
+                f"  - {e['tool_name']} [{e['error_fingerprint']}]: "
+                f"{e['generalized_fix']} "
+                f"(seen {e['cluster_size']}x, "
+                f"{confidence_pct}% confidence)"
+            )
+
+        return "\n".join(parts)
+
+    def record_application(
+        self,
+        tool_name: str,
+        error_fingerprint: str,
+        *,
+        was_successful: bool = False,
+    ) -> None:
+        """Record that a notebook entry was applied (and whether it succeeded)."""
+        with self._lock:
+            try:
+                conn = self._get_conn()
+                conn.execute(
+                    "UPDATE mistake_notebook SET"
+                    "  times_applied = times_applied + 1,"
+                    "  times_succeeded = times_succeeded + ?"
+                    " WHERE tool_name = ? AND error_fingerprint = ?",
+                    (1 if was_successful else 0, tool_name, error_fingerprint),
+                )
+                conn.commit()
+            except sqlite3.Error:
+                pass
+
+    def _prune_if_needed(self, conn: sqlite3.Connection) -> None:
+        """Drop lowest-confidence entries if over the cap."""
+        try:
+            count = conn.execute(
+                "SELECT COUNT(*) FROM mistake_notebook"
+            ).fetchone()[0]
+            if count > _NOTEBOOK_MAX_ENTRIES:
+                excess = count - _NOTEBOOK_MAX_ENTRIES
+                conn.execute(
+                    "DELETE FROM mistake_notebook WHERE id IN ("
+                    "  SELECT id FROM mistake_notebook"
+                    "  ORDER BY confidence ASC, last_distilled ASC"
+                    "  LIMIT ?"
+                    ")",
+                    (excess,),
+                )
+                conn.commit()
+        except sqlite3.Error:
+            pass
+
+    def stats(self) -> dict:
+        """Return summary statistics for the mistake notebook."""
+        with self._lock:
+            try:
+                conn = self._get_conn()
+                total = conn.execute(
+                    "SELECT COUNT(*) FROM mistake_notebook"
+                ).fetchone()[0]
+                accepted = conn.execute(
+                    "SELECT COUNT(*) FROM mistake_notebook"
+                    " WHERE confidence >= ?",
+                    (_NOTEBOOK_ACCEPTANCE_CONFIDENCE,),
+                ).fetchone()[0]
+                return {
+                    "total_entries": total,
+                    "accepted_entries": accepted,
+                    "acceptance_threshold": _NOTEBOOK_ACCEPTANCE_CONFIDENCE,
+                }
+            except sqlite3.Error:
+                return {"total_entries": 0, "accepted_entries": 0}
+
+
+# ---------------------------------------------------------------------------
+# Step-level experience retrieval — dynamic project_knowledge injection
+# ---------------------------------------------------------------------------
+
+# Maximum knowledge entries to inject per turn
+_MAX_KNOWLEDGE_INJECT_PER_TURN = 3
+
+# Minimum importance for dynamic injection
+_MIN_KNOWLEDGE_IMPORTANCE_DYNAMIC = 1
+
+
+def build_experience_context(
+    memory_store,
+    tool_name: str,
+    args: dict | None = None,
+    *,
+    limit: int = _MAX_KNOWLEDGE_INJECT_PER_TURN,
+) -> str | None:
+    """Build context with relevant past experiences for a pending tool call.
+
+    Dynamically searches project_knowledge for entries relevant to the
+    current tool and arguments.  Returns a context string or None.
+
+    Uses keyword matching against the knowledge topic + detail fields
+    to find relevant past learnings.
+    """
+    if memory_store is None:
+        return None
+
+    try:
+        # Build search terms from tool name and args
+        search_terms = [tool_name]
+
+        if args:
+            # Extract path-like args for matching
+            path = args.get("path", "") or args.get("file_path", "")
+            if path:
+                import os
+                ext = os.path.splitext(path)[1]
+                if ext:
+                    search_terms.append(ext)
+                basename = os.path.basename(path)
+                if basename:
+                    search_terms.append(basename)
+
+            # Extract command-like args
+            command = args.get("command", "") or args.get("pattern", "")
+            if command and len(command) < 60:
+                search_terms.append(command)
+
+            # Extract old_string snippets for edit_file
+            old = args.get("old_string", "")
+            if old and len(old) < 80:
+                first_word = old.strip().split()[0] if old.strip() else ""
+                if first_word:
+                    search_terms.append(first_word)
+
+        # Query project_knowledge with relevance ranking
+        all_knowledge = memory_store.list_knowledge(
+            importance_min=_MIN_KNOWLEDGE_IMPORTANCE_DYNAMIC,
+        )
+
+        if not all_knowledge:
+            return None
+
+        # Score each knowledge entry by term overlap
+        scored = []
+        for entry in all_knowledge:
+            topic = (entry.get("summary") or entry.get("topic", "")).lower()
+            detail = (entry.get("detail", "")).lower()
+            category = (entry.get("category", "")).lower()
+            combined = f"{topic} {detail} {category}"
+
+            score = 0
+            for term in search_terms:
+                term_lower = term.lower()
+                if term_lower in topic:
+                    score += 3  # Topic match is strongest
+                elif term_lower in detail:
+                    score += 2
+                elif term_lower in category:
+                    score += 1
+
+            if score > 0:
+                scored.append((score, entry))
+
+        if not scored:
+            return None
+
+        # Sort by score descending, take top N
+        scored.sort(key=lambda x: x[0], reverse=True)
+        top = scored[:limit]
+
+        parts = ["RELEVANT PAST EXPERIENCES:"]
+        for score, entry in top:
+            topic = entry.get("summary") or entry.get("topic", "?")
+            detail = entry.get("detail", "")[:200]
+            cat = entry.get("category", "general")
+            parts.append(f"  [{cat}] {topic}: {detail}")
+
+        return "\n".join(parts)
+
+    except Exception:
+        return None
+
+
+def build_experience_context_batch(
+    memory_store,
+    pending_tool_calls: list[dict],
+    *,
+    limit: int = _MAX_KNOWLEDGE_INJECT_PER_TURN,
+) -> str | None:
+    """Build experience context for a batch of pending tool calls.
+
+    Aggregates relevant past experiences across all pending calls.
+    """
+    if not memory_store or not pending_tool_calls:
+        return None
+
+    all_parts: list[str] = []
+    seen_topics: set[str] = set()
+
+    for tc in pending_tool_calls[:5]:  # Limit to first 5 calls
+        name = tc.get("function", {}).get("name", "")
+        try:
+            args = json.loads(tc.get("function", {}).get("arguments", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            args = {}
+
+        ctx = build_experience_context(
+            memory_store, name, args, limit=2,
+        )
+        if ctx:
+            for line in ctx.split("\n"):
+                line_stripped = line.strip()
+                if line_stripped and line_stripped not in seen_topics:
+                    seen_topics.add(line_stripped)
+                    all_parts.append(line_stripped)
+
+    if not all_parts:
+        return None
+
+    header = "RELEVANT PAST EXPERIENCES:"
+    return header + "\n" + "\n".join(all_parts)

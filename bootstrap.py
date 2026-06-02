@@ -102,6 +102,18 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     except Exception:
         pass  # Self-learning is best-effort, never blocks startup
 
+    # Initialize ToolGraph and MistakeNotebook
+    try:
+        from tools.tool_graph import ToolGraph
+        from tools.failure_learning import MistakeNotebook
+        tg = ToolGraph(memory._db_path)
+        tg.init_schema()
+        mn = MistakeNotebook(memory._db_path)
+        mn.init_schema()
+        set_context(_tool_graph=tg, _mistake_notebook=mn)
+    except Exception:
+        pass  # Best-effort, never blocks startup
+
     # Reset skill gates — start each session with core tools only
     reset_skills()
 

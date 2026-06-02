@@ -1144,6 +1144,48 @@ class MemoryStore:
             warnings.warn("Failed to query project knowledge", stacklevel=2)
             return None
 
+    def list_knowledge(
+        self, category: str = "", importance_min: int = 0, limit: int = 200,
+    ) -> list[dict]:
+        """List project knowledge entries, optionally filtered.
+
+        Args:
+            category: filter by category prefix (empty = all)
+            importance_min: minimum importance to include (default 0 = all)
+            limit: max entries to return
+
+        Returns list of dicts with keys: id, category, summary, detail,
+        importance, hits.
+        """
+        try:
+            conn = self._get_conn()
+            if category:
+                rows = conn.execute(
+                    "SELECT id, category, summary, detail, importance, hits"
+                    " FROM project_knowledge"
+                    " WHERE category = ? AND importance >= ?"
+                    " ORDER BY importance * (hits + 1) DESC"
+                    " LIMIT ?",
+                    (category, importance_min, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT id, category, summary, detail, importance, hits"
+                    " FROM project_knowledge"
+                    " WHERE importance >= ?"
+                    " ORDER BY importance * (hits + 1) DESC"
+                    " LIMIT ?",
+                    (importance_min, limit),
+                ).fetchall()
+            return [
+                {"id": r[0], "category": r[1], "summary": r[2],
+                "detail": r[3], "importance": r[4], "hits": r[5]}
+                for r in rows
+            ]
+        except sqlite3.Error:
+            warnings.warn("Failed to list project knowledge", stacklevel=2)
+            return []
+
     def capture_session_summary(
         self, summary: str, detail: str = "",
     ) -> None:
