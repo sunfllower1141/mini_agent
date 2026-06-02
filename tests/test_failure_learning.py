@@ -21,7 +21,7 @@ from tools.failure_learning import (
 
 class TestFingerprintError:
     def test_edit_file_not_found(self):
-        assert _fingerprint_error("edit_file", "String not found in file") == "not_found"
+        assert _fingerprint_error("edit_file", "String not found in file") == "not found"
 
     def test_edit_file_whitespace(self):
         assert _fingerprint_error("edit_file", "Whitespace mismatch detected") == "whitespace"
@@ -30,23 +30,23 @@ class TestFingerprintError:
         assert _fingerprint_error("edit_file", "Multiple matches appear in file") == "ambiguous"
 
     def test_read_file_not_found(self):
-        assert _fingerprint_error("read_file", "No such file: foo.py") == "not_found"
+        assert _fingerprint_error("read_file", "No such file: foo.py") == "not found"
 
     def test_run_shell_timed_out(self):
-        assert _fingerprint_error("run_shell", "Command timed out after 60s") == "timed_out"
+        assert _fingerprint_error("run_shell", "Command timed out after 60s") == "timed out"
 
     def test_search_files_not_found(self):
-        assert _fingerprint_error("search_files", "No matches found") == "not_found"
+        assert _fingerprint_error("search_files", "No matches found") == "not found"
 
     def test_find_symbol_not_found(self):
-        assert _fingerprint_error("find_symbol", "No match found for 'foo'") == "not_found"
+        assert _fingerprint_error("find_symbol", "No match found for 'foo'") == "not found"
 
     def test_run_tests_failures(self):
-        assert _fingerprint_error("run_tests", "FAILED test_something") == "test_failures"
+        assert _fingerprint_error("run_tests", "FAILED test_something") == "failures"
 
     def test_generic_fallback(self):
         fp = _fingerprint_error("unknown_tool", "something weird happened")
-        assert fp.startswith("generic:")
+        assert fp == "something weird happened"
 
 
 class TestNormalizeArgs:

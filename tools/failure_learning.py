@@ -94,11 +94,16 @@ FAILURE_PATTERNS_INDEXES = [
 # ---------------------------------------------------------------------------
 
 def _fingerprint_error(name: str, content: str) -> str:
-    """Extract a stable error fingerprint from tool result content."""
+    """Extract a stable error fingerprint from tool result content.
+
+    Returns the same space-separated format as tools/__init__._fingerprint_error
+    so that fingerprints stored by FailurePatternStore match those from
+    _learn_from_failure and _FAILURE_PATTERNS.
+    """
     cl = content.lower()
     if name == "edit_file":
         if "not found" in cl or "does not exist" in cl:
-            return "not_found"
+            return "not found"
         if "whitespace" in cl or "indentation" in cl or "tab" in cl or "trailing" in cl:
             return "whitespace"
         if "ambiguous" in cl or "multiple" in cl or "appears" in cl:
@@ -112,29 +117,37 @@ def _fingerprint_error(name: str, content: str) -> str:
             return "exists"
     elif name == "read_file":
         if "not found" in cl or "no such file" in cl:
-            return "not_found"
+            return "not found"
         if "offset" in cl or "exceeds" in cl:
             return "offset"
     elif name == "search_files":
         if "no matches" in cl or "not found" in cl:
-            return "not_found"
+            return "not found"
         if "invalid" in cl and "regex" in cl:
-            return "invalid_regex"
+            return "invalid regex"
     elif name == "run_shell":
         if "not found" in cl or "command not found" in cl:
-            return "not_found"
+            return "not found"
         if "blocked" in cl or "destructive" in cl:
             return "blocked"
         if "timed out" in cl or "timeout" in cl:
-            return "timed_out"
+            return "timed out"
     elif name in ("find_symbol", "find_usages"):
         if "no match" in cl or "not found" in cl:
-            return "not_found"
+            return "not found"
     elif name in ("run_tests", "verify"):
         if "fail" in cl or "FAILED" in cl:
-            return "test_failures"
-    # Generic: hash the content for a stable fingerprint
-    return "generic:" + hashlib.md5(content[:120].encode()).hexdigest()[:12]
+            return "failures"
+    # Fallback: return truncated content (matches tools/__init__ behavior)
+    return content[:60].strip().lower()
+
+
+# Prefer the canonical version from tools/__init__ when available so
+# fingerprints stored by FailurePatternStore match those from
+# _learn_from_failure and _FAILURE_PATTERNS.  The local fallback above
+# is only used when tools/__init__ cannot be imported (bootstrapping).
+if _core_fingerprint is not None:
+    _fingerprint_error = _core_fingerprint  # type: ignore[assignment]
 
 
 def _normalize_args(name: str, args: dict) -> str:
