@@ -7,6 +7,7 @@ Tools: read_file, write_file, edit_file, list_directory, file_info
 from __future__ import annotations
 
 import os
+import re
 import stat as stat_module
 import shutil
 import sys
@@ -20,6 +21,82 @@ from tools import _FILE_RESERVATIONS
 # Thread-local: current sub-agent task_id (set by agent_ops before tool execution)
 import threading
 _current_agent_id: threading.local = threading.local()
+
+# ---------------------------------------------------------------------------
+# Unicode & quote normalization maps (used by edit_file matching)
+# ---------------------------------------------------------------------------
+
+# Curly/smart quotes → ASCII straight quotes
+_QUOTE_NORMALIZE_MAP: dict[int, int | None] = {
+    0x2018: ord("'"),   # ' left single
+    0x2019: ord("'"),   # ' right single
+    0x201A: ord("'"),   # ‚ single low-9
+    0x201B: ord("'"),   # ‛ single high-reversed
+    0x201C: ord('"'),   # " left double
+    0x201D: ord('"'),   # " right double
+    0x201E: ord('"'),   # „ double low-9
+    0x201F: ord('"'),   # ‟ double high-reversed
+    0x2039: ord("'"),   # ‹ single left-pointing angle
+    0x203A: ord("'"),   # › single right-pointing angle
+    0x00AB: ord('"'),   # « left-pointing double angle
+    0x00BB: ord('"'),   # » right-pointing double angle
+}
+
+# Unicode whitespace → ASCII space (or None = remove)
+_UNICODE_WHITESPACE_MAP: dict[int, int | None] = {
+    0x00A0: ord(" "),   # non-breaking space
+    0x2002: ord(" "),   # en space
+    0x2003: ord(" "),   # em space
+    0x2007: ord(" "),   # figure space
+    0x2008: ord(" "),   # punctuation space
+    0x2009: ord(" "),   # thin space
+    0x200A: ord(" "),   # hair space
+    0x202F: ord(" "),   # narrow non-breaking space
+    0x205F: ord(" "),   # medium mathematical space
+    0x3000: ord(" "),   # ideographic space
+    0x00AD: None,       # soft hyphen → remove
+    0x200B: None,       # zero-width space → remove
+    0x200C: None,       # zero-width non-joiner → remove
+    0x200D: None,       # zero-width joiner → remove
+    0xFEFF: None,       # BOM / zero-width no-break space → remove
+    0x2060: None,       # word joiner → remove
+}
+
+# Build fast translation tables (Python str.translate)
+_QUOTE_TRANS_TABLE: dict[int, int] = {}
+_UNICODE_WS_TRANS_TABLE: dict[int, int | None] = {}
+
+def _normalize_quotes(s: str) -> str:
+    """Convert curly/smart quotes to ASCII straight quotes."""
+    return s.translate(_QUOTE_TRANS_TABLE)
+
+def _normalize_unicode_whitespace(s: str) -> str:
+    """Replace Unicode whitespace chars with ASCII space; remove zero-width chars."""
+    return s.translate(_UNICODE_WS_TRANS_TABLE)
+
+def _canonicalize_for_match(s: str) -> str:
+    """Full canonicalization for matching: normalize Unicode ws, then quotes."""
+    return _normalize_quotes(_normalize_unicode_whitespace(s))
+
+# ---------------------------------------------------------------------------
+# Read-before-edit tracking — set of resolved_path values that have been
+# read_file'd during this session.  Edit/replace operations check this to
+# ensure the model has seen the current file content.
+# ---------------------------------------------------------------------------
+
+_READ_FILES: set[str] = set()
+
+# Build fast translation tables at import time
+for _cp, _replacement in _QUOTE_NORMALIZE_MAP.items():
+    _QUOTE_TRANS_TABLE[_cp] = _replacement
+
+# Unicode ws table: map cp → replacement (or delete if None via str.maketrans)
+# str.translate with a dict can map to None to delete characters
+_UNICODE_WS_TRANS_TABLE.update({cp: repl for cp, repl in _UNICODE_WHITESPACE_MAP.items() if repl is not None})
+# Zero-width chars: map to None to delete
+for _cp, _repl in _UNICODE_WHITESPACE_MAP.items():
+    if _repl is None:
+        _UNICODE_WS_TRANS_TABLE[_cp] = None
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +240,9 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
         except OSError:
             pass
 
+    # Track this file as read for read-before-edit enforcement
+    _READ_FILES.add(resolved)
+
     if lines_after_offset > limit:
         truncated = "\n".join(collected[:limit])
         msg = (
@@ -218,6 +298,8 @@ def _write_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
         clear_tool_cache()
         # Invalidate cross-turn file cache
         _FILE_CACHE.pop(safety_result.resolved_path, None)
+        # Track as read for read-before-edit enforcement (agent wrote it, knows content)
+        _READ_FILES.add(safety_result.resolved_path)
         # Keep symbol index fresh for newly written .py files
         if path.endswith(".py"):
             from tools.search_ops import _reindex_file
@@ -254,7 +336,8 @@ _EditResult = tuple[str, ToolResult]  # (path, result)
 
 
 def _normalize_line(s: str) -> str:
-    """Collapse whitespace: tabs→spaces, strip, collapse multiple spaces."""
+    """Collapse whitespace: Unicode ws→space, tabs→spaces, strip, collapse multiple spaces."""
+    s = _normalize_unicode_whitespace(s)
     return ' '.join(s.replace('\t', '    ').split())
 
 
@@ -299,62 +382,286 @@ def _find_closest_lines(content_lines: list[str], search_lines: list[str]) -> di
         'line': best_idx + 1,
         'lines': content_lines[best_idx:best_idx + n_search],
         'diff_hint': '; '.join(diff_parts[:5]) if diff_parts else '',
+        'match_ratio': match_ratio,
+        'matched_lines': best_score,
     }
 
 
 def _fuzzy_find(content: str, search: str) -> tuple[int, int] | None:
-    """Cascading 4-pass match for edit_file.
-    1. Exact match. 2. Trailing-whitespace-tolerant. 3. Indentation-tolerant.
-    4. Normalized-content fuzzy match (tabs→spaces, collapsed whitespace).
+    """Cascading 5-pass match for edit_file.
+
+    1. Exact substring match.
+    2. Quote-normalized match (curly→straight quotes).
+    3. Trailing-whitespace-tolerant.
+    4. Indentation-tolerant (full strip).
+    5. Normalized-content fuzzy match (Unicode ws→space, tabs→spaces, collapsed whitespace)
+       with confidence scoring (requires ≥95% normalized line matches).
     """
     if not search or not content:
         return None
-    # Pass 1: exact substring
-    idx = content.find(search)
+
+    # -- Line-ending normalization: CRLF → LF -------
+    content_lf = content.replace('\r\n', '\n').replace('\r', '\n')
+    search_lf = search.replace('\r\n', '\n').replace('\r', '\n')
+
+    # Pass 1: exact substring (against LF-normalized content)
+    idx = content_lf.find(search_lf)
     if idx != -1:
-        return (idx, idx + len(search))
-    content_lines = content.split('\n')
-    search_lines = search.split('\n')
+        # Map back to original content offsets (CR removal may shift)
+        return _map_lf_offset_to_original(content, search_lf, idx)
+
+    content_lines = content_lf.split('\n')
+    search_lines = search_lf.split('\n')
     if search_lines and search_lines[-1] == '':
         search_lines.pop()
     if not search_lines:
         return None
-    # Pass 2-3: trailing-whitespace-tolerant, then full indent-tolerant
+
+    # Pass 2: quote normalization — try matching after normalizing curly quotes
+    result = _quote_normalized_match(content_lf, search_lf, content)
+    if result is not None:
+        return result
+
+    # Pass 3-4: trailing-whitespace-tolerant, then full indent-tolerant
     for trim in ('right', 'all'):
-        result = _line_match(content_lines, search_lines, trim, content)
+        result = _line_match(content_lines, search_lines, trim, content_lf)
         if result is not None:
-            return result
-    # Pass 4: normalize whitespace on every line, then try to match
-    return _fuzzy_find_closest(content, search_lines, content_lines)
+            return _map_lf_region_to_original(content, result[0], result[1])
+
+    # Pass 5: normalize whitespace on every line, then try to match
+    # with confidence scoring (≥95% threshold)
+    return _fuzzy_find_closest(content_lf, search_lines, content_lines, content)
 
 
-def _fuzzy_find_closest(content: str, search_lines: list[str],
-                        content_lines: list[str]) -> tuple[int, int] | None:
-    """Pass 4: normalize all whitespace on every line, sliding-window match.
+def _map_lf_offset_to_original(
+    original: str, search: str, lf_idx: int,
+) -> tuple[int, int]:
+    """Map an LF-normalized match offset back to original content offsets."""
+    # Walk original content counting chars; skip CR bytes
+    orig_pos = 0
+    lf_pos = 0
+    while lf_pos < lf_idx and orig_pos < len(original):
+        if original[orig_pos] == '\r':
+            orig_pos += 1
+            if orig_pos < len(original) and original[orig_pos] == '\n':
+                orig_pos += 1
+            lf_pos += 1  # \r alone maps to \n
+        else:
+            orig_pos += 1
+            lf_pos += 1
+    start = orig_pos
+    # Now find end — search_len chars in LF space
+    remaining = len(search)
+    while remaining > 0 and orig_pos < len(original):
+        if original[orig_pos] == '\r':
+            orig_pos += 1
+            if orig_pos < len(original) and original[orig_pos] == '\n':
+                orig_pos += 1
+        else:
+            orig_pos += 1
+        remaining -= 1
+    return (start, orig_pos)
+
+
+def _map_lf_region_to_original(
+    original: str, lf_start: int, lf_end: int,
+) -> tuple[int, int]:
+    """Map an LF-normalized region [lf_start, lf_end) back to original offsets."""
+    start = _map_lf_offset_to_original(original, "x" * (lf_end - lf_start), lf_start)[0]
+    _, end = _map_lf_offset_to_original(original, "x" * (lf_end - lf_start), lf_start)
+    return (start, end)
+
+
+def _quote_normalized_match(
+    content_lf: str, search_lf: str, original: str,
+) -> tuple[int, int] | None:
+    """Pass 2: try matching after normalizing curly/smart quotes to ASCII.
+
+    Returns (start, end) in *original* content offsets.
+    """
+    norm_content = _normalize_quotes(content_lf)
+    norm_search = _normalize_quotes(search_lf)
+    idx = norm_content.find(norm_search)
+    if idx != -1:
+        # Map the normalized offset back through the LF content to original
+        # Since quote normalization doesn't change string length (1 cp → 1 byte
+        # in these cases), the offsets are the same as LF offsets.
+        return _map_lf_offset_to_original(original, search_lf, idx)
+    return None
+
+
+def _preserve_indentation(
+    old_str: str, new_str: str, file_region: str,
+) -> str:
+    """Preserve the file's indentation style when applying a replacement.
+
+    Captures the leading whitespace of each line in the matched file region
+    and applies the same indentation *relative changes* to the new_string lines.
+    If old_str has N lines with indentation I₁…Iₙ and new_str has M lines with
+    indentation J₁…Jₘ, then for each new line k at position k in the new block:
+      - if k < N: apply (Jₖ - Iₖ) offset relative to file's Iₖ
+      - if k >= N: apply (Jₙ₋₁ - Iₙ₋₁) offset relative to file's last I
+
+    This handles the common case where the model outputs refactored code with
+    spaces instead of tabs (or vice versa) and we want to match the file's style.
+    """
+    old_lines = old_str.split('\n')
+    new_lines = new_str.split('\n')
+    file_lines = file_region.split('\n')
+
+    # Extract leading whitespace from each line
+    def _leading_ws(s: str) -> str:
+        m = re.match(r'^([ \t]*)', s)
+        return m.group(1) if m else ''
+
+    old_indents = [_leading_ws(l) for l in old_lines]
+    new_indents = [_leading_ws(l) for l in new_lines]
+    file_indents = [_leading_ws(l) for l in file_lines]
+
+    # If all old indents are empty or single-line, no preservation needed
+    if not any(old_indents) or len(old_lines) <= 1:
+        return new_str
+
+    result_lines: list[str] = []
+    for k, new_line in enumerate(new_lines):
+        new_ws = new_indents[k] if k < len(new_indents) else ''
+        new_content = new_line[len(new_ws):]  # rest of line after indentation
+
+        if k < len(old_indents) and k < len(file_indents):
+            old_ws = old_indents[k]
+            file_ws = file_indents[k]
+            # Compute the relative indentation change from old→new
+            if old_ws:
+                # New wanted more/less indentation relative to old baseline
+                if new_ws.startswith(old_ws):
+                    # New has old prefix + extra: apply extra to file's indent
+                    extra = new_ws[len(old_ws):]
+                    result_lines.append(file_ws + extra + new_content)
+                elif old_ws.startswith(new_ws):
+                    # New wants less indent than old: reduce file's indent
+                    remove = len(old_ws) - len(new_ws)
+                    if len(file_ws) >= remove:
+                        result_lines.append(file_ws[remove:] + new_content)
+                    else:
+                        result_lines.append(new_content)
+                else:
+                    # Totally different indent style: use file's indent + relative diff
+                    # Count indent "levels" (tabs=1 level, 2+ spaces=1 level)
+                    old_levels = _count_indent_levels(old_ws)
+                    new_levels = _count_indent_levels(new_ws)
+                    level_diff = new_levels - old_levels
+                    new_file_levels = _count_indent_levels(file_ws) + level_diff
+                    new_file_indent = _indent_from_levels(new_file_levels, file_ws)
+                    result_lines.append(new_file_indent + new_content)
+            else:
+                # Old had no indent; apply new indent relative to file's indent
+                if new_ws:
+                    result_lines.append(file_ws + new_ws + new_content)
+                else:
+                    result_lines.append(file_ws + new_content)
+        elif k < len(new_indents):
+            # Extra lines beyond old: use last old→file diff
+            last_idx = len(old_indents) - 1
+            if last_idx >= 0 and last_idx < len(file_indents):
+                old_last = old_indents[last_idx]
+                file_last = file_indents[last_idx]
+                level_diff = _count_indent_levels(new_indents[k]) - _count_indent_levels(old_last) if old_last else _count_indent_levels(new_indents[k])
+                new_levels = _count_indent_levels(file_last) + level_diff
+                result_lines.append(_indent_from_levels(new_levels, file_last) + new_content)
+            else:
+                result_lines.append(new_line)
+        else:
+            result_lines.append(new_line)
+
+    return '\n'.join(result_lines)
+
+
+def _count_indent_levels(ws: str) -> int:
+    """Count indentation levels: each tab = 1 level, each 2 spaces = 1 level."""
+    if not ws:
+        return 0
+    if '\t' in ws:
+        return ws.count('\t')
+    space_count = len(ws)
+    # Treat each 2 spaces as 1 level (Python standard), with remainder as partial
+    levels = space_count // 2
+    return levels
+
+
+def _indent_from_levels(levels: int, reference_ws: str) -> str:
+    """Generate indentation string from level count, matching reference style."""
+    if levels <= 0:
+        return ''
+    if '\t' in (reference_ws or ''):
+        return '\t' * levels
+    return ' ' * (levels * 2)
+
+
+def _fuzzy_find_closest(
+    content_lf: str,
+    search_lines: list[str],
+    content_lines: list[str],
+    original: str,
+    confidence_threshold: float = 0.95,
+) -> tuple[int, int] | None:
+    """Pass 5: normalize all whitespace on every line, sliding-window match.
 
     Normalizes both search and content lines by collapsing whitespace
-    (tabs→spaces, strip, collapse multiple spaces to single space).
+    (Unicode ws→space, tabs→spaces, strip, collapse multiple spaces).
     Requires a unique match — if multiple windows match, returns None.
+    Also enforces a confidence threshold: the best match must have ≥95% of
+    normalized lines matching exactly.  If below threshold, returns None
+    so the caller can report the near-miss with a score.
+
+    Returns None on ambiguous or low-confidence matches.
     """
     norm_search = [_normalize_line(s) for s in search_lines]
     n_search = len(search_lines)
     n_content = len(content_lines)
     if n_search == 0 or n_content < n_search:
         return None
+
     match_start = None
+    best_score = -1
+    best_idx = 0
+
     for i in range(n_content - n_search + 1):
         window = content_lines[i:i + n_search]
-        if [_normalize_line(w) for w in window] == norm_search:
+        norm_window = [_normalize_line(w) for w in window]
+        score = sum(1 for a, b in zip(norm_search, norm_window) if a == b)
+        if score > best_score:
+            best_score = score
+            best_idx = i
+            match_start = None  # reset ambiguity
+        if norm_window == norm_search:
             if match_start is not None:
-                return None  # ambiguous — multiple matches
+                return None  # ambiguous — multiple exact normalized matches
             match_start = i
-    if match_start is None:
-        return None
-    start_byte = sum(len(line) + 1 for line in content_lines[:match_start])
-    end_byte = start_byte + sum(len(line) + 1 for line in content_lines[match_start:match_start + n_search])
-    if end_byte > start_byte and content[end_byte - 1:end_byte] == '\n':
+
+    # If we have a unique exact normalized match, use it regardless of score
+    if match_start is not None:
+        start_byte = sum(len(line) + 1 for line in content_lines[:match_start])
+        end_byte = start_byte + sum(
+            len(line) + 1 for line in content_lines[match_start:match_start + n_search]
+        )
+        if end_byte > start_byte and content_lf[end_byte - 1:end_byte] == '\n':
+            end_byte -= 1
+        return _map_lf_region_to_original(original, start_byte, end_byte)
+
+    # No exact normalized match — check confidence threshold
+    confidence = best_score / n_search if n_search > 0 else 0.0
+    if confidence < confidence_threshold:
+        return None  # below threshold, let caller report near-miss
+
+    # Above threshold but not exact — use best match
+    # (this handles near-perfect matches with minor whitespace differences)
+    start_byte = sum(len(line) + 1 for line in content_lines[:best_idx])
+    end_byte = start_byte + sum(
+        len(line) + 1 for line in content_lines[best_idx:best_idx + n_search]
+    )
+    if end_byte > start_byte and content_lf[end_byte - 1:end_byte] == '\n':
         end_byte -= 1
-    return (start_byte, end_byte)
+    return _map_lf_region_to_original(original, start_byte, end_byte)
 
 
 def _line_match(content_lines, search_lines, trim, content=''):
@@ -403,6 +710,19 @@ def _apply_single_edit(
         if not ok:
             return (path, ToolResult(success=False, content=msg))
     resolved = safety_result.resolved_path
+
+    # --- Read-before-edit enforcement ---
+    if resolved not in _READ_FILES:
+        return (path, ToolResult(
+            success=False,
+            content=(
+                f"Edit blocked: '{resolved}' has not been read yet in this session.\n"
+                f"Use read_file first to read the file before editing it.\n"
+                f"This ensures the model sees the current file content and can construct\n"
+                f"an accurate old_string for matching."
+            ),
+        ))
+
     try:
         with open(resolved, "r", encoding="utf-8", errors="replace") as f:
             original = f.read()
@@ -428,10 +748,17 @@ def _apply_single_edit(
                 f"and line endings. Try read_file first to verify the exact text."
             )
             if best_match:
-                hint += (
-                    f"\n\nClosest match found around line {best_match['line']}:\n"
-                    f"  Expected ({len(_old_lines)} lines):\n"
-                )
+                # Show confidence score for the closest match
+                n_search = len(_old_lines)
+                if n_search > 0 and best_match.get('match_ratio', 0) > 0:
+                    pct = int(best_match['match_ratio'] * 100)
+                    hint += (
+                        f"\n\nClosest match found at line {best_match['line']} "
+                        f"(confidence: {pct}%, {best_match.get('matched_lines', 0)}/{n_search} lines):"
+                    )
+                else:
+                    hint += f"\n\nClosest match found around line {best_match['line']}:"
+                hint += f"\n  Expected ({len(_old_lines)} lines):\n"
                 for ol in _old_lines[:10]:
                     hint += f"    | {ol.rstrip()}\n"
                 if len(_old_lines) > 10:
@@ -444,7 +771,7 @@ def _apply_single_edit(
                 if best_match['diff_hint']:
                     hint += f"\nDifferences: {best_match['diff_hint']}"
             if candidates:
-                hint += "\nSimilar lines found (did you mean one of this?):\n" + "\n".join(candidates)
+                hint += "\nSimilar lines found (did you mean one of these?):\n" + "\n".join(candidates)
             if old_first_line:
                 try:
                     memory = getattr(_TOOL_CONTEXT, "_memory_store", None)
@@ -464,7 +791,12 @@ def _apply_single_edit(
             replaced = occurrences
         elif count >= 1:
             start, end = match
-            updated = original[:start] + new + original[end:]
+            # --- Indentation preservation ---
+            # Capture the matched region from the original file and apply
+            # indentation preservation to the new_string to match the file's style.
+            matched_region = original[start:end]
+            preserved_new = _preserve_indentation(old, new, matched_region)
+            updated = original[:start] + preserved_new + original[end:]
             replaced = 1
         else:
             return (path, ToolResult(success=False, content=f"Invalid count: {count}. Use a positive integer or -1 (all)."))

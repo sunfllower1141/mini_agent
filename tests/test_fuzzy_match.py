@@ -245,5 +245,181 @@ class TestFindClosestLines(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertIn("expected", result['diff_hint'].lower())
 
+
+# ---------------------------------------------------------------------------
+# New features: quote normalization, Unicode whitespace, indentation
+# preservation, confidence scoring, read-before-edit
+# ---------------------------------------------------------------------------
+
+from tools.file_ops import (
+    _normalize_quotes,
+    _normalize_unicode_whitespace,
+    _canonicalize_for_match,
+    _preserve_indentation,
+    _READ_FILES,
+)
+
+
+class TestQuoteNormalization(unittest.TestCase):
+    """Tests for curly/smart quote → ASCII normalization."""
+
+    def test_curly_double_quotes(self):
+        content = '\u201cHello world\u201d'
+        search = '"Hello world"'
+        result = _fuzzy_find(content, search)
+        self.assertIsNotNone(result)
+        start, end = result
+        # Should match the original curly-quoted content
+        self.assertIn('Hello world', content[start:end])
+
+    def test_curly_single_quotes(self):
+        content = "\u2018test\u2019"
+        search = "'test'"
+        result = _fuzzy_find(content, search)
+        self.assertIsNotNone(result)
+
+    def test_mixed_quotes_in_code(self):
+        content = 'x = \u201cfoo\u201d + \u2018bar\u2019'
+        search = 'x = "foo" + \'bar\''
+        result = _fuzzy_find(content, search)
+        self.assertIsNotNone(result)
+
+    def test_normalize_quotes_helper(self):
+        self.assertEqual(_normalize_quotes('\u201cHello\u201d'), '"Hello"')
+        self.assertEqual(_normalize_quotes("\u2018Hi\u2019"), "'Hi'")
+        self.assertEqual(_normalize_quotes("plain"), "plain")
+
+
+class TestUnicodeWhitespaceNormalization(unittest.TestCase):
+    """Tests for Unicode whitespace → ASCII space normalization."""
+
+    def test_nbsp_to_space(self):
+        content = "hello\u00a0world"
+        search = "hello world"
+        result = _fuzzy_find(content, search)
+        self.assertIsNotNone(result)
+
+    def test_figure_space(self):
+        content = "col1\u2007col2"
+        search = "col1 col2"
+        result = _fuzzy_find(content, search)
+        self.assertIsNotNone(result)
+
+    def test_narrow_nbsp(self):
+        content = "a\u202fb"
+        search = "a b"
+        result = _fuzzy_find(content, search)
+        self.assertIsNotNone(result)
+
+    def test_zero_width_chars_removed(self):
+        content = "hello\u200bworld"
+        search = "helloworld"
+        result = _fuzzy_find(content, search)
+        self.assertIsNotNone(result)
+
+    def test_soft_hyphen_removed(self):
+        content = "break\u00adpoint"
+        search = "breakpoint"
+        result = _fuzzy_find(content, search)
+        self.assertIsNotNone(result)
+
+    def test_normalize_unicode_ws_helper(self):
+        self.assertEqual(_normalize_unicode_whitespace("a\u00a0b"), "a b")
+        self.assertEqual(_normalize_unicode_whitespace("a\u200bb"), "ab")
+        self.assertEqual(_normalize_unicode_whitespace("plain"), "plain")
+
+    def test_canonicalize_combines_both(self):
+        self.assertEqual(_canonicalize_for_match('\u201cHello\u00a0World\u201d'), '"Hello World"')
+
+
+class TestIndentationPreservation(unittest.TestCase):
+    """Tests for _preserve_indentation."""
+
+    def test_spaces_to_tabs_preserved(self):
+        # File uses tabs, model outputs spaces
+        old = "    if x:\n        pass"
+        new = "    if x:\n        pass\n        log()"
+        file_region = "\tif x:\n\t\tpass"
+        result = _preserve_indentation(old, new, file_region)
+        self.assertIn('\tif x:', result)
+        self.assertIn('\t\tpass', result)
+
+    def test_tabs_to_spaces_preserved(self):
+        # File uses spaces, model outputs tabs
+        old = "\tif x:\n\t\tpass"
+        new = "\tif x:\n\t\tpass\n\t\tlog()"
+        file_region = "    if x:\n        pass"
+        result = _preserve_indentation(old, new, file_region)
+        self.assertIn('    if x:', result)
+        self.assertIn('        pass', result)
+
+    def test_relative_indent_increase(self):
+        old = "def foo():\n    return 1"
+        new = "def foo():\n    return 1\n    return 2"
+        file_region = "def foo():\n  return 1"
+        result = _preserve_indentation(old, new, file_region)
+        # Should use 2-space indent from file
+        self.assertIn('  return 1', result)
+        self.assertIn('  return 2', result)
+
+    def test_single_line_no_preservation(self):
+        result = _preserve_indentation("old", "new", "old")
+        self.assertEqual(result, "new")
+
+    def test_extra_lines_use_last_offset(self):
+        old = "def foo():\n    pass"
+        new = "def foo():\n    pass\n    x = 1\n    y = 2"
+        file_region = "def foo():\n\tpass"
+        result = _preserve_indentation(old, new, file_region)
+        self.assertIn('\tx = 1', result)
+        self.assertIn('\ty = 2', result)
+
+
+class TestReadBeforeEdit(unittest.TestCase):
+    """Tests for read-before-edit enforcement."""
+
+    def setUp(self):
+        self._saved = set(_READ_FILES)
+
+    def tearDown(self):
+        _READ_FILES.clear()
+        _READ_FILES.update(self._saved)
+
+    def test_read_tracks_file(self):
+        _READ_FILES.clear()
+        self.assertNotIn("/tmp/test.py", _READ_FILES)
+        _READ_FILES.add("/tmp/test.py")
+        self.assertIn("/tmp/test.py", _READ_FILES)
+
+
+class TestConfidenceScoring(unittest.TestCase):
+    """Tests for confidence scoring in _find_closest_lines."""
+
+    def test_exact_match_has_confidence_100(self):
+        content_lines = ["def foo():", "    return 1"]
+        search_lines = ["def foo():", "    return 1"]
+        result = _find_closest_lines(content_lines, search_lines)
+        self.assertIsNotNone(result)
+        self.assertEqual(result['match_ratio'], 1.0)
+        self.assertEqual(result['matched_lines'], 2)
+
+    def test_partial_match_has_lower_confidence(self):
+        # 3 lines: 2 match, 1 has different content = 2/3 confidence
+        content_lines = ["def foo():", "    return 42", "    extra"]
+        search_lines = ["def foo():", "    return 42", "    different"]
+        result = _find_closest_lines(content_lines, search_lines)
+        self.assertIsNotNone(result)
+        self.assertAlmostEqual(result['match_ratio'], 2/3)
+        self.assertEqual(result['matched_lines'], 2)
+
+    def test_different_content_zero_confidence(self):
+        content_lines = ["def bar():", "    return 42"]
+        search_lines = ["def foo():", "    return 1"]
+        result = _find_closest_lines(content_lines, search_lines)
+        self.assertIsNotNone(result)
+        self.assertEqual(result['match_ratio'], 0.0)  # completely different
+        self.assertEqual(result['matched_lines'], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

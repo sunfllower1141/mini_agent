@@ -438,6 +438,15 @@ class TestEditFileDiff(unittest.TestCase):
         with open(self.test_file, "w") as f:
             f.write("hello world\nline two\n")
         from tools import execute_tool
+        # Must read before editing
+        execute_tool({
+            "id": "call_0",
+            "type": "function",
+            "function": {
+                "name": "read_file",
+                "arguments": json.dumps({"path": self.test_file}),
+            },
+        }, self.wg, self.rg)
         tc = {
             "id": "call_1",
             "type": "function",

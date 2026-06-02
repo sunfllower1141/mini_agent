@@ -273,6 +273,11 @@ class TestRestoreFile(unittest.TestCase):
     def test_restore_after_edit(self):
         """Restore works after edit_file too."""
         path = self._write("editme.txt", "initial text")
+        # Must read before editing (read-before-edit enforcement)
+        execute_tool(
+            _make_tool_call("read_file", path=path),
+            self.write_gate, self.read_gate,
+        )
         execute_tool(
             _make_tool_call("edit_file", path=path, old_string="initial", new_string="changed"),
             self.write_gate, self.read_gate,

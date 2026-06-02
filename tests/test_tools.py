@@ -269,6 +269,8 @@ class TestEditFile(unittest.TestCase):
 
     def test_replaces_first_occurrence(self):
         path = self._write("f.txt", "hello world hello")
+        # Must read before editing
+        execute_tool(_make_tool_call("read_file", path=path), self.write_gate, self.read_gate)
         tc = _make_tool_call("edit_file", path=path,
                              old_string="hello", new_string="hi")
         result = execute_tool(tc, self.write_gate, self.read_gate)
@@ -278,6 +280,7 @@ class TestEditFile(unittest.TestCase):
 
     def test_old_string_not_found_returns_error(self):
         path = self._write("f.txt", "abc")
+        execute_tool(_make_tool_call("read_file", path=path), self.write_gate, self.read_gate)
         tc = _make_tool_call("edit_file", path=path,
                              old_string="xyz", new_string="q")
         result = execute_tool(tc, self.write_gate, self.read_gate)
@@ -834,6 +837,7 @@ class TestErrorHints(unittest.TestCase):
         path = os.path.join(self.workspace, "f.txt")
         with open(path, "w") as f:
             f.write("original content\n")
+        execute_tool(_make_tool_call("read_file", path=path), self.write_gate, self.read_gate)
         tc = _make_tool_call("edit_file", path=path,
                              old_string="nonexistent", new_string="replacement")
         result = execute_tool(tc, self.write_gate, self.read_gate)
@@ -1055,6 +1059,7 @@ class TestEditFileShortOutput(unittest.TestCase):
         f = os.path.join(self.workspace, "e.txt")
         with open(f, "w") as fh:
             fh.write("alpha\nbeta\ngamma\n")
+        execute_tool(_make_tool_call("read_file", path=f), self.write_gate, self.read_gate)
         tc = _make_tool_call("edit_file", path=f, old_string="beta", new_string="delta")
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertTrue(result.success)
@@ -1068,6 +1073,7 @@ class TestEditFileShortOutput(unittest.TestCase):
         f = os.path.join(self.workspace, "e2.txt")
         with open(f, "w") as fh:
             fh.write("one\ntwo\nthree\n")
+        execute_tool(_make_tool_call("read_file", path=f), self.write_gate, self.read_gate)
         tc = _make_tool_call("edit_file", path=f, old_string="two", new_string="TWO")
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertTrue(result.success)
