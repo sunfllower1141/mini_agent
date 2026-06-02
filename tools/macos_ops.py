@@ -19,6 +19,12 @@ All tools degrade gracefully on non-macOS platforms with clear messages.
 Most use pyobjc (AppKit / Quartz / Foundation) which is bundled with
 the macOS Python framework.  A few fall back to subprocess calls
 (osascript, open, mdfind, pmset) for maximum compatibility.
+
+Safety gate note: the registered tool wrappers accept WriteSafetyGate
+and ReadSafetyGate but do not use them.  These tools operate on the
+host desktop (clipboard, keyboard simulation, app lifecycle) which is
+inherently outside the workspace sandbox.  The agent is trusted to use
+them responsibly — they are gated behind the 'desktop' skill group.
 """
 
 from __future__ import annotations
@@ -27,11 +33,88 @@ import os
 import platform
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from safety import ReadSafetyGate, WriteSafetyGate
 from tools import _register, _summarize, ToolResult
 
 PLATFORM = platform.system()
+
+# ── Lazy pyobjc imports (module-level, imported once on first use) ──
+_AppKit_NSWorkspace = None
+
+
+def _get_nsworkspace():
+    """Lazy-load NSWorkspace (cached after first call)."""
+    global _AppKit_NSWorkspace
+    if _AppKit_NSWorkspace is None:
+        try:
+            from AppKit import NSWorkspace as _AppKit_NSWorkspace
+        except ImportError:
+            _AppKit_NSWorkspace = False  # sentinel: not available
+    if _AppKit_NSWorkspace is False:
+        raise ImportError("AppKit.NSWorkspace not available")
+    return _AppKit_NSWorkspace
+
+
+_Quartz_module = None
+
+
+def _get_quartz():
+    """Lazy-load Quartz module (cached after first call)."""
+    global _Quartz_module
+    if _Quartz_module is None:
+        try:
+            import Quartz as _Quartz_module
+        except ImportError:
+            _Quartz_module = False
+    if _Quartz_module is False:
+        raise ImportError("Quartz not available")
+    return _Quartz_module
+
+
+_Foundation_NSProcessInfo = None
+
+
+def _get_nsprocessinfo():
+    """Lazy-load NSProcessInfo (cached after first call)."""
+    global _Foundation_NSProcessInfo
+    if _Foundation_NSProcessInfo is None:
+        try:
+            from Foundation import NSProcessInfo as _Foundation_NSProcessInfo
+        except ImportError:
+            _Foundation_NSProcessInfo = False
+    if _Foundation_NSProcessInfo is False:
+        raise ImportError("Foundation.NSProcessInfo not available")
+    return _Foundation_NSProcessInfo
+
+
+# ── Robust AppleScript string escaping ──
+def _escape_applescript_string(s: str) -> str:
+    """Escape a string for embedding in an AppleScript double-quoted string literal.
+
+    Handles backslashes, double quotes, newlines, carriage returns, tabs,
+    and other control characters that would break the script.
+    Uses character-code comparisons to avoid backslash-encoding confusion.
+    """
+    result: list[str] = []
+    for ch in s:
+        oc = ord(ch)
+        if oc == 92:          # backslash
+            result.append(chr(92) + chr(92))
+        elif oc == 34:        # double quote
+            result.append(chr(92) + chr(34))
+        elif oc == 10:        # newline
+            result.append(chr(92) + "n")
+        elif oc == 13:        # carriage return
+            result.append(chr(92) + "r")
+        elif oc == 9:         # tab
+            result.append(chr(92) + "t")
+        elif oc < 0x20:
+            result.append(chr(92) + "x" + format(oc, "02x"))
+        else:
+            result.append(ch)
+    return "".join(result)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -84,8 +167,7 @@ def _run_command(cmd: list[str], timeout: float = 10.0) -> tuple[bool, str, str]
 def _macos_list_apps() -> ToolResult:
     """List running applications via NSWorkspace."""
     try:
-        from AppKit import NSWorkspace
-
+        NSWorkspace = _get_nsworkspace()
         ws = NSWorkspace.sharedWorkspace()
         apps = ws.runningApplications()
         lines = []
@@ -127,13 +209,7 @@ def _fallback_apps_via_ps() -> ToolResult:
 
 def _macos_launch_app(name: str) -> ToolResult:
     """Launch an app by name or bundle ID."""
-    # Try NSWorkspace first
     try:
-        from AppKit import NSWorkspace, NSURL
-        from Foundation import NSURL
-
-        ws = NSWorkspace.sharedWorkspace()
-
         # Try launching by name using `open -a`
         ok, stdout, stderr = _run_command(
             ["open", "-a", name],
@@ -174,16 +250,44 @@ def _macos_launch_app(name: str) -> ToolResult:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _macos_quit_app(name_or_pid: str) -> ToolResult:
-    """Quit an app by name or PID."""
-    # First, try osascript (gentle quit)
+    """Quit an app by name or PID.
+
+    Checks if the app is running first (via NSWorkspace) to avoid
+    cascading timeouts when the app isn't even launched.
+    """
+    # Quick check: is the app running?
+    # If name_or_pid is numeric, treat as PID and check via ps.
+    # Otherwise look up via NSWorkspace.
+    app_is_running = False
+    try:
+        NSWorkspace = _get_nsworkspace()
+        ws = NSWorkspace.sharedWorkspace()
+        for app in ws.runningApplications():
+            if (name_or_pid.isdigit() and str(app.processIdentifier()) == name_or_pid) or \
+               (app.localizedName() or "").lower() == name_or_pid.lower() or \
+               (app.bundleIdentifier() or "").lower() == name_or_pid.lower():
+                app_is_running = True
+                break
+    except ImportError:
+        # Fallback: assume running, let osascript try
+        app_is_running = True
+
+    if not app_is_running:
+        return ToolResult(
+            success=False,
+            content=f"App '{name_or_pid}' is not running. No action taken.",
+            hint="Use desktop_apps to see running apps. Nothing to quit.",
+        )
+
+    # Gentle quit via osascript
     ok, output = _run_osascript(
-        f'tell application "{name_or_pid}" to quit',
+        f'tell application "{_escape_applescript_string(name_or_pid)}" to quit',
         timeout=10.0,
     )
     if ok:
         return ToolResult(success=True, content=f"Quit '{name_or_pid}'.")
 
-    # If osascript fails, try pkill (force quit)
+    # Force quit via pkill (exact name match only — no -f)
     ok2, stdout2, stderr2 = _run_command(
         ["pkill", "-x", name_or_pid],
         timeout=5.0,
@@ -191,18 +295,10 @@ def _macos_quit_app(name_or_pid: str) -> ToolResult:
     if ok2:
         return ToolResult(success=True, content=f"Force-quit '{name_or_pid}' via pkill.")
 
-    # Try matching partial name
-    ok3, stdout3, stderr3 = _run_command(
-        ["pkill", "-f", name_or_pid],
-        timeout=5.0,
-    )
-    if ok3:
-        return ToolResult(success=True, content=f"Force-quit processes matching '{name_or_pid}'.")
-
     return ToolResult(
         success=False,
-        content=f"Could not quit '{name_or_pid}'. App not found or not responding.",
-        hint="Use desktop_apps to see running apps. GUI apps may require accessibility permission.",
+        content=f"Could not quit '{name_or_pid}'. App not responding.",
+        hint="The app may be frozen. Try Force Quit (⌘⌥⎋) or 'kill -9' on its PID.",
     )
 
 
@@ -287,7 +383,7 @@ def _clipboard_via_osascript(action: str, text: str = "") -> ToolResult:
     elif action == "write":
         if not text:
             return ToolResult(success=False, content="Missing 'text' parameter for clipboard write.")
-        escaped = text.replace("\\", "\\\\").replace('"', '\\"')
+        escaped = _escape_applescript_string(text)
         ok, output = _run_osascript(
             f'set the clipboard to "{escaped}"',
             timeout=5.0,
@@ -306,15 +402,9 @@ def _clipboard_via_osascript(action: str, text: str = "") -> ToolResult:
 def _macos_list_windows() -> ToolResult:
     """List all visible windows via CGWindowList."""
     try:
-        from Quartz import (
-            CGWindowListCopyWindowInfo,
-            kCGWindowListOptionOnScreenOnly,
-            kCGWindowListExcludeDesktopElements,
-            kCGNullWindowID,
-        )
-
-        option = kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements
-        window_list = CGWindowListCopyWindowInfo(option, kCGNullWindowID)
+        Quartz = _get_quartz()
+        option = Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements
+        window_list = Quartz.CGWindowListCopyWindowInfo(option, Quartz.kCGNullWindowID)
 
         # Filter to regular app windows (layer 0 = normal, skip menubar/dock/etc)
         app_windows = []
@@ -329,7 +419,7 @@ def _macos_list_windows() -> ToolResult:
             x, y = int(bounds.get("X", 0)), int(bounds.get("Y", 0))
             w_, h_ = int(bounds.get("Width", 0)), int(bounds.get("Height", 0))
             app_windows.append(
-                f"  [{owner}] \"{name[:60]}\"  {w_}x{h_} @ ({x},{y})  pid={pid}"
+                f'  [{owner}] "{name[:60]}"  {w_}x{h_} @ ({x},{y})  pid={pid}'
             )
 
         if not app_windows:
@@ -358,12 +448,16 @@ def _macos_list_windows() -> ToolResult:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _macos_system_info() -> ToolResult:
-    """Gather system metrics from multiple sources."""
-    lines = []
+    """Gather system metrics from multiple sources.
+
+    Runs independent subprocess calls in parallel via a thread pool
+    to minimize total wall-clock time.
+    """
+    lines: list[str] = []
 
     # CPU / memory / uptime (Foundation)
     try:
-        from Foundation import NSProcessInfo
+        NSProcessInfo = _get_nsprocessinfo()
         pi = NSProcessInfo.processInfo()
         lines.append(f"Hostname:         {pi.hostName()}")
         lines.append(f"OS Version:       {pi.operatingSystemVersionString()}")
@@ -371,44 +465,76 @@ def _macos_system_info() -> ToolResult:
         lines.append(f"Physical Memory:  {pi.physicalMemory() // (1024**3)} GB")
         lines.append(f"System Uptime:    {_format_uptime(pi.systemUptime())}")
     except ImportError:
-        # Fallback via sysctl
-        ok, stdout, _ = _run_command(["sysctl", "-n", "hw.memsize"], timeout=3.0)
-        if ok and stdout:
+        # Fallback via sysctl — run in parallel with other commands below
+        pass
+
+    # Run all subprocess calls in parallel (disk, battery, thermal, load, memory)
+    commands: dict[str, list[str]] = {
+        "disk": ["df", "-h", "/"],
+        "battery": ["pmset", "-g", "batt"],
+        "thermal": ["pmset", "-g", "therm"],
+        "loadavg": ["sysctl", "-n", "vm.loadavg"],
+        "memory": ["memory_pressure"],
+    }
+    # Add sysctl fallbacks if Foundation wasn't available
+    if not lines:
+        commands["memsize"] = ["sysctl", "-n", "hw.memsize"]
+        commands["ncpu"] = ["sysctl", "-n", "hw.ncpu"]
+        commands["boottime"] = ["sysctl", "-n", "kern.boottime"]
+
+    results: dict[str, tuple[bool, str, str]] = {}
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {
+            executor.submit(_run_command, cmd, 3.0): key
+            for key, cmd in commands.items()
+        }
+        for future in as_completed(futures, timeout=10.0):
+            key = futures[future]
+            try:
+                results[key] = future.result()
+            except Exception:
+                results[key] = (False, "", "timed out")
+
+    # Process results
+    if not lines:
+        _, stdout, _ = results.get("memsize", (False, "", ""))
+        if stdout:
             lines.append(f"Physical Memory:  {int(stdout) // (1024**3)} GB")
-        ok, stdout, _ = _run_command(["sysctl", "-n", "hw.ncpu"], timeout=3.0)
-        if ok and stdout:
+        _, stdout, _ = results.get("ncpu", (False, "", ""))
+        if stdout:
             lines.append(f"CPU Cores:        {stdout.strip()}")
-        ok, stdout, _ = _run_command(["sysctl", "-n", "kern.boottime"], timeout=3.0)
-        if ok and stdout:
+        _, stdout, _ = results.get("boottime", (False, "", ""))
+        if stdout:
             lines.append(f"Boot time:        {stdout.strip()}")
 
-    # Disk usage
-    ok, stdout, _ = _run_command(["df", "-h", "/"], timeout=5.0)
+    # Disk
+    ok, stdout, _ = results.get("disk", (False, "", ""))
     if ok:
         parts = stdout.splitlines()[-1].split()
         if len(parts) >= 4:
             lines.append(f"Root Disk:        {parts[1]} total, {parts[2]} used, {parts[3]} avail ({parts[4]} used)")
 
     # Battery
-    ok, stdout, _ = _run_command(["pmset", "-g", "batt"], timeout=5.0)
+    ok, stdout, _ = results.get("battery", (False, "", ""))
     if ok:
         for line in stdout.splitlines():
             if "%" in line and ("discharging" in line.lower() or "charging" in line.lower() or "charged" in line.lower()):
                 lines.append(f"Battery:          {line.strip()}")
                 break
 
-    # Thermal state
-    ok, stdout, _ = _run_command(["pmset", "-g", "therm"], timeout=5.0)
+    # Thermal
+    ok, stdout, _ = results.get("thermal", (False, "", ""))
     if ok and "No thermal warning" not in stdout:
         lines.append(f"Thermal:          {stdout.strip()}")
 
-    # CPU load average
-    ok, stdout, _ = _run_command(["sysctl", "-n", "vm.loadavg"], timeout=3.0)
+    # Load average
+    ok, stdout, _ = results.get("loadavg", (False, "", ""))
     if ok and stdout:
         lines.append(f"Load Average:     {stdout.strip()}")
 
     # Memory pressure
-    ok, stdout, _ = _run_command(["memory_pressure"], timeout=3.0)
+    ok, stdout, _ = results.get("memory", (False, "", ""))
     if ok:
         for line in stdout.splitlines():
             if "pressure" in line.lower() or "free" in line.lower():
@@ -469,22 +595,21 @@ def _macos_press_keys(combo: str) -> ToolResult:
 
     Args:
         combo: e.g. "cmd+c", "cmd+shift+4", "cmd+tab", "escape", "return"
+
+    CGEvent objects are explicitly released via CFRelease to avoid
+    native memory leaks on repeated calls.
     """
     try:
-        from Quartz import (
-            CGEventCreateKeyboardEvent,
-            CGEventPost,
-            CGEventSetFlags,
-            kCGHIDEventTap,
-        )
+        Quartz = _get_quartz()
+        # Import CFRelease for explicit cleanup of CoreFoundation objects
+        from CoreFoundation import CFRelease as _CFRelease
     except ImportError:
-        # Fallback to osascript
         return _press_keys_via_osascript(combo)
 
     parts = [p.strip().lower() for p in combo.split("+")]
 
     # Separate modifiers from the main key
-    modifiers = []
+    modifiers: list[str] = []
     key_name = parts[-1]  # last part is the main key
     for p in parts[:-1]:
         if p in _MODIFIER_MASKS:
@@ -498,10 +623,8 @@ def _macos_press_keys(combo: str) -> ToolResult:
     # Get keycode
     keycode = _KEYCODE_MAP.get(key_name)
     if keycode is None:
-        # Single character → use its ASCII keycode
+        # Single character → look up from virtual key code tables
         if len(key_name) == 1:
-            # Use keycode lookup table for letters
-            char_code = ord(key_name.upper()) if key_name.isalpha() else ord(key_name)
             # For letters A-Z: kVK_ANSI_A = 0x00, kVK_ANSI_Z = 0x06
             if "a" <= key_name.lower() <= "z":
                 keycode = ord(key_name.lower()) - ord("a")
@@ -509,34 +632,38 @@ def _macos_press_keys(combo: str) -> ToolResult:
             elif "0" <= key_name <= "9":
                 keycode = ord(key_name) - ord("0") + 0x1D
             else:
-                # Fallback: use osascript for special chars
                 return _press_keys_via_osascript(combo)
 
     if keycode is None:
         return _press_keys_via_osascript(combo)
 
     try:
-        # Create the key-down event
-        event = CGEventCreateKeyboardEvent(None, keycode, True)
+        # Build modifier flags
+        flags = 0
+        for mod in modifiers:
+            flags |= _MODIFIER_MASKS[mod]
 
-        # Set modifier flags
-        if modifiers:
-            flags = 0
-            for mod in modifiers:
-                flags |= _MODIFIER_MASKS[mod]
-            CGEventSetFlags(event, flags)
+        # Create and post key-down event
+        event_down = Quartz.CGEventCreateKeyboardEvent(None, keycode, True)
+        if flags:
+            Quartz.CGEventSetFlags(event_down, flags)
+        Quartz.CGEventPost(Quartz.kCGHIDEventTap, event_down)
 
-        # Post key-down
-        CGEventPost(kCGHIDEventTap, event)
-
-        # Brief pause before key-up
+        # Brief pause for the OS to register the key-down
         time.sleep(0.02)
 
-        # Key-up event
-        event_up = CGEventCreateKeyboardEvent(None, keycode, False)
-        if modifiers:
-            CGEventSetFlags(event_up, flags)
-        CGEventPost(kCGHIDEventTap, event_up)
+        # Create and post key-up event
+        event_up = Quartz.CGEventCreateKeyboardEvent(None, keycode, False)
+        if flags:
+            Quartz.CGEventSetFlags(event_up, flags)
+        Quartz.CGEventPost(Quartz.kCGHIDEventTap, event_up)
+
+        # Explicitly release CGEvent objects to avoid native memory leaks
+        try:
+            _CFRelease(event_down)
+            _CFRelease(event_up)
+        except Exception:
+            pass  # best-effort cleanup
 
         return ToolResult(success=True, content=f"Pressed: {combo}")
 
@@ -662,14 +789,14 @@ def _macos_reveal(path: str) -> ToolResult:
 
 def _macos_notify(title: str, message: str = "", sound: bool = False) -> ToolResult:
     """Post a macOS notification."""
-    sound_flag = "sound name \"default\"" if sound else ""
-    escaped_title = title.replace("\\", "\\\\").replace('"', '\\"')
-    escaped_msg = message.replace("\\", "\\\\").replace('"', '\\"')
+    sound_clause = 'sound name "default"' if sound else ""
+    escaped_title = _escape_applescript_string(title)
+    escaped_msg = _escape_applescript_string(message)
 
     script = (
         f'display notification "{escaped_msg}" '
         f'with title "{escaped_title}"'
-        + (f" {sound_flag}" if sound_flag else "")
+        + (f" {sound_clause}" if sound_clause else "")
     )
 
     ok, output = _run_osascript(script, timeout=5.0)

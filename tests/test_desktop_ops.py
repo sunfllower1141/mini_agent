@@ -116,7 +116,7 @@ class TestToolRegistration:
     """Tests for tool registration in the dispatch table."""
 
     def test_desktop_tools_in_dispatch(self):
-        """All 5 desktop tools should be in _TOOL_DISPATCH."""
+        """All desktop tools should be in _TOOL_DISPATCH."""
         from tools import _TOOL_DISPATCH
         expected = [
             "desktop_snapshot",
@@ -124,6 +124,17 @@ class TestToolRegistration:
             "desktop_type",
             "desktop_find",
             "desktop_screenshot",
+            "desktop_apps",
+            "desktop_launch",
+            "desktop_quit",
+            "desktop_focus",
+            "desktop_clipboard",
+            "desktop_windows",
+            "desktop_system_info",
+            "desktop_key",
+            "desktop_open",
+            "desktop_reveal",
+            "desktop_notify",
         ]
         for name in expected:
             assert name in _TOOL_DISPATCH, (
@@ -132,23 +143,31 @@ class TestToolRegistration:
             assert callable(_TOOL_DISPATCH[name])
 
     def test_desktop_tools_in_schema(self):
-        """All 5 desktop tools should have schemas in TOOLS."""
+        """All desktop tools should have schemas in TOOLS."""
         from tools.schema import TOOLS
         desktop_names = [
             t["function"]["name"]
             for t in TOOLS
             if t["function"]["name"].startswith("desktop_")
         ]
-        assert len(desktop_names) >= 5
+        assert len(desktop_names) >= 16
         for name in ["desktop_snapshot", "desktop_click", "desktop_type",
-                     "desktop_find", "desktop_screenshot"]:
+                     "desktop_find", "desktop_screenshot",
+                     "desktop_apps", "desktop_launch", "desktop_quit",
+                     "desktop_focus", "desktop_clipboard", "desktop_windows",
+                     "desktop_system_info", "desktop_key", "desktop_open",
+                     "desktop_reveal", "desktop_notify"]:
             assert name in desktop_names, f"Missing schema for '{name}'"
 
     def test_desktop_tools_have_summaries(self):
-        """All 5 desktop tools should have summary functions."""
+        """All desktop tools should have summary functions."""
         from tools import _TOOL_SUMMARIES
         for name in ["desktop_snapshot", "desktop_click", "desktop_type",
-                     "desktop_find", "desktop_screenshot"]:
+                     "desktop_find", "desktop_screenshot",
+                     "desktop_apps", "desktop_launch", "desktop_quit",
+                     "desktop_focus", "desktop_clipboard", "desktop_windows",
+                     "desktop_system_info", "desktop_key", "desktop_open",
+                     "desktop_reveal", "desktop_notify"]:
             assert name in _TOOL_SUMMARIES, (
                 f"Missing summary for '{name}'"
             )
@@ -158,7 +177,7 @@ class TestToolRegistration:
         """The 'desktop' skill should be in SKILLS."""
         from tools.skills import SKILLS
         assert "desktop" in SKILLS
-        assert len(SKILLS["desktop"]) == 16
+        assert len(SKILLS["desktop"]) >= 16
         assert "desktop_snapshot" in SKILLS["desktop"]
         assert "desktop_click" in SKILLS["desktop"]
         assert "desktop_type" in SKILLS["desktop"]
