@@ -29,11 +29,28 @@ import json
 import os
 import platform
 import subprocess
+import time
 
 from safety import ReadSafetyGate, WriteSafetyGate
 from tools import _register, _summarize, ToolResult
 
 PLATFORM = platform.system()  # "Darwin", "Windows", "Linux"
+
+# ---------------------------------------------------------------------------
+# Prime atomacos on the main thread (macOS only).
+#
+# PyObjC / atomacos require the first Accessibility API call to happen on
+# the main thread.  If the first call happens on a background thread (as
+# happens when execute_tool wraps every tool in a daemon thread), the call
+# hangs indefinitely.  This module-level init makes one lightweight call so
+# that all subsequent background-thread calls succeed.
+# ---------------------------------------------------------------------------
+if PLATFORM == "Darwin":
+    try:
+        from atomacos import NativeUIElement
+        NativeUIElement.getFrontmostApp()
+    except Exception:
+        pass  # atomacos not installed or accessibility permission not granted
 
 
 # ---------------------------------------------------------------------------
@@ -213,10 +230,47 @@ def _mcp_call(server: str, tool: str, arguments: dict) -> ToolResult:
 
 # -- macOS: atomacos (v3 API) -----------------------------------------------
 
+# Per-operation timeout for atomacos calls (seconds).
+# Each AX attribute access is a synchronous XPC call that can hang
+# if the target app is unresponsive.  We cap the total walk at
+# _SNAPSHOT_DEADLINE seconds to avoid the 120 s agent-level timeout.
+_ATOMACOS_OP_TIMEOUT = 3.0   # per getattr / children call
+_SNAPSHOT_DEADLINE = 25.0    # total wall-clock budget for the snapshot
+_MAX_ELEMENTS = 200           # hard cap on collected elements
+
+
+def _atomacos_getattr(element, attr: str, default=None):
+    """``getattr`` with a per-call timeout to prevent hangs."""
+    import threading
+    result = default
+    exc = None
+    done = threading.Event()
+
+    def _get():
+        nonlocal result, exc
+        try:
+            result = getattr(element, attr, default)
+        except Exception as e:
+            exc = e
+        finally:
+            done.set()
+
+    t = threading.Thread(target=_get, daemon=True)
+    t.start()
+    if not done.wait(timeout=_ATOMACOS_OP_TIMEOUT):
+        # Timed out — abandon thread, return default
+        return default
+    if exc is not None:
+        raise exc
+    return result
+
+
 def _macos_atomacos_snapshot() -> ToolResult:
     """Capture the accessibility tree using atomacos."""
     try:
         from atomacos import NativeUIElement
+
+        deadline = time.monotonic() + _SNAPSHOT_DEADLINE
 
         # Get the frontmost application
         front_app = NativeUIElement.getFrontmostApp()
@@ -226,7 +280,7 @@ def _macos_atomacos_snapshot() -> ToolResult:
                 content="No frontmost application found. Is Accessibility permission granted?",
             )
 
-        app_name = str(front_app.AXTitle or front_app)
+        app_name = str(_atomacos_getattr(front_app, 'AXTitle') or front_app)
 
         # Get windows
         try:
@@ -238,7 +292,9 @@ def _macos_atomacos_snapshot() -> ToolResult:
             return ToolResult(success=True, content=_format_app_no_window(front_app))
 
         main_window = windows[0]
-        elements = _walk_atomacos_tree(main_window, 0)
+        # Reset the global element counter for this snapshot
+        _walk_atomacos_tree._total_elements = []
+        elements = _walk_atomacos_tree(main_window, 0, deadline=deadline)
 
         content = f"Frontmost app: {app_name}\n\n{_format_element_list(elements)}"
         return ToolResult(success=True, content=_truncate(content, 8000))
@@ -253,21 +309,32 @@ def _macos_atomacos_snapshot() -> ToolResult:
         return ToolResult(success=False, content=f"atomacos snapshot failed: {exc}")
 
 
-def _walk_atomacos_tree(element, depth: int = 0, max_depth: int = 4) -> list[dict]:
-    """Walk the accessibility tree, collecting interactive elements."""
+def _walk_atomacos_tree(element, depth: int = 0, max_depth: int = 4,
+                        deadline: float | None = None) -> list[dict]:
+    """Walk the accessibility tree, collecting interactive elements.
+
+    *deadline* is a ``time.monotonic()`` timestamp after which we stop
+    recursing (prevents hanging on unresponsive apps).
+    """
     elements: list[dict] = []
+
+    # Bail out early: depth limit, deadline expired, or element cap
     if depth > max_depth:
+        return elements
+    if deadline is not None and time.monotonic() > deadline:
+        return elements
+    if len(_walk_atomacos_tree._total_elements) >= _MAX_ELEMENTS:
         return elements
 
     try:
-        role = str(getattr(element, 'AXRole', 'unknown'))
+        role = str(_atomacos_getattr(element, 'AXRole', 'unknown'))
     except Exception:
         role = 'unknown'
 
     try:
-        name = str(getattr(element, 'AXTitle', '') or
-                   getattr(element, 'AXDescription', '') or
-                   getattr(element, 'AXValue', '') or '')
+        name = str(_atomacos_getattr(element, 'AXTitle', '') or
+                   _atomacos_getattr(element, 'AXDescription', '') or
+                   _atomacos_getattr(element, 'AXValue', '') or '')
     except Exception:
         name = ''
 
@@ -280,11 +347,28 @@ def _walk_atomacos_tree(element, depth: int = 0, max_depth: int = 4) -> list[dic
             'depth': depth,
         })
 
+    # Track total elements collected across recursive calls
     try:
-        children = getattr(element, 'AXChildren', None)
+        total_list = _walk_atomacos_tree._total_elements
+    except AttributeError:
+        total_list = []
+        _walk_atomacos_tree._total_elements = total_list
+    total_list.extend(elements)
+
+    if len(total_list) >= _MAX_ELEMENTS:
+        return elements
+
+    try:
+        children = _atomacos_getattr(element, 'AXChildren', None)
         if children and isinstance(children, list):
             for child in children:
-                elements.extend(_walk_atomacos_tree(child, depth + 1, max_depth))
+                if deadline is not None and time.monotonic() > deadline:
+                    break
+                if len(total_list) >= _MAX_ELEMENTS:
+                    break
+                elements.extend(
+                    _walk_atomacos_tree(child, depth + 1, max_depth, deadline)
+                )
     except Exception:
         pass
 
@@ -333,17 +417,21 @@ def _macos_atomacos_click(role: str, name: str) -> ToolResult:
         from atomacos import NativeUIElement
         import atomacos.mouse as mouse
 
+        deadline = time.monotonic() + _SNAPSHOT_DEADLINE
+
         front_app = NativeUIElement.getFrontmostApp()
         if front_app is None:
             return ToolResult(success=False, content="No frontmost application found.")
 
         # Use recursive find to locate the element
-        element = _find_atomacos_element(front_app, role, name)
+        element = _find_atomacos_element(front_app, role, name, deadline=deadline)
         if element is None:
             # Also search each window
             try:
                 for window in front_app.windows():
-                    element = _find_atomacos_element(window, role, name)
+                    if time.monotonic() > deadline:
+                        break
+                    element = _find_atomacos_element(window, role, name, deadline=deadline)
                     if element:
                         break
             except Exception:
@@ -358,14 +446,15 @@ def _macos_atomacos_click(role: str, name: str) -> ToolResult:
 
         # Click the element at its center
         try:
-            pos = element.AXPosition
-            size = element.AXSize
+            pos = _atomacos_getattr(element, 'AXPosition')
+            size = _atomacos_getattr(element, 'AXSize')
             center_x = pos[0] + size[0] / 2
             center_y = pos[1] + size[1] / 2
             mouse.click(center_x, center_y)
+            app_name = str(_atomacos_getattr(front_app, 'AXTitle') or front_app)
             return ToolResult(
                 success=True,
-                content=f"Clicked {role} \"{name}\" in {front_app.AXTitle}.",
+                content=f"Clicked {role} \"{name}\" in {app_name}.",
             )
         except Exception as exc:
             return ToolResult(
@@ -382,30 +471,39 @@ def _macos_atomacos_click(role: str, name: str) -> ToolResult:
         return ToolResult(success=False, content=f"atomacos click failed: {exc}")
 
 
-def _find_atomacos_element(element, role: str, name: str, max_depth: int = 8):
-    """Recursively find an element by role and name."""
+def _find_atomacos_element(element, role: str, name: str, max_depth: int = 8,
+                           deadline: float | None = None):
+    """Recursively find an element by role and name.
+
+    *deadline* is a ``time.monotonic()`` timestamp after which we stop
+    searching (prevents hanging on unresponsive apps).
+    """
+    if deadline is not None and time.monotonic() > deadline:
+        return None
+    if max_depth <= 0:
+        return None
+
     try:
-        el_role = str(getattr(element, 'AXRole', ''))
+        el_role = str(_atomacos_getattr(element, 'AXRole', ''))
     except Exception:
         return None
 
     try:
-        el_name = str(getattr(element, 'AXTitle', '') or
-                      getattr(element, 'AXDescription', '') or '')
+        el_name = str(_atomacos_getattr(element, 'AXTitle', '') or
+                      _atomacos_getattr(element, 'AXDescription', '') or '')
     except Exception:
         el_name = ''
 
     if el_role.lower() == role.lower() and name.lower() in el_name.lower():
         return element
 
-    if max_depth <= 0:
-        return None
-
     try:
-        children = getattr(element, 'AXChildren', None)
+        children = _atomacos_getattr(element, 'AXChildren', None)
         if children and isinstance(children, list):
             for child in children:
-                result = _find_atomacos_element(child, role, name, max_depth - 1)
+                if deadline is not None and time.monotonic() > deadline:
+                    return None
+                result = _find_atomacos_element(child, role, name, max_depth - 1, deadline)
                 if result is not None:
                     return result
     except Exception:
