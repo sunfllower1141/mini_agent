@@ -20,6 +20,12 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "integration: marks tests as integration tests (may require external services)"
     )
+    config.addinivalue_line(
+        "markers", "benchmark: marks tests as benchmarks (excluded by default, use --run-benchmarks)"
+    )
+    config.addinivalue_line(
+        "markers", "slow: marks tests as slow-running (>10s per test)"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -33,6 +39,18 @@ def pytest_addoption(parser):
         action="store_true",
         default=False,
         help="Include benchmark tests (excluded by default)",
+    )
+    parser.addoption(
+        "--swebench",
+        action="store_true",
+        default=False,
+        help="Include SWE-bench benchmarks (requires network + datasets library)",
+    )
+    parser.addoption(
+        "--swebench-max-tasks",
+        type=int,
+        default=5,
+        help="Maximum number of SWE-bench tasks to run (default: 5)",
     )
 
 

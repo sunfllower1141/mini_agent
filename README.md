@@ -137,3 +137,54 @@ Electron ──→ server.py ──→ llm.py ──→ api.py ──→ DeepSee
 Core modules: `config.py` (settings), `safety.py` (gates), `prompt.py` (system prompt), `memory.py` (persistence), `failure_learning.py` (self-learning), `retry.py` (HTTP), `stream.py` (SSE).
 
 Tool implementations live in `tools/` — each module self-contained.
+
+## Benchmarks
+
+mini_agent includes a built-in evaluation harness for benchmarking tool-use and code-fix capabilities.
+
+### Local eval tasks (fast)
+
+9 YAML-defined tasks exercising core tools: file creation, editing, testing, diffing, semantic search, multi-agent fan-out:
+
+```bash
+# Run all local eval tasks (requires API key):
+python -m pytest test_benchmarks.py --run-benchmarks -v -k "local"
+
+# Run a specific task:
+python -m pytest test_benchmarks.py --run-benchmarks -v -k "hello_world"
+```
+
+### SWE-bench (industry standard)
+
+[SWE-bench](https://www.swebench.com/) is the standard benchmark for coding agents — 2,300 real GitHub issues across 12 Python repositories. mini_agent can generate predictions for official evaluation:
+
+```bash
+# Install optional dependency:
+pip install datasets
+
+# Smoke test: run 1 SWE-bench Lite task locally:
+python -m pytest test_benchmarks.py --run-benchmarks --swebench -v -k "smoke"
+
+# Generate predictions for the first 5 SWE-bench Lite tasks:
+python -m eval.swebench_runner \
+  --dataset princeton-nlp/SWE-bench_Lite \
+  --max-tasks 5 --output predictions.jsonl
+
+# Resume a previous run:
+python -m eval.swebench_runner \
+  --dataset princeton-nlp/SWE-bench_Lite \
+  --resume predictions.jsonl --output predictions.jsonl
+```
+
+Then evaluate with the official SWE-bench harness:
+
+```bash
+git clone https://github.com/princeton-nlp/SWE-bench.git
+cd SWE-bench
+python -m swebench.harness.run_evaluation \
+  --dataset_name princeton-nlp/SWE-bench_Lite \
+  --predictions_path /path/to/predictions.jsonl \
+  --max_workers 4 --run_id mini_agent
+```
+
+See [`eval/`](eval/) for the full evaluation architecture and [`eval/swebench_runner.py`](eval/swebench_runner.py) for the SWE-bench pipeline.

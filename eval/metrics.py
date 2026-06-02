@@ -94,7 +94,7 @@ class MetricsCollector:
         self._call_index += 1
         self._start_times[idx] = time.perf_counter()
 
-    def on_tool_end(self, success: bool, detail: str) -> None:
+    def on_tool_end(self, success: bool, detail: str, diff_preview: str | None = None, content: str = "") -> None:
         """Called after each tool completes.
 
         Records success/failure, computes wall time from start timestamp.

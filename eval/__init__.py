@@ -8,6 +8,14 @@ Usage::
     tasks = load_tasks()
     result = run_task(tasks[0])
     print(result.success)
+
+SWE-bench::
+
+    from eval.swebench_runner import run_swebench_task, run_swebench_suite, \\
+        parse_swebench_task, SWEBenchTask, SWEBenchResult, SWEBenchReport
+
+    # Or via CLI:
+    python -m eval.swebench_runner --dataset princeton-nlp/SWE-bench_Lite --max-tasks 5
 """
 
 from eval.runner import (
