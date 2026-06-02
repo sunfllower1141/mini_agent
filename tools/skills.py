@@ -103,6 +103,13 @@ SKILLS: dict[str, list[str]] = {
     "image": [
         "read_image",
     ],
+    "desktop": [
+        "desktop_snapshot",
+        "desktop_click",
+        "desktop_type",
+        "desktop_find",
+        "desktop_screenshot",
+    ],
     "bootstrap": [
         "init",
         "session_stats",

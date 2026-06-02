@@ -1,7 +1,7 @@
 # mini_agent
 
-A terminal coding agent with 59+ tools. Powered by DeepSeek, Claude, or xAI/Grok.
-Multi-agent orchestration, SQLite memory, headless browser, and an Electron desktop app.
+A terminal coding agent with 64+ tools. Powered by DeepSeek, Claude, or xAI/Grok.
+Multi-agent orchestration, SQLite memory, headless browser, desktop automation, and an Electron desktop app.
 
 ## Quick Start
 
@@ -59,12 +59,12 @@ npm start            # auto-builds renderer if needed, then opens the desktop ap
 
 ## Features
 
-- **60 tools**: file ops, shell, search, LSP, MCP, browser automation (Playwright), vision (GPT-4o), planning
+- **64 tools**: file ops, shell, search, LSP, MCP, browser automation (Playwright), desktop automation (atomacos/mss), vision (GPT-4o), planning
 - **Multi-agent**: up to 10 concurrent sub-agents with fan-out/in, pipeline, barrier, scatter-gather patterns. Inter-agent messaging with typed handoffs.
 - **Memory**: SQLite-backed conversation store with token-aware pruning and cross-session project knowledge
 - **Providers**: DeepSeek (default), Claude Sonnet 4.5, xAI Grok 4.3 — auto-detect or set `API_PROVIDER`
 - **Interface**: Electron desktop app (`mini_agent_electron/`)
-- **Skills**: lazy-load tool groups via `use_skill` — git, web, test, planning, agents, search, image, lsp
+- **Skills**: lazy-load tool groups via `use_skill` — git, web, test, planning, agents, search, image, lsp, desktop
 - **Safety**: workspace read/write gates, backup-before-write, diff previews, confirm mode
 - **Cross-platform**: macOS, Linux, Windows
 
@@ -87,7 +87,7 @@ Priority: CLI flags > env vars > `.env` > `.mini_agent.toml` > defaults.
 ## Running Tests
 
 ```bash
-python -m pytest          # 1,113 tests
+python -m pytest          # 1,271 tests
 make test                 # same, via Makefile
 ```
 
@@ -122,7 +122,7 @@ Electron ──→ server.py ──→ llm.py ──→ api.py ──→ DeepSee
     ┌───────────┼───────────┐
     ▼           ▼           ▼
  tools/     memory.py   agent_runtime.py
- (66)       (SQLite)    (sub-agents)
+ (69)       (SQLite)    (sub-agents)
 ```
 
 Core modules: `config.py` (settings), `safety.py` (gates), `prompt.py` (system prompt), `memory.py` (persistence), `retry.py` (HTTP), `stream.py` (SSE).

@@ -1258,4 +1258,87 @@ TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "desktop_snapshot",
+            "description": "Capture the accessibility tree of the frontmost desktop window. Returns a structured text representation of interactive elements (roles, names, states) — much more compact and LLM-friendly than a screenshot. Use this to understand what's on screen before clicking or typing in native desktop apps. On macOS, requires Accessibility permission (System Settings → Privacy → Accessibility → enable Terminal). On Windows, requires: pip install uiautomation.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "desktop_click",
+            "description": "Click a native desktop UI element identified by its role and name. Use desktop_snapshot first to see available elements. Supports macOS (via Accessibility API) and Windows (via UI Automation). Args: role (e.g. 'button', 'textfield', 'checkbox', 'menuItem'), name (visible text or label).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "role": {
+                        "type": "string",
+                        "description": "Element role (e.g. 'button', 'textfield', 'checkbox', 'menuItem', 'tab', 'link', 'window'). See desktop_snapshot output for available roles."
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Accessible name of the element (visible text, label, or aria-label equivalent)."
+                    }
+                },
+                "required": ["role", "name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "desktop_type",
+            "description": "Type text into the currently focused native desktop field. Click into the target field first (using desktop_click or manually), then call this to type. Args: text (string to type).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Text to type into the focused field."
+                    }
+                },
+                "required": ["text"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "desktop_find",
+            "description": "Find native desktop UI elements matching a text or role query across all open windows. Args: query (text to search for in element names/labels), role (optional role filter like 'button', 'window', 'menu').",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Text to search for in element names/labels. Case-insensitive partial match."
+                    },
+                    "role": {
+                        "type": "string",
+                        "description": "Optional: filter by role (e.g. 'button', 'window', 'menu'). Omit to search all roles."
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "desktop_screenshot",
+            "description": "Capture a PNG screenshot of the native desktop (not browser). Unlike browser_screenshot, this captures any open application, menubar, dock, taskbar, etc. Saves to a temp directory. Use read_image to view it. Requires: pip install mss.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
 ]
