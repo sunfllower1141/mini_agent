@@ -2,12 +2,28 @@
 
 Self-modification audit trail — what the agent changed and why.
 
-## 2026-06-03 — Agent Self-Tracking System
+## 2026-06-03 (afternoon) — STATE.txt Injection & Population
+### Added
+- `_inject_state_context()` in context_inject.py — reads STATE.txt once per session
+- `_state_txt_injected` flag on AgentContext (tools/__init__.py), reset in llm.py
+- 6 tests for STATE.txt injection (test_agent_self_tracking.py, 35 total)
+### Changed
+- STATE.txt populated with full architecture map (module inventory, decisions, known issues)
+- HANDOFF.md updated with session context
+
+## 2026-06-03 (morning) — Agent Self-Tracking System
 ### Added
 - `STATE.txt` — architecture decisions, module map, known issues
 - `HANDOFF.md` — session handoff for continuity across restarts
-- `test_agent_self_tracking.py` — tests for self-tracking system
+- `CHANGELOG.md` — structured self-modification audit trail
+- `test_agent_self_tracking.py` — 29 tests for self-tracking system
 ### Changed
+- `README.md` — added "Agent Self-Modification" section
+- `.mini_agent.rules` — added self-review cycle, HANDOFF.md/CHANGELOG.md references
+- `context_inject.py` — added `_inject_handoff_context()` for session startup
+- `memory.py` — added `write_handoff()` and `read_handoff()` helpers
+- `tools/__init__.py` — added `_handoff_injected` flag on AgentContext
+- `llm.py` — reset `_handoff_injected` flag per session
 - `README.md` — added "Agent Self-Modification" section for human collaborators
 - `.mini_agent.rules` — added self-review prompt, HANDOFF.md reference
 - `context_inject.py` — inject HANDOFF.md at session startup

@@ -1,33 +1,24 @@
 # Session Handoff
 # Auto-generated at session end. Read at next session start for continuity.
 
-## Last Session: 2026-06-03
+## Last Session: 2026-06-03 (afternoon)
 
 ### What I Changed
-- Created `STATE.txt` — architecture decisions, module map, known issues (4,382 bytes)
-- Created `HANDOFF.md` — session handoff for continuity across restarts
-- Created `CHANGELOG.md` — structured self-modification audit trail (2,791 bytes)
-- Created `test_agent_self_tracking.py` — 29 tests, all passing
-- Updated `README.md` — added "Agent Self-Modification" section (+39 lines)
-- Updated `.mini_agent.rules` — added self-review cycle, HANDOFF.md/CHANGELOG.md references
-- Updated `context_inject.py` — added `_inject_handoff_context()` for session startup
-- Updated `memory.py` — added `write_handoff()` and `read_handoff()` helpers (+55 lines)
-- Updated `tools/__init__.py` — added `_handoff_injected` flag on AgentContext
-- Updated `llm.py` — reset `_handoff_injected` flag per session
+- **Wired STATE.txt into context injection** — `_inject_state_context()` in context_inject.py,
+  flag on AgentContext (tools/__init__.py), reset in llm.py. Calls from inject_all().
+- **Populated STATE.txt** — full architecture map: module inventory with line counts,
+  architecture decisions, known issues (4,151 bytes).
+- Added 6 tests for STATE.txt injection (test_agent_self_tracking.py, 35 total).
 
 ### What's Pending
-- _json_rpc_shared.py: adopt or remove
-- tools/__init__.py: further splitting beyond result.py/error_hints.py
+- `_json_rpc_shared.py`: adopt or remove (abandoned file)
+- `tools/__init__.py`: still 761 lines, could split further
 - Semantic search across past sessions (current recall_turn is session-only)
+- HANDOFF.md needs automatic write-on-session-end (currently manual)
 
 ### Modified Files
-- STATE.txt (new)
-- HANDOFF.md (new)
-- CHANGELOG.md (new)
-- test_agent_self_tracking.py (new)
-- README.md (edited)
-- .mini_agent.rules (edited)
-- context_inject.py (edited)
-- memory.py (edited)
-- tools/__init__.py (edited)
-- llm.py (edited)
+- STATE.txt (populated)
+- context_inject.py (added _inject_state_context, wired into inject_all)
+- tools/__init__.py (added _state_txt_injected flag)
+- llm.py (reset _state_txt_injected per session)
+- test_agent_self_tracking.py (+6 tests, 35 total)
