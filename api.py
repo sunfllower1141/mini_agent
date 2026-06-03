@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 import requests
 
-from config import AgentConfig
+from core.config import AgentConfig
 from retry import _request_with_retry
 from stream import _parse_stream
 from tools.skills import get_active_tools

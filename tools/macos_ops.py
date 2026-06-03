@@ -35,7 +35,7 @@ import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from safety import ReadSafetyGate, WriteSafetyGate
+from core.safety import ReadSafetyGate, WriteSafetyGate
 from tools import _register, _summarize, ToolResult
 
 PLATFORM = platform.system()

@@ -10,12 +10,12 @@ import unittest
 
 ROOT = os.path.dirname(os.path.dirname(__file__))  # project root, not tests/
 SOURCES = [
-    "llm.py",
-    "prompt.py",
+    "core/llm.py",
+    "core/prompt.py",
     "terminal.py",
-    "config.py",
-    "safety.py",
-    "memory.py",
+    "core/config.py",
+    "core/safety.py",
+    "memory/memory.py",
     "tools/__init__.py",
     "tools/file_ops.py",
     "tools/shell_ops.py",

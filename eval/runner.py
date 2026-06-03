@@ -228,7 +228,7 @@ def run_task(
 
     try:
         # Initialize agent session
-        from config import init_session
+        from core.config import init_session
 
         session = init_session(workspace)
         config = session["config"]
@@ -261,7 +261,7 @@ def run_task(
         timer.start()
 
         try:
-            from llm import run_agent_turn
+            from core.llm import run_agent_turn
 
             result_msg = run_agent_turn(
                 messages=session["messages"],
@@ -293,7 +293,7 @@ def run_task(
         checks = run_checks(task.checks, workspace)
 
         # Estimate tokens
-        from memory import _total_tokens
+        from memory.memory import _total_tokens
 
         tokens = _total_tokens(session["messages"])
 

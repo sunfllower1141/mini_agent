@@ -24,7 +24,7 @@ class TestStartupSessionNoCrash(unittest.TestCase):
 
     def test_init_session_does_not_crash(self):
         """Runs the full init_session() startup path in a temp workspace."""
-        from config import init_session
+        from core.config import init_session
 
         session_data = init_session(self.tmp)
         messages = session_data["messages"]
@@ -50,8 +50,8 @@ class TestSystemPromptBuilds(unittest.TestCase):
 
     def test_prompt_builds_with_default_config(self):
         """build_system_prompt should return a non-empty string."""
-        from prompt import build_system_prompt
-        from config import AgentConfig
+        from core.prompt import build_system_prompt
+        from core.config import AgentConfig
 
         config = AgentConfig()
         config.workspace = self.tmp
@@ -74,7 +74,7 @@ class TestBuildStartupContext(unittest.TestCase):
 
     def test_startup_context_builds(self):
         """build_startup_context should return a non-empty string."""
-        from prompt import build_startup_context
+        from core.prompt import build_startup_context
 
         ctx = build_startup_context(self.tmp)
         self.assertIsInstance(ctx, str)
@@ -82,7 +82,7 @@ class TestBuildStartupContext(unittest.TestCase):
 
     def test_startup_context_with_knowledge(self):
         """build_startup_context should accept and display project knowledge."""
-        from prompt import build_startup_context
+        from core.prompt import build_startup_context
 
         knowledge = [
             {"category": "pattern", "summary": "Test pattern", "detail": "Details here"},
@@ -94,7 +94,7 @@ class TestBuildStartupContext(unittest.TestCase):
 
     def test_startup_context_without_knowledge(self):
         """build_startup_context should work fine with knowledge=None."""
-        from prompt import build_startup_context
+        from core.prompt import build_startup_context
 
         ctx = build_startup_context(self.tmp, knowledge=None)
         self.assertIn("WORKSPACE CONTEXT", ctx)
@@ -145,7 +145,7 @@ class TestProjectKnowledgeMethods(unittest.TestCase):
 
     def test_memory_has_session_summary_methods(self):
         """get_latest_session_summary and capture_session_summary must exist."""
-        from memory import MemoryStore
+        from memory.memory import MemoryStore
 
         db_path = os.path.join(self.tmp, ".mini_agent_memory.db")
         store = MemoryStore(db_path, max_messages=500)
@@ -163,7 +163,7 @@ class TestProjectKnowledgeMethods(unittest.TestCase):
 
     def test_session_summary_methods_work(self):
         """get_latest_session_summary should return None for empty DB."""
-        from memory import MemoryStore
+        from memory.memory import MemoryStore
 
         db_path = os.path.join(self.tmp, ".mini_agent_memory.db")
         store = MemoryStore(db_path, max_messages=500)
@@ -172,7 +172,7 @@ class TestProjectKnowledgeMethods(unittest.TestCase):
 
     def test_knowledge_roundtrip(self):
         """add_knowledge → get_top_knowledge should return the entry."""
-        from memory import MemoryStore
+        from memory.memory import MemoryStore
 
         db_path = os.path.join(self.tmp, ".mini_agent_memory.db")
         store = MemoryStore(db_path, max_messages=500)

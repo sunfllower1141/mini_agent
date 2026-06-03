@@ -9,12 +9,12 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
-from config import MEMORY_FILENAME
-from prompt import build_startup_context
+from core.config import MEMORY_FILENAME
+from core.prompt import build_startup_context
 
 if TYPE_CHECKING:
-    from config import AgentConfig
-    from memory import MemoryStore
+    from core.config import AgentConfig
+    from memory.memory import MemoryStore
 
 
 def _session_db_path(workspace: str, session_name: str | None = None) -> str:
@@ -47,8 +47,8 @@ def switch_session(
     current_config: "AgentConfig",
 ) -> dict:
     """Save current session and load a new one. Returns new session dict."""
-    from memory import MemoryStore
-    from prompt import build_system_prompt
+    from memory.memory import MemoryStore
+    from core.prompt import build_system_prompt
 
     # Save current session
     if current_memory is not None:
@@ -59,7 +59,7 @@ def switch_session(
                          max_tokens=current_config.context_window)
     saved = memory.load()
     if saved:
-        from memory import _compress_tool_results, _prune_by_tokens, _summarize_pruned
+        from memory.memory import _compress_tool_results, _prune_by_tokens, _summarize_pruned
         saved, _ = _compress_tool_results(saved, keep_recent=20)
         saved, pruned = _prune_by_tokens(saved, current_config.context_window, current_config.max_messages)
         if pruned:

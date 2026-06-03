@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import time
 
-from agent_runtime import AgentRuntime, SubAgentResult
-from safety import ReadSafetyGate, WriteSafetyGate
+from agents.agent_runtime import AgentRuntime, SubAgentResult
+from core.safety import ReadSafetyGate, WriteSafetyGate
 from tools import ToolResult, _register, _summarize, _TOOL_CONTEXT
 
 

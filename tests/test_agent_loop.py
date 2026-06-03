@@ -15,8 +15,8 @@ from unittest.mock import patch, MagicMock
 
 import requests as req_mod
 
-from config import AgentConfig
-from llm import call_deepseek, run_agent_turn
+from core.config import AgentConfig
+from core.llm import call_deepseek, run_agent_turn
 from tools import execute_tool, ToolResult
 
 
@@ -458,8 +458,8 @@ class TestRunAgentTurn(unittest.TestCase):
 
     def test_token_budget_code_path_exists(self):
         """Verify _save_turn_summary stores turn history and _total_tokens counts."""
-        from llm import _save_turn_summary
-        from memory import _total_tokens
+        from core.llm import _save_turn_summary
+        from memory.memory import _total_tokens
         from tools import _TOOL_CONTEXT
 
         # Test _total_tokens with sample messages

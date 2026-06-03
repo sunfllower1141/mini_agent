@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from llm import (
+from core.llm import (
     _tool_call_key,
     _check_circuit,
     _compress_stale_tool_results,

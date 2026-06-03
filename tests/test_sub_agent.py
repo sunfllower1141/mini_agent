@@ -14,7 +14,7 @@ import pytest
 import threading
 import time
 
-from agent_runtime import AgentRuntime, SubAgentResult
+from agents.agent_runtime import AgentRuntime, SubAgentResult
 from tools import _TOOL_DISPATCH, _TOOL_CONTEXT
 from conftest import make_mock_config
 
@@ -326,7 +326,7 @@ class TestRecursionGuard:
         which is at max depth. The LLM is mocked to return a tool call for
         each blocked tool, and we verify the sub-agent survives (tool_calls_made
         increments but the tool is blocked without crashing)."""
-        from sub_agent import run_sub_agent
+        from agents.sub_agent import run_sub_agent
         from unittest.mock import patch, MagicMock
 
         blocked = {"spawn_agent", "agent_status", "collect_agent", "collect_any", "agent_extend"}
@@ -337,7 +337,7 @@ class TestRecursionGuard:
         config = make_mock_config()
 
         for tool_name in blocked:
-            with patch("sub_agent.call_llm") as mock_llm:
+            with patch("agents.sub_agent.call_llm") as mock_llm:
                 # Response 1: blocked tool call; Response 2: text (exits loop)
                 mock_llm.side_effect = [
                     {
@@ -496,7 +496,7 @@ class TestResultSerialization:
 class TestSharedContext:
     def test_shared_context_passed_to_sub_agent(self, configured_context, gates):
         """Verify shared_context shows up in sub-agent messages."""
-        import sub_agent as sa
+        import agents.sub_agent as sa
 
         # Capture the messages built by run_sub_agent
         original = sa.run_sub_agent

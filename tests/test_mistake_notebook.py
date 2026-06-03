@@ -129,7 +129,7 @@ class TestExperienceContext:
     @pytest.fixture
     def memory_store(self):
         """Create a MemoryStore with some knowledge entries."""
-        from memory import MemoryStore
+        from memory.memory import MemoryStore
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             db_path = f.name
         ms = MemoryStore(db_path)

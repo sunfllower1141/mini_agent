@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from config import AgentConfig, CONFIG_FILENAME, DEFAULT_API_KEY, OLLAMA_DEFAULT_MODEL, OLLAMA_DEFAULT_API_URL
+from core.config import AgentConfig, CONFIG_FILENAME, DEFAULT_API_KEY, OLLAMA_DEFAULT_MODEL, OLLAMA_DEFAULT_API_URL
 
 
 # Env vars that override AgentConfig defaults / TOML values. Tests must clear

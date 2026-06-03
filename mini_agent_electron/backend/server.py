@@ -42,14 +42,14 @@ _parent = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file
 if _parent not in sys.path:
     sys.path.insert(0, _parent)
 
-from config import (
+from core.config import (
     resolve_workspace, init_session, parse_args,
     _is_remote_workspace, _try_with_timeout,
 )
-from llm import run_agent_turn
+from core.llm import run_agent_turn
 from stream import THINKING_START, THINKING_END
-from safety import ReadSafetyGate, WriteSafetyGate
-from prompt import build_system_prompt, build_startup_context
+from core.safety import ReadSafetyGate, WriteSafetyGate
+from core.prompt import build_system_prompt, build_startup_context
 from api import clear_api_cache
 from emoji_svg import clean_text
 
@@ -436,14 +436,14 @@ class AgentRunner:
             sub = parts[1] if len(parts) > 1 else ""
             arg = parts[2] if len(parts) > 2 else ""
             if sub == "list":
-                from config import list_sessions
+                from core.config import list_sessions
                 sessions = list_sessions(self.workspace)
                 send_msg({
                     "type": "response",
                     "lines": [f"Sessions: {', '.join(sessions) if sessions else 'none'}"]
                 })
             elif sub == "new" and arg:
-                from config import switch_session
+                from core.config import switch_session
                 sd = switch_session(self.workspace, arg, self.memory, self.config)
                 self.messages = self.memory.save(self.messages)
                 self.memory.close()
@@ -453,7 +453,7 @@ class AgentRunner:
                 self._total_tokens = 0
                 send_msg({"type": "response", "lines": [f"Created session '{arg}'."]})
             elif sub == "switch" and arg:
-                from config import switch_session
+                from core.config import switch_session
                 self.messages = self.memory.save(self.messages)
                 self.memory.close()
                 sd = switch_session(self.workspace, arg, self.memory, self.config)
@@ -463,7 +463,7 @@ class AgentRunner:
                 self._total_tokens = 0
                 send_msg({"type": "response", "lines": [f"Switched to '{arg}'."]})
             elif sub == "delete" and arg:
-                from config import delete_session
+                from core.config import delete_session
                 ok, msg = delete_session(self.workspace, arg)
                 send_msg({"type": "response", "lines": [msg]})
             else:
@@ -678,7 +678,7 @@ def main() -> None:
             runner.send_status()
 
         elif msg_type == "session_list":
-            from config import list_sessions
+            from core.config import list_sessions
             sessions = list_sessions(runner.workspace)
             current = ""
             db_path = getattr(runner.memory, '_db_path', '')
@@ -691,7 +691,7 @@ def main() -> None:
             send_msg({"type": "session_list_result", "sessions": sessions, "current": current})
 
         elif msg_type == "session_switch":
-            from config import switch_session
+            from core.config import switch_session
             name = msg.get("name", "")
             if not name:
                 send_msg({"type": "session_list_result", "error": "Session name required."})
@@ -706,7 +706,7 @@ def main() -> None:
                 runner.send_status()
 
         elif msg_type == "session_new":
-            from config import switch_session
+            from core.config import switch_session
             name = msg.get("name", "")
             if not name:
                 send_msg({"type": "session_list_result", "error": "Session name required."})
@@ -722,7 +722,7 @@ def main() -> None:
                 runner.send_status()
 
         elif msg_type == "session_delete":
-            from config import delete_session
+            from core.config import delete_session
             name = msg.get("name", "")
             if not name:
                 send_msg({"type": "session_list_result", "error": "Session name required."})
@@ -730,7 +730,7 @@ def main() -> None:
                 ok, msg_text = delete_session(runner.workspace, name)
                 if ok and name == getattr(runner, '_session_name', None):
                     # Deleted the current session — switch to default
-                    from config import switch_session
+                    from core.config import switch_session
                     sd = switch_session(runner.workspace, "default", runner.memory, runner.config)
                     runner.memory = sd["memory"]
                     runner.messages = sd["messages"]

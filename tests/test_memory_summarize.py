@@ -6,7 +6,7 @@ import os
 import tempfile
 import unittest
 
-from memory import (
+from memory.memory import (
     _summarize_pruned,
     _prune_by_tokens,
     MemoryStore,

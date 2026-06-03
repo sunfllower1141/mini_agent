@@ -4,7 +4,7 @@
 import threading
 from unittest.mock import MagicMock, patch
 
-from agent_runtime import AgentRuntime, SubAgentResult
+from agents.agent_runtime import AgentRuntime, SubAgentResult
 
 
 # ------------------------------------------------------------------

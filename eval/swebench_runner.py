@@ -374,7 +374,7 @@ def run_swebench_task(
         _ensure_git_repo(workspace)
 
         # Initialize agent session
-        from config import init_session
+        from core.config import init_session
 
         session = init_session(workspace)
         config = session["config"]
@@ -403,7 +403,7 @@ def run_swebench_task(
         timer.start()
 
         try:
-            from llm import run_agent_turn
+            from core.llm import run_agent_turn
 
             print(f"  [{task.instance_id}] Running agent...", file=sys.stderr)
             result_msg = run_agent_turn(
@@ -431,7 +431,7 @@ def run_swebench_task(
         model_patch = diff_result.stdout
 
         # Estimate tokens
-        from memory import _total_tokens
+        from memory.memory import _total_tokens
         tokens = _total_tokens(session["messages"])
 
         os.chdir(original_cwd)

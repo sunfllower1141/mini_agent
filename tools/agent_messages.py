@@ -16,7 +16,7 @@ import time
 import threading
 from dataclasses import dataclass, field
 
-from safety import ReadSafetyGate, WriteSafetyGate
+from core.safety import ReadSafetyGate, WriteSafetyGate
 from tools import _register, _summarize, ToolResult, _TOOL_CONTEXT
 
 

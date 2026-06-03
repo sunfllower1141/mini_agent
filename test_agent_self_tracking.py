@@ -13,7 +13,7 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-import context_inject
+from core import context_inject
 from tools import _TOOL_CONTEXT
 
 
@@ -50,8 +50,8 @@ class TestStateFile(unittest.TestCase):
         state_path = os.path.join(root, "STATE.txt")
         with open(state_path, encoding="utf-8") as f:
             content = f.read()
-        for module in ("prompt.py", "config.py", "llm.py", "memory.py",
-                       "context_inject.py", "failure_learning.py", "safety.py"):
+        for module in ("core/prompt.py", "core/config.py", "core/llm.py", "memory/memory.py",
+                       "core/context_inject.py", "tools/failure_learning.py", "core/safety.py"):
             self.assertIn(
                 module, content,
                 f"STATE.txt should mention {module} in the module map",
@@ -174,7 +174,7 @@ class TestMemoryHandoff(unittest.TestCase):
         self.tmpdir = tempfile.mkdtemp()
         self.db_path = os.path.join(self.tmpdir, "test_memory.db")
         # Import memory module and create a MemoryStore
-        from memory import MemoryStore
+        from memory.memory import MemoryStore
         self.store = MemoryStore(self.db_path)
 
     def tearDown(self):
@@ -434,14 +434,14 @@ class TestAutoHandoff(unittest.TestCase):
 
     def test_write_session_handoff_static_method(self):
         """MemoryStore.write_session_handoff should exist and be callable."""
-        from memory import MemoryStore
+        from memory.memory import MemoryStore
         self.assertTrue(hasattr(MemoryStore, "write_session_handoff"))
         self.assertTrue(callable(MemoryStore.write_session_handoff))
 
     def test_write_session_handoff_writes_file(self):
         """write_session_handoff should create HANDOFF.md in workspace."""
         import tempfile
-        from memory import MemoryStore
+        from memory.memory import MemoryStore
         with tempfile.TemporaryDirectory() as tmpdir:
             # Init a git repo so the function can run git commands
             subprocess.run(["git", "init", tmpdir], capture_output=True)
@@ -470,7 +470,7 @@ class TestAutoHandoff(unittest.TestCase):
     def test_write_session_handoff_no_git(self):
         """write_session_handoff should not crash when git is unavailable."""
         import tempfile
-        from memory import MemoryStore
+        from memory.memory import MemoryStore
         with tempfile.TemporaryDirectory() as tmpdir:
             path = MemoryStore.write_session_handoff(
                 tmpdir, start_head=None, pending="N/A",
@@ -497,7 +497,7 @@ class TestAutoHandoff(unittest.TestCase):
     def test_prompt_mentions_handoff(self):
         """System prompt must instruct the agent to call write_session_handoff."""
         root = _project_root()
-        prompt_path = os.path.join(root, "prompt.py")
+        prompt_path = os.path.join(root, "core", "prompt.py")
         with open(prompt_path, encoding="utf-8") as f:
             content = f.read()
         self.assertIn("write_session_handoff", content)

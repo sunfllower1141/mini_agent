@@ -619,7 +619,7 @@ def _summarize_pruned_llm(pruned: list[dict]) -> str:
         from api import call_llm
         # Use the model-family concept: route to the cheapest model
         # We build a minimal config for this one-shot summarization call
-        from config import AgentConfig
+        from core.config import AgentConfig
         summarizer_config = AgentConfig()
         summarizer_config.model = "claude-3-5-haiku-20241022"
         summarizer_config.api_provider = "claude"

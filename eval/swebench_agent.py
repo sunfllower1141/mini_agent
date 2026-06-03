@@ -63,9 +63,9 @@ def main() -> None:
 
     # Initialize agent session
     try:
-        from config import init_session
-        from llm import run_agent_turn
-        from memory import _total_tokens
+        from core.config import init_session
+        from core.llm import run_agent_turn
+        from memory.memory import _total_tokens
     except ImportError as exc:
         print(f"ERROR: Failed to import mini_agent modules: {exc}", file=sys.stderr)
         sys.exit(1)

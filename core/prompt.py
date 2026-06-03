@@ -12,7 +12,7 @@ import os
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from config import AgentConfig
+    from core.config import AgentConfig
 
 
 def build_system_prompt(config: "AgentConfig") -> str:
@@ -236,7 +236,7 @@ def build_startup_context(
     so the agent benefits from past session experience.
     """
     import subprocess as _sp
-    from config import TREE_TRUNCATION_LINES, GIT_LOG_COUNT, GIT_LOG_TIMEOUT
+    from core.config import TREE_TRUNCATION_LINES, GIT_LOG_COUNT, GIT_LOG_TIMEOUT
 
     parts: list[str] = []
     parts.append("[WORKSPACE CONTEXT — injected once at session start]")

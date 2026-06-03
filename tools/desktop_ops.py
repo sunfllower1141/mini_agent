@@ -29,7 +29,7 @@ import platform
 import subprocess
 import time
 
-from safety import ReadSafetyGate, WriteSafetyGate
+from core.safety import ReadSafetyGate, WriteSafetyGate
 from tools import _register, _summarize, ToolResult
 
 PLATFORM = platform.system()  # "Darwin", "Windows", "Linux"

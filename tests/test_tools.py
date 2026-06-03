@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from conftest import make_tool_call as _make_tool_call, make_gates as _gates
-from safety import ReadSafetyGate, WriteSafetyGate
+from core.safety import ReadSafetyGate, WriteSafetyGate
 from tools import ToolResult, execute_tool, tool_summary, _TOOL_CONTEXT
 
 
@@ -551,7 +551,7 @@ class TestWebSearch(unittest.TestCase):
     def setUp(self):
         self.workspace = tempfile.mkdtemp()
         self.write_gate, self.read_gate = _gates(self.workspace)
-        from config import DEFAULT_EXA_API_KEY
+        from core.config import DEFAULT_EXA_API_KEY
         from tools import set_context
         set_context(exa_api_key=os.environ.get("EXA_API_KEY", DEFAULT_EXA_API_KEY))
 
@@ -567,7 +567,7 @@ class TestWebSearch(unittest.TestCase):
     # --- API-call tests disabled to save Exa tokens ---
     #
     # def test_valid_search_returns_results(self):
-    #     from config import DEFAULT_EXA_API_KEY
+    #     from core.config import DEFAULT_EXA_API_KEY
     #     api_key = os.environ.get("EXA_API_KEY", DEFAULT_EXA_API_KEY)
     #     if not api_key:
     #         self.skipTest("EXA_API_KEY not set")
@@ -578,7 +578,7 @@ class TestWebSearch(unittest.TestCase):
     #     self.assertIn("http", result.content)
     #
     # def test_no_results_for_nonsense_query(self):
-    #     from config import DEFAULT_EXA_API_KEY
+    #     from core.config import DEFAULT_EXA_API_KEY
     #     api_key = os.environ.get("EXA_API_KEY", DEFAULT_EXA_API_KEY)
     #     if not api_key:
     #         self.skipTest("EXA_API_KEY not set")
@@ -881,8 +881,8 @@ class TestPlanningPrompt(unittest.TestCase):
 
     def test_prompt_includes_planning_instruction(self):
         """System prompt tells agent to state a plan before tools."""
-        from prompt import build_system_prompt
-        from config import AgentConfig
+        from core.prompt import build_system_prompt
+        from core.config import AgentConfig
         prompt = build_system_prompt(AgentConfig())
         self.assertIn("state your plan", prompt.lower())
         self.assertIn("1-3 sentences", prompt)
@@ -1281,7 +1281,7 @@ class TestMaxTokensTruncation(unittest.TestCase):
 
     def test_compress_truncates_long_tool_results(self):
         """Tool results > 5 lines are compressed to 5 lines + marker."""
-        from memory import _compress_tool_results
+        from memory.memory import _compress_tool_results
 
         # Build tool-result messages with content well over 5 lines (10+ lines)
         messages: list[dict] = []
@@ -1314,7 +1314,7 @@ class TestMaxTokensTruncation(unittest.TestCase):
 
     def test_under_threshold_not_truncated(self):
         """Tool results <= 5 lines are NOT compressed."""
-        from memory import _compress_tool_results
+        from memory.memory import _compress_tool_results
 
         short_content = "short\nresult\nhere"  # 3 lines
         messages = [{

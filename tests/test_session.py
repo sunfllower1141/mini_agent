@@ -7,8 +7,8 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-import config as cfg
-import session
+import core.config as cfg
+import memory.session as session
 
 
 class TestSessionDBPath(unittest.TestCase):
@@ -133,7 +133,7 @@ class TestSwitchSession(unittest.TestCase):
 
     def _make_config(self, **overrides):
         """Minimal AgentConfig for session tests."""
-        from config import AgentConfig
+        from core.config import AgentConfig
         defaults = {
             "workspace": self.tmpdir,
             "api_provider": "deepseek",
@@ -155,9 +155,9 @@ class TestSwitchSession(unittest.TestCase):
         defaults.update(overrides)
         return AgentConfig(**defaults)
 
-    @patch("memory.MemoryStore")
-    @patch("prompt.build_system_prompt", return_value="system prompt")
-    @patch("prompt.build_startup_context", return_value="startup context")
+    @patch("memory.memory.MemoryStore")
+    @patch("core.prompt.build_system_prompt", return_value="system prompt")
+    @patch("core.prompt.build_startup_context", return_value="startup context")
     def test_switch_with_no_current_memory(self, mock_ctx, mock_prompt, MockStore):
         mock_memory = MagicMock()
         mock_memory._skip_load = True
@@ -176,9 +176,9 @@ class TestSwitchSession(unittest.TestCase):
         self.assertGreaterEqual(len(result["messages"]), 2)
         self.assertEqual(result["messages"][0]["role"], "system")
 
-    @patch("memory.MemoryStore")
-    @patch("prompt.build_system_prompt", return_value="system prompt")
-    @patch("prompt.build_startup_context", return_value="startup context")
+    @patch("memory.memory.MemoryStore")
+    @patch("core.prompt.build_system_prompt", return_value="system prompt")
+    @patch("core.prompt.build_startup_context", return_value="startup context")
     def test_switch_closes_current_memory(self, mock_ctx, mock_prompt, MockStore):
         current_memory = MagicMock()
         mock_memory = MagicMock()
@@ -192,9 +192,9 @@ class TestSwitchSession(unittest.TestCase):
 
         current_memory.close.assert_called_once()
 
-    @patch("memory.MemoryStore")
-    @patch("prompt.build_system_prompt", return_value="system prompt")
-    @patch("prompt.build_startup_context", return_value="startup context")
+    @patch("memory.memory.MemoryStore")
+    @patch("core.prompt.build_system_prompt", return_value="system prompt")
+    @patch("core.prompt.build_startup_context", return_value="startup context")
     def test_switch_restores_saved_messages(self, mock_ctx, mock_prompt, MockStore):
         saved_msgs = [
             {"role": "user", "content": "hello"},

@@ -20,9 +20,9 @@ from typing import Any, Callable, TYPE_CHECKING
 import requests
 
 from api import APIError, format_tool_detail, call_llm, call_deepseek  # noqa: F401 call_deepseek re-exported for tests
-from config import AgentConfig
+from .config import AgentConfig
 from tools import execute_tool, tool_summary, clear_tool_cache, _TOOL_CONTEXT
-from safety import ReadSafetyGate, WriteSafetyGate
+from .safety import ReadSafetyGate, WriteSafetyGate
 from logging_setup import get_logger, log_error_trace
 
 if TYPE_CHECKING:
@@ -55,7 +55,7 @@ TURN_HISTORY_MAX_ENTRIES = 200        # cap on _turn_history entries
 # ---------------------------------------------------------------------------
 # _CIRCUIT_WINDOW and _CIRCUIT_THRESHOLD defined in context_inject.py
 # (single source of truth, shared with the circuit breaker implementation).
-from context_inject import _CIRCUIT_WINDOW, _CIRCUIT_THRESHOLD
+from .context_inject import _CIRCUIT_WINDOW, _CIRCUIT_THRESHOLD
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +105,7 @@ _READ_ONLY_NUDGE_THRESHOLD: int = 3  # turns of pure reads before nudge
 # (extracted to keep the orchestrator focused on the main loop).
 # ---------------------------------------------------------------------------
 
-from context_inject import (  # noqa: E402
+from .context_inject import (  # noqa: E402
     _inject_context,
     _inject_pre_execution_context,
     _record_tool_sequence_to_graph,

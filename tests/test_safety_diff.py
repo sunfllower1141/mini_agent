@@ -7,7 +7,7 @@ import os
 import tempfile
 import unittest
 
-from safety import DiffPreview, ReadSafetyGate, SafetyResult, WriteSafetyGate
+from core.safety import DiffPreview, ReadSafetyGate, SafetyResult, WriteSafetyGate
 
 
 class TestGenerateDiff(unittest.TestCase):

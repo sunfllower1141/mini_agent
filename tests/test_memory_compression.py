@@ -4,7 +4,7 @@
 import json
 import unittest
 
-from memory import (
+from memory.memory import (
     _compress_tool_results,
     _compress_read_file,
     _compress_search_files,

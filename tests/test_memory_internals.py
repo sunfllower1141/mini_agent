@@ -13,7 +13,7 @@ import sqlite3
 import tempfile
 import unittest
 
-from memory import (
+from memory.memory import (
     MemoryStore,
     _clean_messages,
     _migrate_old_paths,

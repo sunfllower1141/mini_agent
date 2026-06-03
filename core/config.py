@@ -708,8 +708,8 @@ def _try_with_timeout(fn, timeout: float = 10.0, description: str = "operation")
 # here so existing callers (mini_agent.py, eval/runner.py,
 # tests) continue to work unchanged.
 
-from bootstrap import init_session  # noqa: F401, E402
-from session import (  # noqa: F401, E402
+from .bootstrap import init_session  # noqa: F401, E402
+from memory.session import (  # noqa: F401, E402
     _session_db_path,
     list_sessions,
     switch_session,

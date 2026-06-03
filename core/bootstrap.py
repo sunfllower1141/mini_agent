@@ -14,7 +14,7 @@ import functools
 
 import requests as _requests
 
-from config import (
+from .config import (
     AgentConfig,
     HTTP_CONNECT_TIMEOUT,
     HTTP_READ_TIMEOUT,
@@ -22,10 +22,10 @@ from config import (
     HTTP_POOL_MAXSIZE,
     _is_remote_workspace,
 )
-from safety import ReadSafetyGate, WriteSafetyGate
-from memory import MemoryStore
-from prompt import build_system_prompt, build_startup_context
-from agent_runtime import AgentRuntime
+from .safety import ReadSafetyGate, WriteSafetyGate
+from memory.memory import MemoryStore
+from .prompt import build_system_prompt, build_startup_context
+from agents.agent_runtime import AgentRuntime
 
 # MCP tool schemas — injected into TOOLS lazily when config.mcp_servers is non-empty.
 _MCP_SCHEMAS = [
@@ -83,7 +83,7 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
 
     config = AgentConfig.load(workspace, cli_args=cli_args)
     # Windows SOCKS tunnel auto-start (no-op on other platforms)
-    from config import _start_windows_tunnel
+    from core.config import _start_windows_tunnel
     _start_windows_tunnel(config)
     write_gate = WriteSafetyGate(workspace, allow_overwrites=config.allow_overwrites,
                                  unrestricted=config.unrestricted)
@@ -189,7 +189,7 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     saved = memory.load()
     # Prune loaded conversation to avoid massive first-turn payload
     if saved:
-        from memory import _compress_tool_results, _prune_by_tokens, _summarize_pruned
+        from memory.memory import _compress_tool_results, _prune_by_tokens, _summarize_pruned
         saved, _ = _compress_tool_results(saved, keep_recent=20)
         saved, pruned = _prune_by_tokens(saved, config.context_window, config.max_messages)
         if pruned:

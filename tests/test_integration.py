@@ -23,7 +23,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tools import _TOOL_DISPATCH, _TOOL_CONTEXT, set_context
-from agent_runtime import AgentRuntime
+from agents.agent_runtime import AgentRuntime
 from conftest import make_mock_config, make_gates
 
 
@@ -126,7 +126,7 @@ class TestFullSpawnCollectVerify(unittest.TestCase):
         wg, rg = self.wg, self.rg
         test_file = Path(self.tmp_dir.name) / "agent_output.txt"
 
-        with patch("sub_agent.call_llm") as mock_llm:
+        with patch("agents.sub_agent.call_llm") as mock_llm:
             mock_llm.side_effect = [
                 _make_llm_response(
                     content="",
@@ -164,7 +164,7 @@ class TestFullSpawnCollectVerify(unittest.TestCase):
         """If the sub-agent produces text, collect returns it."""
         wg, rg = self.wg, self.rg
 
-        with patch("sub_agent.call_llm") as mock_llm:
+        with patch("agents.sub_agent.call_llm") as mock_llm:
             mock_llm.side_effect = [
                 _make_llm_response(content="Something went wrong."),
             ]
@@ -199,7 +199,7 @@ class TestFanOut(unittest.TestCase):
     def test_fan_out_three_agents_collect_any(self):
         wg, rg = self.wg, self.rg
 
-        with patch("sub_agent.call_llm") as mock_llm:
+        with patch("agents.sub_agent.call_llm") as mock_llm:
             mock_llm.return_value = _make_llm_response(content="result from agent")
 
             spawn = _TOOL_DISPATCH["spawn_agent"]
@@ -220,7 +220,7 @@ class TestFanOut(unittest.TestCase):
     def test_fan_out_collect_any_with_specific_ids(self):
         wg, rg = self.wg, self.rg
 
-        with patch("sub_agent.call_llm") as mock_llm:
+        with patch("agents.sub_agent.call_llm") as mock_llm:
             mock_llm.return_value = _make_llm_response(content="done")
 
             spawn = _TOOL_DISPATCH["spawn_agent"]
@@ -241,7 +241,7 @@ class TestFanOut(unittest.TestCase):
         """Batch spawn should not exceed _MAX_CONCURRENT (5)."""
         wg, rg = self.wg, self.rg
 
-        with patch("sub_agent.call_llm") as mock_llm:
+        with patch("agents.sub_agent.call_llm") as mock_llm:
             mock_llm.return_value = _make_llm_response(content="ok")
 
             spawn = _TOOL_DISPATCH["spawn_agent"]
@@ -495,7 +495,7 @@ class TestParentPolling(unittest.TestCase):
     def test_poll_running_then_completed(self):
         wg, rg = self.wg, self.rg
 
-        with patch("sub_agent.call_llm") as mock_llm:
+        with patch("agents.sub_agent.call_llm") as mock_llm:
             mock_llm.side_effect = [
                 _make_llm_response(
                     content="",
@@ -554,7 +554,7 @@ class TestMultipleCollectAny(unittest.TestCase):
     def test_collect_any_multiple_agents(self):
         wg, rg = self.wg, self.rg
 
-        with patch("sub_agent.call_llm") as mock_llm:
+        with patch("agents.sub_agent.call_llm") as mock_llm:
             mock_llm.return_value = _make_llm_response(content="quick result")
 
             spawn = _TOOL_DISPATCH["spawn_agent"]
@@ -583,7 +583,7 @@ class TestMultipleCollectAny(unittest.TestCase):
         """After all agents complete, collect_any should return one immediately."""
         wg, rg = self.wg, self.rg
 
-        with patch("sub_agent.call_llm") as mock_llm:
+        with patch("agents.sub_agent.call_llm") as mock_llm:
             mock_llm.return_value = _make_llm_response(content="done")
 
             spawn = _TOOL_DISPATCH["spawn_agent"]
@@ -680,7 +680,7 @@ class TestMultiAgentE2EWorkflow(unittest.TestCase):
         # Stage A writes a file; Stage B reads it and appends.
         stage_a_file = tmp_path / "pipeline_stage_a.txt"
 
-        with patch("sub_agent.call_llm") as mock_llm:
+        with patch("agents.sub_agent.call_llm") as mock_llm:
             # Stage A: write a file with initial content
             # Stage B: read and confirm
             mock_llm.side_effect = [
@@ -733,7 +733,7 @@ class TestMultiAgentE2EWorkflow(unittest.TestCase):
 
         items = ["alpha", "beta", "gamma"]
 
-        with patch("sub_agent.call_llm") as mock_llm:
+        with patch("agents.sub_agent.call_llm") as mock_llm:
             # Each worker returns its item processed
             mock_llm.return_value = _make_llm_response(
                 content="processed: alpha"

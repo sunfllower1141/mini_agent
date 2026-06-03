@@ -432,8 +432,8 @@ class TestRunner:
             _init_git(ws)
 
             # Mock run_agent_turn + init_session (imported locally in runner)
-            with patch("llm.run_agent_turn") as mock_run, \
-                 patch("config.init_session") as mock_init:
+            with patch("core.llm.run_agent_turn") as mock_run, \
+                 patch("core.config.init_session") as mock_init:
                 mock_run.return_value = {"role": "assistant", "content": "Done."}
                 mock_init.return_value = {
                     "config": MagicMock(),
@@ -465,8 +465,8 @@ class TestRunner:
                     on_tool_start("write_file(bar.py)")
                 return {"role": "assistant", "content": "Done."}
 
-            with patch("llm.run_agent_turn", side_effect=fake_run_agent_turn), \
-                 patch("config.init_session") as mock_init:
+            with patch("core.llm.run_agent_turn", side_effect=fake_run_agent_turn), \
+                 patch("core.config.init_session") as mock_init:
                 mock_init.return_value = {
                     "config": MagicMock(),
                     "write_gate": MagicMock(),
@@ -487,8 +487,8 @@ class TestRunner:
         with tempfile.TemporaryDirectory() as ws:
             _init_git(ws)
 
-            with patch("llm.run_agent_turn", side_effect=RuntimeError("Boom")), \
-                 patch("config.init_session") as mock_init:
+            with patch("core.llm.run_agent_turn", side_effect=RuntimeError("Boom")), \
+                 patch("core.config.init_session") as mock_init:
                 mock_init.return_value = {
                     "config": MagicMock(),
                     "write_gate": MagicMock(),
@@ -515,8 +515,8 @@ class TestRunner:
             workspace_fixture="mini_repo",
         )
 
-        with patch("llm.run_agent_turn") as mock_run, \
-             patch("config.init_session") as mock_init:
+        with patch("core.llm.run_agent_turn") as mock_run, \
+             patch("core.config.init_session") as mock_init:
             mock_run.return_value = {"role": "assistant", "content": "Done."}
             mock_init.return_value = {
                 "config": MagicMock(),

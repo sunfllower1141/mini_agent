@@ -132,7 +132,7 @@ class TestCoordinationPatternsEndToEnd(unittest.TestCase):
     """Test fan_out, fan_in, barrier with real AgentRuntime and threads."""
 
     def setUp(self):
-        from agent_runtime import AgentRuntime
+        from agents.agent_runtime import AgentRuntime
 
         self.workspace = tempfile.mkdtemp()
         self.runtime = AgentRuntime()
@@ -173,7 +173,7 @@ class TestCoordinationPatternsEndToEnd(unittest.TestCase):
     def test_fan_in_collects_completed_results(self):
         """fan_in waits for all agents, returns their results in order."""
         from tools.agent_patterns import fan_in
-        from agent_runtime import SubAgentResult
+        from agents.agent_runtime import SubAgentResult
 
         # Manually register completed results
         self.runtime.store_result("task-1", SubAgentResult(True, "result-1", turns_used=1))
@@ -210,7 +210,7 @@ class TestPipelineOrdering(unittest.TestCase):
     """Verify pipeline stages execute in order."""
 
     def setUp(self):
-        from agent_runtime import AgentRuntime
+        from agents.agent_runtime import AgentRuntime
 
         self.workspace = tempfile.mkdtemp()
         self.runtime = AgentRuntime()
@@ -291,7 +291,7 @@ class TestStaleAgentGC(unittest.TestCase):
     """Verify stale agent threads from previous sessions are cleaned up."""
 
     def setUp(self):
-        from agent_runtime import AgentRuntime
+        from agents.agent_runtime import AgentRuntime
         self.runtime = AgentRuntime()
 
     def tearDown(self):
@@ -300,7 +300,7 @@ class TestStaleAgentGC(unittest.TestCase):
             t.join(timeout=2)
 
     def test_gc_removes_completed_threads(self):
-        from agent_runtime import SubAgentResult
+        from agents.agent_runtime import SubAgentResult
 
         cancel = threading.Event()
         t = threading.Thread(target=lambda: time.sleep(0.05), daemon=True)
@@ -340,7 +340,7 @@ class TestAgentHandoffInbox(unittest.TestCase):
     """Verify agent_handoff messages are delivered and readable via inbox."""
 
     def setUp(self):
-        from agent_runtime import AgentRuntime
+        from agents.agent_runtime import AgentRuntime
         self.runtime = AgentRuntime()
 
     def tearDown(self):
@@ -416,7 +416,7 @@ class TestSubAgentRecursion(unittest.TestCase):
     """Verify sub-agents can spawn sub-agents (recursive decomposition)."""
 
     def setUp(self):
-        from agent_runtime import AgentRuntime
+        from agents.agent_runtime import AgentRuntime
 
         self.workspace = tempfile.mkdtemp()
         self.runtime = AgentRuntime()

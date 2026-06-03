@@ -19,7 +19,7 @@ from collections import deque
 from typing import Any
 
 from api import APIError
-from safety import ReadSafetyGate
+from .safety import ReadSafetyGate
 from tools import _TOOL_CONTEXT, get_modified_files
 from logging_setup import get_logger
 from interject import poll_interjections

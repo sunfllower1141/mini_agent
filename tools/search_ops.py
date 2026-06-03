@@ -12,7 +12,7 @@ import re as _re
 import threading
 from typing import Any
 
-from safety import ReadSafetyGate, WriteSafetyGate
+from core.safety import ReadSafetyGate, WriteSafetyGate
 from tools import _register, _summarize, ToolResult, _TOOL_CONTEXT
 from tools.shell_ops import _SKIP_DIRS
 

@@ -291,7 +291,7 @@ class TestBenchmarkMemoryPruning:
     """Benchmark _prune_by_tokens on realistic message volumes."""
 
     def _bench_prune(self, msg_count: int, max_tokens: int, max_messages: int) -> BenchmarkResult:
-        from memory import _prune_by_tokens
+        from memory.memory import _prune_by_tokens
 
         msgs = _make_messages(msg_count)
 
@@ -329,7 +329,7 @@ class TestBenchmarkMemoryPruning:
 
     def test_prune_token_limited(self):
         """Prune by token budget (harder path — iterates trim loop)."""
-        from memory import _prune_by_tokens, _estimate_tokens
+        from memory.memory import _prune_by_tokens, _estimate_tokens
 
         msgs = _make_messages(1000)
         total_tokens = sum(_estimate_tokens(m) for m in msgs)
@@ -427,7 +427,7 @@ class TestBenchmarkCircuitBreaker:
 
     def test_tool_call_key_throughput(self):
         """_tool_call_key is called on every tool call — measure throughput."""
-        from llm import _tool_call_key
+        from core.llm import _tool_call_key
 
         calls = [
             {
@@ -453,7 +453,7 @@ class TestBenchmarkCircuitBreaker:
 
     def test_circuit_trip_detection(self):
         """_check_circuit on a window full of repeated calls."""
-        from llm import _check_circuit
+        from core.llm import _check_circuit
 
         # Build a realistic window: mostly unique + some repeated
         keys: list[str] = []
@@ -531,7 +531,7 @@ class TestBenchmarkToolDispatch:
     def test_dispatch_resolution_speed(self):
         """How fast does execute_tool resolve the handler for known tools?"""
         from tools import execute_tool, _TOOL_DISPATCH, _TOOL_CACHE
-        from safety import ReadSafetyGate, WriteSafetyGate
+        from core.safety import ReadSafetyGate, WriteSafetyGate
 
         wg = WriteSafetyGate("/tmp")
         rg = ReadSafetyGate("/tmp")
@@ -565,7 +565,7 @@ class TestBenchmarkToolDispatch:
     def test_schema_validation_overhead(self):
         """Measure overhead of parameter name validation on a valid call."""
         from tools import execute_tool
-        from safety import ReadSafetyGate, WriteSafetyGate
+        from core.safety import ReadSafetyGate, WriteSafetyGate
 
         wg = WriteSafetyGate("/tmp")
         rg = ReadSafetyGate("/tmp")
@@ -600,7 +600,7 @@ class TestBenchmarkPipeShortCircuit:
 
     def test_pipe_detection_speed(self):
         """_extract_pipe_deps should be near-instant for calls without _pipe."""
-        from llm import _extract_pipe_deps
+        from core.llm import _extract_pipe_deps
 
         # Calls without _pipe — should short-circuit on string check.
         # _extract_pipe_deps takes the full remaining list.
@@ -798,7 +798,7 @@ class TestBenchmarkSemanticSearch:
         check_regression("semantic_index_10_files", index_time)
 
         # Run a search
-        from safety import ReadSafetyGate
+        from core.safety import ReadSafetyGate
         rg = ReadSafetyGate(tmp)
 
         t0 = _time.perf_counter()

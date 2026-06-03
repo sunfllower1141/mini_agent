@@ -5,10 +5,10 @@ import json
 import os
 import unittest
 
-from memory import _clean_messages
+from memory.memory import _clean_messages
 from tools import execute_tool, _repair_json
-from safety import ReadSafetyGate, WriteSafetyGate
-from llm import _tool_call_key, _check_circuit
+from core.safety import ReadSafetyGate, WriteSafetyGate
+from core.llm import _tool_call_key, _check_circuit
 
 
 # ---------------------------------------------------------------------------
@@ -345,25 +345,25 @@ class TestScratchpad(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_empty_by_default(self):
-        from memory import MemoryStore
+        from memory.memory import MemoryStore
         store = MemoryStore(self.db_path)
         self.assertEqual(store.get_scratchpad(), "")
 
     def test_set_and_get(self):
-        from memory import MemoryStore
+        from memory.memory import MemoryStore
         store = MemoryStore(self.db_path)
         store.set_scratchpad("Plan:\n1. Fix bug\n2. Test")
         self.assertEqual(store.get_scratchpad(), "Plan:\n1. Fix bug\n2. Test")
 
     def test_overwrite(self):
-        from memory import MemoryStore
+        from memory.memory import MemoryStore
         store = MemoryStore(self.db_path)
         store.set_scratchpad("v1")
         store.set_scratchpad("v2")
         self.assertEqual(store.get_scratchpad(), "v2")
 
     def test_clear_removes_scratchpad(self):
-        from memory import MemoryStore
+        from memory.memory import MemoryStore
         store = MemoryStore(self.db_path)
         store.set_scratchpad("important notes")
         store.save([{"role": "user", "content": "hi"}])
@@ -371,7 +371,7 @@ class TestScratchpad(unittest.TestCase):
         self.assertEqual(store.get_scratchpad(), "")
 
     def test_persists_across_instances(self):
-        from memory import MemoryStore
+        from memory.memory import MemoryStore
         store1 = MemoryStore(self.db_path)
         store1.set_scratchpad("persistent content")
 
@@ -380,9 +380,9 @@ class TestScratchpad(unittest.TestCase):
 
     def test_tool_writes_to_sqlite_when_path_set(self):
         """write_scratchpad uses SQLite when scratchpad_path is configured."""
-        from memory import MemoryStore
+        from memory.memory import MemoryStore
         from tools import execute_tool, set_context
-        from safety import WriteSafetyGate, ReadSafetyGate
+        from core.safety import WriteSafetyGate, ReadSafetyGate
         store = MemoryStore(self.db_path)
         set_context(scratchpad_path=store._db_path)
         wg = WriteSafetyGate(self.tmp, allow_overwrites=True)
@@ -398,7 +398,7 @@ class TestScratchpad(unittest.TestCase):
         """write_scratchpad writes to .mini_agent_scratchpad.md when no SQLite path."""
         import os as _os
         from tools import execute_tool, set_context
-        from safety import WriteSafetyGate, ReadSafetyGate
+        from core.safety import WriteSafetyGate, ReadSafetyGate
         # Clear any previous scratchpad_path
         set_context(scratchpad_path=None, workspace=self.tmp)
         md_path = _os.path.join(self.tmp, ".mini_agent_scratchpad.md")
@@ -473,7 +473,7 @@ class TestTransientMessages(unittest.TestCase):
     """Verify that _transient messages are stripped from saved history."""
 
     def test_transient_messages_are_cleaned(self):
-        from memory import _clean_messages
+        from memory.memory import _clean_messages
         messages = [
             {"role": "user", "content": "real input"},
             {"role": "user", "content": "scratchpad snapshot", "_transient": True},
@@ -486,7 +486,7 @@ class TestTransientMessages(unittest.TestCase):
         self.assertEqual(cleaned[1]["content"], "response")
 
     def test_non_transient_still_preserved(self):
-        from memory import _clean_messages
+        from memory.memory import _clean_messages
         messages = [
             {"role": "user", "content": "real question"},
             {"role": "assistant", "content": "real answer"},
@@ -495,7 +495,7 @@ class TestTransientMessages(unittest.TestCase):
         self.assertEqual(len(cleaned), 2)
 
     def test_all_transient_empty_result(self):
-        from memory import _clean_messages
+        from memory.memory import _clean_messages
         messages = [
             {"role": "user", "content": "a", "_transient": True},
             {"role": "user", "content": "b", "_transient": True},

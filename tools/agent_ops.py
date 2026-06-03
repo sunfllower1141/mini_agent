@@ -19,9 +19,9 @@ import threading
 import time
 import uuid
 
-from safety import ReadSafetyGate, WriteSafetyGate
+from core.safety import ReadSafetyGate, WriteSafetyGate
 from tools import _register, _summarize, ToolResult, _TOOL_CONTEXT
-from agent_runtime import AgentRuntime, SubAgentResult
+from agents.agent_runtime import AgentRuntime, SubAgentResult
 
 
 # ---------------------------------------------------------------------------
@@ -64,7 +64,7 @@ def _spawn_one(
 ) -> str:
     """Spawn a single sub-agent thread. Returns the task_id."""
     from tools import _TOOL_CONTEXT
-    from sub_agent import run_sub_agent
+    from agents.sub_agent import run_sub_agent
 
     task_id = str(uuid.uuid4())[:8]
     if cancel_event is None:

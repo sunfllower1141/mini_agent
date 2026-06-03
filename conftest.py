@@ -106,7 +106,7 @@ def make_gates(workspace: str = "/tmp") -> tuple:
 
     The write-gate has ``allow_overwrites=True`` for test convenience.
     """
-    from safety import ReadSafetyGate, WriteSafetyGate
+    from core.safety import ReadSafetyGate, WriteSafetyGate
 
     return WriteSafetyGate(workspace, allow_overwrites=True), ReadSafetyGate(workspace)
 
@@ -160,7 +160,7 @@ def _mock_log_api_error():
 @pytest.fixture
 def gates(tmp_path):
     """Safety gates rooted in a temporary directory."""
-    from safety import ReadSafetyGate, WriteSafetyGate
+    from core.safety import ReadSafetyGate, WriteSafetyGate
 
     wg = WriteSafetyGate(str(tmp_path))
     rg = ReadSafetyGate(str(tmp_path))
@@ -173,7 +173,7 @@ def configured_context(tmp_path, monkeypatch):
 
     Cleans up all sub-agent threads and global message state on teardown.
     """
-    from agent_runtime import AgentRuntime
+    from agents.agent_runtime import AgentRuntime
     from tools import set_context
 
     runtime = AgentRuntime()

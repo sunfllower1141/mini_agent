@@ -14,7 +14,7 @@ import subprocess
 import threading
 import uuid
 
-from safety import ReadSafetyGate, WriteSafetyGate
+from core.safety import ReadSafetyGate, WriteSafetyGate
 from tools import _register, _summarize, ToolResult, _TASK_REGISTRY
 
 
@@ -205,7 +205,7 @@ def _task_status(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolR
     # Try to retrieve persisted test output for background runs
     output_msg = ""
     try:
-        from memory import MemoryStore
+        from memory.memory import MemoryStore
         import os as _os
         mem = MemoryStore(_os.path.join(_os.getcwd(), ".mini_agent_memory.db"), max_messages=500)
         test_out = mem.get_test_output()
@@ -1007,7 +1007,7 @@ def _diagnose_failures(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> 
     # Build MemoryStore path — same default used by _persist_test_output
     db_path = _os.path.join(rg.workspace_root, ".mini_agent_memory.db")
     try:
-        from memory import MemoryStore
+        from memory.memory import MemoryStore
         store = MemoryStore(db_path, max_messages=500)
         output = store.get_test_output()
     except Exception as e:

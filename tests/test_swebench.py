@@ -329,9 +329,9 @@ class TestSWEBenchRunnerIntegration:
     """Light integration tests with mocked agent and network."""
 
     @patch("eval.swebench_runner._get_repo")
-    @patch("config.init_session")
-    @patch("llm.run_agent_turn")
-    @patch("memory._total_tokens", return_value=5000)
+    @patch("core.config.init_session")
+    @patch("core.llm.run_agent_turn")
+    @patch("memory.memory._total_tokens", return_value=5000)
     def test_run_swebench_task_mocked(
         self, mock_tokens, mock_run_agent, mock_init_session, mock_get_repo
     ):
@@ -373,8 +373,8 @@ class TestSWEBenchRunnerIntegration:
         assert mock_run_agent.called
 
     @patch("eval.swebench_runner._get_repo")
-    @patch("config.init_session")
-    @patch("llm.run_agent_turn")
+    @patch("core.config.init_session")
+    @patch("core.llm.run_agent_turn")
     def test_run_swebench_task_error_handling(
         self, mock_run_agent, mock_init_session, mock_get_repo
     ):

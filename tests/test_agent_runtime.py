@@ -6,7 +6,7 @@ from __future__ import annotations
 import threading
 import pytest
 
-from agent_runtime import SubAgentResult, AgentRuntime
+from agents.agent_runtime import SubAgentResult, AgentRuntime
 
 
 # ---------------------------------------------------------------------------

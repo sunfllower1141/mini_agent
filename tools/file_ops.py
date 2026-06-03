@@ -13,7 +13,7 @@ import shutil
 import sys
 import time
 
-from safety import ReadSafetyGate, WriteSafetyGate
+from core.safety import ReadSafetyGate, WriteSafetyGate
 from tools import clear_tool_cache
 from tools import _register, _summarize, ToolResult, _TOOL_CONTEXT
 

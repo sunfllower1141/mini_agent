@@ -9,7 +9,7 @@ import sqlite3
 import tempfile
 import unittest
 
-from memory import MemoryStore, _db_path, _prune_by_tokens
+from memory.memory import MemoryStore, _db_path, _prune_by_tokens
 
 
 class TestMemoryStore(unittest.TestCase):

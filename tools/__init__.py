@@ -32,7 +32,7 @@ import sys
 import threading
 from dataclasses import dataclass
 
-from safety import ReadSafetyGate, WriteSafetyGate
+from core.safety import ReadSafetyGate, WriteSafetyGate
 from tools.schema import TOOLS
 from logging_setup import get_logger, log_tool_failure, log_tool_success, log_error_trace
 
@@ -394,7 +394,7 @@ def _write_session_handoff(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate
     store = getattr(_TOOL_CONTEXT, "_memory_store", None)
     if store is None:
         # Fallback: use static method directly
-        from memory import MemoryStore
+        from memory.memory import MemoryStore
         try:
             path = MemoryStore.write_session_handoff(
                 workspace, start_head=start_head,

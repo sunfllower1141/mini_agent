@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import threading
 
-from safety import ReadSafetyGate, WriteSafetyGate
+from core.safety import ReadSafetyGate, WriteSafetyGate
 from tools import _register, _summarize, ToolResult, _TOOL_CONTEXT
 
 
@@ -91,7 +91,7 @@ def _write_scratchpad(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> 
     if memory_store is None:
         scratchpad_path = getattr(_TOOL_CONTEXT, "scratchpad_path", None)
         if scratchpad_path:
-            from memory import MemoryStore
+            from memory.memory import MemoryStore
             memory_store = MemoryStore(scratchpad_path)
 
     if memory_store is not None:

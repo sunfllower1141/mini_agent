@@ -4,8 +4,8 @@
 import os
 import unittest
 
-from config import AgentConfig
-from prompt import build_system_prompt
+from core.config import AgentConfig
+from core.prompt import build_system_prompt
 
 
 class TestBuildSystemPrompt(unittest.TestCase):

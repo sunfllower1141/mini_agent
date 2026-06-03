@@ -20,7 +20,7 @@ from __future__ import annotations
 import os
 import webbrowser as _webbrowser
 
-from safety import ReadSafetyGate, WriteSafetyGate
+from core.safety import ReadSafetyGate, WriteSafetyGate
 from tools import _register, _summarize, ToolResult
 
 # ---------------------------------------------------------------------------
@@ -419,7 +419,7 @@ def _browser_screenshot(args: dict, wg: WriteSafetyGate,
                               content=f"Screenshot blocked by safety layer: "
                                       f"{safety_result.reason}")
     else:
-        from safety import WriteSafetyGate
+        from core.safety import WriteSafetyGate
         safety_result = WriteSafetyGate(os.getcwd()).check(path)
         if not safety_result.allowed:
             return ToolResult(success=False,

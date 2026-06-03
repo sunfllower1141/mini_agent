@@ -6,7 +6,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch, MagicMock
 
-from agent_runtime import AgentRuntime, SubAgentResult
+from agents.agent_runtime import AgentRuntime, SubAgentResult
 
 
 class TestFanOut(unittest.TestCase):

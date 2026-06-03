@@ -94,7 +94,7 @@ _SAVE_RETRY_DELAY = 0.25  # seconds, multiplied by attempt number
 # (extracted to keep MemoryStore focused on persistence).
 # ---------------------------------------------------------------------------
 
-from memory_prune import (  # noqa: F401 — re-exported for backward compatibility
+from .memory_prune import (  # noqa: F401 — re-exported for backward compatibility
     _CHARS_PER_TOKEN,
     _MIN_TOKEN_ESTIMATE,
     _COMPRESSION_KEEP_RECENT,

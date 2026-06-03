@@ -7,7 +7,7 @@ import os
 import tempfile
 import unittest
 
-from safety import ReadSafetyGate, ReadSafetyResult, WriteSafetyGate, WriteSafetyResult
+from core.safety import ReadSafetyGate, ReadSafetyResult, WriteSafetyGate, WriteSafetyResult
 
 
 class TestReadSafetyGate(unittest.TestCase):
