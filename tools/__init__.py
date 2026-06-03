@@ -39,33 +39,24 @@ from logging_setup import get_logger, log_tool_failure, log_tool_success, log_er
 _log = get_logger("tools")
 
 # Hardcoded core schema for remember — always present even if schema.py is missing
-_REMEMBER_SCHEMA = {
-    "type": "function",
-    "function": {
-        "name": "remember",
-        "description": "Manually capture a learning or observation to project_knowledge for cross-session persistence. Use this when you discover a pattern, workaround, or convention worth remembering in future sessions.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "topic": {
-                    "type": "string",
-                    "description": "Short topic label for this learning (e.g. 'edit_file whitespace', 'module import pattern')"
-                },
-                "detail": {
-                    "type": "string",
-                    "description": "The learning itself — what to remember, the pattern, workaround, or convention."
-                },
-                "category": {
-                    "type": "string",
-                    "description": "Optional: category hint (tool_usage, code_pattern, error_pattern, convention, architecture, workaround, dependency, general). Auto-detected if omitted."
-                }
-            },
-            "required": ["topic", "detail"]
-        }
-    }
-}
+# Bootstrap guard: if the canonical "remember" schema is missing from schema.py
+# (e.g. corrupted install), insert a minimal fallback so the tool still works.
 if not any(td["function"]["name"] == "remember" for td in TOOLS):
-    TOOLS.insert(0, _REMEMBER_SCHEMA)
+    TOOLS.insert(0, {
+        "type": "function",
+        "function": {
+            "name": "remember",
+            "description": "Manually capture a learning or observation to project_knowledge for cross-session persistence.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {"type": "string", "description": "Short topic label for this learning."},
+                    "detail": {"type": "string", "description": "The learning itself."},
+                },
+                "required": ["topic", "detail"]
+            }
+        }
+    })
 
 # ---------------------------------------------------------------------------
 # TOOL_SCHEMA_MAP — O(1) name→schema lookup for execute_tool() validation
@@ -168,6 +159,9 @@ class AgentContext:
         self._failure_pattern_store = None  # FailurePatternStore (set by init_session)
         self._self_critique = None  # SelfCritique instance (set by init_session)
         self._subagent_callback: callable | None = None  # (event_type, data) for Electron sub-agent events
+        self._scratchpad_injected: bool = False  # one-time scratchpad context injected this session
+        self._git_diff_injected: bool = False    # one-time git diff context injected this session
+        self._consecutive_read_only_turns: int = 0  # turns of pure reads (reset on write/shell)
 
 
 _TOOL_CONTEXT_VAR: contextvars.ContextVar[AgentContext] = contextvars.ContextVar(
@@ -392,7 +386,7 @@ def _remember(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResu
         return ToolResult(
             success=True,
             content=(
-                f"Remember noted (no persistent store — session init may have skipped)"
+                "Remember noted (no persistent store — session init may have skipped)"
             ),
         )
 
@@ -435,7 +429,6 @@ def _repair_json(raw: str) -> tuple[object, bool]:
     3. Unquoted object keys
     4. 1+2, 1+3, 2+3, 1+2+3 (combinations)
     """
-    import re
 
     # Helper: apply unquoted-key fix only outside strings
     def _fix_unquoted_keys(text: str) -> str:
@@ -1048,4 +1041,3 @@ def _mcp_call_summary(args: dict) -> str:
     server = args.get("server", "?")
     tool = args.get("tool", "?")
     return f"mcp_call({server}/{tool})"
-from tools.mcp_client import get_mcp_manager, init_mcp_servers, shutdown_mcp  # noqa: E402, F401

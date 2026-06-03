@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import tempfile
-import time
 import unittest
-from pathlib import Path
 
 from tools._json_rpc_shared import _drain, drain_stderr, is_subprocess_connected
 

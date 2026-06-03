@@ -91,7 +91,7 @@ Priority: CLI flags > env vars > `.env` > `.mini_agent.toml` > defaults.
 ## Running Tests
 
 ```bash
-python -m pytest          # 1,291 tests
+python -m pytest          # 1,298 tests
 make test                 # same, via Makefile
 ```
 

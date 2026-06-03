@@ -15,7 +15,6 @@ import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from eval.scorer import CheckResult, run_checks
 from eval.metrics import MetricsCollector

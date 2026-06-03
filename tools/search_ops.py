@@ -10,6 +10,7 @@ import json
 import os
 import re as _re
 import threading
+from typing import Any
 
 from safety import ReadSafetyGate, WriteSafetyGate
 from tools import _register, _summarize, ToolResult, _TOOL_CONTEXT
@@ -39,7 +40,6 @@ _SKIP_REF_NAMES: frozenset[str] = frozenset({
 })
 
 # --- #8 Background indexing ---
-import threading
 _background_index_thread: threading.Thread | None = None
 _background_index_ready: threading.Event = threading.Event()
 
@@ -315,7 +315,7 @@ def _find_symbol_summary(args: dict) -> str:
 # semantic_search (sentence-transformers, local)
 # ---------------------------------------------------------------------------
 
-_SEMANTIC_STORE: dict[str, tuple[float, list[tuple[int, int, str, "numpy.ndarray"]]]] = {}
+_SEMANTIC_STORE: dict[str, tuple[float, list[tuple[int, int, str, Any]]]] = {}
 _SEMANTIC_LRU: list[str] = []  # tracks access order for eviction
 _SEMANTIC_MAX_ENTRIES = 500    # per-file entries before eviction kicks in
 _SEMANTIC_MAX_MTIME: float = 0.0  # max mtime across all indexed files (separate from store)
@@ -770,7 +770,6 @@ def _web_search_ddg(query: str, num: int = 5) -> ToolResult:
         from urllib.parse import quote_plus
         import html as _html
         import re as _re
-        import json as _json
 
         url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
         req = Request(url, headers={"User-Agent": "mini_agent/1.0"})
@@ -867,7 +866,7 @@ def _find_usages(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolRe
     if not ref_idx:
         return ToolResult(
             success=True,
-            content=f"Reference index not yet built. Try find_symbol first to populate the forward index.",
+            content="Reference index not yet built. Try find_symbol first to populate the forward index.",
         )
 
     # Exact match first, then substring

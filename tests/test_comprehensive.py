@@ -17,13 +17,11 @@ Covers:
 
 from __future__ import annotations
 
-import json
 import os
 import tempfile
 import threading
 import time
 import unittest
-from unittest.mock import MagicMock, patch
 
 from conftest import make_tool_call as _make_tool_call, make_gates as _gates
 from tools import execute_tool, ToolResult, _TOOL_DISPATCH
@@ -91,7 +89,6 @@ class TestFileReservationConcurrency(unittest.TestCase):
         shutil.rmtree(self.workspace, ignore_errors=True)
 
     def test_concurrent_write_to_same_file_one_wins(self):
-        from tools import _FILE_RESERVATIONS, _FILE_RESERVATIONS_LOCK
 
         filepath = os.path.join(self.workspace, "collision_test.py")
         results: list[ToolResult] = []
@@ -136,7 +133,6 @@ class TestCoordinationPatternsEndToEnd(unittest.TestCase):
 
     def setUp(self):
         from agent_runtime import AgentRuntime
-        from tools import set_context
 
         self.workspace = tempfile.mkdtemp()
         self.runtime = AgentRuntime()
@@ -191,7 +187,6 @@ class TestCoordinationPatternsEndToEnd(unittest.TestCase):
     def test_barrier_completes_when_all_done(self):
         """barrier returns True when all tasks have reached the barrier."""
         from tools.agent_patterns import barrier
-        from agent_runtime import SubAgentResult
         from tools.agent_messages import AgentMessage
 
         # Simulate agents reaching the barrier by sending coord.sync
@@ -240,7 +235,6 @@ class TestPipelineOrdering(unittest.TestCase):
 
     def test_pipeline_stages_run_in_sequence(self):
         """pipeline tool is registered and dispatchable."""
-        from tools.agent_patterns import _pipeline
 
         # Verify the pipeline helper is registered as a tool
         self.assertIn("pipeline", _TOOL_DISPATCH,

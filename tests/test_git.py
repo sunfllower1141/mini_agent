@@ -3,7 +3,6 @@
 test_git.py — tests for the git tool.
 """
 
-import json
 import os
 import subprocess
 import tempfile

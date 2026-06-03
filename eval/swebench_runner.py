@@ -758,7 +758,7 @@ def _cli() -> None:
 
     # Print summary
     print(f"\n{'='*60}")
-    print(f"SWE-bench Run Complete")
+    print("SWE-bench Run Complete")
     print(f"  Dataset:    {args.dataset}")
     print(f"  Total:      {report.total}")
     print(f"  Completed:  {report.completed}")
@@ -772,14 +772,14 @@ def _cli() -> None:
     print(f"{'='*60}")
 
     if report.resolved == 0 and report.completed > 0:
-        print(f"\n  To evaluate these predictions with the official SWE-bench harness:")
-        print(f"    git clone https://github.com/princeton-nlp/SWE-bench.git")
-        print(f"    cd SWE-bench")
-        print(f"    python -m swebench.harness.run_evaluation \\")
+        print("\n  To evaluate these predictions with the official SWE-bench harness:")
+        print("    git clone https://github.com/princeton-nlp/SWE-bench.git")
+        print("    cd SWE-bench")
+        print("    python -m swebench.harness.run_evaluation \\")
         print(f"        --dataset_name {args.dataset} \\")
         print(f"        --predictions_path {os.path.abspath(args.output)} \\")
-        print(f"        --max_workers 4 \\")
-        print(f"        --run_id mini_agent")
+        print("        --max_workers 4 \\")
+        print("        --run_id mini_agent")
 
 
 if __name__ == "__main__":

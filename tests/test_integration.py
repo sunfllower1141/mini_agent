@@ -16,7 +16,6 @@ Covers:
 """
 
 import re
-import time
 import threading
 import tempfile
 import unittest
@@ -24,7 +23,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tools import _TOOL_DISPATCH, _TOOL_CONTEXT, set_context
-from agent_runtime import AgentRuntime, SubAgentResult
+from agent_runtime import AgentRuntime
 from conftest import make_mock_config, make_gates
 
 

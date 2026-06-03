@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from api import _compute_complexity, _ROUTE_SIMPLE_KEYWORDS
+from api import _compute_complexity, _ROUTE_SIMPLE_KEYWORDS, clear_api_cache
 
 
 class TestRouteSimpleKeywords(unittest.TestCase):
@@ -77,6 +77,12 @@ class TestRouteSimpleKeywords(unittest.TestCase):
 
 class TestComputeComplexity(unittest.TestCase):
     """Test _compute_complexity model routing decisions."""
+
+    def setUp(self) -> None:
+        # Clear module-level caches so id(messages) reuse doesn't cause
+        # stale cache hits across test methods (Python may reuse memory
+        # addresses after GC).
+        clear_api_cache()
 
     # --- short read prompt -> simple ---
 

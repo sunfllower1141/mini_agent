@@ -368,7 +368,7 @@ def _macos_clipboard(action: str, text: str = "") -> ToolResult:
                 success=False,
                 content=f"Unknown action: '{action}'. Use 'read' or 'write'.",
             )
-    except Exception as exc:
+    except Exception:
         return _clipboard_via_osascript(action, text)
 
 
@@ -667,7 +667,7 @@ def _macos_press_keys(combo: str) -> ToolResult:
 
         return ToolResult(success=True, content=f"Pressed: {combo}")
 
-    except Exception as exc:
+    except Exception:
         return _press_keys_via_osascript(combo)
 
 

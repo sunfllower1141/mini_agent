@@ -8,7 +8,6 @@ unit tests in isolation miss.
 """
 
 import os
-import sys
 import tempfile
 import unittest
 

@@ -30,8 +30,6 @@ import threading
 import time
 import traceback
 from collections import defaultdict
-from dataclasses import dataclass, field
-from typing import Optional
 
 
 def _ts() -> str:

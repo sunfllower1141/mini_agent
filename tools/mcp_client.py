@@ -15,10 +15,9 @@ import json
 import os
 import subprocess
 import threading
-import time
 
 from tools import ToolResult
-from tools._json_rpc_shared import drain_stderr, is_subprocess_connected
+from tools._json_rpc_shared import drain_stderr
 
 
 # ---------------------------------------------------------------------------

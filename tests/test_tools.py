@@ -7,7 +7,7 @@ import json
 import os
 import tempfile
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from conftest import make_tool_call as _make_tool_call, make_gates as _gates
 from safety import ReadSafetyGate, WriteSafetyGate

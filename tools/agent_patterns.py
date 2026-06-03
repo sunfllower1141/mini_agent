@@ -15,7 +15,6 @@ orchestrator can call to coordinate sub-agents:
 from __future__ import annotations
 
 import time
-import threading
 
 from agent_runtime import AgentRuntime, SubAgentResult
 from safety import ReadSafetyGate, WriteSafetyGate

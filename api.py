@@ -13,19 +13,19 @@ Both ``llm.py`` and ``sub_agent.py`` import from here — no cycle.
 
 from __future__ import annotations
 
-import json
 import re
-import sys
 import threading
 from collections.abc import Callable
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from tools import ToolResult
 
 import requests
 
 from config import AgentConfig
 from retry import _request_with_retry
 from stream import _parse_stream
-from tools.schema import TOOLS
 from tools.skills import get_active_tools
 from logging_setup import log_api_error
 

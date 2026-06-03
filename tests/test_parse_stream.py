@@ -3,7 +3,7 @@
 
 import json
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from stream import _parse_stream, THINKING_START, THINKING_END
 

@@ -3,14 +3,11 @@
 
 from __future__ import annotations
 
-import pytest
 from llm import (
     _tool_call_key,
     _check_circuit,
     _compress_stale_tool_results,
     _save_turn_summary,
-    _CIRCUIT_WINDOW,
-    _CIRCUIT_THRESHOLD,
 )
 
 

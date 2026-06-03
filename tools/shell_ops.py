@@ -117,7 +117,7 @@ def _get_python_cmd() -> list[str]:
 
 def _persist_test_output(output: str) -> None:
     """Save test run output to the memory DB for later inspection."""
-    from tools import _TOOL_CONTEXT, CTX_SCRATCHPAD_PATH
+    from tools import _TOOL_CONTEXT
     db_path = _TOOL_CONTEXT.scratchpad_path
     if not db_path:
         return
@@ -734,7 +734,8 @@ def _verify(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
     from tools import _TOOL_CONTEXT
     if getattr(_TOOL_CONTEXT, '_agent_depth', 0) > 0:
         return ToolResult(success=False, content="verify is restricted to the orchestrator. Sub-agents must not run tests.")
-    import subprocess, os as _os
+    import subprocess
+    import os as _os
     root = rg.workspace_root
 
     results: list[str] = []

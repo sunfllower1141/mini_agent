@@ -17,7 +17,6 @@ from __future__ import annotations
 import http.server
 import os
 import socketserver
-import tempfile
 import threading
 from pathlib import Path
 from unittest import mock
@@ -25,7 +24,6 @@ from unittest import mock
 import pytest
 
 import tools.browser_ops as bo
-from tools import ToolResult
 
 
 # ---------------------------------------------------------------------------

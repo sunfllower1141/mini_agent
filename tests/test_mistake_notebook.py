@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Tests for MistakeNotebook, build_experience_context, and build_experience_context_batch."""
 
-import json
 import os
 import tempfile
 import pytest

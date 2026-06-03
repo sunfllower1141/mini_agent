@@ -7,7 +7,6 @@ Uses pytest-style plain functions for brevity.
 
 import json
 
-import pytest
 import requests
 from unittest.mock import MagicMock
 

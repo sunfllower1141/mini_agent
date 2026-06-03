@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import threading
-import time
 import pytest
 
 from agent_runtime import SubAgentResult, AgentRuntime

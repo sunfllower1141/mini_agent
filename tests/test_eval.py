@@ -24,7 +24,6 @@ from eval.runner import (
     parse_task_from_yaml,
     load_tasks,
     run_task,
-    run_suite,
 )
 
 

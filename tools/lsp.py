@@ -19,7 +19,7 @@ import json
 import queue
 from pathlib import Path
 
-from tools import ToolResult, _register, _summarize, _TOOL_DISPATCH, _TOOL_SUMMARIES
+from tools import ToolResult, _register, _summarize
 from tools._json_rpc_shared import drain_stderr
 
 # ---------------------------------------------------------------------------

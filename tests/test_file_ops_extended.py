@@ -6,18 +6,16 @@ Tests: list_directory, diff, restore_file, plan/plan_status,
        task_status, find_usages, verify, recall_turn, write_scratchpad.
 """
 
-import json
 import os
 import subprocess
 import tempfile
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from conftest import make_tool_call as _make_tool_call, make_gates as _gates
 from tools import (
     ToolResult,
     execute_tool,
-    clear_tool_cache,
     _TOOL_CONTEXT,
     _TASK_REGISTRY,
     set_context,

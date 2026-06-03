@@ -28,13 +28,10 @@ Table: failure_patterns (added to memory.py schema)
 
 from __future__ import annotations
 
-import hashlib
 import json
-import re
 import sqlite3
 import threading
 import warnings
-from typing import Optional
 
 # Reuse _fingerprint_error from tools/__init__ when available;
 # define a fallback here for bootstrapping.
@@ -596,7 +593,6 @@ class SelfCritique:
         self, failures: list[tuple[str, object]], consecutive: int,
     ) -> str:
         """Build critique for escalating failure pattern across turns."""
-        from tools import ToolResult as TR
 
         names = [n for n, _ in failures]
         lines = [

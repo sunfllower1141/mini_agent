@@ -252,7 +252,6 @@ def _route_message(
 @_register("agent_message")
 def _agent_message(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
     """Broadcast a message visible to parent and sibling sub-agents."""
-    from tools import _TOOL_CONTEXT
 
     text = args.get("text", "")
     if not text:
@@ -376,7 +375,6 @@ def _agent_handoff(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> Too
         correlation_id: str    — optional correlation ID
         target: str | None     — if set, deliver only to this task_id
     """
-    from tools import _TOOL_CONTEXT
 
     msg_type = args.get("type", "handoff.result")
     if msg_type not in MSG_TYPE_REGISTRY:
@@ -482,7 +480,6 @@ def _agent_inbox(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolR
 
     Use 'since' to only get messages with index >= that value (for polling).
     """
-    from tools import _TOOL_CONTEXT
 
     task_id = args.get("task_id", "")
     if not task_id:
@@ -558,7 +555,6 @@ def _agent_subscribe(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> T
         task_id: str       — the agent to update
         types: list[str]   — message types to subscribe to (empty = all)
     """
-    from tools import _TOOL_CONTEXT
 
     task_id = args.get("task_id", "")
     if not task_id:

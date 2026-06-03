@@ -3,10 +3,7 @@
 
 from __future__ import annotations
 
-import platform
-import sys
 
-import pytest
 
 from tools.desktop_ops import (
     _detect_providers,

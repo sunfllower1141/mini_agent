@@ -7,6 +7,33 @@ Adding a new tool requires an entry here plus a @_register implementation.
 """
 from __future__ import annotations
 
+# ---------------------------------------------------------------------------
+# Tools available to sub-agent workers.
+#
+# When adding a new tool to TOOLS below, decide whether sub-agents should have
+# access to it.  Sub-agents get a reduced tool set (no desktop/browser/MacOS
+# automation, no MCP, no skills).  Add the tool name to this set if it should
+# be available to sub-agents.
+# ---------------------------------------------------------------------------
+SUB_AGENT_TOOLS: set[str] = {
+    # File & directory
+    "read_file", "write_file", "edit_file", "list_directory", "file_info",
+    "diff", "restore_file",
+    # Search & navigation
+    "search_files", "find_symbol", "find_usages", "semantic_search",
+    # Shell & testing
+    "run_shell", "run_tests", "verify", "git",
+    # Web
+    "web_search", "fetch_url",
+    # Agent coordination (blocked at max_depth by sub_agent.py runtime check)
+    "spawn_agent", "agent_status", "collect_agent", "collect_any",
+    "agent_extend", "agent_cancel", "agent_message", "agent_read",
+    "agent_inbox", "agent_handoff", "agent_subscribe",
+    # Scratchpad & planning
+    "write_scratchpad", "todo_write", "todo_read",
+    "plan", "plan_status",
+}
+
 TOOLS = [
     {
         "type": "function",
@@ -54,6 +81,10 @@ TOOLS = [
                     "detail": {
                         "type": "string",
                         "description": "The learning itself — what to remember, the pattern, workaround, or convention."
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "Optional: category hint (tool_usage, code_pattern, error_pattern, convention, architecture, workaround, dependency, general). Auto-detected if omitted."
                     }
                 },
                 "required": ["topic", "detail"]

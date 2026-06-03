@@ -188,7 +188,6 @@ def _spawn_agent(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolRes
     return its result directly (agent-as-tool pattern).
     """
     from tools import _TOOL_CONTEXT
-    from agent_runtime import AgentRuntime
 
     # --- batch spawn (tasks=list) ---
     tasks_list = args.get("tasks", None)
@@ -392,7 +391,6 @@ def _agent_status(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> Tool
     Returns 'running', 'completed' with a result summary, or 'not_found'.
     """
     from tools import _TOOL_CONTEXT
-    from agent_runtime import AgentRuntime
 
     task_id = args.get("task_id", "")
     if not task_id:
@@ -488,7 +486,6 @@ _COLLECT_TIMEOUT = 30  # seconds to wait for sub-agent completion (kept moderate
 def _collect_agent(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
     """Block until a sub-agent completes, then return its full result."""
     from tools import _TOOL_CONTEXT
-    from agent_runtime import AgentRuntime
 
     task_id = args.get("task_id", "")
     if not task_id:
@@ -577,7 +574,6 @@ def _collect_any(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolR
     Otherwise polls until one completes or timeout.
     """
     from tools import _TOOL_CONTEXT
-    from agent_runtime import AgentRuntime
 
     runtime: AgentRuntime | None = getattr(_TOOL_CONTEXT, "_agent_runtime", None)
     if runtime is None:
@@ -678,7 +674,6 @@ def _collect_any_summary(args: dict) -> str:
 def _agent_extend(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
     """Extend the turn budget of a running sub-agent."""
     from tools import _TOOL_CONTEXT
-    from agent_runtime import AgentRuntime
 
     task_id = args.get("task_id", "")
     if not task_id:
@@ -749,7 +744,6 @@ def _agent_extend_summary(args: dict) -> str:
 def _agent_cancel(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
     """Cancel a running sub-agent by setting its cancel event."""
     from tools import _TOOL_CONTEXT
-    from agent_runtime import AgentRuntime
 
     task_id = args.get("task_id", "")
     if not task_id:
@@ -1179,9 +1173,7 @@ def _wait_for_agent(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> To
     Sleeps with exponential backoff (1s→2s→4s…→30s) between polls
     to minimize LLM token burn.
     """
-    import time
     from tools import _TOOL_CONTEXT
-    from agent_runtime import AgentRuntime
 
     task_ids = args.get("task_ids", [])
     timeout = args.get("timeout", 120)

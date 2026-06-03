@@ -26,12 +26,9 @@ Table: tool_transitions (shared SQLite connection via MemoryStore)
 
 from __future__ import annotations
 
-import json
 import sqlite3
 import threading
 import warnings
-from collections import defaultdict
-from typing import Optional
 
 # ---------------------------------------------------------------------------
 # Named constants

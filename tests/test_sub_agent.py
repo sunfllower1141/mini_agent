@@ -15,7 +15,7 @@ import threading
 import time
 
 from agent_runtime import AgentRuntime, SubAgentResult
-from tools import execute_tool, _TOOL_DISPATCH, _TOOL_CONTEXT, set_context
+from tools import _TOOL_DISPATCH, _TOOL_CONTEXT
 from conftest import make_mock_config
 
 
@@ -955,7 +955,7 @@ class TestIdentityCleanup:
 
     def test_task_id_restored_after_spawn(self, configured_context):
         """After spawn_agent completes, _agent_task_id must be empty (not leak sub ID)."""
-        from tools import _TOOL_CONTEXT, execute_tool
+        from tools import _TOOL_CONTEXT
         from tools.agent_ops import _spawn_one
 
         parent_id_before = getattr(_TOOL_CONTEXT, "_agent_task_id", "")

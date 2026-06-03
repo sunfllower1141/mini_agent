@@ -6,7 +6,7 @@ Covers _FAILURE_PATTERNS, _fingerprint_error, and _learn_from_failure.
 from __future__ import annotations
 
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from tools import _TOOL_CONTEXT
 from tools.__init__ import (

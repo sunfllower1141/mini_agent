@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """test_agent_patterns.py — tests for multi-agent coordination pattern helpers."""
 
-import time
 import threading
 from unittest.mock import MagicMock, patch
 

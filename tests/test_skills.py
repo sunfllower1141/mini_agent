@@ -191,7 +191,6 @@ class TestGetActiveTools(unittest.TestCase):
     def test_returns_core_tool_schemas_only(self):
         with patch("tools.skills.get_active_tool_names",
                    return_value=["read_file", "write_file", "run_shell"]):
-            from tools.schema import TOOLS
             # Only the 3 tools named above should be in the result
             result = skills.get_active_tools()
             result_names = [td["function"]["name"] for td in result]

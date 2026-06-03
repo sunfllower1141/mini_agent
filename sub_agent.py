@@ -18,11 +18,10 @@ from __future__ import annotations
 import sys
 import threading
 import time
-import uuid
 
 from safety import ReadSafetyGate, WriteSafetyGate
-from agent_runtime import SubAgentResult, AgentRuntime
-from api import APIError, call_llm, truncate_content
+from agent_runtime import SubAgentResult
+from api import APIError, call_llm
 from logging_setup import get_logger
 
 _sub_log = get_logger("sub_agent")
@@ -78,8 +77,7 @@ def run_sub_agent(
     """
     current_depth = parent_depth + 1
     from tools import (
-        execute_tool, clear_tool_cache, tool_summary,
-        _TOOL_CACHE, _MODIFIED_FILES, _CACHEABLE, _TOOL_CONTEXT,
+        execute_tool, _CACHEABLE, _TOOL_CONTEXT,
     )
 
     # ── Plan isolation (step 1): save parent plan, give sub-agent clean slate ──
@@ -92,7 +90,7 @@ def run_sub_agent(
 
     # Thread-local agent ID for file reservation enforcement
     from tools.file_ops import _current_agent_id as _agent_tl
-    _agent_tl.task_id = task_id
+    from tools.schema import TOOLS, SUB_AGENT_TOOLS
 
     # --- build messages for sub-agent ---
     # Sub-agents get a minimal system prompt: behavior rules + essential tools only.
@@ -100,20 +98,7 @@ def run_sub_agent(
     # only need read_file, write_file, edit_file, search_files, find_symbol,
     # find_usages, list_directory, run_shell, and sub-agent coordination tools.
     # This saves ~15K tokens per sub-agent context.
-    _SUB_TOOL_NAMES = {
-        "read_file", "write_file", "edit_file", "list_directory",
-        "search_files", "find_symbol", "find_usages", "run_shell",
-        "run_tests", "verify", "git", "file_info", "diff", "restore_file",
-        "web_search", "fetch_url", "semantic_search",
-        # Sub-agent coordination (if not at max depth)
-        "spawn_agent", "agent_status", "collect_agent", "collect_any",
-        "agent_extend", "agent_cancel", "agent_message", "agent_read",
-        "agent_inbox", "agent_handoff", "agent_subscribe",
-        # Scratchpad + plan tracking
-        "write_scratchpad", "todo_write", "todo_read",
-        "plan", "plan_status",
-    }
-    _sub_tools = [t for t in TOOLS if t["function"]["name"] in _SUB_TOOL_NAMES]
+    _sub_tools = [t for t in TOOLS if t["function"]["name"] in SUB_AGENT_TOOLS]
 
     messages: list[dict] = [
         {"role": "system", "content": _SUB_AGENT_SYSTEM_PROMPT},
@@ -731,7 +716,7 @@ def run_sub_agent(
     _restore_plan()
     return _write_report(_make_result(
         success=False,
-        content=f"Sub-agent hit safety cap ({_ABSOLUTE_SAFETY_CAP} turns).",
+        content=f"Sub-agent hit safety cap ({max_turns} turns).",
         error="Safety cap exhausted",
     ))
 

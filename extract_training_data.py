@@ -18,7 +18,7 @@ import json
 import os
 import sqlite3
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 
@@ -183,12 +183,12 @@ def print_stats(examples: list[ToolCallExample]) -> None:
             failure_count += 1
 
     print(f"\n{'='*60}")
-    print(f"Training Data Summary")
+    print("Training Data Summary")
     print(f"{'='*60}")
     print(f"Total examples:           {len(examples)}")
     print(f"Successful tool calls:    {success_count} ({success_count/len(examples)*100:.1f}%)")
     print(f"Failed tool calls:        {failure_count} ({failure_count/len(examples)*100:.1f}%)")
-    print(f"\nTool distribution:")
+    print("\nTool distribution:")
     for tool, count in sorted(tool_counts.items(), key=lambda x: -x[1]):
         bar = "█" * min(count, 40)
         print(f"  {tool:25s} {count:4d}  {bar}")

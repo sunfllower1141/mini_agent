@@ -6,7 +6,6 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
-import pytest
 
 from safety import DiffPreview, ReadSafetyGate, SafetyResult, WriteSafetyGate
 

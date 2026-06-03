@@ -21,7 +21,6 @@ from config import (
     HTTP_POOL_CONNECTIONS,
     HTTP_POOL_MAXSIZE,
     _is_remote_workspace,
-    _try_with_timeout,
 )
 from safety import ReadSafetyGate, WriteSafetyGate
 from memory import MemoryStore
@@ -197,24 +196,22 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     session.mount("https://", _requests.adapters.HTTPAdapter(
         pool_connections=HTTP_POOL_CONNECTIONS, pool_maxsize=HTTP_POOL_MAXSIZE))
 
-    # Ensure the session is closed on normal interpreter shutdown.
-    atexit.register(session.close)
-    if not remote:
-        atexit.register(_shutdown_lsp)
-
-    # P2 fix: auto-capture session summary on shutdown so learnings persist
-    # across sessions. Reads scratchpad + turn history to build a concise
-    # summary that gets injected at next startup.
-    def _capture_session_summary_on_exit() -> None:
+    # Combined exit handler — runs in correct order: summary capture → LSP
+    # shutdown → HTTP session close.  Wrapped in broad try/except so no
+    # single failure blocks the rest or prints tracebacks during interpreter
+    # teardown (when stderr may already be closed).
+    def _cleanup_on_exit() -> None:
+        # 1. Capture session summary (best-effort, must run before memory is
+        #    affected by LSP or session teardown).
         try:
-            import warnings
+            import warnings as _wrn
             from tools import _TOOL_CONTEXT
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
+            with _wrn.catch_warnings():
+                _wrn.simplefilter("ignore")
                 scratchpad = memory.get_scratchpad()
             turn_keys = sorted(getattr(_TOOL_CONTEXT, "_turn_history", {}).keys())
             recent_turns = []
-            for k in turn_keys[-5:]:  # Last 5 turns
+            for k in turn_keys[-5:]:
                 recent_turns.append(_TOOL_CONTEXT._turn_history.get(k, ""))
             turn_text = "\n".join(recent_turns)
             summary = scratchpad[:300] if scratchpad else turn_text[:300]
@@ -222,9 +219,22 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
             if summary.strip():
                 memory.capture_session_summary(summary[:200], detail[:1000])
         except Exception:
-            pass  # Session summary is best-effort, never blocks shutdown
+            pass
 
-    atexit.register(_capture_session_summary_on_exit)
+        # 2. Shutdown LSP connections (skip on remote workspaces).
+        if not remote:
+            try:
+                _shutdown_lsp()
+            except Exception:
+                pass
+
+        # 3. Close HTTP session.
+        try:
+            session.close()
+        except Exception:
+            pass
+
+    atexit.register(_cleanup_on_exit)
 
     return {
         "config": config,

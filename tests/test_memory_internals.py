@@ -26,7 +26,6 @@ from memory import (
     _estimate_tokens,
     _total_tokens,
     _ACCUM_STATE,
-    _ACCUM_LOCK,
     _MARKDOWN_TOOL_RESULT_PREVIEW,
 )
 

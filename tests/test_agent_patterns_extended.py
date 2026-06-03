@@ -4,8 +4,7 @@
 from __future__ import annotations
 
 import unittest
-import pytest
-from unittest.mock import patch, MagicMock, PropertyMock
+from unittest.mock import patch, MagicMock
 
 from agent_runtime import AgentRuntime, SubAgentResult
 

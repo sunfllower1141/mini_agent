@@ -31,7 +31,6 @@ import os
 import subprocess
 import sys
 import threading
-import time
 
 # Ensure the parent mini_agent package is importable.
 # main.js spawns us with cwd = mini_agent root, so cwd is the right path.
@@ -560,7 +559,6 @@ class AgentRunner:
         if cmd == "/init":
             from tools.file_ops import _init_rules
             rg = ReadSafetyGate(self.config.workspace)
-            from tools import ToolResult
             result = _init_rules({}, None, rg)
             lines = str(result.content).split("\n") if result.content else []
             send_msg({"type": "response", "lines": lines})

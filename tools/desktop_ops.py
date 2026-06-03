@@ -25,8 +25,6 @@ Tools:
 
 from __future__ import annotations
 
-import json
-import os
 import platform
 import subprocess
 import time
@@ -519,14 +517,14 @@ def _macos_atomacos_type(text: str) -> ToolResult:
 
         # Use typewrite for text input
         keyboard.typewrite(text)
-        return ToolResult(success=True, content=f"Typed text into focused element.")
+        return ToolResult(success=True, content="Typed text into focused element.")
 
     except ImportError:
         return ToolResult(
             success=False,
             content="atomacos is not installed. Run: pip install atomacos",
         )
-    except Exception as exc:
+    except Exception:
         # Fall back to CGEvent
         return _macos_cgevent_type(text)
 
@@ -565,7 +563,7 @@ def _macos_osascript_type(text: str) -> ToolResult:
             ["osascript", "-e", f'tell application "System Events" to keystroke "{escaped}"'],
             capture_output=True, text=True, timeout=5,
         )
-        return ToolResult(success=True, content=f"Typed text via System Events.")
+        return ToolResult(success=True, content="Typed text via System Events.")
     except Exception as exc:
         return ToolResult(success=False, content=f"osascript keystroke failed: {exc}")
 
@@ -698,11 +696,11 @@ def _win_uia_type(text: str) -> ToolResult:
         value_pattern = focused.GetValuePattern()
         if value_pattern:
             value_pattern.SetValue(text)
-            return ToolResult(success=True, content=f"Typed text into focused element.")
+            return ToolResult(success=True, content="Typed text into focused element.")
 
         # Fallback: SendKeys
         focused.SendKeys(text)
-        return ToolResult(success=True, content=f"Typed text via SendKeys.")
+        return ToolResult(success=True, content="Typed text via SendKeys.")
 
     except ImportError:
         return ToolResult(

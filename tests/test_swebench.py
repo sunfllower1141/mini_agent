@@ -12,7 +12,6 @@ import sys
 import tempfile
 from unittest.mock import patch, MagicMock
 
-import pytest
 
 # Ensure eval is importable
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -337,7 +336,6 @@ class TestSWEBenchRunnerIntegration:
         self, mock_tokens, mock_run_agent, mock_init_session, mock_get_repo
     ):
         """Run a SWE-bench task with all heavy dependencies mocked."""
-        import subprocess
         from eval.swebench_runner import run_swebench_task
 
         # Setup mocks

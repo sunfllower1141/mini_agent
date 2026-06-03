@@ -24,9 +24,6 @@ import sys
 import tempfile
 import time
 import tracemalloc
-import unittest
-from collections import Counter
-from pathlib import Path
 
 import pytest
 
@@ -682,7 +679,6 @@ class TestBenchmarkSemanticSearch:
     def test_preload_starts_background_thread(self):
         """_sem_preload() should return immediately, not block for ~9s."""
         import tools.search_ops as so
-        import threading
         import time as _time
 
         # Force clean state (safe: waits for any running loader thread)
@@ -730,7 +726,6 @@ class TestBenchmarkSemanticSearch:
     def test_get_model_waits_for_preload(self):
         """If preload is in progress, _sem_get_model() waits for it."""
         import tools.search_ops as so
-        import threading
         import time as _time
 
         # Force clean state (safe: waits for any running loader thread)
@@ -754,7 +749,6 @@ class TestBenchmarkSemanticSearch:
     def test_encode_throughput(self):
         """Measure embedding encode throughput for realistic chunk sizes."""
         from tools.search_ops import _sem_get_model
-        import numpy as np
 
         model = _sem_get_model()
         # Realistic code snippets
@@ -777,7 +771,6 @@ class TestBenchmarkSemanticSearch:
     @pytest.mark.semantic
     def test_index_and_search(self):
         """Measure end-to-end: index files + search query."""
-        import tempfile
         import os as _os
         from tools.search_ops import _sem_index, _semantic_search
         from tools import search_ops as so

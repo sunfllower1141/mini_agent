@@ -15,8 +15,7 @@ import time
 
 from safety import ReadSafetyGate, WriteSafetyGate
 from tools import clear_tool_cache
-from tools import _register, _summarize, ToolResult, _TOOL_CONTEXT, CTX_SCRATCHPAD_PATH, CTX_SCRATCHPAD_UPDATED, CTX_PLAN_STEPS, CTX_PLAN_DONE
-from tools import _FILE_RESERVATIONS
+from tools import _register, _summarize, ToolResult, _TOOL_CONTEXT
 
 # Thread-local: current sub-agent task_id (set by agent_ops before tool execution)
 import threading
@@ -989,7 +988,8 @@ def _init_rules(args: dict, _wg, read_gate: ReadSafetyGate) -> ToolResult:
     """Analyze the workspace and auto-generate .mini_agent.rules + .mini_agent.toml
     and seed project_knowledge with auto-detected learnings."""
     try:
-        import fnmatch, glob, subprocess, time
+        import subprocess
+        import time
         workspace = read_gate.workspace_root
         rules_path = os.path.join(workspace, ".mini_agent.rules")
         toml_path = os.path.join(workspace, ".mini_agent.toml")

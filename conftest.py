@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import os
-import threading
 import pytest
 
 
@@ -154,7 +153,7 @@ def make_mock_config(**overrides) -> object:
 def _mock_log_api_error():
     """Prevent tests from writing MagicMock strings into the real api_error.log."""
     from unittest.mock import patch
-    with patch("logging_setup.log_api_error") as mock:
+    with patch("api.log_api_error") as mock:
         yield mock
 
 

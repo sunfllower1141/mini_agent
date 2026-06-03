@@ -6,7 +6,7 @@ import os
 import unittest
 
 from memory import _clean_messages
-from tools import execute_tool, _repair_json, ToolResult
+from tools import execute_tool, _repair_json
 from safety import ReadSafetyGate, WriteSafetyGate
 from llm import _tool_call_key, _check_circuit
 

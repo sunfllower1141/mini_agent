@@ -132,7 +132,8 @@ def build_system_prompt(config: "AgentConfig") -> str:
             else:
                 git_info.append("(working tree clean)")
             prompt += "\n\nREPOSITORY STATUS (git):\n" + "\n".join(git_info) + "\n"
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
+        # git not installed or repo not initialized — skip status block
         pass
 
     return prompt
@@ -156,7 +157,7 @@ _STATIC_PROMPT = (
     "\n"
     "TOOLS & SKILLS:\n"
     "- Start with ~11 core tools. Use **use_skill(\"name\")** to unlock more:\n"
-    "    agents, git, test, lsp, web, planning, search, image, tasks, bootstrap\n"
+    "    agents, git, test, lsp, web, planning, search, image, tasks, bootstrap, desktop\n"
     "- Each skill adds 2-15 tools. The API `tools` parameter only includes\n"
     "  core + activated skill schemas (not all 63 tools).\n"
     "\n"

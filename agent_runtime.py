@@ -51,7 +51,8 @@ class SubAgentResult:
         findings = []
         content = self.content or ""
         # Try JSON first
-        import json as _json, re as _re
+        import json as _json
+        import re as _re
         try:
             # Look for JSON block
             json_match = _re.search(r'\{[^{}]*"findings"[^{}]*\}', content, _re.DOTALL)

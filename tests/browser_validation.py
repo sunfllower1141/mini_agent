@@ -80,7 +80,6 @@ def main():
 
     # 1. open_url (mock — don't open real browser)
     print("─── open_url ───")
-    import webbrowser
     from unittest.mock import patch
     with patch("webbrowser.open", return_value=True):
         all_pass &= test("Opens valid URL",

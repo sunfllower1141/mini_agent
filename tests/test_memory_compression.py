@@ -14,7 +14,6 @@ from memory import (
     _is_match_line,
     _find_tool_call_name,
     _find_tool_call_args,
-    _COMPRESSION_MAX_LINES,
     _COMPRESSION_MAX_FIRST_LINE,
 )
 
