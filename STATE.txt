@@ -1,5 +1,5 @@
 # mini_agent Architecture State
-# Last updated: 2026-06-03
+# Last updated: 2026-06-03 (post-audit)
 #
 # This file is the agent's map of the codebase. Update it after every
 # completed change. The agent reads this at session start for context.
@@ -84,8 +84,17 @@
    spirals (context_inject.py, 6-call window, 3-repeat threshold).
 5. **Memory is SQLite**: memory.py uses SQLite for persistence with separate session DBs.
    learnings are tagged and searchable.
+6. **Injection flags reset in bootstrap.init_session()**: Context injection flags
+   (_scratchpad_injected, _git_diff_injected, _handoff_injected, _state_txt_injected)
+   are reset once per session in bootstrap.init_session(), NOT per turn in
+   run_agent_turn(). This gives injectors one chance per session, by design.
+7. **build_startup_context lives in prompt.py**: The startup context builder is defined
+  in prompt.py and imported directly, not re-exported through config.py.
 
 ## Known Issues
 - `_json_rpc_shared.py` — abandoned file, should adopt or remove
 - `tools/__init__.py` — still too large (761 lines), could split further
 - No semantic search across past sessions (current recall is session-only)
+- Circular import bootstrap ↔ config at module level (init_session is imported via
+  config at the bottom of config.py; safe in practice since it only executes at
+  import-finalization time, but brittle)

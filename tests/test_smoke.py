@@ -74,7 +74,7 @@ class TestBuildStartupContext(unittest.TestCase):
 
     def test_startup_context_builds(self):
         """build_startup_context should return a non-empty string."""
-        from config import build_startup_context
+        from prompt import build_startup_context
 
         ctx = build_startup_context(self.tmp)
         self.assertIsInstance(ctx, str)
@@ -82,7 +82,7 @@ class TestBuildStartupContext(unittest.TestCase):
 
     def test_startup_context_with_knowledge(self):
         """build_startup_context should accept and display project knowledge."""
-        from config import build_startup_context
+        from prompt import build_startup_context
 
         knowledge = [
             {"category": "pattern", "summary": "Test pattern", "detail": "Details here"},
@@ -94,7 +94,7 @@ class TestBuildStartupContext(unittest.TestCase):
 
     def test_startup_context_without_knowledge(self):
         """build_startup_context should work fine with knowledge=None."""
-        from config import build_startup_context
+        from prompt import build_startup_context
 
         ctx = build_startup_context(self.tmp, knowledge=None)
         self.assertIn("WORKSPACE CONTEXT", ctx)

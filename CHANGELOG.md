@@ -2,6 +2,33 @@
 
 Self-modification audit trail — what the agent changed and why.
 
+## 2026-06-03 (evening) — Code Audit: Injection, Import, and Data-Loss Fixes
+### Fixed
+- **Injection flag lifecycle**: 4 flags reset in `run_agent_turn()` (per user message)
+  moved to `bootstrap.init_session()` (per session). One-time injections now
+  properly run once per session, not once per message. (llm.py, bootstrap.py)
+- **Duplicate failure pattern warning**: removed redundant direct call in
+  `run_agent_turn()` phase 3; `_tool_execution_phase()` already handles it. (llm.py)
+- **Startup context role mismatch**: session.py used `"system"` role for startup
+  context; standardized on `"user"` to match bootstrap.py. (session.py)
+- **Data loss in stale tool result compression**: context_inject now saves
+  `_original_content` before shrinking tool results; memory_prune restores it
+  for accurate content-aware compression. (context_inject.py, memory_prune.py)
+### Changed
+- **Removed build_startup_context re-export from config.py**. Importers now
+  get it directly from prompt.py. (config.py, server.py, tests/test_smoke.py)
+- **Eliminated fake tool call hack in _inject_experience_context**. New
+  `build_experience_context_from_text()` in failure_learning.py accepts plain
+  text with proper keyword extraction and scoring. (context_inject.py,
+  tools/failure_learning.py)
+- **Updated run_agent_turn docstring**: accurately describes message-count-based
+  reminder injection. (llm.py)
+### Reason
+Code audit of startup/shutdown/prompt/injection architecture found 7 issues:
+2 critical (flag lifecycle, duplicate injection), 3 medium (role inconsistency,
+compression data loss, import spaghetti), 2 low (misleading docstring, fake
+tool call hack). All fixed; 71 tests pass.
+
 ## 2026-06-03 (afternoon) — STATE.txt Injection & Population
 ### Added
 - `_inject_state_context()` in context_inject.py — reads STATE.txt once per session

@@ -715,4 +715,3 @@ from session import (  # noqa: F401, E402
     switch_session,
     delete_session,
 )
-from prompt import build_startup_context  # noqa: F401, E402

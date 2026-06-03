@@ -71,7 +71,7 @@ def switch_session(
     startup_ctx = build_startup_context(workspace, knowledge=knowledge)
     messages: list[dict] = [
         {"role": "system", "content": build_system_prompt(current_config)},
-        {"role": "system", "content": startup_ctx},
+        {"role": "user", "content": startup_ctx},
     ]
     if saved:
         messages.extend(saved)

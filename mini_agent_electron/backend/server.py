@@ -44,13 +44,12 @@ if _parent not in sys.path:
 
 from config import (
     resolve_workspace, init_session, parse_args,
-    build_startup_context,
     _is_remote_workspace, _try_with_timeout,
 )
 from llm import run_agent_turn
 from stream import THINKING_START, THINKING_END
 from safety import ReadSafetyGate, WriteSafetyGate
-from prompt import build_system_prompt
+from prompt import build_system_prompt, build_startup_context
 from api import clear_api_cache
 from emoji_svg import clean_text
 

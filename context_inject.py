@@ -488,6 +488,10 @@ def _compress_stale_tool_results(messages: list[dict]) -> None:
         first_line = lines[0]
         total_lines = len(lines)
         total_chars = len(content)
+        # Preserve original content so memory.save() can apply
+        # its own content-aware compression (better than first-line-only).
+        if "_original_content" not in m:
+            m["_original_content"] = content
         m["content"] = (
             f"{first_line}\n… (compressed: {total_lines} lines, {total_chars} chars)"
         )
@@ -729,9 +733,9 @@ def _inject_experience_context(
     if memory_store is None:
         return
     try:
-        from tools.failure_learning import build_experience_context
+        from tools.failure_learning import build_experience_context_from_text
 
-        # Extract context from the last user message or recent tool outputs
+        # Extract context from the last user message
         search_context = ""
         for msg in reversed(messages):
             if msg.get("role") == "user" and not msg.get("_transient"):
@@ -741,13 +745,9 @@ def _inject_experience_context(
         if not search_context:
             return
 
-        # Build experience context using a synthetic "tool call" to trigger
-        # keyword-based retrieval
-        ctx_msg = build_experience_context(
+        ctx_msg = build_experience_context_from_text(
             memory_store,
-            tool_name="",  # Empty = search all
-            args={"command": search_context},
-            limit=2,
+            text=search_context,
         )
         if ctx_msg:
             messages.append({

@@ -107,7 +107,6 @@ _READ_ONLY_NUDGE_THRESHOLD: int = 3  # turns of pure reads before nudge
 
 from context_inject import (  # noqa: E402
     _inject_context,
-    _inject_failure_pattern_warnings,
     _inject_pre_execution_context,
     _record_tool_sequence_to_graph,
     _check_circuit,
@@ -633,14 +632,13 @@ def run_agent_turn(
     If *session* is a requests.Session, it is reused across API calls for
     connection reuse. If None, the requests module is used (test-friendly).
 
-    Every 5 tool-using turns, a system reminder is injected to keep the agent
-    on track and let it decide whether to continue or wrap up.
+    System reminders are injected at message-count-based intervals to keep the
+    agent on track and let it decide whether to continue or wrap up.
     """
-    # Reset one-time injection flags on AgentContext (no module-level globals)
-    _TOOL_CONTEXT._scratchpad_injected = False
-    _TOOL_CONTEXT._git_diff_injected = False
-    _TOOL_CONTEXT._handoff_injected = False
-    _TOOL_CONTEXT._state_txt_injected = False
+    # One-time injection flags are reset in bootstrap.init_session() once per
+    # session, NOT here — resetting them per turn would cause HANDOFF.md,
+    # STATE.txt, scratchpad, and git diff to be re-injected on every user
+    # message, wasting thousands of tokens.
 
     # Store provider on context for subsystem access (system reminder interval, etc.)
     _TOOL_CONTEXT._provider = config.api_provider
@@ -718,10 +716,9 @@ def run_agent_turn(
                 return msg
 
             # ----- phase 3: tool execution -----
-            # P4 fix: inject failure pattern warnings for the NEW tool calls
-            # right before execution (was only pre-API-call before, missing
-            # the current turn's tool choices).
-            _inject_failure_pattern_warnings(msg, messages)
+            # Failure pattern warnings are injected inside
+            # _tool_execution_phase → _inject_pre_execution_context()
+            # (not here — avoids double injection).
             continue_loop = _tool_execution_phase(
                 msg, messages, deferred_stream_results, executed_tool_indices,
                 write_gate, read_gate, turn_count,

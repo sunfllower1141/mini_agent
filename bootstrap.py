@@ -205,6 +205,15 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     if saved:
         messages.extend(saved)
 
+    # Reset one-time injection flags for this session (per-session, not per-turn).
+    # These gates prevent HANDOFF.md, STATE.txt, scratchpad, and git diff from
+    # being re-injected on every user message when run_agent_turn() is called
+    # multiple times in the same session.
+    _TOOL_CONTEXT._scratchpad_injected = False
+    _TOOL_CONTEXT._git_diff_injected = False
+    _TOOL_CONTEXT._handoff_injected = False
+    _TOOL_CONTEXT._state_txt_injected = False
+
     session = _requests.Session()
     # Set default timeout (connect, read) for every request.
     session.request = functools.partial(session.request, timeout=(HTTP_CONNECT_TIMEOUT, HTTP_READ_TIMEOUT))

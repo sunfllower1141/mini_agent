@@ -1220,6 +1220,82 @@ def build_experience_context(
         return None
 
 
+def build_experience_context_from_text(
+    memory_store,
+    text: str,
+    *,
+    limit: int = _MAX_KNOWLEDGE_INJECT_PER_TURN,
+) -> str | None:
+    """Build context with relevant past experiences from a plain text query.
+
+    Unlike build_experience_context(), this takes arbitrary text (e.g., the
+    user's last message) instead of requiring a tool_name + args dict.
+    Extracts keywords from the text and scores project_knowledge entries
+    by overlap.
+    """
+    if memory_store is None or not text:
+        return None
+
+    try:
+        # Tokenize text into search terms (words 3+ chars, skip common words)
+        import re as _re
+        STOP = {
+            "the", "and", "for", "that", "this", "with", "from", "have",
+            "what", "when", "where", "which", "does", "will", "would",
+            "should", "could", "about", "your", "just", "like", "been",
+        }
+        words = _re.findall(r"[a-zA-Z_][a-zA-Z0-9_]{2}", text.lower())
+        search_terms = [w for w in words if w not in STOP][:10]
+
+        if not search_terms:
+            return None
+
+        # Query project_knowledge with relevance ranking
+        all_knowledge = memory_store.list_knowledge(
+            importance_min=_MIN_KNOWLEDGE_IMPORTANCE_DYNAMIC,
+        )
+        if not all_knowledge:
+            return None
+
+        # Score each knowledge entry by term overlap
+        scored = []
+        for entry in all_knowledge:
+            topic = (entry.get("summary") or entry.get("topic", "")).lower()
+            detail = (entry.get("detail", "")).lower()
+            category = (entry.get("category", "")).lower()
+            combined = f"{topic} {detail} {category}"
+
+            score = 0
+            for term in search_terms:
+                if term in topic:
+                    score += 3
+                elif term in detail:
+                    score += 2
+                elif term in category:
+                    score += 1
+
+            if score > 0:
+                scored.append((score, entry))
+
+        if not scored:
+            return None
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        top = scored[:limit]
+
+        parts = ["RELEVANT PAST EXPERIENCES:"]
+        for score, entry in top:
+            topic = entry.get("summary") or entry.get("topic", "?")
+            detail = entry.get("detail", "")[:200]
+            cat = entry.get("category", "general")
+            parts.append(f"  [{cat}] {topic}: {detail}")
+
+        return "\n".join(parts)
+
+    except Exception:
+        return None
+
+
 def build_experience_context_batch(
     memory_store,
     pending_tool_calls: list[dict],

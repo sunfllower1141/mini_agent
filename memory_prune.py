@@ -262,6 +262,10 @@ def _compress_tool_results(
             break
         if m.get("role") != "tool":
             continue
+        # Restore original content if it was compressed in-place by
+        # context_inject._compress_stale_tool_results during the turn loop.
+        if "_original_content" in m:
+            m["content"] = m.pop("_original_content")
         text = _get_tool_content(m)
         if not text:
             continue
