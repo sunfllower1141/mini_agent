@@ -112,6 +112,34 @@ def _inject_handoff_context(
     })
 
 
+def _inject_state_context(
+    messages: list[dict], *, workspace_root: str = "",
+) -> None:
+    """Inject STATE.txt content at session start (one-time per session)."""
+    if _TOOL_CONTEXT._state_txt_injected or not workspace_root:
+        return
+    _TOOL_CONTEXT._state_txt_injected = True
+    state_path = os.path.join(workspace_root, "STATE.txt")
+    if not os.path.isfile(state_path):
+        return
+    try:
+        with open(state_path, encoding="utf-8", errors="replace") as f:
+            content = f.read().strip()
+    except OSError:
+        return
+    if not content:
+        return
+    messages.append({
+        "role": "user",
+        "content": (
+            "Architecture state from your last session "
+            "(you maintain this as your map of the codebase):\n\n"
+            + content
+        ),
+        "_transient": True,
+    })
+
+
 def _inject_scratchpad_context(
     messages: list[dict], *, memory_store: Any = None,
 ) -> None:
@@ -836,6 +864,10 @@ def _inject_context(
     """
     # One-time injections (first turn only)
     _inject_handoff_context(
+        messages,
+        workspace_root=read_gate.workspace_root if read_gate else "",
+    )
+    _inject_state_context(
         messages,
         workspace_root=read_gate.workspace_root if read_gate else "",
     )

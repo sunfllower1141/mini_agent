@@ -640,6 +640,7 @@ def run_agent_turn(
     _TOOL_CONTEXT._scratchpad_injected = False
     _TOOL_CONTEXT._git_diff_injected = False
     _TOOL_CONTEXT._handoff_injected = False
+    _TOOL_CONTEXT._state_txt_injected = False
 
     # Store provider on context for subsystem access (system reminder interval, etc.)
     _TOOL_CONTEXT._provider = config.api_provider

@@ -138,6 +138,7 @@ class AgentContext:
         self._scratchpad_injected: bool = False  # one-time scratchpad context injected this session
         self._git_diff_injected: bool = False    # one-time git diff context injected this session
         self._handoff_injected: bool = False     # one-time handoff context injected this session
+        self._state_txt_injected: bool = False   # one-time STATE.txt context injected this session
         self._consecutive_read_only_turns: int = 0  # turns of pure reads (reset on write/shell)
 
 

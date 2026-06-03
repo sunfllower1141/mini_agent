@@ -315,6 +315,79 @@ class TestHandoffContextInjection(unittest.TestCase):
         )
 
 
+class TestStateContextInjection(unittest.TestCase):
+    """context_inject._inject_state_context injects STATE.txt at session start."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        # Create a dummy STATE.txt
+        self.state_path = os.path.join(self.tmpdir, "STATE.txt")
+        with open(self.state_path, "w", encoding="utf-8") as f:
+            f.write("# Architecture State\n- Module: foo\n- Issue: bar")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_injects_when_flag_false(self):
+        """Should inject state content into messages on first call."""
+        _TOOL_CONTEXT._state_txt_injected = False
+        messages: list[dict] = []
+        context_inject._inject_state_context(
+            messages, workspace_root=self.tmpdir,
+        )
+        self.assertEqual(len(messages), 1)
+        msg = messages[0]
+        self.assertIn("Architecture state from your last session", msg["content"])
+        self.assertIn("Module: foo", msg["content"])
+        self.assertTrue(msg["_transient"])
+
+    def test_sets_flag_after_injection(self):
+        """Should set _state_txt_injected = True after injection."""
+        _TOOL_CONTEXT._state_txt_injected = False
+        messages: list[dict] = []
+        context_inject._inject_state_context(
+            messages, workspace_root=self.tmpdir,
+        )
+        self.assertTrue(_TOOL_CONTEXT._state_txt_injected)
+
+    def test_skips_when_flag_true(self):
+        """Should not inject if already injected this session."""
+        _TOOL_CONTEXT._state_txt_injected = True
+        messages: list[dict] = []
+        context_inject._inject_state_context(
+            messages, workspace_root=self.tmpdir,
+        )
+        self.assertEqual(len(messages), 0)
+
+    def test_skips_when_no_workspace(self):
+        """Should not inject if workspace_root is empty."""
+        _TOOL_CONTEXT._state_txt_injected = False
+        messages: list[dict] = []
+        context_inject._inject_state_context(
+            messages, workspace_root="",
+        )
+        self.assertEqual(len(messages), 0)
+
+    def test_skips_when_file_missing(self):
+        """Should not inject if STATE.txt doesn't exist."""
+        _TOOL_CONTEXT._state_txt_injected = False
+        messages: list[dict] = []
+        empty_dir = os.path.join(self.tmpdir, "empty")
+        os.makedirs(empty_dir, exist_ok=True)
+        context_inject._inject_state_context(
+            messages, workspace_root=empty_dir,
+        )
+        self.assertEqual(len(messages), 0)
+
+    def test_state_txt_flag_initialized(self):
+        """_state_txt_injected must be initialized on AgentContext."""
+        self.assertTrue(
+            hasattr(_TOOL_CONTEXT, "_state_txt_injected"),
+            "_state_txt_injected should be defined on _TOOL_CONTEXT",
+        )
+
+
 class TestReadmeHasSelfModSection(unittest.TestCase):
     """README.md must include the Agent Self-Modification section."""
 
