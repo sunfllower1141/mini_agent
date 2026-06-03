@@ -139,6 +139,7 @@ class AgentContext:
         self._git_diff_injected: bool = False    # one-time git diff context injected this session
         self._handoff_injected: bool = False     # one-time handoff context injected this session
         self._state_txt_injected: bool = False   # one-time STATE.txt context injected this session
+        self._session_start_head: str | None = None  # git HEAD hash at session start (for auto-handoff)
         self._consecutive_read_only_turns: int = 0  # turns of pure reads (reset on write/shell)
 
 
@@ -379,6 +380,43 @@ def _remember_summary(args: dict) -> str:
 
 _TOOL_DISPATCH["remember"] = _remember
 _TOOL_SUMMARIES["remember"] = _remember_summary
+
+# write_session_handoff — auto-generates HANDOFF.md from session state
+def _write_session_handoff(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
+    """Auto-generate and write HANDOFF.md for session continuity."""
+    workspace = _TOOL_CONTEXT.workspace
+    if not workspace:
+        return ToolResult(False, "", "no workspace available")
+    start_head = getattr(_TOOL_CONTEXT, "_session_start_head", None)
+    pending = (args.get("pending") or "").strip()
+    notes = (args.get("notes") or "").strip()
+
+    store = getattr(_TOOL_CONTEXT, "_memory_store", None)
+    if store is None:
+        # Fallback: use static method directly
+        from memory import MemoryStore
+        try:
+            path = MemoryStore.write_session_handoff(
+                workspace, start_head=start_head,
+                pending=pending, notes=notes,
+            )
+            return ToolResult(True, f"HANDOFF.md written to {path}")
+        except OSError as e:
+            return ToolResult(False, "", str(e))
+    try:
+        path = store.write_session_handoff(
+            workspace, start_head=start_head,
+            pending=pending, notes=notes,
+        )
+        return ToolResult(True, f"HANDOFF.md written to {path}")
+    except OSError as e:
+        return ToolResult(False, "", str(e))
+
+
+_TOOL_DISPATCH["write_session_handoff"] = _write_session_handoff
+_TOOL_SUMMARIES["write_session_handoff"] = (
+    lambda args: "write_session_handoff()"
+)
 
 # ── use_skill gate: lazy tool loading ──
 from tools.skills import USE_SKILL_SCHEMA, _use_skill  # noqa: E402

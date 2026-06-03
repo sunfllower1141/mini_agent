@@ -70,7 +70,7 @@
 - `HANDOFF.md` — session-to-session continuity
 - `CHANGELOG.md` — structured change audit trail
 
-## Architecture Decisions
+## Active Decisions
 
 1. **Context injection is one-time + per-turn**: HANDOFF.md, STATE.txt, scratchpad, and git diff
    are injected once per session. Orchestration status, interjections, and progress checks run

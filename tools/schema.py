@@ -94,6 +94,27 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "write_session_handoff",
+            "description": "Write HANDOFF.md for session continuity. Auto-generates a summary of what changed this session using git diff. Call this before signing off to ensure the next session has context about what you worked on.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pending": {
+                        "type": "string",
+                        "description": "Optional: what's still pending / incomplete from this session."
+                    },
+                    "notes": {
+                        "type": "string",
+                        "description": "Optional: any additional notes for the next session."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "find_symbol",
             "description": "Find where a Python symbol (function, class, method name) is defined in the workspace. Returns file path and line number for each match. Much faster than grep/search_files for symbol lookup. Use this to locate definitions before editing code.",
             "parameters": {

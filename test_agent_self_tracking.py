@@ -8,6 +8,7 @@ and self-review cycle support in memory.py and context_inject.py.
 from __future__ import annotations
 
 import os
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
@@ -426,6 +427,86 @@ class TestReadmeHasSelfModSection(unittest.TestCase):
         self.assertIn("Observe", content)
         self.assertIn("Diagnose", content)
         self.assertIn("Improve", content)
+
+
+class TestAutoHandoff(unittest.TestCase):
+    """write_session_handoff auto-generates HANDOFF.md from git diff."""
+
+    def test_write_session_handoff_static_method(self):
+        """MemoryStore.write_session_handoff should exist and be callable."""
+        from memory import MemoryStore
+        self.assertTrue(hasattr(MemoryStore, "write_session_handoff"))
+        self.assertTrue(callable(MemoryStore.write_session_handoff))
+
+    def test_write_session_handoff_writes_file(self):
+        """write_session_handoff should create HANDOFF.md in workspace."""
+        import tempfile
+        from memory import MemoryStore
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Init a git repo so the function can run git commands
+            subprocess.run(["git", "init", tmpdir], capture_output=True)
+            subprocess.run(["git", "-C", tmpdir, "commit", "--allow-empty",
+                          "-m", "init"], capture_output=True)
+            start_head = subprocess.check_output(
+                ["git", "-C", tmpdir, "rev-parse", "HEAD"], text=True,
+            ).strip()
+
+            path = MemoryStore.write_session_handoff(
+                tmpdir, start_head=start_head,
+                pending="Fix the flux capacitor",
+                notes="Don't forget the tests",
+            )
+            self.assertTrue(os.path.isfile(path))
+            with open(path, encoding="utf-8") as f:
+                content = f.read()
+            self.assertIn("## Last Session", content)
+            self.assertIn("### What I Changed", content)
+            self.assertIn("### What's Pending", content)
+            self.assertIn("Fix the flux capacitor", content)
+            self.assertIn("### Modified Files", content)
+            self.assertIn("### Notes", content)
+            self.assertIn("Don't forget the tests", content)
+
+    def test_write_session_handoff_no_git(self):
+        """write_session_handoff should not crash when git is unavailable."""
+        import tempfile
+        from memory import MemoryStore
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = MemoryStore.write_session_handoff(
+                tmpdir, start_head=None, pending="N/A",
+            )
+            self.assertTrue(os.path.isfile(path))
+            with open(path, encoding="utf-8") as f:
+                content = f.read()
+            self.assertIn("### What I Changed", content)
+            self.assertIn("(no git changes detected)", content)
+
+    def test_tool_dispatched(self):
+        """write_session_handoff must be registered in tool dispatch."""
+        from tools import _TOOL_DISPATCH
+        self.assertIn("write_session_handoff", _TOOL_DISPATCH)
+        self.assertTrue(callable(_TOOL_DISPATCH["write_session_handoff"]))
+
+    def test_tool_in_schema(self):
+        """write_session_handoff must be in TOOLS schema."""
+        from tools.schema import TOOLS
+        names = [t["function"]["name"]
+                for t in TOOLS if t.get("type") == "function"]
+        self.assertIn("write_session_handoff", names)
+
+    def test_prompt_mentions_handoff(self):
+        """System prompt must instruct the agent to call write_session_handoff."""
+        root = _project_root()
+        prompt_path = os.path.join(root, "prompt.py")
+        with open(prompt_path, encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn("write_session_handoff", content)
+        self.assertIn("Session handoff", content)
+
+    def test_session_start_head_initialized(self):
+        """_session_start_head must be initialized on AgentContext."""
+        from tools import _TOOL_CONTEXT
+        self.assertTrue(hasattr(_TOOL_CONTEXT, "_session_start_head"))
 
 
 if __name__ == "__main__":

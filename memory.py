@@ -584,6 +584,87 @@ class MemoryStore:
         except OSError:
             return None
 
+    @staticmethod
+    def write_session_handoff(
+        workspace: str,
+        start_head: str | None = None,
+        pending: str = "",
+        notes: str = "",
+    ) -> str:
+        """Auto-generate and write HANDOFF.md from session state.
+
+        Uses git diff since *start_head* (if provided) to determine what
+        changed.  Falls back to ``git diff --stat`` from last commit if
+        *start_head* is None.
+
+        Returns the path written, or raises OSError on failure.
+        """
+        import datetime
+        import subprocess as _sp
+
+        date_str = datetime.datetime.now(datetime.timezone.utc).strftime(
+            "%Y-%m-%d %H:%M UTC"
+        )
+
+        # --- What changed ---
+        changes_lines: list[str] = []
+        modified_files: list[str] = []
+
+        try:
+            if start_head:
+                # Diff since session start
+                r = _sp.run(
+                    ["git", "-C", workspace, "diff", "--stat", f"{start_head}.."],
+                    capture_output=True, text=True, timeout=10,
+                )
+                if r.returncode == 0 and r.stdout.strip():
+                    stat_out = r.stdout.strip()
+                    changes_lines.append(f"```\n{stat_out}\n```")
+                    # Parse modified files from stat output
+                    for line in stat_out.split("\n"):
+                        if "|" in line:
+                            fname = line.split("|")[0].strip()
+                            if fname:
+                                modified_files.append(fname)
+
+                # New commits since session start
+                r2 = _sp.run(
+                    ["git", "-C", workspace, "log", "--oneline", f"{start_head}.."],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if r2.returncode == 0 and r2.stdout.strip():
+                    changes_lines.insert(0, f"### Commits\n```\n{r2.stdout.strip()}\n```")
+            else:
+                # Fallback: diff from last commit
+                r = _sp.run(
+                    ["git", "-C", workspace, "diff", "--stat", "HEAD~1.."],
+                    capture_output=True, text=True, timeout=10,
+                )
+                if r.returncode == 0 and r.stdout.strip():
+                    changes_lines.append(f"```\n{r.stdout.strip()}\n```")
+        except (OSError, _sp.TimeoutExpired):
+            pass
+
+        changes_text = "\n".join(changes_lines) if changes_lines else "(no git changes detected)"
+        pending_text = pending or "(none recorded)"
+        files_text = "\n".join(f"- {f}" for f in modified_files) if modified_files else "(none tracked)"
+
+        handoff_path = os.path.join(workspace, "HANDOFF.md")
+        content = (
+            f"# Session Handoff\n"
+            f"# Auto-generated at session end. Read at next session start for continuity.\n\n"
+            f"## Last Session: {date_str}\n\n"
+            f"### What I Changed\n{changes_text}\n\n"
+            f"### What's Pending\n{pending_text}\n\n"
+            f"### Modified Files\n{files_text}\n"
+        )
+        if notes:
+            content += f"\n### Notes\n{notes}\n"
+
+        with open(handoff_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return handoff_path
+
     def capture_session_summary(
         self, summary: str, detail: str = "",
     ) -> None:

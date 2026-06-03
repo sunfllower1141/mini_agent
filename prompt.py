@@ -212,7 +212,11 @@ _STATIC_PROMPT = (
     "\n"
     "Code analysis: diff, verify, diagnose_failures, find_usages, restore_file.\n"
     "\n"
-    "Session: session_stats, recall_turn. External: read_image.\n"
+    "Session: session_stats, recall_turn, write_session_handoff. External: read_image.\n"
+    "\n"
+    "Session handoff (IMPORTANT): before signing off, call write_session_handoff()\n"
+    "so the next session has context about what you changed and what's pending.\n"
+    "It auto-generates from git diff \u2014 just pass pending='...' if you have open items.\n"
 )
 
 # ---------------------------------------------------------------------------

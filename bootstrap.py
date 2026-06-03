@@ -116,6 +116,19 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     except Exception:
         pass  # Best-effort, never blocks startup
 
+    # Capture git HEAD at session start for auto-handoff diff
+    from tools import _TOOL_CONTEXT
+    try:
+        import subprocess as _sp
+        r = _sp.run(
+            ["git", "-C", workspace, "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode == 0:
+            _TOOL_CONTEXT._session_start_head = r.stdout.strip()
+    except (OSError, _sp.TimeoutExpired):
+        _TOOL_CONTEXT._session_start_head = None
+
     # Reset skill gates — start each session with core tools only
     reset_skills()
 
@@ -204,7 +217,32 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     # single failure blocks the rest or prints tracebacks during interpreter
     # teardown (when stderr may already be closed).
     def _cleanup_on_exit() -> None:
-        # 1. Capture session summary (best-effort, must run before memory is
+        # 1. Auto-write HANDOFF.md for next-session continuity
+        try:
+            import warnings as _wrn
+            from tools import _TOOL_CONTEXT
+            with _wrn.catch_warnings():
+                _wrn.simplefilter("ignore")
+                scratchpad = memory.get_scratchpad()
+            start_head = getattr(_TOOL_CONTEXT, "_session_start_head", None)
+            # Derive pending items from scratchpad (look for "Pending" or "TODO" section)
+            pending = ""
+            if scratchpad:
+                import re as _re
+                m = _re.search(
+                    r"(?:##\s*Pending|##\s*TODO|##\s*What.s Pending)(.*?)(?:##|$)",
+                    scratchpad, _re.DOTALL | _re.IGNORECASE,
+                )
+                if m:
+                    pending = m.group(1).strip()[:500]
+            memory.write_session_handoff(
+                workspace, start_head=start_head,
+                pending=pending, notes="",
+            )
+        except Exception:
+            pass
+
+        # 2. Capture session summary (best-effort, must run before memory is
         #    affected by LSP or session teardown).
         try:
             import warnings as _wrn
