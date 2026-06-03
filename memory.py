@@ -529,6 +529,61 @@ class MemoryStore:
             warnings.warn("Failed to list project knowledge", stacklevel=2)
             return []
 
+    def write_handoff(
+        self, changes: str, pending: str = "", modified_files: str = "",
+    ) -> None:
+        """Write a HANDOFF.md file in the workspace root for session continuity.
+
+        This is complementary to the DB-backed session_summary.  HANDOFF.md
+        is a plain-text file the agent can read at next startup without
+        needing the database to be loaded first.
+
+        Args:
+            changes: what was changed this session (bullet list or paragraph)
+            pending: what's still in progress / upcoming
+            modified_files: list of files touched this session
+        """
+        import datetime
+        date_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        workspace = os.path.dirname(self._db_path)
+        # Walk up from db_path to find workspace root
+        candidate = os.path.dirname(self._filepath)
+        if os.path.isdir(candidate):
+            workspace = candidate
+        handoff_path = os.path.join(workspace, "HANDOFF.md")
+        content = (
+            f"# Session Handoff\n"
+            f"# Auto-generated at session end. Read at next session start for continuity.\n\n"
+            f"## Last Session: {date_str}\n\n"
+            f"### What I Changed\n{changes}\n\n"
+        )
+        if pending:
+            content += f"### What's Pending\n{pending}\n\n"
+        if modified_files:
+            content += f"### Modified Files\n{modified_files}\n"
+        try:
+            with open(handoff_path, "w", encoding="utf-8") as f:
+                f.write(content)
+        except OSError as e:
+            _mem_log.warning("Failed to write HANDOFF.md: %s", e)
+
+    def read_handoff(self) -> str | None:
+        """Read HANDOFF.md from the workspace root, returning its content.
+
+        Returns None if the file doesn't exist or can't be read.
+        """
+        workspace = os.path.dirname(self._filepath)
+        if not os.path.isdir(workspace):
+            workspace = os.path.dirname(self._db_path)
+        handoff_path = os.path.join(workspace, "HANDOFF.md")
+        if not os.path.isfile(handoff_path):
+            return None
+        try:
+            with open(handoff_path, encoding="utf-8", errors="replace") as f:
+                return f.read().strip()
+        except OSError:
+            return None
+
     def capture_session_summary(
         self, summary: str, detail: str = "",
     ) -> None:

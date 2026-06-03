@@ -5,6 +5,10 @@
 # project-specific conventions (code style, module map, testing rules).
 # The full AI behavioral instruction lives in prompt.py. These rules are
 # injected at the end of the system prompt as an appendix.
+#
+# SELF-MODIFICATION: This agent modifies its own codebase. After every
+# completed change, update STATE.txt. At session end, write HANDOFF.md.
+# Log significant changes in CHANGELOG.md with date and reason.
 
 ## Code Style
 - Use type hints on all public functions. Prefer dataclasses for structured data.
@@ -40,6 +44,8 @@
 #   lsp.py           — LSP client (pylsp integration)
 #   mcp_client.py    — MCP client (stdio JSON-RPC tool discovery)
 # STATE.txt          — architecture decisions, current state (consult before major changes)
+# HANDOFF.md         — session handoff (read at startup, write at session end)
+# CHANGELOG.md       — self-modification audit trail (update after significant changes)
 
 ## Testing
 - Test files live at root: `test_<module>.py`. Use unittest.TestCase.
@@ -74,3 +80,16 @@
 - Update STATE.txt after every completed change.
 - Every new feature needs at least one test.
 - If tests fail, stop and diagnose before making additional changes.
+
+## Self-Review Cycle
+After completing a significant change (new file, refactored module, or >50 lines edited):
+1. **Observe**: what did I just do? What files did I touch?
+2. **Diagnose**: did I encounter any new failure modes, edge cases, or patterns?
+3. **Improve**: should this be crystallized as a project rule, a knowledge entry, or a fix strategy?
+4. **Verify**: run relevant tests. If they fail, stop and diagnose before continuing.
+5. **Document**: update STATE.txt (architecture), HANDOFF.md (session), CHANGELOG.md (audit).
+
+At the end of every session, write a HANDOFF.md with:
+- What I changed (files and reasoning)
+- What's pending (unfinished work)
+- Modified files list (for git context on next startup)

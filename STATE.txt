@@ -1,0 +1,70 @@
+# mini_agent Architecture State
+# Last updated: 2026-06-03
+#
+# This file is the agent's map of the codebase. Update it after every
+# completed change. The agent reads this at session start for context.
+# Humans can read it to understand current architecture decisions.
+
+## Active Decisions
+- `tools/__init__.py` was split: ToolResult → `tools/result.py`, error hints → `tools/error_hints.py`
+- `_start_windows_tunnel()` moved from `config.py` → `bootstrap.py` (separates side-effects from config loading)
+- `call_deepseek` is an alias for `call_llm` (LLM dispatch already consolidated in `api.py`)
+- `_json_rpc_shared.py` exists in `tools/` but is dead code — unused by `lsp.py` or `mcp_client.py`
+- `memory.py` prune logic extracted to `memory_prune.py` (still re-exported from `memory.py` for backward compat)
+- `context_inject.py` handles all per-turn context injection (scratchpad, git diff, orchestration, circuit breaker, self-critique)
+- `failure_learning.py` has three subsystems: FailurePatternStore (SQLite), SelfCritique (mid-conversation), MistakeNotebook (batch clustering)
+
+## Module Map
+```
+prompt.py          — system prompt builder (_STATIC_PROMPT + dynamic header + rules injection)
+config.py          — AgentConfig loading (TOML + env + CLI); startup context builder
+llm.py             — run_agent_turn() orchestrator, tool piping, circuit breaker, turn summaries
+api.py             — LLM API calls (call_llm), message cache, provider dispatch
+memory.py          — SQLite conversation persistence, project_knowledge, failure_patterns tables
+memory_prune.py    — token-aware pruning, tool result compression, summarization (imported by memory.py)
+context_inject.py  — per-turn context injection: scratchpad, git diff, orchestration, interjections
+failure_learning.py — self-learning: failure fingerprints → pattern clustering → fix distillation
+safety.py          — workspace read/write gates (ReadSafetyGate, WriteSafetyGate, SafetyResult)
+agent_runtime.py   — sub-agent lifecycle, inboxes, file reservations, status snapshots
+sub_agent.py       — sub-agent engine, turn budget, pruning, Pro model selection
+interject.py       — thread-safe user interjection queue
+retry.py           — HTTP retry with jitter and backoff
+stream.py          — SSE stream parser
+bootstrap.py       — startup bootstrap (venv check, Windows tunnel, etc.)
+logging_setup.py   — log directory, get_logger(), log_tool_failure()
+plan.py            — task planning with steps and status tracking
+
+tools/
+  __init__.py      — dispatch, cache, ToolResult, JSON repair
+  result.py        — ToolResult dataclass
+  error_hints.py   — tool-level error detection and hints
+  schema.py        — TOOLS definitions sent to LLM
+  file_ops.py      — read/write/edit/list/info/scratchpad/diff/plan/verify/remember
+  shell_ops.py     — run_shell, run_tests, search_files, git, task_status
+  search_ops.py    — find_symbol, find_usages, web_search, recall_turn, session_stats
+  browser_ops.py   — browser_navigate/snapshot/click/type/screenshot
+  agent_ops.py     — spawn/status/collect/message/read/extend/handoff/inbox
+  agent_messages.py — typed message registry, validation, routing
+  agent_patterns.py — fan_out, fan_in, pipeline, barrier, scatter_gather
+  lsp.py           — LSP client (pylsp integration)
+  mcp_client.py    — MCP client (stdio JSON-RPC tool discovery)
+  desktop_ops.py   — macOS desktop automation (atomacos/mss)
+
+eval/
+  swebench_runner.py — SWE-bench prediction pipeline
+  agent.py         — SWE-bench agent wrapper
+  benchmarks.py    — local eval tasks (9 YAML-defined)
+```
+
+## Known Issues / TODO
+- `tools/_json_rpc_shared.py` is dead code — either adopt into `lsp.py`/`mcp_client.py` or remove
+- `tools/__init__.py` still ~1500 lines — further splitting possible (dispatch, JSON repair)
+- `memory.py` `save()` method is ~50 lines — consider splitting compression/pruning/SQL writes into helpers
+- No semantic search across past sessions — only `recall_turn` for current session
+- Sub-agent handoff results use legacy dict keys (text/from not type/payload) — intentional for backward compat
+
+## File Locations
+- Logs: `~/.mini_agent/logs/` (agent.log, api_error.log, error_traces.log)
+- Memory DB: `~/.mini_agent/memory/<workspace_hash>.db`
+- Config: `.env` for API keys, `.mini_agent.toml` for advanced settings
+- Rules: `.mini_agent.rules` (walked up directory tree, merged)

@@ -84,6 +84,34 @@ MODIFIED_FILES_CHECKPOINT_TURN = 2  # turn to show modified-files checkpoint
 # ---------------------------------------------------------------------------
 
 
+def _inject_handoff_context(
+    messages: list[dict], *, workspace_root: str = "",
+) -> None:
+    """Inject HANDOFF.md content at session start (one-time per session)."""
+    if _TOOL_CONTEXT._handoff_injected or not workspace_root:
+        return
+    _TOOL_CONTEXT._handoff_injected = True
+    handoff_path = os.path.join(workspace_root, "HANDOFF.md")
+    if not os.path.isfile(handoff_path):
+        return
+    try:
+        with open(handoff_path, encoding="utf-8", errors="replace") as f:
+            content = f.read().strip()
+    except OSError:
+        return
+    if not content:
+        return
+    messages.append({
+        "role": "user",
+        "content": (
+            "Session handoff from your previous session "
+            "(you wrote this at the end of last session):\n\n"
+            + content
+        ),
+        "_transient": True,
+    })
+
+
 def _inject_scratchpad_context(
     messages: list[dict], *, memory_store: Any = None,
 ) -> None:
@@ -807,6 +835,10 @@ def _inject_context(
     Delegates to smaller helpers for one-time and per-turn injections.
     """
     # One-time injections (first turn only)
+    _inject_handoff_context(
+        messages,
+        workspace_root=read_gate.workspace_root if read_gate else "",
+    )
     _inject_scratchpad_context(messages, memory_store=memory_store)
     _inject_git_diff(messages, memory_store=memory_store, read_gate=read_gate)
 

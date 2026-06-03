@@ -53,12 +53,9 @@ TURN_HISTORY_MAX_ENTRIES = 200        # cap on _turn_history entries
 # ---------------------------------------------------------------------------
 # Circuit breaker — guards against repeated identical tool calls
 # ---------------------------------------------------------------------------
-
-_CIRCUIT_WINDOW: int = 6       # lookback window size
-_CIRCUIT_THRESHOLD: int = 3    # trip after this many identical calls in the window
-
-# _tool_call_key / _check_circuit now imported from context_inject.py
-# (kept _CIRCUIT_* constants locally for run_agent_turn circuit tracking)
+# _CIRCUIT_WINDOW and _CIRCUIT_THRESHOLD defined in context_inject.py
+# (single source of truth, shared with the circuit breaker implementation).
+from context_inject import _CIRCUIT_WINDOW, _CIRCUIT_THRESHOLD
 
 
 # ---------------------------------------------------------------------------
@@ -642,6 +639,7 @@ def run_agent_turn(
     # Reset one-time injection flags on AgentContext (no module-level globals)
     _TOOL_CONTEXT._scratchpad_injected = False
     _TOOL_CONTEXT._git_diff_injected = False
+    _TOOL_CONTEXT._handoff_injected = False
 
     # Store provider on context for subsystem access (system reminder interval, etc.)
     _TOOL_CONTEXT._provider = config.api_provider

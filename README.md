@@ -118,6 +118,45 @@ npm start            # production mode
 | `Shift+Enter` | New line |
 | `Escape` | Cancel streaming response |
 
+## Agent Self-Modification
+
+mini_agent is designed to modify and improve its own codebase. If you're a **human collaborator** working alongside the agent, here's what you need to know:
+
+### The Agent's Memory System
+
+| File | Purpose | Updated |
+|------|---------|---------|
+| `STATE.txt` | Architecture map — current decisions, module map, known issues. The agent reads this at startup. | By agent after each change |
+| `HANDOFF.md` | Session handoff — what changed, what's pending. Picks up where it left off. | Auto-written at session end |
+| `CHANGELOG.md` | Self-mod audit trail — what changed and why, structured by date. | By agent after significant changes |
+| `.mini_agent.rules` | Rules and conventions the agent follows. Also serves as the CLAUDE.md equivalent. | By agent when patterns crystallize |
+| `project_knowledge` (SQLite) | Cross-session learnings with confidence scoring. Survives workspace resets. | By agent via `remember` tool |
+
+### Safety Boundaries
+
+- **Workspace gates**: reads/writes are sandboxed to the workspace directory (unless `--unrestricted`)
+- **Read-before-edit**: `edit_file` requires a recent `read_file` call
+- **Diff previews**: all file writes produce unified diffs for review
+- **Backup-before-write**: destructive operations create `.bak` files
+- **Circuit breaker**: repeated identical tool calls are detected and halted
+- **Self-critique**: failure patterns are detected mid-conversation and corrective guidance is injected
+
+### How the Agent Evolves
+
+1. **Observe**: failed tool calls are fingerprinted and stored in SQLite
+2. **Diagnose**: patterns are clustered across different arguments and tools
+3. **Improve**: fixes are distilled into reusable strategies (stored in `project_knowledge`)
+4. **Verify**: tests are run after every change; the agent stops if they fail
+5. **Document**: `STATE.txt`, `HANDOFF.md`, and `CHANGELOG.md` are updated to track what happened
+
+### Contributing Alongside the Agent
+
+- The agent reads `.mini_agent.rules` on every startup — update it if you want to change its behavior
+- The agent reads `STATE.txt` for architecture context — keep it current
+- The agent reads `HANDOFF.md` for session continuity — it's auto-generated but you can add notes
+- All modifications are tracked in `CHANGELOG.md` — review it to see what the agent has been doing
+- Run `python -m pytest` before and after letting the agent work — it won't proceed with broken tests
+
 ## Architecture
 
 ```
