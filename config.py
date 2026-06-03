@@ -238,8 +238,6 @@ class AgentConfig:
         _apply_cli_overrides(config, cli_args)
         # --workspace is resolved before we get here; store it
         config.workspace = workspace
-        # Phase 4: Windows SOCKS tunnel auto-start (no-op on other platforms)
-        _start_windows_tunnel(config)
 
         return config
 

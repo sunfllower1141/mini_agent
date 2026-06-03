@@ -82,6 +82,9 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     from tools.skills import reset_skills
 
     config = AgentConfig.load(workspace, cli_args=cli_args)
+    # Windows SOCKS tunnel auto-start (no-op on other platforms)
+    from config import _start_windows_tunnel
+    _start_windows_tunnel(config)
     write_gate = WriteSafetyGate(workspace, allow_overwrites=config.allow_overwrites,
                                  unrestricted=config.unrestricted)
     read_gate = ReadSafetyGate(workspace, unrestricted=config.unrestricted)
