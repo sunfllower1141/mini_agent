@@ -1052,54 +1052,21 @@ def _row_to_msg(row: tuple[str, str]) -> dict:
 def _clean_messages(messages: list[dict]) -> list[dict]:
     """Strip system messages, orphaned tool results, and incomplete tool-call sequences.
 
-    Two-pass validation:
-
-    1. **Backward pass** — remove ``tool`` messages whose ``tool_call_id``
-       has no *preceding* assistant message with a matching ``tool_calls``
-       entry.  This catches the "tool result before assistant" ordering bug
-       that causes API 400 errors.
-
-    2. **Forward pass** — truncate at any assistant message whose
-       ``tool_calls`` have no matching ``tool`` results *after* it.  This
-       catches incomplete / dangling tool-call sequences.
+    Uses the canonical ``_strip_orphaned_tool_messages`` from ``api.py``
+    with ``truncate=True`` for persistence: incomplete tool-call sequences
+    are truncated (everything from that point onward is dropped), rather
+    than just removing individual orphaned messages.
     """
-    # ---- backward pass: remove orphaned tool results ----
-    valid_ids: set[str] = set()  # tool_call_ids seen so far from assistants
-    pass1: list[dict] = []
-    for m in messages:
-        if m.get("role") == "system":
-            continue
-        if m.get("_transient"):
-            continue  # scratchpad, progress, circuit breaker — never persist
-        if m.get("role") == "tool":
-            tcid = m.get("tool_call_id", "")
-            if tcid and tcid not in valid_ids:
-                continue  # orphaned — no preceding assistant owns this id
-        pass1.append(m)
-        # Accumulate valid ids from this message (only assistant with tool_calls)
-        for tc in m.get("tool_calls", []):
-            tcid = tc.get("id", "")
-            if tcid:
-                valid_ids.add(tcid)
+    from api import _strip_orphaned_tool_messages
 
-    # ---- forward pass (single reverse scan): truncate incomplete tool-call sequences ----
-    # Scan backward collecting tool_call_ids from tool messages.
-    # When we hit an assistant with tool_calls, its ids must all be in the
-    # set (meaning matching tool results exist *after* it in forward order).
-    # The first incomplete assistant we find going backward is the truncation point.
-    seen_tool_ids: set[str] = set()
-    truncate_at = len(pass1)
-    for i in range(len(pass1) - 1, -1, -1):
-        m = pass1[i]
-        if m.get("role") == "tool":
-            tcid = m.get("tool_call_id", "")
-            if tcid:
-                seen_tool_ids.add(tcid)
-        else:
-            tool_ids = {tc["id"] for tc in m.get("tool_calls", [])}
-            if tool_ids and not tool_ids.issubset(seen_tool_ids):
-                truncate_at = i
-    return pass1[:truncate_at]
+    # ---- strip system messages and transient messages ----
+    cleaned: list[dict] = [
+        m for m in messages
+        if m.get("role") != "system" and not m.get("_transient")
+    ]
+
+    # ---- strip orphaned tool messages (canonical implementation from api.py) ----
+    return _strip_orphaned_tool_messages(cleaned, truncate=True)
 
 
 def _migrate_old_paths(new_filepath: str, db_path: str) -> None:

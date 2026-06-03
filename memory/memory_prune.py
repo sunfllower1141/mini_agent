@@ -262,10 +262,6 @@ def _compress_tool_results(
             break
         if m.get("role") != "tool":
             continue
-        # Restore original content if it was compressed in-place by
-        # context_inject._compress_stale_tool_results during the turn loop.
-        if "_original_content" in m:
-            m["content"] = m.pop("_original_content")
         text = _get_tool_content(m)
         if not text:
             continue
@@ -648,25 +644,14 @@ def _summarize_pruned_llm(pruned: list[dict]) -> str:
 # ---------------------------------------------------------------------------
 
 def _strip_orphaned_tool_results(messages: list[dict]) -> list[dict]:
-    """Remove any ``tool`` messages whose preceding ``assistant``
-    message lacks matching ``tool_calls``.  Pruning can delete the
-    assistant message but leave its tool results orphaned, causing
-    API 400: ``\"Messages with role 'tool' must be a response to a
-    preceding message with 'tool_calls'\"``."""
-    result: list[dict] = []
-    pending_tool_call_ids: set[str] = set()
-    for m in messages:
-        if m.get("role") == "assistant" and m.get("tool_calls"):
-            pending_tool_call_ids = {tc["id"] for tc in m["tool_calls"]}
-            result.append(m)
-        elif m.get("role") == "tool":
-            tid = m.get("tool_call_id", "")
-            if tid in pending_tool_call_ids:
-                result.append(m)
-            # else: orphaned — drop it
-        else:
-            result.append(m)
-    return result
+    """Remove orphaned tool messages and assistant(tool_calls) in one pass.
+
+    Delegates to the canonical implementation in ``api.py`` (lazy import
+    to avoid circular dependency: api → core.config → core.bootstrap →
+    memory.memory → memory.memory_prune → api).
+    """
+    from api import _strip_orphaned_tool_messages
+    return _strip_orphaned_tool_messages(messages)
 
 
 # ---------------------------------------------------------------------------

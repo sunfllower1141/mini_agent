@@ -100,24 +100,33 @@ class TestCompressStaleToolResults:
     """Tests for _compress_stale_tool_results."""
 
     def test_compresses_old_multi_line_tool_result(self):
-        msgs = [{"role": "tool", "content": "line1\nline2\nline3\nline4"}]
-        # Pad with enough messages to push tool result beyond STALE_THRESHOLD (15)
-        padding = [{"role": "user", "content": f"msg {i}"} for i in range(17)]
+        import json
+        # Real tool results are JSON-wrapped: {"content": "...", "success": true}
+        inner = "line1\nline2\nline3\nline4\nline5\nline6\nline7"
+        msgs = [{"role": "tool", "content": json.dumps({"content": inner, "success": True})}]
+        # Pad with enough messages to push tool result beyond keep_recent (12)
+        padding = [{"role": "user", "content": f"msg {i}"} for i in range(14)]
         msgs = msgs + padding
         _compress_stale_tool_results(msgs)
-        # The tool message (index 0) should be compressed
-        assert "compressed" in msgs[0]["content"]
+        # The tool message (index 0) should be compressed — check the JSON content
+        data = json.loads(msgs[0]["content"])
+        assert "truncated" in data["content"]
 
     def test_skips_recent_tool_results(self):
-        msgs = [{"role": "user", "content": "a"}] * 3 + [
-            {"role": "tool", "content": "line1\nline2\nline3"}
+        import json
+        inner = "line1\nline2\nline3\nline4\nline5\nline6\nline7"
+        msgs = [{"role": "user", "content": "a"}] * 5 + [
+            {"role": "tool", "content": json.dumps({"content": inner, "success": True})}
         ]
         _compress_stale_tool_results(msgs)
-        # Last message is tool, age 0 < 15, should NOT be compressed
-        assert "compressed" not in msgs[-1]["content"]
+        # Last message is tool, age 0 < keep_recent (12), should NOT be compressed
+        data = json.loads(msgs[-1]["content"])
+        assert "truncated" not in data["content"]
 
     def test_skips_already_compressed(self):
-        msgs = [{"role": "tool", "content": "line1\nline2 \u2026 (compressed: 5 lines, 100 chars)"}]
+        import json
+        # Content that is already short enough — won't be re-compressed
+        msgs = [{"role": "tool", "content": json.dumps({"content": "line1\nline2", "success": True})}]
         padding = [{"role": "user", "content": f"msg {i}"} for i in range(20)]
         msgs = msgs + padding
         original = msgs[0]["content"]
@@ -125,12 +134,14 @@ class TestCompressStaleToolResults:
         assert msgs[0]["content"] == original  # unchanged
 
     def test_skips_single_line_results(self):
-        msgs = [{"role": "tool", "content": "single line only"}]
+        import json
+        msgs = [{"role": "tool", "content": json.dumps({"content": "single line only", "success": True})}]
         padding = [{"role": "user", "content": f"msg {i}"} for i in range(20)]
         msgs = msgs + padding
         _compress_stale_tool_results(msgs)
         # Single line should not be compressed
-        assert msgs[0]["content"] == "single line only"
+        data = json.loads(msgs[0]["content"])
+        assert data["content"] == "single line only"
 
     def test_skips_non_string_content(self):
         msgs = [{"role": "tool", "content": 42}]
@@ -140,11 +151,14 @@ class TestCompressStaleToolResults:
         assert msgs[0]["content"] == 42  # unchanged
 
     def test_skips_non_tool_messages(self):
-        msgs = [{"role": "assistant", "content": "hello\nworld\nfoo\nbar"}]
+        import json
+        msgs = [{"role": "assistant", "content": json.dumps({"content": "hello\nworld\nfoo\nbar\nbaz\nqux\nquux", "success": True})}]
         padding = [{"role": "user", "content": f"msg {i}"} for i in range(20)]
         msgs = msgs + padding
         _compress_stale_tool_results(msgs)
-        assert "compressed" not in msgs[0]["content"]
+        # Non-tool messages are never compressed
+        data = json.loads(msgs[0]["content"])
+        assert "truncated" not in data["content"]
 
 
 # ---------------------------------------------------------------------------

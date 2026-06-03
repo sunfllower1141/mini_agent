@@ -463,38 +463,18 @@ def _inject_system_reminder(messages: list[dict], *, turn_count: int) -> None:
 
 
 def _compress_stale_tool_results(messages: list[dict]) -> None:
-    """Compress tool results older than 15 messages behind the tail
-    to first-line only, saving context while preserving key info.
+    """Compress tool results older than 12 messages behind the tail.
 
-    Only compresses tool messages whose content has multiple lines.
-    Already-compressed results (marked with '… (truncated)') are skipped.
+    Uses the content-aware compression from ``memory_prune`` (same
+    algorithm used during persistence), so tool results are compressed
+    consistently throughout the turn loop — not just on save.
+
+    Only tool results outside the *keep_recent* window are compressed;
+    recent results stay intact for the model to reference.
     """
-    STALE_THRESHOLD = 15
-    tail = len(messages)
-    for i, m in enumerate(messages):
-        if m.get("role") != "tool":
-            continue
-        age = tail - i
-        if age <= STALE_THRESHOLD:
-            continue
-        content = m.get("content", "")
-        if not isinstance(content, str):
-            continue
-        if "… (truncated)" in content or "… (compressed)" in content:
-            continue
-        lines = content.split("\n")
-        if len(lines) <= 2:
-            continue
-        first_line = lines[0]
-        total_lines = len(lines)
-        total_chars = len(content)
-        # Preserve original content so memory.save() can apply
-        # its own content-aware compression (better than first-line-only).
-        if "_original_content" not in m:
-            m["_original_content"] = content
-        m["content"] = (
-            f"{first_line}\n… (compressed: {total_lines} lines, {total_chars} chars)"
-        )
+    from memory.memory_prune import _compress_tool_results
+
+    _compress_tool_results(messages, keep_recent=12)
 
 
 def _inject_failure_pattern_warnings(

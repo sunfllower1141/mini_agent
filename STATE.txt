@@ -1,5 +1,5 @@
 # mini_agent Architecture State
-# Last updated: 2026-06-03 (post-audit)
+# Last updated: 2026-06-03 (memory efficiency audit — unified orphan strip, content-aware compression, cache caps)
 #
 # This file is the agent's map of the codebase. Update it after every
 # completed change. The agent reads this at session start for context.
@@ -86,6 +86,16 @@
    run_agent_turn(). This gives injectors one chance per session, by design.
 7. **build_startup_context lives in prompt.py**: The startup context builder is defined
   in core/prompt.py and imported directly, not re-exported through config.py.
+8. **Unified orphan stripping in api.py**: ``_strip_orphaned_tool_messages(messages, *, truncate=False)``
+  is the single source of truth for orphaned tool message cleanup.  ``truncate=False`` (default)
+  for API calls removes individual orphans; ``truncate=True`` for persistence truncates at the
+  first incomplete sequence.  Replaces 4 separate implementations across 3 files.
+9. **Content-aware compression everywhere**: ``context_inject._compress_stale_tool_results``
+  now delegates to ``memory_prune._compress_tool_results`` instead of doing lossy first-line-only
+  compression.  The ``_original_content`` field is no longer used — compression is idempotent.
+10. **Cache caps**: ``_clean_messages_cache`` capped at 16 entries, ``_complexity_cache`` at 32.
+    Prevents unbounded growth from stale message-list entries while preserving incremental
+    cleaning optimization across turns.
 
 ## Known Issues
 - `_json_rpc_shared.py` — abandoned file, should adopt or remove

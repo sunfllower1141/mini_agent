@@ -85,6 +85,7 @@ def format_tool_detail(result: "ToolResult", max_len: int = 300) -> str:
 # turn only clean newly appended messages rather than the entire list.
 _clean_messages_cache: dict[int, tuple[int, str, list[dict]]] = {}
 _clean_messages_cache_lock: threading.Lock = threading.Lock()
+_MAX_CLEAN_CACHE_ENTRIES = 16  # cap to prevent unbounded growth from stale entries
 
 
 def _clean_message(msg: dict, index: int, provider: str = "deepseek") -> dict | None:
@@ -123,6 +124,7 @@ _ROUTE_SIMPLE_KEYWORDS = re.compile(
 
 # Cache: per-messages-list complexity result (doesn't change within a turn)
 _complexity_cache: dict[int, str] = {}
+_MAX_COMPLEXITY_CACHE_ENTRIES = 32
 
 def _compute_complexity(messages: list[dict]) -> str:
     """Return 'simple' or 'complex' for the last user message, for model routing.
@@ -145,24 +147,79 @@ def _compute_complexity(messages: list[dict]) -> str:
                 break
     result = "simple" if (len(user_text) < 300 and not _ROUTE_SIMPLE_KEYWORDS.search(user_text)) else "complex"
     _complexity_cache[list_id] = result
+    # Cap to prevent unbounded growth from stale entries
+    if len(_complexity_cache) > _MAX_COMPLEXITY_CACHE_ENTRIES:
+        _complexity_cache.pop(next(iter(_complexity_cache)))
     return result
 
 
-def _strip_orphaned_tool_calls(messages: list[dict]) -> list[dict]:
-    """Remove assistant messages whose tool_calls lack matching
-    tool result messages.  Prevents 400 "insufficient tool messages
-    following tool_calls" errors from the API.
+def _strip_orphaned_tool_messages(
+    messages: list[dict],
+    *,
+    truncate: bool = False,
+) -> list[dict]:
+    """Remove orphaned tool messages and assistant(tool_calls) in one pass.
 
-    Returns a new list (never mutates the cached *messages* list).
+    Two fixes applied in sequence:
+
+    1. **Strip orphaned tool results** — remove ``tool`` messages whose
+       ``tool_call_id`` has no preceding ``assistant(tool_calls)`` with a
+       matching id.  Prevents 400: "role 'tool' must be a response to a
+       preceding message with 'tool_calls'".
+
+    2. **Strip orphaned tool calls** — remove ``assistant`` messages whose
+       ``tool_calls`` lack matching ``tool`` results *after* them in the
+       conversation.  Prevents 400: "insufficient tool messages following
+       tool_calls".
+
+    When *truncate* is True, the second pass truncates the entire list
+    at the first incomplete assistant(tool_calls) sequence — i.e., all
+    messages from that point onward are dropped.  Use ``truncate=True``
+    for persistence (coherent conversation), ``truncate=False`` (default)
+    for API calls (remove only the broken messages, keep the rest).
+
+    Returns a new list (never mutates the input).
+
+    This replaces the two separate functions ``_strip_orphaned_tool_calls``
+    and ``_strip_orphaned_tool_results`` that previously ran as sequential
+    O(n) passes.  The combined implementation is still O(n).
     """
-    # First pass: walk backwards to find which tool_call_ids are satisfied.
-    # A tool_call is satisfied if a tool result with matching id appears
-    # after it (i.e., after it in forward order = before it in backward scan).
+    # ------------------------------------------------------------------
+    # Pass 1: remove orphaned tool results (tool messages with no
+    #         preceding assistant(tool_calls) that owns their id).
+    # ------------------------------------------------------------------
+    valid_ids: set[str] = set()
+    pass1: list[dict] = []
+    for m in messages:
+        if m.get("role") == "assistant" and m.get("tool_calls"):
+            for tc in m["tool_calls"]:
+                tcid = tc.get("id")
+                if tcid:
+                    valid_ids.add(tcid)
+            pass1.append(m)
+        elif m.get("role") == "tool":
+            tcid = m.get("tool_call_id", "")
+            if tcid and tcid in valid_ids:
+                pass1.append(m)
+            # else: orphaned — drop
+        else:
+            pass1.append(m)
+
+    # ------------------------------------------------------------------
+    # Pass 2: handle orphaned assistant(tool_calls).
+    #
+    #   truncate=False (API safety): remove individual orphaned assistant
+    #       messages whose tool_calls have no matching results after them.
+    #
+    #   truncate=True (persistence): find the first incomplete assistant
+    #       sequence going backward and truncate the list there (dropping
+    #       everything from that point onward, including subsequent user
+    #       or system messages).
+    # ------------------------------------------------------------------
     seen_ids: set[str] = set()
-    # Second pass: mark indices of orphaned assistant(tool_calls) messages.
     orphan_indices: set[int] = set()
-    for i in range(len(messages) - 1, -1, -1):
-        m = messages[i]
+    for i in range(len(pass1) - 1, -1, -1):
+        m = pass1[i]
         role = m.get("role", "")
         if role == "tool":
             tcid = m.get("tool_call_id")
@@ -170,47 +227,24 @@ def _strip_orphaned_tool_calls(messages: list[dict]) -> list[dict]:
                 seen_ids.add(tcid)
         elif role == "assistant" and "tool_calls" in m:
             tc_ids = [tc.get("id") for tc in m.get("tool_calls", []) if tc.get("id")]
-            if not tc_ids:
-                continue  # tool_calls with no ids — skip
-            if not all(tcid in seen_ids for tcid in tc_ids):
-                # Orphan: tool_calls with no matching results after it.
-                orphan_indices.add(i)
+            if tc_ids and not all(tcid in seen_ids for tcid in tc_ids):
+                if truncate:
+                    # Truncate: drop everything from this point forward
+                    return pass1[:i]
+                else:
+                    orphan_indices.add(i)
         # NOTE: do NOT break on user/system — memory pruning may have
         # removed tool results while leaving orphaned assistant(tool_calls)
         # earlier in the conversation, separated by user messages.
-    if orphan_indices:
-        return [m for i, m in enumerate(messages) if i not in orphan_indices]
-    return messages
-
-
-def _strip_orphaned_tool_results(messages: list[dict]) -> list[dict]:
-    """Remove tool messages that lack a preceding assistant(tool_calls)
-    message with a matching tool_call_id.  Prevents 400 \"Messages with
-    role 'tool' must be a response to a preceding message with
-    'tool_calls'\" errors from the API.
-
-    Returns a new list (never mutates the input list).
-    """
-    # Build set of valid tool_call_ids from assistant messages
-    valid_ids: set[str] = set()
-    for m in messages:
-        if m.get("role") == "assistant" and "tool_calls" in m:
-            for tc in m.get("tool_calls", []):
-                tcid = tc.get("id")
-                if tcid:
-                    valid_ids.add(tcid)
-
-    # Mark orphaned tool messages
-    orphan_indices: set[int] = set()
-    for i, m in enumerate(messages):
-        if m.get("role") == "tool":
-            tcid = m.get("tool_call_id")
-            if tcid and tcid not in valid_ids:
-                orphan_indices.add(i)
 
     if orphan_indices:
-        return [m for i, m in enumerate(messages) if i not in orphan_indices]
-    return messages
+        return [m for i, m in enumerate(pass1) if i not in orphan_indices]
+    return pass1
+
+
+# Backward-compatible aliases for tests that import the old names.
+_strip_orphaned_tool_calls = _strip_orphaned_tool_messages
+_strip_orphaned_tool_results = _strip_orphaned_tool_messages
 
 
 def _build_payload(
@@ -334,15 +368,16 @@ def call_llm(
                 if cleaned is not None:
                     clean_messages.append(cleaned)
             _clean_messages_cache[list_id] = (current_len, provider, clean_messages)
+            # Cap cache size: evict oldest entry when over limit.
+            # Python 3.7+ dicts preserve insertion order, so the first
+            # key is the oldest.
+            if len(_clean_messages_cache) > _MAX_CLEAN_CACHE_ENTRIES:
+                _clean_messages_cache.pop(next(iter(_clean_messages_cache)))
 
-    # Safety net: always strip orphaned tool calls/results.
-    # Memory pruning can remove assistant(tool_calls) messages while
-    # leaving their tool result messages, causing 400 errors like
-    # "Messages with role 'tool' must be a response to a preceding
-    # message with 'tool_calls'".  The per-call overhead is O(n) set
-    # lookups — negligible compared to the API round-trip.
-    safe_messages = _strip_orphaned_tool_calls(clean_messages)
-    safe_messages = _strip_orphaned_tool_results(safe_messages)
+    # Safety net: strip orphaned tool calls/results in one O(n) pass.
+    # Memory pruning can leave orphaned tool messages or assistant(tool_calls)
+    # causing 400 errors from the API.
+    safe_messages = _strip_orphaned_tool_messages(clean_messages)
 
     payload = _build_payload(config, messages, safe_messages)
 
