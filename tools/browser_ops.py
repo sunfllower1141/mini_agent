@@ -18,19 +18,28 @@ a clear error message if it's missing.
 from __future__ import annotations
 
 import os
+import threading
 import webbrowser as _webbrowser
 
 from core.safety import ReadSafetyGate, WriteSafetyGate
 from tools import _register, _summarize, ToolResult
 
 # ---------------------------------------------------------------------------
-# Playwright lazy singleton
+# Playwright lazy singleton — THREAD-AWARE
+#
+# The tool dispatch runs every tool call in a *new* daemon thread.
+# Playwright's sync API (greenlet-based) ties its internal event-loop
+# greenlet to the thread that created it.  Accessing the singleton from
+# a different thread causes "cannot switch to a different thread (which
+# happens to have exited)".  We track the creation thread and recreate
+# the browser whenever the calling thread changes.
 # ---------------------------------------------------------------------------
 
 _PLAYWRIGHT = None
 _BROWSER = None
 _PAGE = None
 _PLAYWRIGHT_INSTANCE = None
+_BROWSER_THREAD_ID: int | None = None  # thread that owns the current browser
 
 
 def _get_playwright():
@@ -48,15 +57,75 @@ def _get_playwright():
     return _PLAYWRIGHT
 
 
+# Substrings that indicate the browser/event-loop thread has died and
+# the global singleton must be hard-reset (skipping normal close).
+_BROWSER_DEAD_SIGNATURES: tuple[str, ...] = (
+    "different thread",
+    "has exited",
+    "Target page, context or browser has been closed",
+    "Browser closed",
+)
+
+
+def _page_alive(page) -> bool:
+    """Check if a Playwright page object is still responsive."""
+    try:
+        page.evaluate("1")  # trivial JS eval to test connectivity
+        return True
+    except Exception as exc:
+        msg = str(exc)
+        if any(sig in msg for sig in _BROWSER_DEAD_SIGNATURES):
+            return False
+        return False
+
+
+def _force_reset_browser_globals() -> None:
+    """Hard-reset browser global state without calling close() on stale objects."""
+    global _BROWSER, _PAGE, _PLAYWRIGHT_INSTANCE, _BROWSER_THREAD_ID
+    _BROWSER = None
+    _PAGE = None
+    _PLAYWRIGHT_INSTANCE = None
+    _BROWSER_THREAD_ID = None
+
+
 def _get_page():
-    """Return a shared browser page (lazy, cached)."""
-    global _BROWSER, _PAGE, _PLAYWRIGHT_INSTANCE
-    if _PAGE is None:
-        pw = _get_playwright()
-        _PLAYWRIGHT_INSTANCE = pw().__enter__()
-        _BROWSER = _PLAYWRIGHT_INSTANCE.chromium.launch(headless=True)
-        _PAGE = _BROWSER.new_page()
-    return _PAGE
+    """Return a browser page, recreating if the calling thread changed.
+
+    Because tool dispatch runs each call in a new daemon thread,
+    Playwright's greenlet-backed sync API must be created fresh for
+    each thread.  This function detects thread changes and recreates
+    the browser automatically.
+    """
+    global _BROWSER, _PAGE, _PLAYWRIGHT_INSTANCE, _BROWSER_THREAD_ID
+
+    current_tid = threading.get_ident()
+    if _PAGE is not None and _BROWSER_THREAD_ID == current_tid:
+        if _page_alive(_PAGE):
+            return _PAGE
+        # Alive check failed — browser crashed within same thread
+        _force_reset_browser_globals()
+    elif _PAGE is not None:
+        # Different thread — stale singleton, force reset
+        _force_reset_browser_globals()
+
+    # Create fresh browser on this thread
+    for attempt in range(2):
+        try:
+            pw = _get_playwright()
+            _PLAYWRIGHT_INSTANCE = pw().__enter__()
+            _BROWSER = _PLAYWRIGHT_INSTANCE.chromium.launch(headless=True)
+            _PAGE = _BROWSER.new_page()
+            _BROWSER_THREAD_ID = current_tid
+            return _PAGE
+        except Exception as exc:
+            msg = str(exc)
+            if attempt == 1 or not any(
+                sig in msg for sig in _BROWSER_DEAD_SIGNATURES
+            ):
+                raise
+            _force_reset_browser_globals()
+
+    raise RuntimeError("Failed to create browser page after retries")
 
 
 def _close_browser():
