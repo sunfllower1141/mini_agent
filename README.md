@@ -59,7 +59,7 @@ npm start            # auto-builds renderer if needed, then opens the desktop ap
 
 ## Features
 
-- **75 tools**: file ops (with robust edit_file), shell, search, LSP, MCP, browser automation (Playwright), desktop automation (atomacos/mss), vision (GPT-4o), planning
+- **76 tools**: file ops (with robust edit_file), shell, search, LSP, MCP, browser automation (Playwright), desktop automation (atomacos/mss), vision (GPT-4o), planning
 - **Self-learning**: the agent learns from its own mistakes across sessions. Failed tool calls are fingerprinted, clustered into patterns, and distilled into reusable fixes. Before repeating a call that's failed before, it gets a warning with what went wrong and how to fix it. Three subsystems work together:
   - *Failure Pattern Store* — SQLite-backed database of tool failures with confidence scoring. When `edit_file` fails with "string not found" 5 times, the agent remembers and warns itself before the next attempt.
   - *Self-Critique* — detects failure clusters mid-conversation and injects corrective guidance ("stop retrying, read the file first, try a different approach").
@@ -160,22 +160,79 @@ mini_agent is designed to modify and improve its own codebase. If you're a **hum
 ## Architecture
 
 ```
-Electron ──→ server.py ──→ llm.py ──→ api.py ──→ DeepSeek / Claude / xAI
-                │
-    ┌───────────┼───────────────┐
-    ▼           ▼               ▼
- tools/     memory.py      agent_runtime.py
- (75)       (SQLite)       (sub-agents)
-            │
-    ┌───────┴───────┐
-    ▼               ▼
- failure_learning.py  project_knowledge
- (self-learning)      (cross-session)
+┌─────────────────────────────────────────────────────────────────┐
+│                        DESKTOP WRAPPER                          │
+│  Electron ──→ server.py                                         │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+┌────────────────────────────▼────────────────────────────────────┐
+│                     CORE ORCHESTRATION                           │
+│                                                                  │
+│  bootstrap.py ──→ llm.py ──→ api.py ──→ DeepSeek / Claude / xAI │
+│  (session init)   (agent loop,   (provider                │
+│                    tool dispatch)  abstraction)            │
+│       │                │                                    │
+│       ▼                ▼                                    │
+│  context_inject.py  config.py   safety.py  prompt.py        │
+│  (per-turn hints,   (TOML cfg)  (rw gates) (sys prompt)     │
+│   circuit breaker)                                          │
+└─────────────────────────┬──────────────────────────────────────┘
+                          │
+      ┌───────────────────┼───────────────────────┐
+      ▼                   ▼                       ▼
+┌─────────────┐  ┌──────────────┐    ┌────────────────────┐
+│   TOOLS     │  │    MEMORY    │    │   SUB-AGENTS        │
+│  (76 total, │  │   (SQLite)   │    │                     │
+│   11 core,  │  │              │    │  agent_runtime.py   │
+│   11 skills)│  │  memory.py   │    │  sub_agent.py       │
+│             │  │  session.py  │    │                     │
+│  __init__.py│  │  prune.py    │    └────────────────────┘
+│  context.py │  │              │
+│  schema.py  │  │              │
+│  skills.py  │  │              │
+│             │  │              │
+│  file_ops   │  │              │
+│  shell_ops  │  │              │
+│  search_ops │  │              │
+│  agent_ops  │  │              │
+│  agent_msgs │  │              │
+│  agent_pat. │  │              │
+│  agent_todos│  │              │
+│  browser_ops│  │              │
+│  desktop_ops│  │              │
+│  macos_ops  │  │              │
+│  lsp.py     │  │              │
+│  mcp_client │  │              │
+│  failure_   │  │              │
+│   learning  │  │              │
+│  tool_graph │  │              │
+│  error_hints│  │              │
+│  reservat.  │  │              │
+└─────────────┘  └──────────────┘
 ```
 
-Core modules: `config.py` (settings), `safety.py` (gates), `prompt.py` (system prompt), `memory.py` (persistence), `failure_learning.py` (self-learning), `retry.py` (HTTP), `stream.py` (SSE).
+### Key Design Decisions
 
-Tool implementations live in `tools/` — each module self-contained.
+| Decision | Detail |
+|----------|--------|
+| **Skills system** | 11 core tools always visible, 11 skill groups (65 tools) lazy-loaded via `use_skill`. Keeps prompt focused for simple tasks. |
+| **SQLite memory** | Separate session DBs in `memory/memory.py`. Persists messages, scratchpad, learnings, handoff. Compresses stale tool results with content-aware pruning. |
+| **Per-turn context injection** | `context_inject.py` runs every turn: hints stale tool results, suggests better tools, checks for repeated mistakes, enforces circuit breaker. STATE.txt/HANDOFF.md injected once per session. |
+| **Safety gates** | All file and shell operations go through `core/safety.py` ReadSafetyGate/WriteSafetyGate, enforcing workspace boundaries. |
+| **Sub-agent isolation** | Each sub-agent gets its own context, turn budget, and broadcast inbox. File reservations (`tools/reservations.py`) prevent write collisions. |
+| **Circuit breaker** | Detects 3+ repeated identical tool calls in a 6-call window and warns before API cost spirals. |
+| **Self-modification tracking** | `STATE.txt` (architecture map), `HANDOFF.md` (session continuity), `CHANGELOG.md` (audit trail). Agent reads/updates these to maintain cross-session context. |
+
+### Module Map
+
+| Directory | Key Files | Purpose |
+|-----------|-----------|---------|
+| `core/` | `bootstrap.py`, `llm.py`, `context_inject.py`, `config.py`, `safety.py`, `prompt.py` | Session init, agent loop, context injection, config, safety, system prompt |
+| (root) | `api.py`, `stream.py`, `retry.py`, `interject.py`, `logging_setup.py` | Provider abstraction, SSE streaming, HTTP retry, user interjection polling, structured logging |
+| `tools/` | `__init__.py`, `schema.py`, `skills.py`, `context.py`, `reservations.py`, `file_ops.py`, `shell_ops.py`, `search_ops.py`, `agent_ops.py`, `agent_patterns.py`, `browser_ops.py`, `desktop_ops.py`, `macos_ops.py`, `lsp.py`, `mcp_client.py`, `failure_learning.py`, `tool_graph.py`, `error_hints.py` | Tool dispatch, schema definitions, skill gates, agent context, file reservations, all tool implementations |
+| `memory/` | `memory.py`, `memory_prune.py`, `session.py` | SQLite persistence, message pruning/compression, session lifecycle |
+| `agents/` | `agent_runtime.py`, `sub_agent.py` | Sub-agent runtime, task delegation |
+| `eval/` | `scorer.py`, `swebench_runner.py` | Local eval tasks + SWE-bench integration |
 
 ## Benchmarks
 
