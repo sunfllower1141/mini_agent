@@ -1150,8 +1150,3 @@ def _init_rules(args: dict, _wg, read_gate: ReadSafetyGate) -> ToolResult:
             content=f"Initialized workspace: {', '.join(created)}.")
     except Exception as e:
         return ToolResult(success=False, content=f"/init failed: {e}")
-
-
-@_summarize("init")
-def _init_rules_summary(args: dict) -> str:
-    return "init: generate .mini_agent.rules from workspace"

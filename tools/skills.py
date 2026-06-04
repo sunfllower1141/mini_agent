@@ -84,6 +84,7 @@ SKILLS: dict[str, list[str]] = {
         "barrier",
         "pipeline",
         "scatter_gather",
+        "audit_parallel",
         "wait_for_agent",
     ],
     "planning": [

@@ -1073,6 +1073,32 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "audit_parallel",
+            "description": "Fan-out a code audit across multiple defect classes in parallel. Each defect class gets its own sub-agent. Use this to run comprehensive code audits (bugs, performance, style, etc.) concurrently. Returns task IDs; collect results with collect_any/collect_agent.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "defect_classes": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of defect categories to audit (e.g. ['bugs & error handling', 'code quality', 'performance'])."
+                    },
+                    "workspace_scope": {
+                        "type": "string",
+                        "description": "Optional: limit audit to a subdirectory (e.g. 'tools/')."
+                    },
+                    "max_turns": {
+                        "type": "integer",
+                        "description": "Optional: turn budget per auditor (default 15). Lower values enforce faster audits."
+                    }
+                },
+                "required": ["defect_classes"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "scatter_gather",
             "description": "Scatter-gather: apply a single task template across a list of items in parallel, then collect results. Each item is substituted into the template to create a sub-agent task. Use this to process a list of items with the same logic concurrently.",
             "parameters": {

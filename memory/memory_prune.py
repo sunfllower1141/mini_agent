@@ -577,81 +577,88 @@ def _summarize_pruned_rules(pruned: list[dict]) -> str:
     return "\n".join(parts)
 
 
-def _summarize_pruned_llm(pruned: list[dict]) -> str:
-    """Use a cheap LLM to summarize pruned conversation context.
-
-    Returns a concise paragraph (2-4 sentences) capturing key decisions,
-    facts, and actions from the pruned messages. Falls back to rules-based
-    summarization on failure.
-    """
-    # Build a compact representation of pruned messages
-    lines: list[str] = []
-    for m in pruned:
-        role = m.get("role", "")
-        content = str(m.get("content", ""))[:500]
-        if role == "user":
-            lines.append(f"[user] {content}")
-        elif role == "assistant":
-            tc = m.get("tool_calls")
-            if tc:
-                names = [t.get("function", {}).get("name", "?") for t in tc]
-                lines.append(f"[assistant] called: {', '.join(names)}")
-            elif content:
-                lines.append(f"[assistant] {content[:300]}")
-        elif role == "tool":
-            text = _get_tool_content(m)
-            lines.append(f"[tool result] {text[:300]}")
-
-    conversation_text = "\n".join(lines[-50:])  # cap at last 50 to keep prompt small
-
-    prompt = (
-        "Summarize this conversation excerpt in 2-3 sentences. "
-        "Capture: key decisions made, important facts learned, files modified, "
-        "and the overall progress. Be concise.\n\n"
-        f"{conversation_text}\n\nSummary:"
-    )
-
-    try:
-        from api import call_llm
-        # Use the model-family concept: route to the cheapest model
-        # We build a minimal config for this one-shot summarization call
-        from core.config import AgentConfig
-        summarizer_config = AgentConfig()
-        summarizer_config.model = "claude-3-5-haiku-20241022"
-        summarizer_config.api_provider = "claude"
-        summarizer_config.max_tokens = 200
-        summarizer_config.stream = False
-        summarizer_config.temperature = 1.0
-        summarizer_config.api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-        if not summarizer_config.api_key:
-            # Try deepseek as fallback
-            summarizer_config.api_key = os.environ.get("DEEPSEEK_API_KEY", "")
-            summarizer_config.api_provider = "deepseek"
-            summarizer_config.model = "deepseek-chat"
-
-        messages = [{"role": "user", "content": prompt}]
-        result = call_llm(messages, summarizer_config)
-        if result and result.get("content"):
-            return f"[Earlier context summary] {result['content'].strip()}"
-    except Exception:
-        _mem_log.warning("LLM summarization failed, falling back to rules-based", exc_info=True)
-
-    return _summarize_pruned_rules(pruned)
+# _summarize_pruned_llm removed — dead code (never called).
+# _summarize_pruned always uses _summarize_pruned_rules — deterministic,
+# fast, and testable.  LLM summarization was a nice idea but broke tests
+# that expect structured output with file names, commands, etc.
 
 
 # ---------------------------------------------------------------------------
 # Orphaned-tool cleanup
 # ---------------------------------------------------------------------------
 
-def _strip_orphaned_tool_results(messages: list[dict]) -> list[dict]:
+def _strip_orphaned_tool_messages(
+    messages: list[dict],
+    *,
+    truncate: bool = False,
+) -> list[dict]:
     """Remove orphaned tool messages and assistant(tool_calls) in one pass.
 
-    Delegates to the canonical implementation in ``api.py`` (lazy import
-    to avoid circular dependency: api → core.config → core.bootstrap →
-    memory.memory → memory.memory_prune → api).
+    Two fixes applied in sequence:
+
+    1. **Strip orphaned tool results** — remove ``tool`` messages whose
+      ``tool_call_id`` has no preceding ``assistant(tool_calls)`` with a
+      matching id.  Prevents 400: "role 'tool' must be a response to a
+      preceding message with 'tool_calls'".
+
+    2. **Strip orphaned tool calls** — remove ``assistant`` messages whose
+      ``tool_calls`` lack matching ``tool`` results *after* them in the
+      conversation.  Prevents 400: "insufficient tool messages following
+      tool_calls".
+
+    When *truncate* is True, the second pass truncates the entire list
+    at the first incomplete assistant(tool_calls) sequence — i.e., all
+    messages from that point onward are dropped.  Use ``truncate=True``
+    for persistence (coherent conversation), ``truncate=False`` (default)
+    for API calls (remove only the broken messages, keep the rest).
+
+    Returns a new list (never mutates the input).
     """
-    from api import _strip_orphaned_tool_messages
-    return _strip_orphaned_tool_messages(messages)
+    # Pass 1: remove orphaned tool results (tool messages with no
+    #         preceding assistant(tool_calls) that owns their id).
+    valid_ids: set[str] = set()
+    pass1: list[dict] = []
+    for m in messages:
+        if m.get("role") == "assistant" and m.get("tool_calls"):
+            for tc in m["tool_calls"]:
+                tcid = tc.get("id")
+                if tcid:
+                    valid_ids.add(tcid)
+            pass1.append(m)
+        elif m.get("role") == "tool":
+            tcid = m.get("tool_call_id", "")
+            if tcid and tcid in valid_ids:
+                pass1.append(m)
+            # else: orphaned — drop
+        else:
+            pass1.append(m)
+
+    # Pass 2: handle orphaned assistant(tool_calls).
+    seen_ids: set[str] = set()
+    orphan_indices: set[int] = set()
+    for i in range(len(pass1) - 1, -1, -1):
+        m = pass1[i]
+        role = m.get("role", "")
+        if role == "tool":
+            tcid = m.get("tool_call_id")
+            if tcid:
+                seen_ids.add(tcid)
+        elif role == "assistant" and "tool_calls" in m:
+            tc_ids = [tc.get("id") for tc in m.get("tool_calls", []) if tc.get("id")]
+            if tc_ids and not all(tcid in seen_ids for tcid in tc_ids):
+                if truncate:
+                    return pass1[:i]
+                else:
+                    orphan_indices.add(i)
+
+    if orphan_indices:
+        return [m for i, m in enumerate(pass1) if i not in orphan_indices]
+    return pass1
+
+
+# Backward-compatible aliases (used by tests).
+_strip_orphaned_tool_calls = _strip_orphaned_tool_messages
+_strip_orphaned_tool_results = _strip_orphaned_tool_messages
 
 
 # ---------------------------------------------------------------------------

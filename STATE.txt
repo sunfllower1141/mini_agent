@@ -1,5 +1,6 @@
 # mini_agent Architecture State
-# Last updated: 2026-06-03 (memory efficiency audit — unified orphan strip, content-aware compression, cache caps)
+# Last updated: 2026-06-05 (tools & memory audit — save() decomposed, AgentContext extracted,
+#   orphan stripping unified in memory_prune, dead code removed)
 #
 # This file is the agent's map of the codebase. Update it after every
 # completed change. The agent reads this at session start for context.
@@ -19,13 +20,16 @@
 - `agents/sub_agent.py` — sub-agent task delegation and result collection (806 lines)
 
 ### API & Communication
-- `api.py` — OpenAI/Anthropic API client abstraction
+- `api.py` — OpenAI/Anthropic API client abstraction; imports orphan stripping from memory_prune
 - `stream.py` — streaming response handling
 - `retry.py` — retry logic with exponential backoff
 
 ### Memory & Knowledge
-- `memory/memory.py` — SQLite-backed memory store, scratchpad, learnings, handoff (1118 lines)
-- `memory/memory_prune.py` — memory pruning and deduplication (727 lines)
+- `memory/memory.py` — SQLite-backed memory store, scratchpad, learnings, handoff.
+  save() decomposed into _prepare_messages(), _write_messages(), _maybe_vacuum().
+- `memory/memory_prune.py` — message pruning, content-aware compression, conversation
+  summarization, and canonical orphaned-tool-message stripping (moved from api.py).
+  Dead _summarize_pruned_llm removed.
 - `memory/session.py` — session lifecycle and persistence
 - `interject.py` — user interjection polling
 - `logging_setup.py` — structured logging
@@ -34,25 +38,39 @@
 - `core/safety.py` — read/write safety gates, workspace boundaries
 
 ### Tools (tools/ directory)
-- `tools/__init__.py` — ToolResult, AgentContext, tool registry (761 lines)
-- `tools/file_ops.py` — read_file, write_file, edit_file, find_symbol (1157 lines)
-- `tools/shell_ops.py` — run_shell command execution (1145 lines)
-- `tools/search_ops.py` — search_files, grep across workspace (980 lines)
-- `tools/agent_ops.py` — sub-agent lifecycle tools (1274 lines)
-- `tools/agent_messages.py` — sub-agent messaging inbox/read (614 lines)
-- `tools/agent_patterns.py` — parallel task orchestration patterns (932 lines)
-- `tools/failure_learning.py` — failure pattern store and matching (1260 lines)
-- `tools/desktop_ops.py` — desktop integration tools (1064 lines)
-- `tools/macos_ops.py` — macOS-specific tools (972 lines)
-- `tools/lsp.py` — language server protocol tools (851 lines)
+- `tools/__init__.py` — tool dispatch, execute_tool, register/summarize decorators (~540 lines;
+  AgentContext and file reservations extracted to dedicated modules)
+- `tools/context.py` — AgentContext, _ContextProxy, _TOOL_CONTEXT, set_context (extracted from __init__)
+- `tools/reservations.py` — file reservation system for sub-agent write collision prevention (extracted from __init__)
+- `tools/result.py` — ToolResult dataclass
 - `tools/schema.py` — tool JSON schema definitions (1559 lines)
+- `tools/skills.py` — lazy tool loading via skill gates (11 core tools, 11 skill groups)
+- `tools/error_hints.py` — error hint generation and failure fingerprinting
+- `tools/file_ops.py` — read_file, write_file, edit_file, list_directory, file_info (1157 lines)
+- `tools/shell_ops.py` — run_shell, search_files, run_tests, verify, git (1145 lines)
+- `tools/search_ops.py` — find_symbol, find_usages, semantic_search, web_search (980 lines)
+- `tools/agent_ops.py` — sub-agent lifecycle tools: spawn, collect, extend, cancel (1274 lines)
+- `tools/agent_messages.py` — sub-agent typed messaging inbox/read (614 lines)
+- `tools/agent_patterns.py` — parallel orchestration patterns: fan_out, pipeline, barrier (932 lines)
+- `tools/agent_todos.py` — per-agent todo tracking
+- `tools/failure_learning.py` — failure pattern store, self-critique, project knowledge (1260 lines)
+- `tools/tool_graph.py` — tool transition graph for sequencing hints and anti-pattern detection
+- `tools/lsp.py` — language server protocol tools (851 lines)
+- `tools/desktop_ops.py` — desktop automation tools (1064 lines)
+- `tools/macos_ops.py` — macOS-specific tools (972 lines)
+- `tools/browser_ops.py` — Playwright/Puppeteer browser automation
+- `tools/_json_rpc_shared.py` — shared drain_stderr() utility for LSP and MCP clients
+- `tools/mcp_client.py` — MCP (Model Context Protocol) client
 
 ### Electron Desktop App
 - `mini_agent_electron/` — Electron-based desktop wrapper
 
 ### Tests
-- `test_agent_self_tracking.py` — tests for HANDOFF, STATE, CHANGELOG, self-review (35 tests)
-- `tests/` — legacy test directory
+- `tests/test_memory.py` — memory store tests
+- `tests/test_tools.py` — tool execution tests
+- `tests/test_resilience.py` — orphan stripping and message cleaning tests
+- `tests/test_memory_internals.py` — _clean_messages, migration, export tests
+- `tests/test_api.py` — API client and message cleaning tests
 - `conftest.py` — shared test fixtures
 - `eval/` — evaluation harness
 
@@ -79,27 +97,33 @@
 4. **Circuit breaker**: Detects repeated identical tool calls and warns before API cost
    spirals (core/context_inject.py, 6-call window, 3-repeat threshold).
 5. **Memory is SQLite**: memory/memory.py uses SQLite for persistence with separate session DBs.
-   learnings are tagged and searchable.
+   Learnings are tagged and searchable.
 6. **Injection flags reset in bootstrap.init_session()**: Context injection flags
    (_scratchpad_injected, _git_diff_injected, _handoff_injected, _state_txt_injected)
    are reset once per session in core/bootstrap.init_session(), NOT per turn in
    run_agent_turn(). This gives injectors one chance per session, by design.
 7. **build_startup_context lives in prompt.py**: The startup context builder is defined
-  in core/prompt.py and imported directly, not re-exported through config.py.
-8. **Unified orphan stripping in api.py**: ``_strip_orphaned_tool_messages(messages, *, truncate=False)``
-  is the single source of truth for orphaned tool message cleanup.  ``truncate=False`` (default)
-  for API calls removes individual orphans; ``truncate=True`` for persistence truncates at the
-  first incomplete sequence.  Replaces 4 separate implementations across 3 files.
+   in core/prompt.py and imported directly, not re-exported through config.py.
+8. **Unified orphan stripping in memory_prune.py**: ``_strip_orphaned_tool_messages``
+   is the single source of truth, living in ``memory/memory_prune.py``. Both ``api.py``
+   and ``memory/memory.py`` import from there. ``truncate=False`` (default) for API calls
+   removes individual orphans; ``truncate=True`` for persistence truncates at the first
+   incomplete sequence. Backward-compat aliases kept in api.py.
 9. **Content-aware compression everywhere**: ``context_inject._compress_stale_tool_results``
-  now delegates to ``memory_prune._compress_tool_results`` instead of doing lossy first-line-only
-  compression.  The ``_original_content`` field is no longer used — compression is idempotent.
+   delegates to ``memory_prune._compress_tool_results`` — per-tool-type compression with
+   knowledge of request parameters (offset/limit for read_file, match patterns for search_files).
 10. **Cache caps**: ``_clean_messages_cache`` capped at 16 entries, ``_complexity_cache`` at 32.
-    Prevents unbounded growth from stale message-list entries while preserving incremental
-    cleaning optimization across turns.
+    Prevents unbounded growth from stale message-list entries.
+11. **MemoryStore.save() decomposed**: _prepare_messages() handles cleaning, compression,
+    pruning, and summarisation. _write_messages() handles SQL writes with retry logic.
+    _maybe_vacuum() handles opportunistic DB compaction. save() is a two-line dispatch.
+12. **AgentContext and reservations extracted**: ``tools/context.py`` holds AgentContext,
+    _ContextProxy, _TOOL_CONTEXT, and set_context. ``tools/reservations.py`` holds the
+    file reservation system. Both re-exported through ``tools/__init__.py`` for
+    backward compatibility.
 
 ## Known Issues
-- `_json_rpc_shared.py` — abandoned file, should adopt or remove
-- `tools/__init__.py` — still too large (761 lines), could split further
+- `_json_rpc_shared.py` — shared drain_stderr() utility used by lsp.py and mcp_client.py
 - No semantic search across past sessions (current recall is session-only)
 - Core packages (`core/`, `agents/`, `memory/`) use lazy `__init__.py` with `__getattr__` to
   break circular imports. Adding new public symbols requires updating the `__getattr__` chain.

@@ -125,8 +125,8 @@ from .memory_prune import (  # noqa: F401 — re-exported for backward compatibi
     _build_compressed,
     _summarize_pruned,
     _summarize_pruned_rules,
-    _summarize_pruned_llm,
     _strip_orphaned_tool_results,
+    _strip_orphaned_tool_messages,
     _prune_by_tokens,
 )
 
@@ -699,52 +699,40 @@ class MemoryStore:
             warnings.warn("Failed to query session summary", stacklevel=2)
             return None
 
-    # TODO: MemoryStore.save is ~50 lines — consider splitting compression,
-    #       pruning, summarization, and SQL writes into separate helpers.
-    def save(self, messages: list[dict]) -> list[dict]:
-        """Persist *messages* to the database.
+    # ------------------------------------------------------------------
+    # save() helpers — split from the main method (was ~100 lines).
+    # ------------------------------------------------------------------
 
-        1. Strip system messages and incomplete tool-call sequences.
-        2. Compress old tool results (first-line only).
-        3. Prune by token budget, preserving turn boundaries.
-        4. Summarize pruned messages into a context note.
-        5. Write atomically to SQLite.
+    def _prepare_messages(self, messages: list[dict]) -> tuple[list[dict], list[dict], bool]:
+        """Clean, compress, prune, and summarise messages.  Does NOT write to DB.
 
-        Returns *kept*, the processed list of messages that was written.
-        Callers should replace their in-memory list with this return value
-        to keep their working set in sync with the compacted/pruned store.
+        Returns (kept, pruned, compressed) where:
+          - *kept* is the final message list after all processing
+          - *pruned* is the list of messages that were removed (may be empty)
+          - *compressed* is True if any tool results were compressed in-place
         """
         _clear_message_caches()
         cleaned = _clean_messages(messages)
         cleaned, compressed = _compress_tool_results(cleaned, keep_recent=_COMPRESSION_KEEP_RECENT)
 
-        # Incremental token accounting: only count new messages since
-        # last save.  When compression or pruning occurs, adjust below.
+        # Incremental token accounting: only count new messages since last save.
         new_start = min(self._last_saved_count, len(cleaned))
         new_tokens = sum(_estimate_tokens(m) for m in cleaned[new_start:])
         self._token_count += new_tokens
 
-        # Pruning cooldown: at long conversations, skip pruning most saves
-        # to avoid the O(n) full-rewrite cost.  Only prune when the token
-        # budget is exceeded by a meaningful margin AND the cooldown has
-        # expired.
+        # Decide whether to prune: always prune when over the hard message-count
+        # cap, or when token budget is significantly exceeded and cooldown expired.
         overage_ratio = (self._token_count / self._max_tokens) if self._max_tokens > 0 else 0.0
-        # Always prune when over the hard message count cap (max_messages),
-        # or when token budget is significantly exceeded and cooldown expired.
         over_message_cap = len(cleaned) > self._max_messages
         should_prune = over_message_cap or (
             self._prune_cooldown <= 0
             and overage_ratio > _PRUNE_OVERAGE_BUFFER
         )
+
         if should_prune:
-            kept, pruned = _prune_by_tokens(
-                cleaned, self._max_tokens, self._max_messages,
-            )
-            # Subtract tokens for pruned messages
+            kept, pruned = _prune_by_tokens(cleaned, self._max_tokens, self._max_messages)
             if pruned:
                 self._token_count -= sum(_estimate_tokens(m) for m in pruned)
-            # Inject summary of pruned context
-            if pruned:
                 summary = _summarize_pruned(pruned)
                 if summary:
                     summary_msg = {"role": "user", "content": summary}
@@ -752,23 +740,28 @@ class MemoryStore:
                     self._token_count += _estimate_tokens(summary_msg)
             self._prune_cooldown = _PRUNE_COOLDOWN
         else:
-            pruned = []
+            pruned: list[dict] = []
             kept = cleaned
-            # Decrement cooldown each save
             if self._prune_cooldown > 0:
                 self._prune_cooldown -= 1
 
+        return kept, pruned, compressed
+
+    def _write_messages(
+        self, kept: list[dict], pruned: list[dict], compressed: bool,
+    ) -> list[dict]:
+        """Write *kept* to SQLite with retry logic.  Returns *kept* on success,
+        or *messages* (untouched input) on failure so the caller never loses data.
+        """
         self._ensure_parent()
         last_exc = None
         for attempt in range(_SAVE_MAX_RETRIES):
             try:
                 conn = self._get_conn()
                 conn.execute("BEGIN IMMEDIATE")
-                # Incremental save: if no pruning happened and we only
-                # appended messages, INSERT just the new rows instead of
-                # rewriting everything.
-                need_full_rewrite = (bool(pruned) or compressed
-                                     or len(kept) < self._last_saved_count)
+                need_full_rewrite = (
+                    bool(pruned) or compressed or len(kept) < self._last_saved_count
+                )
                 if need_full_rewrite:
                     conn.execute(_DELETE)
                     conn.executemany(
@@ -783,20 +776,8 @@ class MemoryStore:
                             [(m["role"], json.dumps(m)) for m in new_msgs],
                         )
                 conn.commit()
-                # Increment save counter for periodic VACUUM
                 self._save_count += 1
-                # Trigger VACUUM on full rewrite with freelist bloat OR
-                # periodically every _VACUUM_INTERVAL saves (whichever
-                # comes first).  This keeps the DB compact even when
-                # we avoid full rewrites via the pruning cooldown.
-                should_vacuum = need_full_rewrite or (self._save_count % _VACUUM_INTERVAL == 0)
-                if should_vacuum:
-                    try:
-                        row = conn.execute("PRAGMA freelist_count").fetchone()
-                        if row and row[0] > _VACUUM_FREELIST_THRESHOLD:
-                            self._start_background_vacuum()
-                    except sqlite3.Error:
-                        pass  # VACUUM is opportunistic; ignore failures
+                self._maybe_vacuum(conn, after_full_rewrite=need_full_rewrite)
                 self._last_saved_count = len(kept)
                 return kept
             except sqlite3.Error as exc:
@@ -809,8 +790,6 @@ class MemoryStore:
                 if attempt < _SAVE_MAX_RETRIES - 1:
                     import time
                     time.sleep(_SAVE_RETRY_DELAY * (attempt + 1))
-                    # Force a fresh connection on retry — the old one
-                    # may still be tangled in the failed transaction.
                     if self._conn is not None:
                         try:
                             self._conn.close()
@@ -820,7 +799,35 @@ class MemoryStore:
 
         import sys
         print(f"Warning: memory save failed: {last_exc}", file=sys.stderr)
-        return messages  # return original on failure so caller doesn't lose data
+        return kept  # best-effort: return processed messages so caller can retry
+
+    def _maybe_vacuum(self, conn: sqlite3.Connection, *, after_full_rewrite: bool) -> None:
+        """Trigger background VACUUM when freelist exceeds threshold or periodically."""
+        should_check = after_full_rewrite or (self._save_count % _VACUUM_INTERVAL == 0)
+        if not should_check:
+            return
+        try:
+            row = conn.execute("PRAGMA freelist_count").fetchone()
+            if row and row[0] > _VACUUM_FREELIST_THRESHOLD:
+                self._start_background_vacuum()
+        except sqlite3.Error:
+            pass  # VACUUM is opportunistic; ignore failures
+
+    def save(self, messages: list[dict]) -> list[dict]:
+        """Persist *messages* to the database.
+
+        1. Strip system messages and incomplete tool-call sequences.
+        2. Compress old tool results (content-aware, per-tool-type).
+        3. Prune by token budget, preserving turn boundaries.
+        4. Summarise pruned messages into a context note.
+        5. Write atomically to SQLite (incremental or full rewrite).
+
+        Returns *kept*, the processed list of messages that was written.
+        Callers should replace their in-memory list with this return value
+        to keep their working set in sync with the compacted/pruned store.
+        """
+        kept, pruned, compressed = self._prepare_messages(messages)
+        return self._write_messages(kept, pruned, compressed)
 
     # -----------------------------------------------------------------------
     # Mid-session pruning (triggers at 70% token capacity)
@@ -1052,12 +1059,12 @@ def _row_to_msg(row: tuple[str, str]) -> dict:
 def _clean_messages(messages: list[dict]) -> list[dict]:
     """Strip system messages, orphaned tool results, and incomplete tool-call sequences.
 
-    Uses the canonical ``_strip_orphaned_tool_messages`` from ``api.py``
-    with ``truncate=True`` for persistence: incomplete tool-call sequences
-    are truncated (everything from that point onward is dropped), rather
-    than just removing individual orphaned messages.
+    Uses the canonical ``_strip_orphaned_tool_messages`` from
+    ``memory_prune.py`` with ``truncate=True`` for persistence: incomplete
+    tool-call sequences are truncated (everything from that point onward
+    is dropped), rather than just removing individual orphaned messages.
     """
-    from api import _strip_orphaned_tool_messages
+    from memory.memory_prune import _strip_orphaned_tool_messages
 
     # ---- strip system messages and transient messages ----
     cleaned: list[dict] = [
@@ -1065,7 +1072,7 @@ def _clean_messages(messages: list[dict]) -> list[dict]:
         if m.get("role") != "system" and not m.get("_transient")
     ]
 
-    # ---- strip orphaned tool messages (canonical implementation from api.py) ----
+    # ---- strip orphaned tool messages (canonical implementation from memory_prune) ----
     return _strip_orphaned_tool_messages(cleaned, truncate=True)
 
 

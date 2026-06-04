@@ -130,7 +130,7 @@ def _get_page():
 
 def _close_browser():
     """Close the shared browser and clean up globals. Used by tests."""
-    global _BROWSER, _PAGE, _PLAYWRIGHT_INSTANCE
+    global _BROWSER, _PAGE, _PLAYWRIGHT_INSTANCE, _BROWSER_THREAD_ID
     if _BROWSER is not None:
         _BROWSER.close()
         _BROWSER = None
@@ -141,6 +141,7 @@ def _close_browser():
             pass
         _PLAYWRIGHT_INSTANCE = None
     _PAGE = None
+    _BROWSER_THREAD_ID = None
     # Stop the asyncio event loop Playwright spun up
     try:
         import asyncio

@@ -23,7 +23,6 @@ Submodules:
 
 """
 
-import contextvars
 import json
 import re
 import sqlite3
@@ -52,6 +51,7 @@ if not any(td["function"]["name"] == "remember" for td in TOOLS):
                 "properties": {
                     "topic": {"type": "string", "description": "Short topic label for this learning."},
                     "detail": {"type": "string", "description": "The learning itself."},
+                    "category": {"type": "string", "description": "Optional: category hint. Auto-detected if omitted."},
                 },
                 "required": ["topic", "detail"]
             }
@@ -99,88 +99,21 @@ _TOOL_SUMMARIES: dict[str, callable] = {}
 # Maps tool name -> bool (whether dispatch fn accepts on_output kwarg)
 _DISPATCH_SIGNATURES: dict[str, bool] = {}
 
-# Context keys used across tools and llm
-CTX_SCRATCHPAD_PATH = "scratchpad_path"
-CTX_SCRATCHPAD_UPDATED = "_scratchpad_updated"
-CTX_TURN_HISTORY = "_turn_history"  # dict[int, str] — turn number → summary
-CTX_PLAN_STEPS = "_plan_steps"      # list[str] — from plan tool
-CTX_PLAN_DONE = "_plan_done"        # set[int] — completed step indices
-
-class AgentContext:
-    """Mutable context shared across tools and the agent loop.
-
-    Replaces the old ``_TOOL_CONTEXT`` dict.  Initialized once at startup
-    via ``set_context()``, then read/written by tools and ``llm.py``.
-
-    Attributes (all optional, defaulting to None or empty):
-        scratchpad_path     SQLite DB path for scratchpad persistence
-        exa_api_key         API key for Exa web search
-        workspace           Workspace root directory
-        _scratchpad_updated Flag: scratchpad was updated this turn
-        _turn_history       dict[int, str] — turn number → summary
-        _plan_steps         list[str] — declared plan steps
-        _plan_done          set[int] — completed step indices
-    """
-
-    def __init__(self):
-        self.scratchpad_path: str | None = None
-        self.exa_api_key: str | None = None
-        self.openai_api_key: str | None = None
-        self.workspace: str | None = None
-        self._scratchpad_updated: bool = False
-        self._turn_history: dict[int, str] = {}
-        self._plan_steps: list[str] = []
-        self._plan_done: set[int] = set()
-        self._memory_store = None  # MemoryStore instance (set by init_session)
-        self._failure_pattern_store = None  # FailurePatternStore (set by init_session)
-        self._self_critique = None  # SelfCritique instance (set by init_session)
-        self._subagent_callback: callable | None = None  # (event_type, data) for Electron sub-agent events
-        self._scratchpad_injected: bool = False  # one-time scratchpad context injected this session
-        self._git_diff_injected: bool = False    # one-time git diff context injected this session
-        self._handoff_injected: bool = False     # one-time handoff context injected this session
-        self._state_txt_injected: bool = False   # one-time STATE.txt context injected this session
-        self._session_start_head: str | None = None  # git HEAD hash at session start (for auto-handoff)
-        self._consecutive_read_only_turns: int = 0  # turns of pure reads (reset on write/shell)
-
-
-_TOOL_CONTEXT_VAR: contextvars.ContextVar[AgentContext] = contextvars.ContextVar(
-    "tool_context", default=AgentContext()
+# ---------------------------------------------------------------------------
+# Agent context — extracted to tools/context.py (re-exported for backward compat)
+# ---------------------------------------------------------------------------
+from tools.context import (  # noqa: E402, F401
+    AgentContext,
+    _TOOL_CONTEXT_VAR,
+    _ContextProxy,
+    _TOOL_CONTEXT,
+    CTX_SCRATCHPAD_PATH,
+    CTX_SCRATCHPAD_UPDATED,
+    CTX_TURN_HISTORY,
+    CTX_PLAN_STEPS,
+    CTX_PLAN_DONE,
+    set_context,
 )
-
-
-class _ContextProxy:
-    """Proxy that transparently delegates attribute access to the current
-    ``AgentContext`` inside a ``ContextVar``.  Each thread / async task
-    gets its own copy, so concurrent tool execution (background shells,
-    sub-agents, etc.) cannot cross-contaminate context state."""
-
-    __slots__ = ("_cv",)
-
-    def __init__(self, cv: contextvars.ContextVar):
-        super().__setattr__("_cv", cv)
-
-    def __getattr__(self, name: str):
-        return getattr(self._cv.get(), name)
-
-    def __setattr__(self, name: str, value):
-        if name == "_cv":
-            super().__setattr__(name, value)
-        else:
-            setattr(self._cv.get(), name, value)
-
-    def __delattr__(self, name: str):
-        delattr(self._cv.get(), name)
-
-    @property
-    def __dict__(self):
-        return self._cv.get().__dict__
-
-    def get(self) -> AgentContext:
-        """Explicit accessor for the raw ``AgentContext`` (rarely needed)."""
-        return self._cv.get()
-
-
-_TOOL_CONTEXT = _ContextProxy(_TOOL_CONTEXT_VAR)
 
 # Per-turn cache for read-only tools. Cleared by run_agent_turn each turn.
 # Key: (tool_name, sorted_args_json). Cached read_file/file_info/etc.
@@ -192,10 +125,14 @@ _MODIFIED_FILES_LOCK = threading.Lock()
 
 _TASK_REGISTRY: dict[str, subprocess.Popen] = {}  # background shell task registry
 
-# File reservation system — prevents sub-agent write collisions
-# Maps file_path (relative to workspace) → task_id of owning agent
-_FILE_RESERVATIONS: dict[str, str] = {}
-_FILE_RESERVATIONS_LOCK = threading.Lock()
+# ---------------------------------------------------------------------------
+# File reservation system — extracted to tools/reservations.py
+# ---------------------------------------------------------------------------
+from tools.reservations import (  # noqa: E402, F401
+    reserve_file,
+    release_file,
+    release_all_files,
+)
 
 # Sub-agent runtime registry (lazy init in config.init_session)
 _AGENT_RUNTIME = None  # AgentRuntime — set by init_session
@@ -205,55 +142,6 @@ _CACHEABLE = frozenset({
     "lsp_definition", "lsp_references", "lsp_hover", "lsp_diagnostics",
 })
 _TOOL_TIMEOUT = 120  # P3.1: per-tool execution timeout (seconds)
-
-
-# P1.4: Dispatch mapping for set_context — replaces if/elif chain
-_CTX_DISPATCH = {
-    "scratchpad_path": lambda ctx, v: setattr(ctx, "scratchpad_path", v),
-    "exa_api_key": lambda ctx, v: setattr(ctx, "exa_api_key", v),
-    "openai_api_key": lambda ctx, v: setattr(ctx, "openai_api_key", v),
-    "workspace": lambda ctx, v: setattr(ctx, "workspace", v),
-}
-
-
-def set_context(**kwargs) -> None:
-    """Set module-level context accessible to tool implementations."""
-    ctx = _TOOL_CONTEXT
-    for key, value in kwargs.items():
-        handler = _CTX_DISPATCH.get(key)
-        if handler is not None:
-            handler(ctx, value)
-        else:
-            setattr(ctx, key, value)
-
-
-def reserve_file(path: str, task_id: str) -> tuple[bool, str]:
-    """Try to reserve a file for writing. Returns (ok, message).
-
-    Fails if the file is already reserved by another agent.
-    Call this before write_file/edit_file to prevent collisions.
-    """
-    with _FILE_RESERVATIONS_LOCK:
-        existing = _FILE_RESERVATIONS.get(path)
-        if existing is not None and existing != task_id:
-            return False, f"File '{path}' is reserved by agent '{existing[:8]}'"
-        _FILE_RESERVATIONS[path] = task_id
-    return True, ""
-
-
-def release_file(path: str, task_id: str) -> None:
-    """Release a file reservation. No-op if not reserved by this agent."""
-    with _FILE_RESERVATIONS_LOCK:
-        if _FILE_RESERVATIONS.get(path) == task_id:
-            del _FILE_RESERVATIONS[path]
-
-
-def release_all_files(task_id: str) -> None:
-    """Release all file reservations held by an agent."""
-    with _FILE_RESERVATIONS_LOCK:
-        to_release = [p for p, t in _FILE_RESERVATIONS.items() if t == task_id]
-        for path in to_release:
-            del _FILE_RESERVATIONS[path]
 
 
 def add_modified_file(path: str) -> None:
@@ -285,104 +173,7 @@ def _summarize(name: str):
 
 
 # ---------------------------------------------------------------------------
-# remember — hardcoded core tool (not dependent on workspace files)
-# ---------------------------------------------------------------------------
-
-
-def _remember(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
-    """Store a project-level learning that persists across sessions.
-
-    Saved to the ``project_knowledge`` table via MemoryStore.add_knowledge().
-    Auto-categorizes the learning if no category is provided.
-    Deduplicates by checking for an existing entry before inserting.
-    Returns a summary of what was stored.
-    """
-    import warnings as _warnings
-
-    topic = args.get("topic", "")
-    detail = args.get("detail", "")
-    category = args.get("category", "")
-    if not topic.strip():
-        return ToolResult(
-            success=False,
-            content="Missing required parameter: 'topic' (short topic label for this learning).",
-        )
-    if not detail.strip():
-        return ToolResult(
-            success=False,
-            content="Missing required parameter: 'detail' (the learning itself).",
-        )
-
-    # Auto-categorize if no category provided
-    if not category:
-        try:
-            from tools.failure_learning import suggest_category, KNOWLEDGE_CATEGORIES
-            category = suggest_category(topic, detail)
-            if category not in KNOWLEDGE_CATEGORIES:
-                category = "general"
-        except ImportError:
-            _warnings.warn("failure_learning not available; using category='general'")
-            category = "general"
-
-    memory_store = getattr(_TOOL_CONTEXT, "_memory_store", None)
-    topic_preview = topic[:200] + ("..." if len(topic) > 200 else "")
-    detail_preview = detail[:200] + ("..." if len(detail) > 200 else "")
-
-    if memory_store is not None:
-        # Check for existing entry before inserting (dedup)
-        existing = memory_store.find_knowledge(category, topic)
-        if existing is not None:
-            memory_store.bump_knowledge(existing["id"])
-            return ToolResult(
-                success=True,
-                content=(
-                    f"Already known [{category}]:\\n"
-                    f"  Topic: {topic_preview}\\n"
-                    f"  (bumped hit counter)"
-                ),
-            )
-        try:
-            memory_store.add_knowledge(topic, category=category, detail=detail)
-        except Exception as e:
-            return ToolResult(
-                success=True,
-                content=f"Remember noted, but DB insert failed: {e}",
-            )
-        return ToolResult(
-            success=True,
-            content=(
-                f"Stored in project knowledge [{category}]:\\n"
-                f"  Topic: {topic_preview}\\n"
-                f"  Detail: {detail_preview}"
-            ),
-        )
-
-    # No memory store available — report non-persistent fallback.
-    # The memory store is always set during bootstrap; this path only
-    # triggers if bootstrap failed or set_context was never called.
-    memory_store = getattr(_TOOL_CONTEXT, "_memory_store", None)
-    if memory_store is None:
-        return ToolResult(
-            success=True,
-            content=(
-                "Remember noted (no persistent store — session init may have skipped)"
-            ),
-        )
-
-
-def _remember_summary(args: dict) -> str:
-    topic = args.get("topic", "?")
-    preview = topic[:60]
-    if len(topic) > 60:
-        preview += "\u2026"
-    return f"remember(\"{preview}\")"
-
-
-_TOOL_DISPATCH["remember"] = _remember
-_TOOL_SUMMARIES["remember"] = _remember_summary
-
-# write_session_handoff — auto-generates HANDOFF.md from session state
-def _write_session_handoff(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
+def _write_session_handoff(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
     """Auto-generate and write HANDOFF.md for session continuity."""
     workspace = _TOOL_CONTEXT.workspace
     if not workspace:
@@ -698,13 +489,20 @@ def execute_tool(
             # Clear in-memory counters on success — the agent recovered
             _TOOL_CONTEXT.__dict__.pop("_failure_patterns", None)
 
+    # --- Cache invalidation: clear read cache on any write so subsequent ---
+    # reads within the same turn see fresh content.  Also covers restore_file.
+    _WRITE_TOOLS = frozenset({"write_file", "edit_file", "restore_file"})
+    if result.success and name in _WRITE_TOOLS:
+        _TOOL_CACHE.clear()
+
     # --- Post-edit auto-verification: run LSP diagnostics after file writes ---
-    # Guarded by a module-level lock to prevent concurrent LSP connections
-    # from deadlocking (two threads both trying to connect to the same pylsp).
+    # LSP connections use subprocess pipes + per-connection locks, so they are
+    # thread-safe.  Tool dispatch is synchronous (one tool at a time), so two
+    # LSP calls never race on the same connection.
     if result.success and name in ("write_file", "edit_file"):
         try:
             file_path = args.get("path", "")
-            if file_path and threading.current_thread() is threading.main_thread():
+            if file_path:
                 from tools.lsp import _lsp_diagnostics
                 diag_result = _lsp_diagnostics({"file_path": file_path}, write_gate, read_gate)
                 if diag_result.success and diag_result.content:
@@ -797,3 +595,46 @@ def _mcp_call_summary(args: dict) -> str:
     server = args.get("server", "?")
     tool = args.get("tool", "?")
     return f"mcp_call({server}/{tool})"
+
+
+# ---------------------------------------------------------------------------
+# atexit cleanup — tear down browser, LSP, MCP, background tasks on exit
+# ---------------------------------------------------------------------------
+
+import atexit as _atexit
+
+
+def _cleanup_resources() -> None:
+    """Best-effort cleanup of tool resources on process exit."""
+    # Kill any background shell tasks
+    for tid, proc in list(_TASK_REGISTRY.items()):
+        try:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=2)
+        except Exception:
+            pass
+    _TASK_REGISTRY.clear()
+
+    # Close browser (Playwright)
+    try:
+        from tools.browser_ops import _close_browser as _close_browser_fn
+        _close_browser_fn()
+    except Exception:
+        pass
+
+    # Shutdown LSP connections
+    try:
+        from tools.lsp import shutdown_lsp as _shutdown_lsp_fn
+        _shutdown_lsp_fn()
+    except Exception:
+        pass
+
+    # Shutdown MCP servers
+    try:
+        shutdown_mcp()
+    except Exception:
+        pass
+
+
+_atexit.register(_cleanup_resources)
