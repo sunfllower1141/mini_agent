@@ -56,6 +56,16 @@ function AppShell() {
   const nextLineId = useCallback(() => ++lineIdRef.current, []);
   const [showSettings, setShowSettings] = useState(false);
   const [inputValue, setInputValue] = useState('');
+  const [theme, setTheme] = useState(() => localStorage.getItem('mini_agent_theme') || 'dark');
+
+  const toggleTheme = useCallback(() => {
+    setTheme((prev) => {
+      const next = prev === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('mini_agent_theme', next);
+      document.documentElement.setAttribute('data-theme', next);
+      return next;
+    });
+  }, []);
 
   // Helper to add a line to any log
   const addLine = useCallback((setter) => (line) => {
@@ -342,6 +352,16 @@ function AppShell() {
     }
 
     if (text.startsWith('/')) {
+      // Handle renderer-local commands first
+      const trimmed = text.trim().toLowerCase();
+      if (trimmed === '/theme' || trimmed === '/theme dark' || trimmed === '/theme light') {
+        const target = trimmed.includes('light') ? 'light' : trimmed.includes('dark') ? 'dark' : (theme === 'dark' ? 'light' : 'dark');
+        setTheme(target);
+        localStorage.setItem('mini_agent_theme', target);
+        document.documentElement.setAttribute('data-theme', target);
+        setInputValue('');
+        return;
+      }
       window.miniAgent.command(text);
       setInputValue('');
       // /clear also wipes the renderer's chat & tool logs immediately
@@ -566,6 +586,9 @@ function AppShell() {
         {isLive && (
           <span id="live-indicator" onClick={handleCancel} title="Cancel"> ●</span>
         )}
+        <span id="theme-toggle" onClick={toggleTheme} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}>
+          {theme === 'dark' ? '☀' : '☾'}
+        </span>
         {turnCountVal != null && (
           <span id="turn-counter"> ↻ turn <span id="turn-count">{turnCountVal}</span></span>
         )}

@@ -1,28 +1,56 @@
 /* ==========================================================================
-   style.css — dark theme for mini_agent Electron
+   style.css — themeable styles for mini_agent Electron
    ========================================================================== */
 
 /* ---------------------------------------------------------------------------
-   CSS Variables — Dark monochrome palette
+   CSS Variables — two themes: dark (default) + light
    --------------------------------------------------------------------------- */
 :root {
-  --bg:       #000000;
-  --surface:  #1a1a1a;
-  --border:   #2a2a2a;
-  --accent:   #e0e0e0;
-  --text:     #c8c8c8;
-  --dim:      #666666;
-  --green:    #8cc265;
-  --yellow:   #999999;
-  --red:      #e05555;
-  --thinking: #888888;
-  --pulse:         #888888;
-  --final-thought: #cccccc;
-
   --font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Cascadia Code',
                   'Menlo', 'Consolas', 'DejaVu Sans Mono', monospace;
   --font-size: 13px;
   --line-height: 1.5;
+}
+
+/* Dark theme (default) */
+:root,
+[data-theme="dark"] {
+  --bg:             #000000;
+  --bg-rgb:         0, 0, 0;
+  --surface:        #1a1a1a;
+  --surface-rgb:    26, 26, 26;
+  --border:         #2a2a2a;
+  --accent:         #e0e0e0;
+  --accent-rgb:     224, 224, 224;
+  --text:           #c8c8c8;
+  --dim:            #666666;
+  --green:          #8cc265;
+  --yellow:         #999999;
+  --red:            #e05555;
+  --thinking:       #888888;
+  --pulse:          #888888;
+  --final-thought:  #cccccc;
+  --overlay:        #15121f;
+}
+
+/* Light theme */
+[data-theme="light"] {
+  --bg:             #ffffff;
+  --bg-rgb:         255, 255, 255;
+  --surface:        #f0f0f0;
+  --surface-rgb:    240, 240, 240;
+  --border:         #d0d0d0;
+  --accent:         #1a1a1a;
+  --accent-rgb:     0, 0, 0;
+  --text:           #333333;
+  --dim:            #999999;
+  --green:          #4a8c2a;
+  --yellow:         #8a7a2a;
+  --red:            #c03030;
+  --thinking:       #777777;
+  --pulse:          #777777;
+  --final-thought:  #222222;
+  --overlay:        #f6f6f6;
 }
 
 /* ---------------------------------------------------------------------------
@@ -219,7 +247,7 @@ html, body {
   min-height: 0;
 }
 
-/* ── React Flow custom node cards ───────────────────────────────── */
+/* ── React Flow custom node cards ─────────────────────────── */
 .agent-rf-node {
   display: flex;
   align-items: center;
@@ -237,7 +265,7 @@ html, body {
   position: relative;
 }
 
-/* React Flow handles — dark theme theming */
+/* React Flow handles — theme-aware */
 .agent-rf-node .react-flow__handle {
   width: 8px;
   height: 8px;
@@ -260,7 +288,7 @@ html, body {
   justify-content: center;
   background: rgba(30, 30, 46, 0.95);
   border: 2px solid var(--accent);
-  box-shadow: 0 0 12px rgba(255, 255, 255, 0.08);
+  box-shadow: 0 0 12px rgb(var(--accent-rgb) / 0.08);
   font-weight: 700;
   font-size: 12px;
 }
@@ -275,7 +303,7 @@ html, body {
 .agent-rf-node--sub:hover {
   border-color: var(--accent);
   background: rgba(69, 71, 90, 0.95);
-  box-shadow: 0 0 8px rgba(255, 255, 255, 0.06);
+  box-shadow: 0 0 8px rgb(var(--accent-rgb) / 0.06);
 }
 
 .agent-rf-node__dot {
@@ -352,18 +380,18 @@ html, body {
   font-size: 12px;
 }
 
-/* ─── Tooltip ─────────────────────────────────────────────────────────── */
+/* ─── Tooltip ─────────────────────────────────────────────────── */
 .agent-tree-tooltip {
   position: absolute;
   z-index: 50;
   width: 300px;
   max-height: 60vh;
   overflow-y: auto;
-  background: #15121f;
+  background: var(--overlay);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px 12px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 8px 24px rgb(var(--bg-rgb) / 0.85);
   pointer-events: none;
   animation: tooltipFadeIn 0.15s ease-out;
 }
@@ -452,8 +480,8 @@ html, body {
 
 #input-frame.drag-over {
   border-color: var(--accent);
-  background: rgba(255, 255, 255, 0.04);
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+  background: rgb(var(--accent-rgb) / 0.04);
+  box-shadow: 0 0 0 1px rgb(var(--accent-rgb) / 0.08);
 }
 
 #input-frame .frame-left,
@@ -527,6 +555,19 @@ html, body {
 }
 
 /* ---------------------------------------------------------------------------
+   Theme toggle
+   --------------------------------------------------------------------------- */
+#theme-toggle {
+  cursor: pointer;
+  user-select: none;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+}
+#theme-toggle:hover {
+  opacity: 1;
+}
+
+/* ---------------------------------------------------------------------------
    Session picker dropdown
    --------------------------------------------------------------------------- */
 .session-picker {
@@ -545,14 +586,14 @@ html, body {
   bottom: 100%;
   right: 0;
   margin-bottom: 6px;
-  background: #15121f;
+  background: var(--overlay);
   border: 1px solid var(--border);
   border-radius: 8px;
   min-width: 200px;
   max-height: 280px;
   overflow-y: auto;
   z-index: 100;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 4px 16px rgb(var(--bg-rgb) / 0.85);
   padding: 4px 0;
 }
 
@@ -567,7 +608,7 @@ html, body {
   justify-content: space-between;
 }
 .session-dropdown-item:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgb(var(--accent-rgb) / 0.06);
 }
 .session-dropdown-item.session-current {
   color: var(--accent);
@@ -605,7 +646,7 @@ html, body {
 .session-delete-btn:hover {
   opacity: 1 !important;
   color: var(--red);
-  background: rgba(255, 255, 255, 0.06);
+  background: rgb(var(--accent-rgb) / 0.06);
 }
 
 .session-dropdown-divider {
@@ -680,7 +721,7 @@ html, body {
   padding: 0.75em 1em;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: rgba(0, 0, 0, 0.25);
+  background: rgb(var(--bg-rgb) / 0.25);
   overflow-x: auto;
   font-size: 0.85em;
   line-height: 1.5;
@@ -773,7 +814,7 @@ html, body {
   color: var(--text);
 }
 .msg-agent tr:nth-child(even) td {
-  background: rgba(255, 255, 255, 0.02);
+  background: rgb(var(--accent-rgb) / 0.03);
 }
 .msg-agent code {
   background: var(--surface);
@@ -832,7 +873,7 @@ html, body {
   white-space: normal;
 }
 .md-line code {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgb(var(--accent-rgb) / 0.06);
   padding: 1px 4px;
   border-radius: 2px;
   font-size: 12px;
@@ -897,6 +938,7 @@ html, body {
   from { opacity: 0; transform: translateY(4px); filter: blur(1px); }
   to   { opacity: 1; transform: translateY(0);    filter: blur(0); }
 }
+
 .thought-chunk {
   animation: thoughtPop 0.35s ease-out;
 }
@@ -942,7 +984,7 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.85);
+  background: rgb(var(--bg-rgb) / 0.85);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
 }
@@ -956,7 +998,7 @@ html, body {
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 32px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 8px 32px rgb(var(--bg-rgb) / 0.85);
 }
 
 #settings-header {
@@ -1019,7 +1061,38 @@ html, body {
 .provider-btn.active {
   border-color: var(--accent);
   color: var(--accent);
-  background: rgba(255, 255, 255, 0.04);
+  background: rgb(var(--accent-rgb) / 0.04);
+}
+
+/* --- Theme selector --- */
+
+.theme-selector {
+  display: flex;
+  gap: 6px;
+}
+
+.theme-btn {
+  flex: 1;
+  padding: 10px 12px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--dim);
+  font-family: var(--font-family);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.theme-btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.theme-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgb(var(--accent-rgb) / 0.04);
 }
 
 /* --- API key input --- */
