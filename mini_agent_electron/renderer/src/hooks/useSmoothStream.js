@@ -2,7 +2,9 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 
 /**
  * useSmoothStream — buffer incoming text chunks and animate them
- * character-by-character at a smooth, consistent rate via requestAnimationFrame.
+ * with a smooth exponential catch-up at ~60 fps.  Each tick advances
+ * by ceil(behind / 4), so the animation is fast when far behind and
+ * slows naturally as it catches up — no jarring discrete thresholds.
  *
  * Returns:
  *   displayedText  — current visible text (animating)
@@ -10,43 +12,52 @@ import { useState, useEffect, useRef, useCallback } from 'react';
  *   reset          — clear the stream
  *   flush          — instantly display all buffered text
  */
-export default function useSmoothStream({ speed = 8 } = {}) {
+export default function useSmoothStream() {
   const [displayedText, setDisplayedText] = useState('');
   const fullRef = useRef('');
   const indexRef = useRef(0);
-  const rafRef = useRef(null);
-  const lastRef = useRef(0);
+  const timerRef = useRef(null);
 
-  const animate = useCallback((time) => {
+  // ~60 fps — smooth to the eye
+  const TICK_MS = 16;
+
+  // Use a ref to hold the latest tick function so addChunk can always
+  // schedule the current version without stale-closure issues.
+  const tickRef = useRef(null);
+
+  tickRef.current = () => {
     const full = fullRef.current;
-    if (indexRef.current < full.length) {
-      if (time - lastRef.current > speed) {
-        // Advance by 1-3 chars depending on how far behind we are
-        const behind = full.length - indexRef.current;
-        const step = behind > 100 ? 6 : behind > 30 ? 3 : 1;
-        indexRef.current = Math.min(indexRef.current + step, full.length);
-        setDisplayedText(full.slice(0, indexRef.current));
-        lastRef.current = time;
-      }
-      rafRef.current = requestAnimationFrame(animate);
-    } else {
-      rafRef.current = null;
+    const behind = full.length - indexRef.current;
+    if (behind <= 0) {
+      timerRef.current = null;
+      return;
     }
-  }, [speed]);
+    // Smooth exponential catch-up: advance by ceil(behind / 4).
+    // Far behind → big jumps.  Close → 1 char per tick.
+    const step = Math.max(1, Math.ceil(behind / 4));
+    indexRef.current = Math.min(indexRef.current + step, full.length);
+    setDisplayedText(full.slice(0, indexRef.current));
+
+    // Schedule next tick if still behind
+    if (indexRef.current < full.length) {
+      timerRef.current = setTimeout(tickRef.current, TICK_MS);
+    } else {
+      timerRef.current = null;
+    }
+  };
 
   const addChunk = useCallback((text) => {
     if (!text) return;
     fullRef.current += text;
-    if (!rafRef.current) {
-      lastRef.current = performance.now();
-      rafRef.current = requestAnimationFrame(animate);
+    if (!timerRef.current) {
+      timerRef.current = setTimeout(tickRef.current, TICK_MS);
     }
-  }, [animate]);
+  }, []);
 
   const reset = useCallback(() => {
-    if (rafRef.current) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
     }
     fullRef.current = '';
     indexRef.current = 0;
@@ -54,21 +65,21 @@ export default function useSmoothStream({ speed = 8 } = {}) {
   }, []);
 
   const flush = useCallback(() => {
-    if (rafRef.current) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
     }
     indexRef.current = fullRef.current.length;
     setDisplayedText(fullRef.current);
     return fullRef.current;
   }, []);
 
-  // Cleanup RAF on unmount to avoid setState on unmounted component
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (rafRef.current) {
-        cancelAnimationFrame(rafRef.current);
-        rafRef.current = null;
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
       }
     };
   }, []);

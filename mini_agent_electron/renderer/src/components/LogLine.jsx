@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import CodeBlock from './CodeBlock';
@@ -28,8 +29,7 @@ function escapeHtml(text) {
     .replace(/"/g, '&quot;');
 }
 
-
-export default function LogLine({ line }) {
+const LogLine = memo(function LogLine({ line }) {
   // React component — render directly
   if (line.component) {
     return <div className={line.cls || ''}>{line.component}</div>;
@@ -64,4 +64,6 @@ export default function LogLine({ line }) {
 
   // Plain text — HTML-escaped
   return <div className={line.cls || ''}>{escapeHtml(line.text)}</div>;
-}
+});
+
+export default LogLine;

@@ -1,6 +1,4 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import useSmoothStream from './hooks/useSmoothStream';
 import LogLine from './components/LogLine';
 import CodeBlock from './components/CodeBlock';
@@ -8,6 +6,8 @@ import LogPanel from './components/LogPanel';
 import AgentTree from './components/AgentTree';
 import RoundedFrame from './components/RoundedFrame';
 import CharStream from './components/CharStream';
+import DeferredMarkdown from './components/DeferredMarkdown';
+import StreamingMessage from './components/StreamingMessage';
 import ErrorBoundary from './components/ErrorBoundary';
 import SessionPicker from './components/SessionPicker';
 import SettingsPanel from './components/SettingsPanel';
@@ -16,21 +16,6 @@ import SettingsPanel from './components/SettingsPanel';
 // State arrays still hold full history; only the visible slice hits the DOM.
 const MAX_RENDERED_CHAT_LINES = 400;
 const MAX_RENDERED_TOOL_LINES = 400;
-
-
-// Shared components map for ReactMarkdown — wires CodeBlock for syntax highlighting.
-// Used in the thinking pane (left side) where syntax highlighting is desired.
-const markdownComponents = {
-  pre({ children }) {
-    return <>{children}</>;
-  },
-  code({ className, children, inline, ...props }) {
-    const match = /language-(\w+)/.exec(className || '');
-    const lang = match ? match[1] : undefined;
-    const code = String(children).replace(/\n$/, '');
-    return <CodeBlock code={code} language={lang} inline={inline} />;
-  },
-};
 
 
 // ---------------------------------------------------------------------------
@@ -67,6 +52,8 @@ function AppShell() {
   const inThinkingRef = useRef(false);
   const submitTimeoutRef = useRef(null);
   const toolOutputStack = useRef([]); // stack of buffers for parallel tool calls
+  const lineIdRef = useRef(0); // monotonically increasing ID for stable React keys
+  const nextLineId = useCallback(() => ++lineIdRef.current, []);
   const [showSettings, setShowSettings] = useState(false);
   const [inputValue, setInputValue] = useState('');
 
@@ -206,9 +193,9 @@ function AppShell() {
         setChatLines((prev) => {
           const updated = [...prev];
           if (updated.length > 0 && updated[updated.length - 1].cls === 'msg-agent-pending') {
-            updated[updated.length - 1] = { text: agentText, cls: 'msg-agent', markdown: true };
+            updated[updated.length - 1] = { id: updated[updated.length - 1].id, text: agentText, cls: 'msg-agent', markdown: true };
           } else {
-            updated.push({ text: agentText, cls: 'msg-agent', markdown: true });
+            updated.push({ id: nextLineId(), text: agentText, cls: 'msg-agent', markdown: true });
           }
           return updated;
         });
@@ -228,7 +215,7 @@ function AppShell() {
       clearTimeout(submitTimeoutRef.current);
       chatStream.flush();
       chatStream.reset();
-      setChatLines((prev) => [...prev, { text: `Error: ${data.message}`, cls: 'msg-error' }]);
+      setChatLines((prev) => [...prev, { id: nextLineId(), text: `Error: ${data.message}`, cls: 'msg-error' }]);
       setIsLive(false);
       setInputDisabled(false);
       inputRef.current?.focus();
@@ -237,7 +224,7 @@ function AppShell() {
     unsubs.push(api.on('backend:response', (data) => {
       if (data.lines && data.target === 'chat') {
         for (const line of data.lines) {
-          setChatLines((prev) => [...prev, { text: line, cls: 'msg-status' }]);
+          setChatLines((prev) => [...prev, { id: nextLineId(), text: line, cls: 'msg-status' }]);
         }
       }
     }));
@@ -344,7 +331,7 @@ function AppShell() {
         setSubagentData({});
         chatStream.reset();
         thinking.reset();
-        setThinkingOutput('');
+        setThinkingBlocks([]);
         setIsLive(false);
         setInputDisabled(false);
         setInputValue('');
@@ -364,17 +351,17 @@ function AppShell() {
         setSubagentData({});
         chatStream.reset();
         thinking.reset();
-        setThinkingOutput('');
+        setThinkingBlocks([]);
       }
       return;
     }
 
     setChatLines((prev) => [
       ...prev,
-      ...(prev.length > 0 ? [{ text: '', cls: 'msg-separator' }] : []),
-      { text, cls: 'msg-user' },
-      { text: '', cls: 'msg-separator' },
-      { text: '', cls: 'msg-agent-pending' },
+      ...(prev.length > 0 ? [{ id: nextLineId(), text: '', cls: 'msg-separator' }] : []),
+      { id: nextLineId(), text, cls: 'msg-user' },
+      { id: nextLineId(), text: '', cls: 'msg-separator' },
+      { id: nextLineId(), text: '', cls: 'msg-agent-pending' },
     ]);
     chatStream.reset();
 
@@ -455,13 +442,13 @@ function AppShell() {
     inThinkingRef.current = false;
     const agentText = chatStream.flush();
     const thinkText = thinking.flush();
-    if (thinkText) setThinkingOutput(thinkText);
+    if (thinkText) setThinkingBlocks((prev) => [...prev, thinkText]);
     thinking.reset();
     if (agentText) {
       setChatLines((prev) => {
         const updated = [...prev];
         if (updated.length > 0 && updated[updated.length - 1].cls === 'msg-agent-pending') {
-          updated[updated.length - 1] = { text: agentText, cls: 'msg-agent' };
+          updated[updated.length - 1] = { id: updated[updated.length - 1].id, text: agentText, cls: 'msg-agent' };
         }
         return updated;
       });
@@ -513,8 +500,7 @@ function AppShell() {
               )}
               {!thinking.displayedText && thinkingBlocks.map((block, i) => (
                 <div key={i} className="msg-thinking">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}
->{block}</ReactMarkdown>
+                  <DeferredMarkdown text={block} markdown={false} />
                 </div>
               ))}
             </div>
@@ -529,27 +515,19 @@ function AppShell() {
         {/* Right pane: Chat */}
         <RoundedFrame id="right-pane" title="Chat">
           <div id="chat-log" ref={chatLogRef} className="log scrollable text">
-            {chatLines.slice(-MAX_RENDERED_CHAT_LINES).map((line, i) => {
+            {chatLines.slice(-MAX_RENDERED_CHAT_LINES).map((line) => {
               if (line.cls === 'msg-agent') {
                 return (
-                  <div key={`line-${i}`} className="msg-agent">
-                    {line.text.trim() && (
-                      <ReactMarkdown key={`md-${i}`} remarkPlugins={[remarkGfm]}>
-                        {line.text}
-                      </ReactMarkdown>
-                    )}
+                  <div key={line.id} className="msg-agent">
+                    <DeferredMarkdown text={line.text} />
                   </div>
                 );
               }
-              return <LogLine key={`line-${i}`} line={line} />;
+              return <LogLine key={line.id} line={line} />;
             })}
             {chatStream.displayedText && (
               <div className="msg-agent">
-                {chatStream.displayedText.trim() && (
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {chatStream.displayedText}
-                  </ReactMarkdown>
-                )}
+                <StreamingMessage text={chatStream.displayedText} />
               </div>
             )}
           </div>

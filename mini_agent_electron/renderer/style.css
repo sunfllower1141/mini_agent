@@ -180,6 +180,8 @@ html, body {
   word-break: break-word;
   min-height: 0;
   padding: 2px 0;
+  /* Contain paint/layout so React re-renders don't trigger full-page paints */
+  contain: layout style paint;
 }
 
 .log {
@@ -425,6 +427,9 @@ html, body {
 .thinking-log {
   max-height: 12em;
   flex-shrink: 0;
+  overflow-y: auto;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 /* Scrollable fills remaining space */
@@ -736,18 +741,6 @@ html, body {
   user-select: none;
 }
 
-/* Character-level fade-in for smooth streaming */
-.stream-char {
-  animation: charFadeIn 0.35s ease-out;
-}
-@keyframes charFadeIn {
-  from { opacity: 0; filter: blur(2px); }
-  to   { opacity: 1; filter: blur(0); }
-}
-/* First char of a new block gets a slightly longer intro */
-.stream-char:first-child {
-  animation-duration: 0.5s;
-}
 .msg-tool-ok  { color: var(--dim); font-size: 0.75em; }
 .msg-tool-err { color: var(--red); font-size: 0.75em; }
 .msg-status   { color: var(--dim); font-style: italic; }

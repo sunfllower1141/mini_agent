@@ -221,12 +221,9 @@ function AgentTreeInner({ agents }) {
         edges: elkEdges,
       };
 
-      console.log('[AgentTree] ELK input graph:', JSON.stringify(graph));
-
       try {
         const layoutedGraph = await elk.layout(graph);
         if (cancelled) return;
-        console.log('[AgentTree] ELK output:', JSON.stringify(layoutedGraph));
 
         // 3. Map ELK nodes → ReactFlow nodes
         const layChildren = layoutedGraph.children || [];
@@ -267,9 +264,6 @@ function AgentTreeInner({ agents }) {
             },
           };
         });
-
-        console.log('[AgentTree] newNodes:', newNodes.length, JSON.stringify(newNodes.map(n => ({ id: n.id, x: n.position.x, y: n.position.y }))));
-        console.log('[AgentTree] newEdges:', newEdges.length, JSON.stringify(newEdges.map(e => ({ id: e.id, source: e.source, target: e.target }))));
 
         setNodes(newNodes);
         setEdges(newEdges);
