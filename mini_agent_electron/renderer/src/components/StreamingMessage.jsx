@@ -3,58 +3,64 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 /**
- * Renders streaming text with markdown, but throttles parses to ~80ms
- * intervals. ReactMarkdown is expensive — parsing every tick from
- * useSmoothStream burns CPU for zero visual gain. Humans can't
- * perceive markdown formatting changes at >12 fps.
+ * Renders streaming text with markdown.  ReactMarkdown is expensive, so we
+ * throttle re-parses to ~80ms intervals.  Key insight: we ALWAYS render
+ * ReactMarkdown — we just update the text fed to it at a lower rate.
+ * Toggling between <pre> and ReactMarkdown causes visible flicker because
+ * the DOM structure changes (block → inline reflow).
  *
- * The raw text is always shown; markdown parsing catches up at ~12 fps.
+ * The markdown view lags up to 80ms behind the incoming text, which is
+ * imperceptible.  When streaming stops, a final flush catches it up.
  */
 const StreamingMessage = memo(function StreamingMessage({ text }) {
-  const [parsedAt, setParsedAt] = useState('');
-  const lastParseRef = useRef(0);
+  const [throttled, setThrottled] = useState('');
+  const lastUpdateRef = useRef(0);
+  const pendingRef = useRef(null);
   const timerRef = useRef(null);
 
   useEffect(() => {
     const now = performance.now();
-    const elapsed = now - lastParseRef.current;
+    const elapsed = now - lastUpdateRef.current;
 
     if (elapsed >= 80) {
-      // Enough time since last parse — update immediately
-      lastParseRef.current = now;
-      setParsedAt(text);
+      lastUpdateRef.current = now;
+      setThrottled(text);
     } else {
-      // Schedule an update after the remaining throttle window
-      const remaining = 80 - elapsed;
-      timerRef.current = setTimeout(() => {
-        lastParseRef.current = performance.now();
-        setParsedAt(text);
-      }, remaining);
+      // Store the latest text but don't render yet
+      pendingRef.current = text;
+      if (!timerRef.current) {
+        const remaining = 80 - elapsed;
+        timerRef.current = setTimeout(() => {
+          timerRef.current = null;
+          lastUpdateRef.current = performance.now();
+          if (pendingRef.current !== null) {
+            setThrottled(pendingRef.current);
+            pendingRef.current = null;
+          }
+        }, remaining);
+      }
     }
 
     return () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
+      // Don't clear the timer here — we want the deferred update to fire.
+      // The timer cleans itself up.
     };
   }, [text]);
 
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
   if (!text || !text.trim()) return null;
 
-  // Show raw <pre> text in the fast path; ReactMarkdown only renders when
-  // parsedAt has caught up (throttled to ~12 fps by the effect above).
-  if (parsedAt !== text) {
-    return (
-      <pre style={{ whiteSpace: 'pre-wrap', margin: 0, fontFamily: 'inherit', fontSize: 'inherit' }}>
-        {text}
-      </pre>
-    );
-  }
-
+  // Always render ReactMarkdown with the throttled text.
+  // When streaming ends, throttled === text and we show the final version.
   return (
     <ReactMarkdown remarkPlugins={[remarkGfm]}>
-      {parsedAt}
+      {throttled || text}
     </ReactMarkdown>
   );
 });
