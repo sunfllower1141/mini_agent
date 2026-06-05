@@ -17,6 +17,25 @@ import SettingsPanel from './components/SettingsPanel';
 const MAX_RENDERED_CHAT_LINES = 400;
 const MAX_RENDERED_TOOL_LINES = 400;
 
+// Theme registry — name, data-theme value, status-bar icon
+const THEMES = [
+  { name: 'Dark',         id: 'dark',         icon: '☾' },
+  { name: 'Light',        id: 'light',        icon: '☀' },
+  { name: 'Dracula',      id: 'dracula',      icon: '🧛' },
+  { name: 'Nord',         id: 'nord',         icon: '❄️' },
+  { name: 'Catppuccin',   id: 'catppuccin',   icon: '🐱' },
+  { name: 'Rosé Pine',    id: 'rose-pine',    icon: '🌹' },
+  { name: 'Gruvbox',      id: 'gruvbox',      icon: '🪵' },
+  { name: 'Solarized',    id: 'solarized',    icon: '☯️' },
+  { name: 'Tokyo Night',  id: 'tokyo-night',  icon: '🌆' },
+  { name: 'Monokai',      id: 'monokai',      icon: '🎨' },
+];
+
+function setThemeDom(id) {
+  document.documentElement.setAttribute('data-theme', id);
+  localStorage.setItem('mini_agent_theme', id);
+}
+
 
 // ---------------------------------------------------------------------------
 // App
@@ -57,15 +76,34 @@ function AppShell() {
   const [showSettings, setShowSettings] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const [theme, setTheme] = useState(() => localStorage.getItem('mini_agent_theme') || 'dark');
+  const [themePickerOpen, setThemePickerOpen] = useState(false);
 
-  const toggleTheme = useCallback(() => {
-    setTheme((prev) => {
-      const next = prev === 'dark' ? 'light' : 'dark';
-      localStorage.setItem('mini_agent_theme', next);
-      document.documentElement.setAttribute('data-theme', next);
-      return next;
-    });
+  const themeIndex = THEMES.findIndex((t) => t.id === theme);
+  const themeEntry = THEMES[themeIndex] || THEMES[0];
+
+  const applyTheme = useCallback((id) => {
+    setTheme(id);
+    setThemeDom(id);
+    setThemePickerOpen(false);
   }, []);
+
+  // Cycle to next theme
+  const cycleTheme = useCallback(() => {
+    const nextIndex = (themeIndex + 1) % THEMES.length;
+    applyTheme(THEMES[nextIndex].id);
+  }, [themeIndex, applyTheme]);
+
+  // Close theme picker on outside click
+  useEffect(() => {
+    if (!themePickerOpen) return;
+    const close = (e) => {
+      if (!e.target.closest('.theme-dropdown') && !e.target.closest('#theme-toggle')) {
+        setThemePickerOpen(false);
+      }
+    };
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [themePickerOpen]);
 
   // Helper to add a line to any log
   const addLine = useCallback((setter) => (line) => {
@@ -354,11 +392,21 @@ function AppShell() {
     if (text.startsWith('/')) {
       // Handle renderer-local commands first
       const trimmed = text.trim().toLowerCase();
-      if (trimmed === '/theme' || trimmed === '/theme dark' || trimmed === '/theme light') {
-        const target = trimmed.includes('light') ? 'light' : trimmed.includes('dark') ? 'dark' : (theme === 'dark' ? 'light' : 'dark');
-        setTheme(target);
-        localStorage.setItem('mini_agent_theme', target);
-        document.documentElement.setAttribute('data-theme', target);
+      if (trimmed.startsWith('/theme')) {
+        const arg = trimmed.replace('/theme', '').trim();
+        if (arg) {
+          // `/theme <name>` — fuzzy match against theme id or name
+          const match = THEMES.find((t) =>
+            t.id.toLowerCase() === arg.toLowerCase() ||
+            t.name.toLowerCase() === arg.toLowerCase()
+          );
+          if (match) {
+            applyTheme(match.id);
+          }
+        } else {
+          // `/theme` with no arg — cycle
+          cycleTheme();
+        }
         setInputValue('');
         return;
       }
@@ -586,9 +634,24 @@ function AppShell() {
         {isLive && (
           <span id="live-indicator" onClick={handleCancel} title="Cancel"> ●</span>
         )}
-        <span id="theme-toggle" onClick={toggleTheme} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}>
-          {theme === 'dark' ? '☀' : '☾'}
+        <span id="theme-toggle" onClick={() => setThemePickerOpen((p) => !p)} title={`Theme: ${themeEntry.name}`}>
+          {themeEntry.icon}
         </span>
+        {themePickerOpen && (
+          <div className="theme-dropdown">
+            {THEMES.map((t) => (
+              <div
+                key={t.id}
+                className={`theme-dropdown-item${t.id === theme ? ' theme-current' : ''}`}
+                onClick={() => applyTheme(t.id)}
+              >
+                <span className="theme-icon">{t.icon}</span>
+                <span className="theme-name">{t.name}</span>
+                {t.id === theme && <span className="theme-check">✓</span>}
+              </div>
+            ))}
+          </div>
+        )}
         {turnCountVal != null && (
           <span id="turn-counter"> ↻ turn <span id="turn-count">{turnCountVal}</span></span>
         )}

@@ -53,6 +53,166 @@
   --overlay:        #f6f6f6;
 }
 
+/* ── Dracula ─────────────────────────────────────────────────────────────── */
+[data-theme="dracula"] {
+  --bg:             #282a36;
+  --bg-rgb:         40, 42, 54;
+  --surface:        #1e1f29;
+  --surface-rgb:    30, 31, 41;
+  --border:         #44475a;
+  --accent:         #bd93f9;
+  --accent-rgb:     189, 147, 249;
+  --text:           #f8f8f2;
+  --dim:            #6272a4;
+  --green:          #50fa7b;
+  --yellow:         #f1fa8c;
+  --red:            #ff5555;
+  --thinking:       #6272a4;
+  --pulse:          #bd93f9;
+  --final-thought:  #f8f8f2;
+  --overlay:        #21222c;
+}
+
+/* ── Nord ────────────────────────────────────────────────────────────────── */
+[data-theme="nord"] {
+  --bg:             #2e3440;
+  --bg-rgb:         46, 52, 64;
+  --surface:        #3b4252;
+  --surface-rgb:    59, 66, 82;
+  --border:         #4c566a;
+  --accent:         #88c0d0;
+  --accent-rgb:     136, 192, 208;
+  --text:           #d8dee9;
+  --dim:            #4c566a;
+  --green:          #a3be8c;
+  --yellow:         #ebcb8b;
+  --red:            #bf616a;
+  --thinking:       #81a1c1;
+  --pulse:          #88c0d0;
+  --final-thought:  #eceff4;
+  --overlay:        #2e3440;
+}
+
+/* ── Catppuccin Mocha ───────────────────────────────────────────────────── */
+[data-theme="catppuccin"] {
+  --bg:             #1e1e2e;
+  --bg-rgb:         30, 30, 46;
+  --surface:        #181825;
+  --surface-rgb:    24, 24, 37;
+  --border:         #313244;
+  --accent:         #cba6f7;
+  --accent-rgb:     203, 166, 247;
+  --text:           #cdd6f4;
+  --dim:            #6c7086;
+  --green:          #a6e3a1;
+  --yellow:         #f9e2af;
+  --red:            #f38ba8;
+  --thinking:       #89b4fa;
+  --pulse:          #cba6f7;
+  --final-thought:  #cdd6f4;
+  --overlay:        #1e1e2e;
+}
+
+/* ── Rosé Pine ───────────────────────────────────────────────────────────── */
+[data-theme="rose-pine"] {
+  --bg:             #191724;
+  --bg-rgb:         25, 23, 36;
+  --surface:        #1f1d2e;
+  --surface-rgb:    31, 29, 46;
+  --border:         #26233a;
+  --accent:         #eb6f92;
+  --accent-rgb:     235, 111, 146;
+  --text:           #e0def4;
+  --dim:            #6e6a86;
+  --green:          #9ccfd8;
+  --yellow:         #f6c177;
+  --red:            #eb6f92;
+  --thinking:       #908caa;
+  --pulse:          #c4a7e7;
+  --final-thought:  #e0def4;
+  --overlay:        #191724;
+}
+
+/* ── Gruvbox Dark ────────────────────────────────────────────────────────── */
+[data-theme="gruvbox"] {
+  --bg:             #282828;
+  --bg-rgb:         40, 40, 40;
+  --surface:        #1d2021;
+  --surface-rgb:    29, 32, 33;
+  --border:         #504945;
+  --accent:         #d79921;
+  --accent-rgb:     215, 153, 33;
+  --text:           #ebdbb2;
+  --dim:            #7c6f64;
+  --green:          #98971a;
+  --yellow:         #d79921;
+  --red:            #cc241d;
+  --thinking:       #928374;
+  --pulse:          #d79921;
+  --final-thought:  #ebdbb2;
+  --overlay:        #282828;
+}
+
+/* ── Solarized Dark ──────────────────────────────────────────────────────── */
+[data-theme="solarized"] {
+  --bg:             #002b36;
+  --bg-rgb:         0, 43, 54;
+  --surface:        #073642;
+  --surface-rgb:    7, 54, 66;
+  --border:         #586e75;
+  --accent:         #268bd2;
+  --accent-rgb:     38, 139, 210;
+  --text:           #839496;
+  --dim:            #586e75;
+  --green:          #859900;
+  --yellow:         #b58900;
+  --red:            #dc322f;
+  --thinking:       #657b83;
+  --pulse:          #268bd2;
+  --final-thought:  #93a1a1;
+  --overlay:        #002b36;
+}
+
+/* ── Tokyo Night ─────────────────────────────────────────────────────────── */
+[data-theme="tokyo-night"] {
+  --bg:             #1a1b26;
+  --bg-rgb:         26, 27, 38;
+  --surface:        #16161e;
+  --surface-rgb:    22, 22, 30;
+  --border:         #2f3346;
+  --accent:         #7aa2f7;
+  --accent-rgb:     122, 162, 247;
+  --text:           #c0caf5;
+  --dim:            #565f89;
+  --green:          #9ece6a;
+  --yellow:         #e0af68;
+  --red:            #f7768e;
+  --thinking:       #565f89;
+  --pulse:          #7aa2f7;
+  --final-thought:  #c0caf5;
+  --overlay:        #1a1b26;
+}
+
+/* ── Monokai ─────────────────────────────────────────────────────────────── */
+[data-theme="monokai"] {
+  --bg:             #272822;
+  --bg-rgb:         39, 40, 34;
+  --surface:        #1e1f1c;
+  --surface-rgb:    30, 31, 28;
+  --border:         #3e3d32;
+  --accent:         #a6e22e;
+  --accent-rgb:     166, 226, 46;
+  --text:           #f8f8f2;
+  --dim:            #75715e;
+  --green:          #a6e22e;
+  --yellow:         #e6db74;
+  --red:            #f92672;
+  --thinking:       #75715e;
+  --pulse:          #a6e22e;
+  --final-thought:  #f8f8f2;
+  --overlay:        #272822;
+}
+
 /* ---------------------------------------------------------------------------
    Reset & Base
    --------------------------------------------------------------------------- */
@@ -562,9 +722,63 @@ html, body {
   user-select: none;
   opacity: 0.6;
   transition: opacity 0.15s;
+  position: relative;
 }
 #theme-toggle:hover {
   opacity: 1;
+}
+
+/* Theme picker dropdown */
+.theme-dropdown {
+  position: absolute;
+  bottom: 100%;
+  right: 0;
+  margin-bottom: 6px;
+  background: var(--overlay);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-width: 190px;
+  max-height: 340px;
+  overflow-y: auto;
+  z-index: 100;
+  box-shadow: 0 4px 16px rgb(var(--bg-rgb) / 0.9);
+  padding: 4px 0;
+  animation: tooltipFadeIn 0.12s ease-out;
+}
+
+.theme-dropdown-item {
+  padding: 6px 12px;
+  cursor: pointer;
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background 0.1s;
+}
+.theme-dropdown-item:hover {
+  background: rgb(var(--accent-rgb) / 0.08);
+}
+.theme-dropdown-item.theme-current {
+  color: var(--accent);
+}
+
+.theme-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+  width: 20px;
+  text-align: center;
+}
+
+.theme-name {
+  flex: 1;
+}
+
+.theme-check {
+  color: var(--accent);
+  font-size: 11px;
+  flex-shrink: 0;
 }
 
 /* ---------------------------------------------------------------------------
