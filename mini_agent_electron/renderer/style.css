@@ -12,9 +12,9 @@
   --accent:   #e0e0e0;
   --text:     #c8c8c8;
   --dim:      #666666;
-  --green:    #aaaaaa;
+  --green:    #8cc265;
   --yellow:   #999999;
-  --red:      #777777;
+  --red:      #e05555;
   --thinking: #888888;
   --pulse:         #888888;
   --final-thought: #cccccc;
@@ -669,7 +669,7 @@ html, body {
    Message styles
    --------------------------------------------------------------------------- */
 .msg-user     { color: var(--text); margin-bottom: 0.5em; opacity: 0.8; }
-.msg-agent    { color: var(--final-thought); margin-bottom: 1em; display: flex; flex-wrap: wrap; align-items: baseline; }
+.msg-agent    { color: var(--final-thought); margin-bottom: 1em; }
 .msg-error    { color: var(--red); }
 .msg-thinking { color: var(--thinking); }
 .msg-agent-pending { min-height: 1em; }
@@ -687,7 +687,7 @@ html, body {
 }
 .code-block pre {
   margin: 0;
-  padding: 8px 12px;
+  padding: 10px 14px;
   border-radius: 6px;
   overflow-x: auto;
   font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', 'Menlo', monospace;
