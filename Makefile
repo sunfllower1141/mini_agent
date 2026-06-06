@@ -2,7 +2,7 @@
 # ====================
 # Standard targets for testing, coverage, linting, and cleanup.
 
-PYTEST := python -m pytest
+PYTEST := python3 -m pytest
 PYTEST_ARGS := -x -q --tb=short
 COVERAGE_DIR := htmlcov
 
@@ -13,7 +13,7 @@ TIMEGUARD ?= 300
 ifeq ($(TIMEGUARD),0)
   SAFE_RUN :=
 else
-  SAFE_RUN := timeout --kill-after=5 $(TIMEGUARD)
+  SAFE_RUN := bash scripts/timeguard.sh $(TIMEGUARD)
 endif
 
 .PHONY: help test test-slow test-all test-quick coverage lint clean
@@ -53,7 +53,7 @@ coverage-fail:  ## Run coverage, fail if under 80%
 lint:  ## Syntax-check all Python files
 	$(SAFE_RUN) bash -c '\
 		echo "=== py_compile ===" && \
-		python -m py_compile $$(find . -name "*.py" -not -path "./venv/*" -not -path "./.venv/*" -not -path "./__pycache__/*") && \
+		python3 -m py_compile $$(find . -name "*.py" -not -path "./venv/*" -not -path "./.venv/*" -not -path "./__pycache__/*") && \
 		echo "=== ruff check ===" && \
 		ruff check . --ignore=E501 || true && \
 		echo "=== ruff format check ===" && \

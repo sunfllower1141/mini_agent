@@ -182,6 +182,11 @@ function spawnPythonBackend(workspacePath) {
     // HF warnings, tqdm bars, etc. are noise in the UI.
     const text = data.toString().trim();
     if (text) {
+      // Suppress known-harmless multiprocess shutdown traceback (Python 3.12+)
+      // multiprocess 0.70.x resource_tracker hits AttributeError on _recursion_count
+      if (text.includes('multiprocess/resource_tracker.py') && text.includes('_recursion_count')) {
+        return;
+      }
       process.stderr.write(`[python:stderr] ${data}`);
     }
   });

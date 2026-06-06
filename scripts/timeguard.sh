@@ -7,6 +7,9 @@
 #
 # Can also be sourced to add `timeguard` shell function:
 #   source scripts/timeguard.sh && timeguard 120 make test
+#
+# Portable: tries GNU timeout, then gtimeout (macOS coreutils), then a
+# pure-bash background-process fallback.
 
 set -euo pipefail
 
@@ -25,4 +28,38 @@ if [[ $# -eq 0 ]]; then
     exit 1
 fi
 
-exec timeout --kill-after=5 "$CEILING" "$@"
+# ── portable timeout dispatch ──────────────────────────────────────────
+
+if command -v timeout &>/dev/null; then
+    # Linux / GNU coreutils
+    exec timeout --kill-after=5 "$CEILING" "$@"
+elif command -v gtimeout &>/dev/null; then
+    # macOS with `brew install coreutils`
+    exec gtimeout --kill-after=5 "$CEILING" "$@"
+else
+    # Pure-bash fallback for macOS (no coreutils).
+    # Runs the command in the background, waits with a ceiling, and sends
+    # SIGTERM (then SIGKILL after a 5s grace) if the ceiling is exceeded.
+    "$@" &
+    PID=$!
+
+    # Watcher: fires after CEILING seconds
+    (
+        sleep "$CEILING"
+        kill -TERM "$PID" 2>/dev/null || true
+        sleep 5
+        kill -KILL "$PID" 2>/dev/null || true
+    ) &
+    WATCHER=$!
+
+    set +e
+    wait "$PID" 2>/dev/null
+    RC=$?
+    set -e
+
+    # Clean up the watcher
+    kill -KILL "$WATCHER" 2>/dev/null || true
+    wait "$WATCHER" 2>/dev/null || true
+
+    exit "$RC"
+fi
