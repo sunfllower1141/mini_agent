@@ -98,6 +98,7 @@ let pythonProcess = null;
 let pythonReady = false;
 let pendingRequests = [];
 let lastStatus = null; // cached status for renderer to fetch on mount
+let _shuttingDown = false;  // set during window-close to prevent restart loops
 
 function spawnPythonBackend(workspacePath) {
   const backendScript = path.join(__dirname, 'backend', 'server.py');
@@ -189,6 +190,12 @@ function spawnPythonBackend(workspacePath) {
     console.log(`Python backend exited with code ${code}`);
     pythonReady = false;
     pythonProcess = null;
+    // If we're in a shutdown sequence and the backend exited cleanly,
+    // quit Electron regardless of platform (fixes macOS hang).
+    if (_shuttingDown) {
+      app.quit();
+      return;
+    }
     // Auto-restart on unexpected exit (not a clean shutdown)
     if (code !== 0 && code !== null) {
       const win = BrowserWindow.getAllWindows()[0];
@@ -589,16 +596,26 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  _shuttingDown = true;
   if (pythonProcess && pythonProcess.stdin && !pythonProcess.killed) {
     try {
       pythonProcess.stdin.write(JSON.stringify({ type: 'shutdown' }) + '\n');
       pythonProcess.stdin.end();
     } catch (e) { /* ignore */ }
+    // Hard timeout: if Python hasn't exited within 5s, force-kill and quit.
     setTimeout(() => {
       if (pythonProcess && !pythonProcess.killed) {
-        try { pythonProcess.kill(); } catch (e) { /* ignore */ }
+        try { pythonProcess.kill('SIGKILL'); } catch (e) { /* ignore */ }
       }
-    }, 2000);
+      // On macOS, also force quit — window-all-closed normally skips app.quit()
+      // but we're shutting down the backend, not just hiding the window.
+      if (process.platform === 'darwin') {
+        app.quit();
+      }
+    }, 5000);
+  } else {
+    // No backend running — quit immediately on all platforms.
+    app.quit();
   }
   if (process.platform !== 'darwin') {
     app.quit();
