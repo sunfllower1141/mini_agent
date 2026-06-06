@@ -1004,6 +1004,7 @@ def _remember(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResu
         try:
             import sqlite3
             conn = sqlite3.connect(db_path)
+            conn.execute("PRAGMA busy_timeout=5000")
             conn.execute(
                 "INSERT INTO project_knowledge (category, summary, detail) VALUES (?, ?, ?)",
                 (category, topic, detail),

@@ -109,21 +109,9 @@ class ToolGraph:
         self._lock = threading.Lock()
 
     def _get_conn(self) -> sqlite3.Connection:
-        """Get or create a cached, resilient connection."""
-        if self._conn is not None:
-            try:
-                self._conn.execute("SELECT 1")
-            except sqlite3.Error:
-                try:
-                    self._conn.close()
-                except sqlite3.Error:
-                    pass
-                self._conn = None
-        if self._conn is None:
-            self._conn = sqlite3.connect(self._db_path)
-            self._conn.execute("PRAGMA journal_mode=WAL")
-            self._conn.execute("PRAGMA synchronous=NORMAL")
-            self._conn.execute("PRAGMA busy_timeout=5000")
+        """Return the shared SQLite connection (one connection per db_path)."""
+        from memory.memory import get_shared_conn
+        self._conn = get_shared_conn(self._db_path)
         return self._conn
 
     def init_schema(self) -> None:
@@ -140,6 +128,9 @@ class ToolGraph:
                 conn.commit()
             except sqlite3.Error:
                 warnings.warn("Failed to init tool_transitions table", stacklevel=2)
+            finally:
+                # Don't close — shared via get_shared_conn()
+                self._conn = None
 
     # ------------------------------------------------------------------
     # Recording

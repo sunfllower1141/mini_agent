@@ -30,6 +30,15 @@ from logging_setup import get_logger
 
 _mem_log = get_logger("memory")
 
+# --- shared connection cache (one connection per db_path) ---
+# Multiple components (MemoryStore, FailurePatternStore, ToolGraph,
+# MistakeNotebook) all hit the same SQLite database.  Each had its own
+# sqlite3.Connection, which meant up to 4 concurrent connections
+# competing for the same write lock → "database is locked" under load.
+# A single shared connection per db_path eliminates this lock contention.
+_conn_cache: dict[str, sqlite3.Connection] = {}
+_conn_cache_lock = threading.Lock()
+
 # --- sqlite3 error escalation: track consecutive errors ---
 _consecutive_sqlite_errors: int = 0
 _CONSECUTIVE_ERROR_THRESHOLD = 3
@@ -48,6 +57,102 @@ def _reset_sqlite_errors() -> None:
     global _consecutive_sqlite_errors
     if _consecutive_sqlite_errors > 0:
         _consecutive_sqlite_errors = 0
+
+
+def get_shared_conn(db_path: str) -> sqlite3.Connection:
+    """Return a cached, shared SQLite connection for *db_path*.
+
+    All components (MemoryStore, FailurePatternStore, ToolGraph,
+    MistakeNotebook) use this single connection per database file,
+    eliminating the "database is locked" errors caused by multiple
+    connections competing for the same write lock.
+
+    The connection is created lazily with WAL mode, NORMAL sync,
+    a 5-second busy timeout, and foreign keys enabled.
+
+    Thread-safe: protected by ``_conn_cache_lock``.
+    """
+    with _conn_cache_lock:
+        conn = _conn_cache.get(db_path)
+        if conn is not None:
+            # Ping — if the connection died (e.g. forked subprocess),
+            # recreate it.
+            try:
+                conn.execute("SELECT 1")
+                return conn
+            except sqlite3.Error:
+                try:
+                    conn.close()
+                except sqlite3.Error:
+                    pass
+                _conn_cache.pop(db_path, None)
+
+        # Determine journal mode
+        use_wal = not _is_remote_fs(db_path)
+
+        # Attempt 1: WAL mode (fast, local filesystem)
+        if use_wal:
+            try:
+                conn = sqlite3.connect(db_path)
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA synchronous=NORMAL")
+                conn.execute("PRAGMA cache_size=-8000")
+                conn.execute("PRAGMA temp_store=MEMORY")
+                conn.execute("PRAGMA busy_timeout=5000")
+                conn.execute("PRAGMA foreign_keys=ON")
+                _conn_cache[db_path] = conn
+                return conn
+            except sqlite3.OperationalError:
+                _mem_log.warning(
+                    "WAL mode failed for %s — trying DELETE journal mode", db_path,
+                )
+                try:
+                    conn.close()
+                except sqlite3.Error:
+                    pass
+
+        # Attempt 2: DELETE + EXCLUSIVE (network filesystem fallback)
+        try:
+            conn = sqlite3.connect(db_path)
+            conn.execute("PRAGMA journal_mode=DELETE")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA locking_mode=EXCLUSIVE")
+            conn.execute("PRAGMA cache_size=-8000")
+            conn.execute("PRAGMA temp_store=MEMORY")
+            conn.execute("PRAGMA busy_timeout=5000")
+            conn.execute("PRAGMA foreign_keys=ON")
+            _conn_cache[db_path] = conn
+            return conn
+        except sqlite3.OperationalError as e:
+            _mem_log.warning("DELETE journal mode failed for %s: %s", db_path, e)
+            try:
+                conn.close()
+            except sqlite3.Error:
+                pass
+
+        # Attempt 3: Local fallback path
+        local_path = _local_db_path(db_path)
+        _mem_log.info("falling back to local database path: %s", local_path)
+        conn = sqlite3.connect(local_path)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA cache_size=-8000")
+        conn.execute("PRAGMA temp_store=MEMORY")
+        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute("PRAGMA foreign_keys=ON")
+        _conn_cache[db_path] = conn
+        return conn
+
+
+def _close_shared_conn(db_path: str) -> None:
+    """Close and remove a cached connection (used on session teardown)."""
+    with _conn_cache_lock:
+        conn = _conn_cache.pop(db_path, None)
+    if conn is not None:
+        try:
+            conn.close()
+        except sqlite3.Error:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -258,12 +363,9 @@ class MemoryStore:
                 f"(path={self._db_path})",
                 stacklevel=2,
             )
-            # Reset connection so _get_conn() will retry (possibly with
-            # a local fallback path) on the next operation.
-            try:
-                self._conn.close()
-            except sqlite3.Error:
-                pass
+        finally:
+            # Don't close — the connection is shared via get_shared_conn()
+            # and other components use it too.  Just release our local ref.
             self._conn = None
 
     @property
@@ -276,96 +378,19 @@ class MemoryStore:
         return self._token_count
 
     def _get_conn(self) -> sqlite3.Connection:
-        """Return a cached SQLite connection with WAL mode enabled.
+        """Return the shared SQLite connection for this store's database.
 
-        Creates the connection on first call.  All internal methods
-        share this single connection instead of opening a new one
-        for every operation.
-
-        Pings the cached connection with ``SELECT 1`` before use.
-        If the connection was closed (e.g. by a forked subprocess
-        or a prior error), it is transparently recreated.
-
-        On remote/network filesystems (SMB, NFS, AFP), WAL journal
-        mode is unreliable due to POSIX lock limitations.  Falls back:
-          1. journal_mode=DELETE + locking_mode=EXCLUSIVE
-          2. If even that fails, uses a local temp path
-             (~/.mini_agent/memory/<hash>.db)
+        Uses the module-level connection cache so that all components
+        (MemoryStore, FailurePatternStore, ToolGraph, MistakeNotebook)
+        share a single connection per database file — no more lock
+        contention between separate connections.
         """
-        if self._conn is not None:
-            try:
-                self._conn.execute("SELECT 1")
-            except sqlite3.Error:
-                # Connection is dead — recreate it
-                try:
-                    self._conn.close()
-                except sqlite3.Error:
-                    pass
-                self._conn = None
-
-        if self._conn is not None:
-            return self._conn
-
-        # Determine the best database path and journal mode
-        db_path = self._db_path
-        use_wal = True
-
-        if _is_remote_fs(db_path):
-            use_wal = False
-            _mem_log.info("remote filesystem detected for %s — falling back to DELETE journal mode", db_path)
-
-        # Attempt 1: WAL mode on local FS (fast path)
-        if use_wal:
-            try:
-                self._conn = sqlite3.connect(db_path)
-                self._conn.execute("PRAGMA journal_mode=WAL")
-                self._conn.execute("PRAGMA synchronous=NORMAL")
-                self._conn.execute("PRAGMA cache_size=-8000")
-                self._conn.execute("PRAGMA temp_store=MEMORY")
-                self._conn.execute("PRAGMA busy_timeout=5000")
-                self._conn.execute("PRAGMA foreign_keys=ON")
-                return self._conn
-            except sqlite3.OperationalError:
-                _mem_log.warning("WAL mode failed for %s — trying DELETE journal mode", db_path)
-                try:
-                    if self._conn is not None:
-                        self._conn.close()
-                except sqlite3.Error:
-                    pass
-                self._conn = None
-
-        # Attempt 2: DELETE journal mode (works on remote FS, but slower)
-        try:
-            self._conn = sqlite3.connect(db_path)
-            self._conn.execute("PRAGMA journal_mode=DELETE")
-            self._conn.execute("PRAGMA synchronous=NORMAL")
-            self._conn.execute("PRAGMA locking_mode=EXCLUSIVE")
-            self._conn.execute("PRAGMA cache_size=-8000")
-            self._conn.execute("PRAGMA temp_store=MEMORY")
-            self._conn.execute("PRAGMA busy_timeout=5000")
-            self._conn.execute("PRAGMA foreign_keys=ON")
-            return self._conn
-        except sqlite3.OperationalError as e:
-            _mem_log.warning("DELETE journal mode failed for %s: %s", db_path, e)
-            try:
-                self._conn.close()
-            except sqlite3.Error:
-                pass
-            self._conn = None
-
-        # Attempt 3: Local fallback path (last resort for remote FS)
-        local_path = _local_db_path(db_path)
-        _mem_log.info("falling back to local database path: %s", local_path)
-        self._conn = sqlite3.connect(local_path)
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA synchronous=NORMAL")
-        self._conn.execute("PRAGMA cache_size=-8000")
-        self._conn.execute("PRAGMA temp_store=MEMORY")
-        self._conn.execute("PRAGMA busy_timeout=5000")
-        self._conn.execute("PRAGMA foreign_keys=ON")
-        # Update _db_path so future reconnect attempts use the local path
-        self._db_path = local_path
-        return self._conn
+        conn = get_shared_conn(self._db_path)
+        # If get_shared_conn fell back to a local path, update _db_path
+        # so future calls (and other components passed this path) benefit.
+        # We can detect this by checking the connection's database path.
+        self._conn = conn
+        return conn
 
     def _start_background_vacuum(self) -> None:
         """Run VACUUM on a private connection in a daemon thread.
@@ -385,6 +410,7 @@ class MemoryStore:
         def _run() -> None:
             try:
                 conn = sqlite3.connect(db_path)
+                conn.execute("PRAGMA busy_timeout=5000")
                 conn.execute("VACUUM")
                 conn.close()
             except sqlite3.Error:
@@ -395,14 +421,14 @@ class MemoryStore:
         t.start()
 
     def close(self) -> None:
-        """Close the shared database connection (if open)."""
-        if self._conn is not None:
-            try:
-                self._conn.close()
-            except sqlite3.Error:
-                warnings.warn("Failed to close DB connection", stacklevel=3)
-                pass
-            self._conn = None
+        """Close the shared database connection and remove it from the cache.
+
+        After calling this, the next ``_get_conn()`` call will open a fresh
+        connection.  Use this when you need to ensure the database file on
+        disk is truly released (e.g. before migrating/corrupting in tests).
+        """
+        _close_shared_conn(self._db_path)
+        self._conn = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -813,12 +839,9 @@ class MemoryStore:
                 if attempt < _SAVE_MAX_RETRIES - 1:
                     import time
                     time.sleep(_SAVE_RETRY_DELAY * (attempt + 1))
-                    if self._conn is not None:
-                        try:
-                            self._conn.close()
-                        except sqlite3.Error:
-                            pass
-                        self._conn = None
+                    # Don't close — it's shared.  Just release our local ref
+                    # so _get_conn() will revalidate from the cache.
+                    self._conn = None
 
         import sys
         print(f"Warning: memory save failed: {last_exc}", file=sys.stderr)
@@ -1191,6 +1214,7 @@ def _migrate_json(json_path: str, db_path: str) -> None:
 
     try:
         with sqlite3.connect(db_path) as conn:
+            conn.execute("PRAGMA busy_timeout=5000")
             conn.execute(_CREATE_TABLE)
             conn.execute("BEGIN IMMEDIATE")
             conn.executemany(

@@ -124,6 +124,7 @@ def _persist_test_output(output: str) -> None:
     try:
         import sqlite3
         conn = sqlite3.connect(db_path)
+        conn.execute("PRAGMA busy_timeout=5000")
         conn.execute(
             "CREATE TABLE IF NOT EXISTS test_output ("
             "id INTEGER PRIMARY KEY CHECK (id = 1),"
