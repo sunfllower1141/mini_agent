@@ -6,6 +6,8 @@ from __future__ import annotations
 import threading
 import pytest
 
+pytestmark = pytest.mark.slow
+
 from agents.agent_runtime import SubAgentResult, AgentRuntime
 
 

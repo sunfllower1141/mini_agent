@@ -3,7 +3,10 @@
 test_git.py — tests for the git tool.
 """
 
+import pytest
 import os
+
+pytestmark = pytest.mark.slow
 import subprocess
 import tempfile
 import unittest

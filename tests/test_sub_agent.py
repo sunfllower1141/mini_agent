@@ -12,6 +12,8 @@ Covers:
 
 import pytest
 import threading
+
+pytestmark = pytest.mark.slow
 import time
 
 from agents.agent_runtime import AgentRuntime, SubAgentResult

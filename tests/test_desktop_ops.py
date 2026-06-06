@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+import pytest
 
+
+pytestmark = pytest.mark.slow
 
 from tools.desktop_ops import (
     _detect_providers,

@@ -3,23 +3,26 @@
 # Standard targets for testing, coverage, linting, and cleanup.
 
 PYTEST := python -m pytest
-PYTEST_ARGS := --ignore=test_benchmarks.py
+PYTEST_ARGS := -x -q --tb=short
 COVERAGE_DIR := htmlcov
 
-.PHONY: help test test-all test-quick coverage lint clean
+.PHONY: help test test-slow test-all test-quick coverage lint clean
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
-test:  ## Run standard test suite (excludes benchmarks)
-	$(PYTEST) $(PYTEST_ARGS) -v
+test:  ## Run fast test suite (excludes slow + benchmarks)
+	$(PYTEST) $(PYTEST_ARGS)
 
-test-all:  ## Run all tests including benchmarks
-	$(PYTEST) -v --run-benchmarks
+test-slow:  ## Run only slow tests (AgentRuntime, sub-agent, git, desktop ops)
+	$(PYTEST) $(PYTEST_ARGS) --run-slow
 
-test-quick:  ## Run tests in parallel (faster, less output)
-	$(PYTEST) $(PYTEST_ARGS) -n auto -q 2>/dev/null || $(PYTEST) $(PYTEST_ARGS) -q
+test-all:  ## Run full suite (fast + slow + benchmarks)
+	$(PYTEST) -v --run-slow --run-benchmarks
+
+test-quick:  ## Run fast tests in parallel (faster, less output)
+	$(PYTEST) $(PYTEST_ARGS) -n auto 2>/dev/null || $(PYTEST) $(PYTEST_ARGS)
 
 coverage:  ## Run tests with coverage report (terminal)
 	$(PYTEST) $(PYTEST_ARGS) \

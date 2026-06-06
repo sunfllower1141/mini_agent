@@ -6,7 +6,10 @@ and the agent script entry point. Network-heavy operations (dataset loading,
 repo cloning) are mocked.
 """
 
+import pytest
 import json
+
+pytestmark = pytest.mark.slow
 import os
 import sys
 import tempfile

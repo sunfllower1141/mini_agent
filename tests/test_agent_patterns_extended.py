@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+import pytest
 import unittest
+
+pytestmark = pytest.mark.slow
 from unittest.mock import patch, MagicMock
 
 from agents.agent_runtime import AgentRuntime, SubAgentResult

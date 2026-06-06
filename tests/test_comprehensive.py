@@ -17,7 +17,10 @@ Covers:
 
 from __future__ import annotations
 
+import pytest
 import os
+
+pytestmark = pytest.mark.slow
 import tempfile
 import threading
 import time

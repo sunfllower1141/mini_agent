@@ -1,0 +1,8 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers -p no:cacheprovider"
+markers = [
+    "slow: marks tests as slow-running (sub-agent threads, AgentRuntime, git, desktop ops)",
+    "benchmark: marks tests as benchmarks (excluded by default, use --run-benchmarks)",
+    "integration: marks tests as integration tests (may require external services)",
+]

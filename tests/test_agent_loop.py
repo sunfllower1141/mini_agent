@@ -6,7 +6,10 @@ Mocks the DeepSeek API to verify that tool calls are executed, results are
 appended, text responses are handled correctly, and API retry works.
 """
 
+import pytest
 import json
+
+pytestmark = pytest.mark.slow
 import os
 import tempfile
 import threading

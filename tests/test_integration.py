@@ -15,7 +15,10 @@ Covers:
   7. agent_message + agent_read broadcast/pagination
 """
 
+import pytest
 import re
+
+pytestmark = pytest.mark.slow
 import threading
 import tempfile
 import unittest

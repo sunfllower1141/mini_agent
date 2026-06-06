@@ -40,6 +40,12 @@ def pytest_addoption(parser):
         help="Include benchmark tests (excluded by default)",
     )
     parser.addoption(
+        "--run-slow",
+        action="store_true",
+        default=False,
+        help="Include slow tests (excluded by default: sub-agent threads, AgentRuntime, git, desktop ops)",
+    )
+    parser.addoption(
         "--swebench",
         action="store_true",
         default=False,
@@ -71,14 +77,30 @@ def pytest_ignore_collect(collection_path, config):
 
 
 def pytest_collection_modifyitems(config, items) -> None:
-    """Run benchmark tests last when included via --run-benchmarks."""
+    """Run benchmark tests last when included via --run-benchmarks.
+    Deselect slow-marked tests unless --run-slow is set.
+    """
+    run_slow = config.getoption("--run-slow", default=False)
+
+    kept = []
+    deselected = []
     benchmark_items = []
     other_items = []
+
     for item in items:
+        # Deselect slow tests unless --run-slow
+        is_slow = any(marker.name == "slow" for marker in item.iter_markers())
+        if is_slow and not run_slow:
+            deselected.append(item)
+            continue
+        # Separate benchmarks for ordering
         if os.path.basename(item.location[0]) == "test_benchmarks.py":
             benchmark_items.append(item)
         else:
             other_items.append(item)
+
+    if deselected:
+        config.hook.pytest_deselected(items=deselected)
     items[:] = other_items + benchmark_items
 
 

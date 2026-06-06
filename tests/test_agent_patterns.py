@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """test_agent_patterns.py — tests for multi-agent coordination pattern helpers."""
 
+import pytest
 import threading
+
+pytestmark = pytest.mark.slow
 from unittest.mock import MagicMock, patch
 
 from agents.agent_runtime import AgentRuntime, SubAgentResult
