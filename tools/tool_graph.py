@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS tool_transitions (
     to_tool         TEXT    NOT NULL,
     count           INTEGER NOT NULL DEFAULT 1,
     success_count   INTEGER NOT NULL DEFAULT 0,
-    last_seen       TEXT    NOT NULL DEFAULT (datetime('now'))
+    last_seen       TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
 )
 """
 

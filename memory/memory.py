@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS messages (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     role       TEXT    NOT NULL,
     content    TEXT    NOT NULL,   -- JSON blob of the full message dict
-    created_at TEXT    DEFAULT (datetime('now'))
+    created_at TEXT    DEFAULT CURRENT_TIMESTAMP
 )
 """
 
@@ -239,8 +239,8 @@ class MemoryStore:
                 "success_count   INTEGER NOT NULL DEFAULT 0,"
                 "failure_count   INTEGER NOT NULL DEFAULT 1,"
                 "confidence      REAL    NOT NULL DEFAULT 0.0,"
-                "last_seen       TEXT    NOT NULL DEFAULT (datetime('now')),"
-                "created_at      TEXT    NOT NULL DEFAULT (datetime('now'))"
+                "last_seen       TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                "created_at      TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP"
                 ")"
             )
             conn.execute(

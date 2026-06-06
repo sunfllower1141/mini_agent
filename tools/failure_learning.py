@@ -74,8 +74,8 @@ CREATE TABLE IF NOT EXISTS failure_patterns (
     success_count   INTEGER NOT NULL DEFAULT 0,
     failure_count   INTEGER NOT NULL DEFAULT 1,
     confidence      REAL    NOT NULL DEFAULT 0.0,
-    last_seen       TEXT    NOT NULL DEFAULT (datetime('now')),
-    created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+    last_seen       TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at      TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
 )
 """
 
@@ -750,8 +750,8 @@ CREATE TABLE IF NOT EXISTS mistake_notebook (
     confidence      REAL    NOT NULL DEFAULT 0.0,
     times_applied   INTEGER NOT NULL DEFAULT 0,
     times_succeeded INTEGER NOT NULL DEFAULT 0,
-    last_distilled  TEXT    NOT NULL DEFAULT (datetime('now')),
-    created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+    last_distilled  TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at      TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
 )
 """
 
