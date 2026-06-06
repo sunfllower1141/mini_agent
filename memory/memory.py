@@ -189,6 +189,12 @@ _PRUNE_COOLDOWN = 3  # saves to skip before pruning again
 # bloat rapidly but periodic compaction is still healthy.
 _VACUUM_INTERVAL = 50
 
+# Hard row cap: when the messages table exceeds this many rows, delete the
+# oldest rows to prevent unbounded SQLite growth.  Token-aware pruning
+# usually keeps us well under this, but sessions with many tiny sub-agent
+# messages can accumulate millions of rows.
+_MAX_ROWS = 100_000
+
 # Save retry: when the database is locked, retry with backoff before
 # surfacing the warning to the user.
 _SAVE_MAX_RETRIES = 3
@@ -826,6 +832,7 @@ class MemoryStore:
                         )
                 conn.commit()
                 self._save_count += 1
+                self._maybe_cap_rows(conn)
                 self._maybe_vacuum(conn, after_full_rewrite=need_full_rewrite)
                 self._last_saved_count = len(kept)
                 return kept
@@ -858,6 +865,21 @@ class MemoryStore:
                 self._start_background_vacuum()
         except sqlite3.Error:
             pass  # VACUUM is opportunistic; ignore failures
+
+    def _maybe_cap_rows(self, conn: sqlite3.Connection) -> None:
+        """Delete oldest rows when the messages table exceeds _MAX_ROWS."""
+        try:
+            row = conn.execute("SELECT COUNT(*) FROM messages").fetchone()
+            if row and row[0] > _MAX_ROWS:
+                excess = row[0] - _MAX_ROWS
+                conn.execute(
+                    "DELETE FROM messages WHERE id IN ("
+                    "  SELECT id FROM messages ORDER BY id ASC LIMIT ?"
+                    ")",
+                    (excess,),
+                )
+        except sqlite3.Error:
+            pass  # best-effort; token-aware pruning is the primary guard
 
     def save(self, messages: list[dict]) -> list[dict]:
         """Persist *messages* to the database.

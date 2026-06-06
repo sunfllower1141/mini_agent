@@ -295,7 +295,7 @@ def _inject_orchestration_context(messages: list[dict]) -> None:
         # --- Auto-extend productive sub-agents running low on turns ---
         if running_ids:
             for tid in running_ids:
-                status_snap = runtime.status_snapshots.get(tid, {})
+                status_snap = runtime.get_snapshot(tid) or {}
                 turns_budget = status_snap.get("turns_budget", 0)
                 current_turn = status_snap.get("turn", 0)
                 remaining = turns_budget - current_turn

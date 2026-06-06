@@ -345,7 +345,14 @@ def _apply_toml(config: AgentConfig, data: dict) -> None:
             continue
         expected = _TOML_SCHEMA[key]
 
-        if not isinstance(value, expected):
+        # Use type() identity check for int and bool to prevent
+        # isinstance(True, int) == True from silently converting bool→int.
+        if expected in (int, bool):
+            type_ok = type(value) is expected
+        else:
+            type_ok = isinstance(value, expected)
+
+        if not type_ok:
             print(
                 f"Warning: .mini_agent.toml key '{key}' expected {expected.__name__}, "
                 f"got {type(value).__name__} — skipping",

@@ -83,7 +83,7 @@ def format_tool_detail(result: "ToolResult", max_len: int = 300) -> str:
 # Incremental message cleaning cache: keyed by id(messages), stores a tuple
 # of (last_cleaned_len, provider, clean_messages) so repeated calls within a
 # turn only clean newly appended messages rather than the entire list.
-_clean_messages_cache: dict[int, tuple[int, str, list[dict]]] = {}
+_clean_messages_cache: dict[int, tuple[int, str, list[dict], int]] = {}
 _clean_messages_cache_lock: threading.Lock = threading.Lock()
 _MAX_CLEAN_CACHE_ENTRIES = 16  # cap to prevent unbounded growth from stale entries
 
@@ -258,19 +258,25 @@ def call_llm(
     # Incremental cleaning: only clean messages appended since last call.
     # This avoids O(n) deep-copy of the entire message list on every API call.
     list_id = id(messages)
+    # Fingerprint to detect id() reuse: if Python recycles the same id for a
+    # new list, the first element's identity will differ.
+    fp = id(messages[0]) if messages else 0
     with _clean_messages_cache_lock:
         cached_entry = _clean_messages_cache.get(list_id)
         if cached_entry is not None:
-            cached_len, cached_provider, clean_messages = cached_entry
+            cached_len, cached_provider, clean_messages, cached_fp = cached_entry
+            # Detect id() reuse: same list_id but different first element.
+            if cached_fp != fp:
+                cached_len, cached_provider, clean_messages = 0, provider, []
         else:
-            cached_len, cached_provider, clean_messages = 0, provider, []
+            cached_len, cached_provider, clean_messages, cached_fp = 0, provider, [], 0
 
         current_len = len(messages)
 
         # Invalidate cache if provider changed mid-session
         if cached_provider != provider:
             _clean_messages_cache.clear()
-            cached_len, cached_provider, clean_messages = 0, provider, []
+            cached_len, cached_provider, clean_messages, cached_fp = 0, provider, [], 0
 
         if cached_len >= current_len:
             # Same list, no new messages — reuse cache as-is
@@ -281,7 +287,7 @@ def call_llm(
                 cleaned = _clean_message(messages[i], i, provider)
                 if cleaned is not None:
                     clean_messages.append(cleaned)
-            _clean_messages_cache[list_id] = (current_len, provider, clean_messages)
+            _clean_messages_cache[list_id] = (current_len, provider, clean_messages, fp)
             # Cap cache size: evict oldest entry when over limit.
             # Python 3.7+ dicts preserve insertion order, so the first
             # key is the oldest.

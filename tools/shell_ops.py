@@ -201,8 +201,8 @@ def _task_status(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolR
     returncode = proc.poll()
     if returncode is None:
         return ToolResult(success=True, content=f"Task {task_id}: still running.")
-    # Clean up completed tasks from the registry
-    del _TASK_REGISTRY[task_id]
+    # Clean up completed tasks from the registry (may already be removed by auto-cleanup)
+    _TASK_REGISTRY.pop(task_id, None)
     # Try to retrieve persisted test output for background runs
     output_msg = ""
     try:
@@ -334,6 +334,16 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
             # Write stdin in a daemon thread to avoid blocking
             if stdin_text is not None and proc.stdin is not None:
                 threading.Thread(target=lambda p, t: (p.stdin.write(t), p.stdin.close()), args=(proc, stdin_text), daemon=True).start()
+            # Auto-cleanup: remove from registry when the process exits, so
+            # _TASK_REGISTRY doesn't grow unbounded if task_status is never called.
+            def _auto_cleanup(reg: dict, tid: str, p: subprocess.Popen) -> None:
+                try:
+                    p.wait()
+                except (OSError, subprocess.SubprocessError):
+                    pass
+                finally:
+                    reg.pop(tid, None)
+            threading.Thread(target=_auto_cleanup, args=(_TASK_REGISTRY, task_id, proc), daemon=True).start()
             return ToolResult(
                 success=True,
                 content=f"Started background task {task_id}. Use task_status to check.",
@@ -693,6 +703,7 @@ def _run_tests(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
             if stderr_lines:
                 output += "\n[stderr]\n" + "".join(stderr_lines)
             _persist_test_output(output)
+            _TASK_REGISTRY.pop(task_id, None)  # auto-cleanup on completion
         threading.Thread(target=_persist_when_done, daemon=True).start()
         return ToolResult(
             success=True,
