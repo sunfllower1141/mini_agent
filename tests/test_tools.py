@@ -651,7 +651,7 @@ class TestSemanticSearch(unittest.TestCase):
         tc = _make_tool_call("semantic_search", query="anything", path=self.workspace)
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertTrue(result.success)
-        self.assertIn("No matches found", result.content)
+        self.assertIn("No indexed files found", result.content)
 
     def test_outside_workspace_allowed(self):
         outside = tempfile.mkdtemp()

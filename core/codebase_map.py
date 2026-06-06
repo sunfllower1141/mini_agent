@@ -17,6 +17,7 @@ from __future__ import annotations
 import ast
 import os
 import re
+import threading
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
@@ -43,6 +44,15 @@ MAX_SYMBOLS_PER_FILE: int = 20
 MAX_IMPORTS_PER_FILE: int = 10
 # Max lines of output before truncation
 MAX_OUTPUT_LINES: int = 80
+
+# --- Incremental map cache ---
+# Path → FileSymbols for all indexed files.  Updated incrementally when
+# files are written/edited so the agent's context stays current without
+# a full workspace re-scan.
+_MAP_CACHE: dict[str, FileSymbols] = {}
+_MAP_CACHE_LOCK = threading.Lock()
+_MAP_CACHE_WORKSPACE_PACKAGES: set[str] = set()
+_MAP_CACHE_WORKSPACE: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -213,6 +223,186 @@ def _extract_ts_symbols(
 
 
 # ---------------------------------------------------------------------------
+# Tree-sitter extraction adapters (fall back to AST/regex)
+# ---------------------------------------------------------------------------
+
+def _extract_python_with_treesitter(
+    filepath: str, rel_path: str, workspace_packages: set[str],
+) -> FileSymbols | None:
+    """Extract Python symbols via tree-sitter. Returns None if unavailable."""
+    try:
+        from core.tree_sitter_parser import extract_symbols
+    except ImportError:
+        return None
+    result = extract_symbols(filepath)
+    if result is None:
+        return None
+    defs, _calls, imports = result
+    if not defs and not imports:
+        return None
+    # Count lines
+    try:
+        with open(filepath, encoding="utf-8", errors="replace") as f:
+            line_count = sum(1 for _ in f)
+    except OSError:
+        line_count = 0
+    sym = FileSymbols(path=rel_path, line_count=line_count)
+    sym.is_test = any(kw in os.path.basename(filepath).lower()
+                      for kw in ("test", "spec"))
+    for d in defs:
+        if d["kind"] == "class":
+            sym.classes.append(d["name"])
+        elif d["kind"] == "def":
+            sym.functions.append(d["name"])
+            if d["name"] == "main" or d["name"] == "__main__":
+                sym.has_main = True
+    for imp in imports:
+        mod = imp["module"]
+        if imp.get("internal"):
+            sym.imports_internal.append(mod)
+        else:
+            sym.imports_external.append(mod.split(".")[0] if "." in mod else mod)
+    sym.imports_internal = sorted(set(sym.imports_internal))
+    sym.imports_external = sorted(set(sym.imports_external))
+    return sym
+
+
+def _extract_ts_with_treesitter(
+    filepath: str, rel_path: str, workspace_packages: set[str],
+) -> FileSymbols | None:
+    """Extract TypeScript/JS symbols via tree-sitter. Returns None if unavailable."""
+    try:
+        from core.tree_sitter_parser import extract_symbols
+    except ImportError:
+        return None
+    result = extract_symbols(filepath)
+    if result is None:
+        return None
+    defs, _calls, imports = result
+    if not defs and not imports:
+        return None
+    try:
+        with open(filepath, encoding="utf-8", errors="replace") as f:
+            line_count = sum(1 for _ in f)
+    except OSError:
+        line_count = 0
+    sym = FileSymbols(path=rel_path, line_count=line_count)
+    sym.is_test = any(kw in os.path.basename(filepath).lower()
+                      for kw in ("test", "spec"))
+    for d in defs:
+        name = d["name"]
+        if name.startswith("_"):
+            continue
+        if name[0].isupper():
+            sym.classes.append(name)
+        else:
+            sym.functions.append(name)
+    for imp in imports:
+        mod = imp["module"]
+        if imp.get("internal"):
+            sym.imports_internal.append(mod)
+        elif mod.startswith("."):
+            sym.imports_internal.append(mod)
+        else:
+            sym.imports_external.append(mod.split("/")[0] if "/" in mod else mod)
+    sym.imports_internal = sorted(set(sym.imports_internal))
+    sym.imports_external = sorted(set(sym.imports_external))
+    return sym
+
+
+# ---------------------------------------------------------------------------
+# Incremental update helpers
+# ---------------------------------------------------------------------------
+
+def _extract_single_file(
+    filepath: str, rel_path: str, workspace_packages: set[str],
+) -> FileSymbols | None:
+    """Extract symbols from a single file (called for incremental updates).
+
+    Uses tree-sitter when available (more accurate, error-tolerant),
+    falls back to AST (Python) or regex (JS/TS).
+    """
+    _, ext = os.path.splitext(filepath)
+    if ext in PYTHON_EXT:
+        # Try tree-sitter first for Python (more accurate, handles syntax errors)
+        sym = _extract_python_with_treesitter(filepath, rel_path, workspace_packages)
+        if sym is not None:
+            return sym
+        return _extract_python_symbols(filepath, rel_path, workspace_packages)
+    elif ext in TS_JS_EXT:
+        sym = _extract_ts_with_treesitter(filepath, rel_path, workspace_packages)
+        if sym is not None:
+            return sym
+        return _extract_ts_symbols(filepath, rel_path, workspace_packages)
+    return None
+
+
+def update_file_in_map(filepath: str, workspace: str) -> None:
+    """Re-extract symbols for a single file and update the cached map.
+
+    Call this after writing/editing a file so the codebase map stays
+    current without a full workspace re-scan.
+    """
+    global _MAP_CACHE, _MAP_CACHE_WORKSPACE_PACKAGES, _MAP_CACHE_WORKSPACE
+    if not os.path.isfile(filepath):
+        return
+    rel_path = os.path.relpath(filepath, workspace)
+    if os.path.basename(filepath).startswith("."):
+        return
+    if _MAP_CACHE_WORKSPACE != workspace or not _MAP_CACHE_WORKSPACE_PACKAGES:
+        _MAP_CACHE_WORKSPACE_PACKAGES = _discover_workspace_packages(workspace)
+        _MAP_CACHE_WORKSPACE = workspace
+    sym = _extract_single_file(filepath, rel_path, _MAP_CACHE_WORKSPACE_PACKAGES)
+    with _MAP_CACHE_LOCK:
+        if sym is not None:
+            _MAP_CACHE[rel_path] = sym
+        else:
+            _MAP_CACHE.pop(rel_path, None)
+
+
+def remove_file_from_map(filepath: str, workspace: str) -> None:
+    """Remove a file from the cached codebase map (e.g. on deletion)."""
+    global _MAP_CACHE
+    rel_path = os.path.relpath(filepath, workspace)
+    with _MAP_CACHE_LOCK:
+        _MAP_CACHE.pop(rel_path, None)
+
+
+def invalidate_map() -> None:
+    """Clear the cached codebase map, forcing a full rebuild next call."""
+    global _MAP_CACHE, _MAP_CACHE_WORKSPACE_PACKAGES, _MAP_CACHE_WORKSPACE
+    with _MAP_CACHE_LOCK:
+        _MAP_CACHE.clear()
+        _MAP_CACHE_WORKSPACE_PACKAGES.clear()
+        _MAP_CACHE_WORKSPACE = ""
+
+
+def _discover_workspace_packages(workspace: str) -> set[str]:
+    """Discover top-level packages in the workspace."""
+    packages: set[str] = set()
+    try:
+        for entry in os.listdir(workspace):
+            full = os.path.join(workspace, entry)
+            if not os.path.isdir(full) or entry.startswith("."):
+                continue
+            if entry in SKIP_DIRS:
+                continue
+            if os.path.isfile(os.path.join(full, "__init__.py")):
+                packages.add(entry)
+            if os.path.isfile(os.path.join(full, "package.json")):
+                packages.add(entry)
+    except OSError:
+        pass
+    return packages
+
+
+def get_cached_map() -> dict[str, FileSymbols]:
+    """Return a snapshot of the current cached map (thread-safe)."""
+    with _MAP_CACHE_LOCK:
+        return dict(_MAP_CACHE)
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -237,57 +427,56 @@ def build_codebase_map(
     if not os.path.isdir(workspace):
         return ""
 
-    # Phase 1: Discover workspace packages (top-level dirs with __init__.py or package.json)
-    workspace_packages: set[str] = set()
-    try:
-        for entry in os.listdir(workspace):
-            full = os.path.join(workspace, entry)
-            if not os.path.isdir(full) or entry.startswith("."):
-                continue
-            if entry in SKIP_DIRS:
-                continue
-            # Check for Python package marker
-            if os.path.isfile(os.path.join(full, "__init__.py")):
-                workspace_packages.add(entry)
-            # Check for JS/TS package marker
-            if os.path.isfile(os.path.join(full, "package.json")):
-                workspace_packages.add(entry)
-    except OSError:
-        pass
+    global _MAP_CACHE, _MAP_CACHE_WORKSPACE_PACKAGES, _MAP_CACHE_WORKSPACE
 
-    # Phase 2: Walk and extract symbols
-    all_symbols: list[FileSymbols] = []
-    try:
-        for dirpath, dirnames, filenames in os.walk(workspace):
-            # Filter out skipped dirs
-            dirnames[:] = sorted(
-                d for d in dirnames
-                if d not in SKIP_DIRS and not d.startswith(".")
-            )
+    # --- Fast path: use cached map if workspace hasn't changed ---
+    with _MAP_CACHE_LOCK:
+        cache_valid = (
+            _MAP_CACHE_WORKSPACE == workspace
+            and _MAP_CACHE_WORKSPACE_PACKAGES
+            and _MAP_CACHE
+        )
+        if cache_valid:
+            all_symbols = list(_MAP_CACHE.values())
+        else:
+            all_symbols = None
 
-            for fname in sorted(filenames):
-                if fname.startswith("."):
-                    continue
-                filepath = os.path.join(dirpath, fname)
-                rel_path = os.path.relpath(filepath, workspace)
+    if all_symbols is None:
+        # Phase 1: Discover workspace packages
+        workspace_packages: set[str] = _discover_workspace_packages(workspace)
 
-                _, ext = os.path.splitext(fname)
-                symbols: FileSymbols | None = None
+        # Phase 2: Walk and extract symbols
+        new_cache: dict[str, FileSymbols] = {}
+        all_symbols = []
+        try:
+            for dirpath, dirnames, filenames in os.walk(workspace):
+                dirnames[:] = sorted(
+                    d for d in dirnames
+                    if d not in SKIP_DIRS and not d.startswith(".")
+                )
 
-                if ext in PYTHON_EXT:
-                    symbols = _extract_python_symbols(
-                        filepath, rel_path, workspace_packages,
-                    )
-                elif ext in TS_JS_EXT:
-                    symbols = _extract_ts_symbols(
+                for fname in sorted(filenames):
+                    if fname.startswith("."):
+                        continue
+                    filepath = os.path.join(dirpath, fname)
+                    rel_path = os.path.relpath(filepath, workspace)
+
+                    symbols = _extract_single_file(
                         filepath, rel_path, workspace_packages,
                     )
 
-                if symbols is not None:
-                    all_symbols.append(symbols)
+                    if symbols is not None:
+                        all_symbols.append(symbols)
+                        new_cache[rel_path] = symbols
 
-    except OSError:
-        pass
+        except OSError:
+            pass
+
+        # Populate cache for incremental updates
+        with _MAP_CACHE_LOCK:
+            _MAP_CACHE = new_cache
+            _MAP_CACHE_WORKSPACE_PACKAGES = workspace_packages
+            _MAP_CACHE_WORKSPACE = workspace
 
     if not all_symbols:
         return ""

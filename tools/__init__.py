@@ -148,6 +148,14 @@ def add_modified_file(path: str) -> None:
     """Record a file as modified (thread-safe). Used by write_file/edit_file."""
     with _MODIFIED_FILES_LOCK:
         _MODIFIED_FILES.add(path)
+    # Incrementally update the codebase map so agent context stays current
+    try:
+        root = _TOOL_CONTEXT.workspace if _TOOL_CONTEXT else None
+        if root and path.endswith((".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")):
+            from core.codebase_map import update_file_in_map
+            update_file_in_map(path, root)
+    except Exception:
+        pass  # best-effort; never block the write on map update failure
 
 
 def get_modified_files() -> list[str]:

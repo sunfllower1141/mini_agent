@@ -879,7 +879,7 @@ def _verify_summary(args: dict) -> str:
 # git
 # ---------------------------------------------------------------------------
 
-_GIT_SAFE: set[str] = {"status", "diff", "log", "init", "add", "commit", "show", "restore"}
+_GIT_SAFE: set[str] = {"status", "diff", "log", "init", "add", "commit", "show", "restore", "blame", "log_p", "branch_diff"}
 
 
 def _git_run(cwd: str, *args: str) -> tuple[int, str, str]:
@@ -961,6 +961,83 @@ def _git(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
         if rc != 0:
             return ToolResult(success=False, content=err or out)
         return ToolResult(success=True, content=out)
+
+    elif sub == "blame":
+        if not extra.strip():
+            return ToolResult(success=False, content="'blame' requires a file path in 'args'.")
+        # Limit output to 200 lines to avoid blowing context
+        rc, out, err = _git_run(
+            cwd, "blame", "--date=short", "-w", "-L", "1,200", extra.strip(),
+        )
+        if rc != 0:
+            return ToolResult(success=False, content=err or out)
+        if not out.strip():
+            return ToolResult(success=True, content=f"No blame info for: {extra.strip()}")
+        # Compact the output: hash(8) author date line_num: code
+        lines = out.strip().split("\n")
+        compact = []
+        for line in lines:
+            # git blame format: hash (author date line_num) code
+            parts = line.split(" ", 2)
+            if len(parts) >= 3:
+                # Extract just the first 8 chars of hash
+                short_hash = parts[0][:8] if len(parts[0]) >= 8 else parts[0]
+                # Reassemble: hash author (date line_num) code
+                compact.append(f"{short_hash} {parts[1]} {parts[2]}")
+            else:
+                compact.append(line)
+        return ToolResult(success=True, content="\n".join(compact))
+
+    elif sub == "log_p":
+        # Show log with diff/patch. Optional path filter in args
+        count = args.get("count", 5)
+        path_filter = extra.strip() if extra.strip() else None
+        cmd = ["log", "-p", f"-n{min(count, 20)}", "--decorate"]
+        if path_filter:
+            cmd.extend(["--", path_filter])
+        rc, out, err = _git_run(cwd, *cmd)
+        if rc != 0 and "does not have any commits" not in err:
+            return ToolResult(success=False, content=err or out)
+        if not out.strip():
+            return ToolResult(success=True, content="No commits found.")
+        # Truncate to ~8000 chars to keep response manageable
+        truncated = out[:8000]
+        if len(out) > 8000:
+            truncated += f"\n... (truncated, {len(out)} total chars)"
+        return ToolResult(success=True, content=truncated)
+
+    elif sub == "branch_diff":
+        # Diff between branches. Default: current branch vs main/master.
+        # Optional args: branch name to compare against, or "A..B" syntax
+        if extra.strip():
+            compare = extra.strip()
+        else:
+            # Auto-detect: try "main", then "master"
+            for candidate in ("main", "master"):
+                rc, _, _ = _git_run(cwd, "rev-parse", "--verify", candidate)
+                if rc == 0:
+                    compare = candidate
+                    break
+            else:
+                return ToolResult(
+                    success=False,
+                    content="Could not detect main/master branch. Specify branch in 'args'.",
+                )
+        rc, out, err = _git_run(
+            cwd, "diff", "--stat", f"{compare}...HEAD",
+        )
+        if rc != 0:
+            return ToolResult(success=False, content=err or out)
+        if not out.strip():
+            return ToolResult(success=True, content=f"No differences vs {compare}.")
+        # Append a shortstat summary
+        lines = [f"Changes vs {compare}:\n", out.rstrip()]
+        rc2, diff_out, _ = _git_run(
+            cwd, "diff", "--shortstat", f"{compare}...HEAD",
+        )
+        if rc2 == 0 and diff_out.strip():
+            lines.append(f"\nSummary: {diff_out.strip()}")
+        return ToolResult(success=True, content="\n".join(lines))
 
     elif sub == "restore":
         if not extra.strip():

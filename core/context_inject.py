@@ -368,11 +368,12 @@ def _inject_modified_files_checkpoint(
     messages: list[dict], *, read_gate: ReadSafetyGate | None = None,
 ) -> None:
     """Inject modified-files checkpoint (turn 2 only)."""
-    if not get_modified_files():
+    modified = get_modified_files()
+    if not modified:
         return
-    mod_list = "\n".join(f"  - {f}" for f in get_modified_files())
+    mod_list = "\n".join(f"  - {f}" for f in modified)
     test_hint = ""
-    for mf in get_modified_files():
+    for mf in modified:
         base = os.path.basename(mf)
         if base.startswith("test_") and base.endswith(".py"):
             test_hint += f"\n  Relevant test: {base}"
@@ -380,12 +381,41 @@ def _inject_modified_files_checkpoint(
             candidate = f"test_{base}"
             dp = os.path.dirname(mf)
             test_path = os.path.join(dp, candidate) if dp else candidate
-            if os.path.isfile(os.path.join(read_gate.workspace_root, test_path)):
+            if read_gate and os.path.isfile(os.path.join(read_gate.workspace_root, test_path)):
                 test_hint += f"\n  Relevant test: {test_path}"
+
+    # Knowledge graph caller analysis for modified files
+    kg_hint = ""
+    workspace = read_gate.workspace_root if read_gate else ""
+    if workspace:
+        try:
+            from core.knowledge_graph import ensure_graph_built, find_callers_of_file
+            if ensure_graph_built(workspace):
+                caller_summaries: list[str] = []
+                for mf in modified[:5]:  # max 5 files
+                    if not mf.endswith(".py"):
+                        continue
+                    callers = find_callers_of_file(mf)
+                    if callers:
+                        # Show top 2 caller files
+                        cf_parts = []
+                        for cf in callers[:2]:
+                            names = cf["callers"][:2]
+                            names_str = ", ".join(names)
+                            if len(cf["callers"]) > 2:
+                                names_str += f" (+{len(cf['callers']) - 2})"
+                            cf_parts.append(f"{cf['file']}({names_str})")
+                        caller_summaries.append(f"  {mf} → called by: {', '.join(cf_parts)}")
+                if caller_summaries:
+                    kg_hint = "\nCaller impact analysis:\n" + "\n".join(caller_summaries)
+        except Exception:
+            pass
+
     ckpt = (
         f"Files modified this session:\n{mod_list}\n"
         f"Running `verify` or `run_tests`{test_hint if test_hint else ''} "
         f"after changes is recommended."
+        f"{kg_hint}"
     )
     messages.append({"role": "user", "content": ckpt, "_transient": True})
 
@@ -399,6 +429,84 @@ def _inject_circuit_breaker(
     warning = _check_circuit(recent_tool_keys)
     if warning:
         messages.append({"role": "user", "content": warning, "_transient": True})
+
+
+def _inject_post_edit_verification(messages: list[dict]) -> None:
+    """Inject post-edit verification suggestions when files have been modified.
+
+    Uses knowledge graph to find callers that may need re-verification
+    after changes.  Runs every turn after the modified-files checkpoint
+    turn, but only when there are modified files.
+    """
+    modified = get_modified_files()
+    if not modified:
+        return
+
+    workspace = None
+    read_gate = getattr(_TOOL_CONTEXT, "_read_gate", None)
+    if read_gate and hasattr(read_gate, "workspace_root"):
+        workspace = read_gate.workspace_root
+    if not workspace:
+        return
+
+    # Only inject if there are non-test Python files modified
+    py_files = [f for f in modified if f.endswith(".py") and not os.path.basename(f).startswith("test_")]
+    if not py_files:
+        return
+
+    # Only inject periodically (every 6 turns after checkpoint) to avoid noise
+    turn = getattr(_TOOL_CONTEXT, "_turn_count", 0)
+    if turn <= MODIFIED_FILES_CHECKPOINT_TURN:
+        return
+    if (turn - MODIFIED_FILES_CHECKPOINT_TURN) % 6 != 0:
+        return
+
+    lines: list[str] = []
+    lines.append("Post-edit verification — files modified this session:")
+
+    # Test coverage: show which modified files have/haven't test coverage
+    for mf in py_files[:5]:
+        base = os.path.basename(mf)
+        candidate = f"test_{base}"
+        dp = os.path.dirname(mf)
+        test_path = os.path.join(dp, candidate) if dp else candidate
+        has_test = os.path.isfile(os.path.join(workspace, test_path))
+        if not has_test:
+            alt_path = os.path.join("tests", candidate)
+            has_test = os.path.isfile(os.path.join(workspace, alt_path))
+        status = "✅ has test" if has_test else "⚠️ no test found"
+        lines.append(f"  {mf} — {status}")
+
+    # Knowledge graph: show affected callers across all modified files
+    try:
+        from core.knowledge_graph import ensure_graph_built, find_callers_of_file
+        if ensure_graph_built(workspace):
+            all_callers: dict[str, list[str]] = {}
+            for mf in py_files[:5]:
+                callers = find_callers_of_file(mf)
+                for cf in callers:
+                    f = cf["file"]
+                    if f not in all_callers:
+                        all_callers[f] = []
+                    all_callers[f].extend(cf["callers"])
+            if all_callers:
+                # Deduplicate and sort
+                unique_callers = {f: sorted(set(names)) for f, names in all_callers.items()}
+                lines.append("\nAffected callers (may need verification):")
+                for f, names in sorted(unique_callers.items())[:5]:
+                    names_str = ", ".join(names[:3])
+                    if len(names) > 3:
+                        names_str += f" (+{len(names) - 3})"
+                    lines.append(f"  {f}: {names_str}")
+    except Exception:
+        pass
+
+    lines.append("\nConsider running `verify` or `run_tests` for affected files.")
+    messages.append({
+        "role": "user",
+        "content": "\n".join(lines),
+        "_transient": True,
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -419,6 +527,8 @@ def _inject_edit_risk_context(messages: list[dict]) -> None:
       - Recent modification frequency (hotspot detection)
       - Co-changed files (files that change in the same commits)
       - Missing test coverage
+      - Knowledge graph caller analysis (which callers may break)
+      - Git blame (who last touched these lines)
 
     Only injects when there are pending edits — zero tokens otherwise.
     """
@@ -453,6 +563,14 @@ def _inject_edit_risk_context(messages: list[dict]) -> None:
     if not workspace:
         return
 
+    # Lazy-build knowledge graph for caller analysis
+    _kg_available = False
+    try:
+        from core.knowledge_graph import ensure_graph_built, find_callers_of_file
+        _kg_available = ensure_graph_built(workspace)
+    except Exception:
+        _kg_available = False
+
     lines: list[str] = []
     for target in edit_targets[:3]:  # max 3 files to avoid bloat
         full_path = os.path.join(workspace, target) if not os.path.isabs(target) else target
@@ -472,7 +590,7 @@ def _inject_edit_risk_context(messages: list[dict]) -> None:
                 commit_lines = r.stdout.strip().split("\n")
                 count = len(commit_lines)
                 if count >= 3:
-                    risk_items.append(f"modified in {count}/{_EDIT_RISK_GIT_DEPTH} recent commits \u26a0\ufe0f")
+                    risk_items.append(f"modified in {count}/{_EDIT_RISK_GIT_DEPTH} recent commits ⚠️")
                 elif count > 0:
                     risk_items.append(f"modified in {count} recent commit(s)")
         except (OSError, _sp.TimeoutExpired):
@@ -510,7 +628,48 @@ def _inject_edit_risk_context(messages: list[dict]) -> None:
                 # Also check tests/ directory
                 alt_path = os.path.join("tests", candidate)
                 if not os.path.isfile(os.path.join(workspace, alt_path)):
-                    risk_items.append("no test file found \u26a0\ufe0f")
+                    risk_items.append("no test file found ⚠️")
+
+        # 4. Knowledge graph caller analysis (if graph is available)
+        if _kg_available and target.endswith(".py"):
+            try:
+                callers = find_callers_of_file(target)
+                if callers:
+                    # Cap to 3 caller files to keep context tight
+                    caller_parts: list[str] = []
+                    for cf in callers[:3]:
+                        names = cf["callers"][:3]
+                        names_str = ", ".join(names)
+                        if len(cf["callers"]) > 3:
+                            names_str += f" (+{len(cf['callers']) - 3} more)"
+                        caller_parts.append(f"{cf['file']} ({names_str})")
+                    caller_summary = "; ".join(caller_parts)
+                    if len(callers) > 3:
+                        caller_summary += f" (+{len(callers) - 3} more files)"
+                    risk_items.append(f"callers: {caller_summary} — verify after changes")
+            except Exception:
+                pass
+
+        # 5. Git blame — who last modified this file
+        try:
+            r = _sp.run(
+                ["git", "-C", workspace, "blame", "--line-porcelain", target],
+                capture_output=True, text=True, timeout=4,
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                # Parse porcelain blame: extract author lines
+                authors: dict[str, int] = {}
+                for line in r.stdout.split("\n"):
+                    if line.startswith("author "):
+                        author = line[7:].strip()
+                        authors[author] = authors.get(author, 0) + 1
+                if authors:
+                    # Show top authors by line count
+                    top = sorted(authors.items(), key=lambda x: -x[1])[:3]
+                    author_parts = [f"{a} ({c} lines)" for a, c in top]
+                    risk_items.append(f"authors: {', '.join(author_parts)}")
+        except (OSError, _sp.TimeoutExpired):
+            pass
 
         if risk_items:
             lines.append(f"  {target}: {'; '.join(risk_items)}")
@@ -1145,6 +1304,15 @@ def _inject_context(
     # so fresh context isn't immediately pruned.
     _compact_if_needed(messages)
 
+    # Build knowledge graph at startup (one-time, lazy — no-op if already built)
+    workspace = read_gate.workspace_root if read_gate else ""
+    if workspace and turn_count == 1:
+        try:
+            from core.knowledge_graph import ensure_graph_built
+            ensure_graph_built(workspace)
+        except Exception:
+            pass
+
     # One-time injections (first turn only)
     _inject_handoff_context(
         messages,
@@ -1182,6 +1350,7 @@ def _inject_context(
     _inject_self_critique(messages, turn_count=turn_count)
     _inject_tool_graph_context(messages)
     _inject_experience_context(messages, memory_store=memory_store)
+    _inject_post_edit_verification(messages)
 
     # Context-quality defences (research-backed: 25% fill degrades quality)
     _compress_stale_tool_results(messages)

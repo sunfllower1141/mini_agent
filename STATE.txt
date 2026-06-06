@@ -1,6 +1,7 @@
 # mini_agent Architecture State
 # Last updated: 2026-06-06 (context engineering: codebase_map + compaction)
 # Last updated: 2026-06-06 (electron: fix hang on exit — app.quit() on window-all-closed)
+# Last updated: 2026-06-06 (self-audit wiring: knowledge_graph + git blame + tree-sitter + post-edit verification)
 # Last updated: 2026-06-05 (tools & memory audit — save() decomposed, AgentContext extracted,
 #   orphan stripping unified in memory_prune, dead code removed)
 #
@@ -19,6 +20,10 @@
   orchestration, progress checks, circuit breaker, conversation compaction, edit risk briefing, pattern rules) (1250 lines)
 - `core/prompt.py` — system prompt assembly, startup context (file tree, codebase map, git log)
 - `core/config.py` — TOML config loading, provider settings (718 lines)
+- `core/tree_sitter_parser.py` — multi-language (Python/JS/TS) source parsing via tree-sitter
+  with regex/AST fallback. Extracts defs, calls, and imports for codebase_map and knowledge_graph.
+- `core/knowledge_graph.py` — entity-relationship graph (calls, imports, inherits, defines) with
+  BFS shortest-path, subgraph, and caller-finding queries. Wired into self-audit injections.
 
 ### Sub-Agent System
 - `agents/agent_runtime.py` — sub-agent runtime, broadcast inbox, turn budgets
@@ -151,6 +156,28 @@
     development tasks (\"Add a new tool\", \"Modify system prompt\", \"Change
     memory storage\") to the relevant source files. Injected once at session
     startup alongside HANDOFF.md and STATE.txt. (new 2026-06-06)
+18. **Tree-sitter parser**: ``core/tree_sitter_parser.py`` provides multi-language
+    (Python, JS, TS) symbol extraction via tree-sitter queries, with regex/AST
+    fallback. Used by codebase_map for more accurate symbol extraction and by
+    knowledge_graph for call-graph construction. Lazy-loads language grammars.
+19. **Knowledge graph**: ``core/knowledge_graph.py`` builds an entity-relationship
+    graph (calls, imports, inherits, defines) from workspace source files.
+    Exposes ``find_related()`` (neighborhood), ``trace_path()`` (shortest path BFS),
+    ``get_subgraph()``, ``find_callers_of_file()``, and ``ensure_graph_built()``.
+    Wired into edit risk briefing, modified-files checkpoint, and post-edit
+    verification to surface caller impact before and after edits.
+20. **Git blame in edit risk briefing**: ``_inject_edit_risk_context()`` now
+    includes ``git blame --line-porcelain`` analysis, showing top authors by
+    line count for each file about to be edited. Helps the agent understand
+    ownership context before making changes.
+21. **Post-edit verification injection**: New ``_inject_post_edit_verification()``
+    runs every 6 turns after the modified-files checkpoint, showing test
+    coverage status for modified files and affected callers from the knowledge
+    graph. Periodic reminder to verify changes haven't broken downstream code.
+22. **Codebase map incremental cache**: ``core/codebase_map.py`` now maintains a
+    cached symbol map (``_MAP_CACHE``) updated incrementally via
+    ``update_file_in_map()`` on every file write/edit. Avoids full workspace
+    re-scans. ``_extract_single_file()`` uses tree-sitter when available.
 
 ## Known Issues
 - `_json_rpc_shared.py` — shared drain_stderr() utility used by lsp.py and mcp_client.py
