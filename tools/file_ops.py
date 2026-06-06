@@ -136,6 +136,16 @@ def _auto_advance_plan(file_path: str, edit_text: str = "") -> None:
         if any(w in haystack for w in words):
             done.add(idx)
     _TOOL_CONTEXT._plan_done = done
+    if incomplete_indices and any(i in done for i in incomplete_indices):
+        _TOOL_CONTEXT._plan_last_advanced_turn = getattr(_TOOL_CONTEXT, "_turn_count", 0)
+
+    # Persist to memory if any steps were auto-completed
+    if incomplete_indices:
+        try:
+            from tools.agent_todos import _maybe_persist_plan
+            _maybe_persist_plan()
+        except ImportError:
+            pass
 
 
 def _backup_before_write(resolved_path: str) -> None:

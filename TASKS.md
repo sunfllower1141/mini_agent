@@ -48,6 +48,14 @@ Read before starting work to orient yourself in the codebase.
 - **`tools/reservations.py`** — File reservation system (per-agent file locks)
 - **`tools/tool_result.py`** — ToolResult dataclass, JSON repair, error formatting
 
+### Modify Planning / Task Tracking
+- **`tools/agent_todos.py`** — plan, plan_status, todo_write, todo_read, write_scratchpad
+- **`tools/context.py`** — _plan_steps, _plan_done, _plan_last_advanced_turn state
+- **`memory/memory.py`** — Plan persistence (set_plan, get_plan), HANDOFF.md plan export
+- **`core/context_inject.py`** — _inject_plan_status (per-turn plan injection, staleness detection)
+- **`tools/file_ops.py`** — _auto_advance_plan (auto-completes steps on write/edit)
+- **`tools/skills.py`** — "planning" skill group (todo_write, todo_read, plan, plan_status)
+
 ### Modify LSP Integration
 - **`tools/lsp.py`** — LSP client (pylsp integration for code intelligence)
 

@@ -154,8 +154,19 @@ def _plan(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
             content="Plan must have at least one step.",
             hint="Provide a non-empty array of step descriptions.",
         )
+    _MAX_PLAN_STEPS = 15
+    if len(steps) > _MAX_PLAN_STEPS:
+        return ToolResult(
+            success=False,
+            content=f"Plan too large: {len(steps)} steps. Maximum is {_MAX_PLAN_STEPS}. Break your task into smaller sub-plans or use a sub-agent for each major phase.",
+            hint=f"Limit your plan to {_MAX_PLAN_STEPS} steps. For larger tasks, create a high-level plan and delegate phases to sub-agents via spawn_agent.",
+        )
     _TOOL_CONTEXT._plan_steps = steps
     _TOOL_CONTEXT._plan_done = set()
+    _TOOL_CONTEXT._plan_last_advanced_turn = getattr(_TOOL_CONTEXT, "_turn_count", 0)
+
+    # Persist to memory for cross-session continuity
+    _maybe_persist_plan()
     lines = [f"Plan ({len(steps)} steps):"]
     for i, step in enumerate(steps, 1):
         lines.append(f"  [{i}] {step}")
@@ -186,8 +197,15 @@ def _plan_status(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolR
                 content=f"Invalid step {step}. Plan has {len(steps)} steps.",
                 hint=f"Step must be between 1 and {len(steps)}.",
             )
+        if idx in done:
+            # Idempotency guard: warn if step was already marked complete
+            pass  # re-marking is harmless (a set), but we could nudge
         done.add(idx)
         _TOOL_CONTEXT._plan_done = done
+        _TOOL_CONTEXT._plan_last_advanced_turn = getattr(_TOOL_CONTEXT, "_turn_count", 0)
+
+        # Persist to memory for cross-session continuity
+        _maybe_persist_plan()
 
     lines = [f"Plan ({len(done)}/{len(steps)} complete):"]
     for i, s in enumerate(steps, 1):
@@ -205,3 +223,16 @@ def _plan_status_summary(args: dict) -> str:
     if step is not None:
         return f"plan_status(complete step {step})"
     return "plan_status()"
+
+
+def _maybe_persist_plan() -> None:
+    """Persist current plan state to SQLite memory if a MemoryStore is available."""
+    memory_store = getattr(_TOOL_CONTEXT, "_memory_store", None)
+    if memory_store is None:
+        return
+    steps = getattr(_TOOL_CONTEXT, "_plan_steps", [])
+    done = getattr(_TOOL_CONTEXT, "_plan_done", set())
+    try:
+        memory_store.set_plan(steps, list(done))
+    except Exception:
+        pass  # best-effort; plan is in-memory even if persistence fails

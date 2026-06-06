@@ -94,6 +94,17 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     set_context(exa_api_key=config.exa_api_key, openai_api_key=config.openai_api_key,
                 scratchpad_path=memory._db_path, _memory_store=memory)
 
+    # Restore persisted plan state from previous session
+    try:
+        from tools import _TOOL_CONTEXT
+        saved_steps, saved_done = memory.get_plan()
+        if saved_steps:
+            _TOOL_CONTEXT._plan_steps = saved_steps
+            _TOOL_CONTEXT._plan_done = set(saved_done)
+            _TOOL_CONTEXT._plan_last_advanced_turn = 0  # fresh session
+    except Exception:
+        pass  # best-effort; plan is in-memory anyway
+
     # Initialize self-learning systems (FailurePatternStore + SelfCritique)
     try:
         from tools.failure_learning import FailurePatternStore, SelfCritique
@@ -248,9 +259,14 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
                 )
                 if m:
                     pending = m.group(1).strip()[:500]
+            # Capture plan state for handoff
+            plan_steps = getattr(_TOOL_CONTEXT, "_plan_steps", [])
+            plan_done = list(getattr(_TOOL_CONTEXT, "_plan_done", set()))
             memory.write_session_handoff(
                 workspace, start_head=start_head,
                 pending=pending, notes="",
+                plan_steps=plan_steps if plan_steps else None,
+                plan_done=plan_done if plan_done else None,
             )
         except Exception:
             pass

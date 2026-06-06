@@ -85,6 +85,12 @@ def run_sub_agent(
     _saved_plan_done = getattr(_TOOL_CONTEXT, '_plan_done', set())
     _TOOL_CONTEXT._plan_steps = []
     _TOOL_CONTEXT._plan_done = set()
+
+    def _restore_plan():
+        """Restore parent plan state on exit (guaranteed by try/finally)."""
+        _TOOL_CONTEXT._plan_steps = _saved_plan_steps
+        _TOOL_CONTEXT._plan_done = _saved_plan_done
+
     from tools.schema import TOOLS
     from core.prompt import build_system_prompt
 
@@ -185,11 +191,6 @@ def run_sub_agent(
 
     import json
     import requests
-
-    # ── Helper: restore parent plan state on exit (step 1) ──
-    def _restore_plan():
-        _TOOL_CONTEXT._plan_steps = _saved_plan_steps
-        _TOOL_CONTEXT._plan_done = _saved_plan_done
 
     # ── Helper: write sub-agent report to file (step 4) ──
     def _write_report(result: SubAgentResult) -> SubAgentResult:
@@ -335,6 +336,7 @@ def run_sub_agent(
                 print(f"  ⚠ auto-ping failed: {exc}", file=sys.stderr, flush=True)
 
         if cancel_event is not None and cancel_event.is_set():
+            _restore_plan()
             return SubAgentResult(
                 success=False,
                 content="Cancelled by parent.",
@@ -506,6 +508,7 @@ def run_sub_agent(
         except APIError as exc:
             # API error with structured detail
             detail = f"API call failed [{exc.status_code}]: {exc.body}"
+            _restore_plan()
             return SubAgentResult(
                 success=False,
                 content=detail,
@@ -522,6 +525,7 @@ def run_sub_agent(
                 tc_ids = [m.get("tool_call_id", "-")[:12] if m.get("role") == "tool" else "-" for m in messages]
                 detail += f" | Roles: {roles}"
                 detail += f" | ToolIDs: {tc_ids}"
+            _restore_plan()
             return SubAgentResult(
                 success=False,
                 content=detail,
@@ -532,6 +536,7 @@ def run_sub_agent(
             )
 
         if cancel_event is not None and cancel_event.is_set():
+            _restore_plan()
             return SubAgentResult(
                 success=False,
                 content="Cancelled by parent.",
@@ -542,6 +547,7 @@ def run_sub_agent(
             )
 
         if msg is None:
+            _restore_plan()
             return SubAgentResult(
                 success=False,
                 content="No response from LLM.",
@@ -631,6 +637,7 @@ def run_sub_agent(
 
                     # Check cancellation after each tool execution
                     if cancel_event is not None and cancel_event.is_set():
+                        _restore_plan()
                         return SubAgentResult(
                             success=False,
                             content="Cancelled by parent during tool execution.",

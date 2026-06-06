@@ -198,6 +198,15 @@ class MemoryStore:
             )
             # Ensure a row always exists
             conn.execute("INSERT OR IGNORE INTO scratchpad (id, content) VALUES (1, '')")
+            # Plan state table — persists plan steps across sessions
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS plan_state ("
+                "id INTEGER PRIMARY KEY CHECK (id = 1),"
+                "steps_json TEXT NOT NULL DEFAULT '[]',"
+                "done_json TEXT NOT NULL DEFAULT '[]'"
+                ")"
+            )
+            conn.execute("INSERT OR IGNORE INTO plan_state (id, steps_json, done_json) VALUES (1, '[]', '[]')")
             # Test output table — persisted so agent can read failures without re-running
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS test_output ("
@@ -590,6 +599,8 @@ class MemoryStore:
         start_head: str | None = None,
         pending: str = "",
         notes: str = "",
+        plan_steps: list[str] | None = None,
+        plan_done: list[int] | None = None,
     ) -> str:
         """Auto-generate and write HANDOFF.md from session state.
 
@@ -649,6 +660,16 @@ class MemoryStore:
         pending_text = pending or "(none recorded)"
         files_text = "\n".join(f"- {f}" for f in modified_files) if modified_files else "(none tracked)"
 
+        # Build plan progress section
+        plan_text = ""
+        if plan_steps:
+            done_set = set(plan_done or [])
+            plan_lines = [f"Plan ({len(done_set)}/{len(plan_steps)} complete):"]
+            for i, s in enumerate(plan_steps, 1):
+                mark = "✓" if (i - 1) in done_set else "○"
+                plan_lines.append(f"  [{mark}] {i}. {s}")
+            plan_text = "\n".join(plan_lines) + "\n"
+
         handoff_path = os.path.join(workspace, "HANDOFF.md")
         content = (
             f"# Session Handoff\n"
@@ -656,8 +677,10 @@ class MemoryStore:
             f"## Last Session: {date_str}\n\n"
             f"### What I Changed\n{changes_text}\n\n"
             f"### What's Pending\n{pending_text}\n\n"
-            f"### Modified Files\n{files_text}\n"
         )
+        if plan_text:
+            content += f"### Plan Progress\n{plan_text}\n"
+        content += f"### Modified Files\n{files_text}\n"
         if notes:
             content += f"\n### Notes\n{notes}\n"
 
@@ -943,6 +966,50 @@ class MemoryStore:
         except sqlite3.Error as exc:
             import sys
             print(f"Warning: scratchpad write failed: {exc}", file=sys.stderr)
+
+    def get_plan(self) -> tuple[list[str], list[int]]:
+        """Return (steps, done_indices) from persisted plan state.  Returns ([], []) if none."""
+        try:
+            conn = self._get_conn()
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS plan_state ("
+                "id INTEGER PRIMARY KEY CHECK (id = 1),"
+                "steps_json TEXT NOT NULL DEFAULT '[]',"
+                "done_json TEXT NOT NULL DEFAULT '[]'"
+                ")"
+            )
+            conn.execute("INSERT OR IGNORE INTO plan_state (id, steps_json, done_json) VALUES (1, '[]', '[]')")
+            row = conn.execute(
+                "SELECT steps_json, done_json FROM plan_state WHERE id = 1"
+            ).fetchone()
+            if row:
+                steps = json.loads(row[0]) if row[0] else []
+                done = json.loads(row[1]) if row[1] else []
+                return steps, done
+            return [], []
+        except (sqlite3.Error, json.JSONDecodeError):
+            return [], []
+
+    def set_plan(self, steps: list[str], done_indices: list[int]) -> None:
+        """Persist plan steps and completed indices to SQLite."""
+        try:
+            conn = self._get_conn()
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS plan_state ("
+                "id INTEGER PRIMARY KEY CHECK (id = 1),"
+                "steps_json TEXT NOT NULL DEFAULT '[]',"
+                "done_json TEXT NOT NULL DEFAULT '[]'"
+                ")"
+            )
+            conn.execute("INSERT OR IGNORE INTO plan_state (id, steps_json, done_json) VALUES (1, '[]', '[]')")
+            conn.execute(
+                "INSERT OR REPLACE INTO plan_state (id, steps_json, done_json) VALUES (1, ?, ?)",
+                (json.dumps(steps), json.dumps(sorted(done_indices))),
+            )
+            conn.commit()
+        except sqlite3.Error as exc:
+            import sys
+            print(f"Warning: plan state write failed: {exc}", file=sys.stderr)
 
     def get_test_output(self) -> str:
         """Return the last saved test output (empty string if none)."""

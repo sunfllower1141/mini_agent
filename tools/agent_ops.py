@@ -904,7 +904,7 @@ def _session_stats(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> Too
     plan = getattr(_TOOL_CONTEXT, "_plan_steps", [])
     plan_done = getattr(_TOOL_CONTEXT, "_plan_done", set())
     if plan:
-        done_count = len(plan_done & set(range(1, len(plan) + 1)))
+        done_count = len(plan_done)  # plan_done stores 0-based indices, just count
         lines.append(f"Plan:           {done_count}/{len(plan)} steps done")
 
     return ToolResult(success=True, content="\\n".join(lines))

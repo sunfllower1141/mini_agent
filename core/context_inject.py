@@ -698,6 +698,21 @@ def _inject_plan_status(messages: list[dict]) -> None:
         mark = "✓" if (i - 1) in plan_done else "○"
         lines.append(f"  [{mark}] {i}. {s}")
     lines.append("Use plan_status to mark steps complete as you finish them.")
+
+    # --- Plan staleness detection ---
+    turn_count = getattr(_TOOL_CONTEXT, "_turn_count", 0)
+    last_advanced = getattr(_TOOL_CONTEXT, "_plan_last_advanced_turn", 0)
+    _PLAN_STALE_TURNS = 3
+    stale_turns = turn_count - last_advanced
+    if len(plan_done) < len(plan_steps) and stale_turns >= _PLAN_STALE_TURNS:
+        lines.append(
+            f"\n⚠️ PLAN STALLED: No step advanced in {stale_turns} turns. "
+            "Either you're stuck on the current step, or you forgot to call "
+            "plan_status when you finished it. Re-evaluate: are you making "
+            "progress? If stuck, read relevant files, try a different approach, "
+            "or mark the step as done and move on."
+        )
+
     messages.append({
         "role": "user",
         "content": "\n".join(lines),

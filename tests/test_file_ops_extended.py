@@ -407,10 +407,108 @@ class TestPlan(unittest.TestCase):
         self.assertEqual(_TOOL_CONTEXT._plan_steps, ["new step"])
         self.assertEqual(_TOOL_CONTEXT._plan_done, set())
 
+    def test_plan_too_many_steps_rejected(self):
+        """Plan with more than 15 steps is rejected."""
+        tc = _make_tool_call("plan", steps=[f"step {i}" for i in range(20)])
+        result = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertFalse(result.success)
+        self.assertIn("too large", result.content.lower())
+
+    def test_plan_exactly_fifteen_steps_accepted(self):
+        """Plan with exactly 15 steps is accepted."""
+        steps = [f"step {i}" for i in range(15)]
+        tc = _make_tool_call("plan", steps=steps)
+        result = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertTrue(result.success)
+        self.assertEqual(_TOOL_CONTEXT._plan_steps, steps)
+
+    def test_plan_status_idempotent(self):
+        """Marking a step complete multiple times is harmless."""
+        execute_tool(
+            _make_tool_call("plan", steps=["A", "B"]),
+            self.write_gate, self.read_gate,
+        )
+        execute_tool(_make_tool_call("plan_status", step=1), self.write_gate, self.read_gate)
+        # Mark step 1 again — should succeed without error
+        result = execute_tool(_make_tool_call("plan_status", step=1), self.write_gate, self.read_gate)
+        self.assertTrue(result.success)
+        self.assertEqual(_TOOL_CONTEXT._plan_done, {0})
+
+    def test_plan_tracks_last_advanced_turn(self):
+        """Plan status updates _plan_last_advanced_turn."""
+        _TOOL_CONTEXT._turn_count = 5
+        execute_tool(
+            _make_tool_call("plan", steps=["A", "B"]),
+            self.write_gate, self.read_gate,
+        )
+        # After plan(), last_advanced_turn should be set to turn_count
+        self.assertEqual(_TOOL_CONTEXT._plan_last_advanced_turn, 5)
+        # Advance turn and complete a step
+        _TOOL_CONTEXT._turn_count = 7
+        execute_tool(_make_tool_call("plan_status", step=1), self.write_gate, self.read_gate)
+        self.assertEqual(_TOOL_CONTEXT._plan_last_advanced_turn, 7)
+
+    def test_auto_advance_plan_on_write(self):
+        """Auto-advance fires when write_file path matches plan step keyword."""
+        execute_tool(
+            _make_tool_call("plan", steps=["Create test_config.py", "Verify output"]),
+            self.write_gate, self.read_gate,
+        )
+        self.assertEqual(_TOOL_CONTEXT._plan_done, set())
+        # Write a file whose name matches step 1 keyword
+        filepath = os.path.join(self.workspace, "test_config.py")
+        tc = _make_tool_call("write_file", path=filepath, content="# test config")
+        result = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertTrue(result.success)
+        self.assertIn(0, _TOOL_CONTEXT._plan_done, "Step 1 should be auto-completed")
+
+    def test_auto_advance_plan_no_match(self):
+        """Auto-advance does NOT fire when file path doesn't match any step."""
+        execute_tool(
+            _make_tool_call("plan", steps=["Create test_config.py"]),
+            self.write_gate, self.read_gate,
+        )
+        filepath = os.path.join(self.workspace, "unrelated_file.txt")
+        tc = _make_tool_call("write_file", path=filepath, content="hello")
+        result = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertTrue(result.success)
+        self.assertEqual(_TOOL_CONTEXT._plan_done, set(), "No step should auto-complete")
+
 
 # ---------------------------------------------------------------------------
-# task_status
+# session_stats plan line
 # ---------------------------------------------------------------------------
+
+class TestSessionStatsPlan(unittest.TestCase):
+
+    def setUp(self):
+        self.workspace = tempfile.mkdtemp()
+        self.write_gate, self.read_gate = _gates(self.workspace)
+        _TOOL_CONTEXT._plan_steps = []
+        _TOOL_CONTEXT._plan_done = set()
+
+    def tearDown(self):
+        import shutil
+        _TOOL_CONTEXT._plan_steps = []
+        _TOOL_CONTEXT._plan_done = set()
+        shutil.rmtree(self.workspace, ignore_errors=True)
+
+    def test_session_stats_no_plan(self):
+        """session_stats omits plan line when no plan is active."""
+        tc = _make_tool_call("session_stats")
+        result = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertTrue(result.success)
+        self.assertNotIn("Plan:", result.content)
+
+    def test_session_stats_shows_plan_progress(self):
+        """session_stats shows correct plan progress count."""
+        _TOOL_CONTEXT._plan_steps = ["A", "B", "C"]
+        _TOOL_CONTEXT._plan_done = {0}  # step 1 done (0-indexed)
+        tc = _make_tool_call("session_stats")
+        result = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertTrue(result.success)
+        self.assertIn("Plan:", result.content)
+        self.assertIn("1/3", result.content)
 
 class TestTaskStatus(unittest.TestCase):
 

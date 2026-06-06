@@ -16,6 +16,7 @@ CTX_SCRATCHPAD_UPDATED = "_scratchpad_updated"
 CTX_TURN_HISTORY = "_turn_history"  # dict[int, str] — turn number → summary
 CTX_PLAN_STEPS = "_plan_steps"      # list[str] — from plan tool
 CTX_PLAN_DONE = "_plan_done"        # set[int] — completed step indices
+CTX_PLAN_LAST_ADVANCED = "_plan_last_advanced_turn"  # int — turn when last step advanced
 
 
 class AgentContext:
@@ -32,6 +33,7 @@ class AgentContext:
         _turn_history         dict[int, str] — turn number → summary
         _plan_steps           list[str] — declared plan steps
         _plan_done            set[int] — completed step indices
+        _plan_last_advanced_turn  int — turn number when a step was last completed
     """
 
     def __init__(self):
@@ -43,6 +45,7 @@ class AgentContext:
         self._turn_history: dict[int, str] = {}
         self._plan_steps: list[str] = []
         self._plan_done: set[int] = set()
+        self._plan_last_advanced_turn: int = 0
         self._memory_store = None  # MemoryStore instance (set by init_session)
         self._failure_pattern_store = None  # FailurePatternStore (set by init_session)
         self._self_critique = None  # SelfCritique instance (set by init_session)
