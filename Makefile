@@ -6,6 +6,16 @@ PYTEST := python -m pytest
 PYTEST_ARGS := -x -q --tb=short
 COVERAGE_DIR := htmlcov
 
+# Hard wall-clock ceiling for every target (seconds).
+# Override with:  make test TIMEGUARD=120
+# Disable with:   make test TIMEGUARD=0
+TIMEGUARD ?= 300
+ifeq ($(TIMEGUARD),0)
+  SAFE_RUN :=
+else
+  SAFE_RUN := timeout --kill-after=5 $(TIMEGUARD)
+endif
+
 .PHONY: help test test-slow test-all test-quick coverage lint clean
 
 help:  ## Show this help
@@ -13,19 +23,19 @@ help:  ## Show this help
 		awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
 test:  ## Run fast test suite (excludes slow + benchmarks)
-	$(PYTEST) $(PYTEST_ARGS)
+	$(SAFE_RUN) $(PYTEST) $(PYTEST_ARGS)
 
 test-slow:  ## Run only slow tests (AgentRuntime, sub-agent, git, desktop ops)
-	$(PYTEST) $(PYTEST_ARGS) --run-slow
+	$(SAFE_RUN) $(PYTEST) $(PYTEST_ARGS) --run-slow
 
 test-all:  ## Run full suite (fast + slow + benchmarks)
-	$(PYTEST) -v --run-slow --run-benchmarks
+	$(SAFE_RUN) $(PYTEST) -v --run-slow --run-benchmarks
 
 test-quick:  ## Run fast tests in parallel (faster, less output)
-	$(PYTEST) $(PYTEST_ARGS) -n auto 2>/dev/null || $(PYTEST) $(PYTEST_ARGS)
+	$(SAFE_RUN) $(PYTEST) $(PYTEST_ARGS) -n auto 2>/dev/null || $(SAFE_RUN) $(PYTEST) $(PYTEST_ARGS)
 
 coverage:  ## Run tests with coverage report (terminal)
-	$(PYTEST) $(PYTEST_ARGS) \
+	$(SAFE_RUN) $(PYTEST) $(PYTEST_ARGS) \
 		--cov=. \
 		--cov-report=term-missing \
 		--cov-report=html:$(COVERAGE_DIR) \
@@ -34,35 +44,36 @@ coverage:  ## Run tests with coverage report (terminal)
 	@echo "HTML report: $(COVERAGE_DIR)/index.html"
 
 coverage-fail:  ## Run coverage, fail if under 80%
-	$(PYTEST) $(PYTEST_ARGS) \
+	$(SAFE_RUN) $(PYTEST) $(PYTEST_ARGS) \
 		--cov=. \
 		--cov-report=term-missing \
 		--cov-fail-under=80 \
 		-v
 
 lint:  ## Syntax-check all Python files
-	@echo "=== py_compile ==="
-	python -m py_compile $$(find . -name '*.py' -not -path './venv/*' -not -path './.venv/*' -not -path './__pycache__/*')
-	@echo "=== ruff check ==="
-	ruff check . --ignore=E501 || true
-	@echo "=== ruff format check ==="
-	ruff format --check . || true
+	$(SAFE_RUN) bash -c '\
+		echo "=== py_compile ===" && \
+		python -m py_compile $$(find . -name "*.py" -not -path "./venv/*" -not -path "./.venv/*" -not -path "./__pycache__/*") && \
+		echo "=== ruff check ===" && \
+		ruff check . --ignore=E501 || true && \
+		echo "=== ruff format check ===" && \
+		ruff format --check . || true'
 
 lint-strict:  ## Lint with strict mode (fail on issues)
-	ruff check .
-	ruff format --check .
+	$(SAFE_RUN) ruff check .
+	$(SAFE_RUN) ruff format --check .
 
 dist:  ## Build distributable for current platform (.dmg/.exe/.AppImage)
-	bash build_dist.sh
+	$(SAFE_RUN) bash build_dist.sh
 
 dist-mac:  ## Build macOS .dmg
-	bash build_dist.sh --mac
+	$(SAFE_RUN) bash build_dist.sh --mac
 
 dist-win:  ## Build Windows .exe installer
-	bash build_dist.sh --win
+	$(SAFE_RUN) bash build_dist.sh --win
 
 dist-linux:  ## Build Linux .AppImage
-	bash build_dist.sh --linux
+	$(SAFE_RUN) bash build_dist.sh --linux
 
 clean:  ## Remove build artifacts, cache, and coverage
 	rm -rf __pycache__ .pytest_cache $(COVERAGE_DIR) .coverage
