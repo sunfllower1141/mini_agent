@@ -531,8 +531,8 @@ def _inject_edit_risk_context(messages: list[dict]) -> None:
 # File-pattern conditional rules
 # ---------------------------------------------------------------------------
 
-# Cache for loaded pattern rules: list of (pattern, instruction)
-_PATTERN_RULES: list[tuple[str, str]] | None = None
+# Cache for loaded pattern rules: list of (pattern, instruction, rule_name)
+_PATTERN_RULES: list[tuple[str, str, str]] | None = None
 # Set of pattern names already injected this session (avoid repeats)
 _PATTERN_RULES_INJECTED: set[str] = set()
 

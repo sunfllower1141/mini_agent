@@ -275,14 +275,14 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
         except Exception:
             pass
 
-        # 2. Shutdown LSP connections (skip on remote workspaces).
+        # 3. Shutdown LSP connections (skip on remote workspaces).
         if not remote:
             try:
                 _shutdown_lsp()
             except Exception:
                 pass
 
-        # 3. Close HTTP session.
+        # 4. Close HTTP session.
         try:
             session.close()
         except Exception:
