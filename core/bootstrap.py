@@ -213,6 +213,10 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     _TOOL_CONTEXT._git_diff_injected = False
     _TOOL_CONTEXT._handoff_injected = False
     _TOOL_CONTEXT._state_txt_injected = False
+    _TOOL_CONTEXT._tasks_injected = False
+    # Reset pattern rules for new session
+    from core.context_inject import _reset_pattern_rules
+    _reset_pattern_rules()
 
     session = _requests.Session()
     # Set default timeout (connect, read) for every request.

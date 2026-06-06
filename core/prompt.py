@@ -264,7 +264,15 @@ def build_startup_context(
             break
     parts.append("```\n" + "\n".join(tree_lines) + "\n```")
 
-    # 2. Recent git log (last 5 commits, if this is a git repo)
+    # 2. Codebase structure map (symbol-level: classes, functions, imports)
+    #    Generated via AST/regex — compact ~2K token map so the agent
+    #    knows what lives where without exploratory tool calls.
+    from core.codebase_map import build_codebase_map
+    codebase_map = build_codebase_map(workspace)
+    if codebase_map:
+        parts.append("\n" + codebase_map)
+
+    # 3. Recent git log (last 5 commits, if this is a git repo)
     try:
         r = _sp.run(["git", "-C", workspace, "log", "--oneline", f"-{GIT_LOG_COUNT}"],
                     capture_output=True, text=True, timeout=GIT_LOG_TIMEOUT)
@@ -273,7 +281,7 @@ def build_startup_context(
     except (OSError, _sp.TimeoutExpired):
         pass
 
-    # 3. Project knowledge (cross-session learnings, grouped by category)
+    # 4. Project knowledge (cross-session learnings, grouped by category)
     if knowledge:
         lines = []
         session_entries = [e for e in knowledge if e.get("category") == "session_summary"]

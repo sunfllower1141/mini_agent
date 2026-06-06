@@ -127,6 +127,7 @@ mini_agent is designed to modify and improve its own codebase. If you're a **hum
 | File | Purpose | Updated |
 |------|---------|---------|
 | `STATE.txt` | Architecture map — current decisions, module map, known issues. The agent reads this at startup. | By agent after each change |
+| `TASKS.md` | Task-to-file index — maps common tasks to relevant source files | Read at startup |
 | `HANDOFF.md` | Session handoff — what changed, what's pending. Picks up where it left off. | Auto-written at session end |
 | `CHANGELOG.md` | Self-mod audit trail — what changed and why, structured by date. | By agent after significant changes |
 | `.mini_agent.rules` | Rules and conventions the agent follows. Also serves as the CLAUDE.md equivalent. | By agent when patterns crystallize |

@@ -1,4 +1,6 @@
 # mini_agent Architecture State
+# Last updated: 2026-06-06 (context engineering: codebase_map + compaction)
+# Last updated: 2026-06-06 (electron: fix hang on exit — app.quit() on window-all-closed)
 # Last updated: 2026-06-05 (tools & memory audit — save() decomposed, AgentContext extracted,
 #   orphan stripping unified in memory_prune, dead code removed)
 #
@@ -10,9 +12,12 @@
 ### Core Orchestration
 - `core/bootstrap.py` — entry point, session init, workspace setup
 - `core/llm.py` — main agent loop: turn management, tool dispatch, API calls (825 lines)
-- `core/context_inject.py` — per-turn context injection (handoff, state, scratchpad, git diff,
-  orchestration, progress checks, circuit breaker) (900 lines)
-- `core/prompt.py` — system prompt assembly
+- `core/codebase_map.py` — structural codebase map: AST-based symbol extraction,
+  module grouping, import graph. Injected into startup context for zero-cost
+  codebase orientation. (new 2026-06-06)
+- `core/context_inject.py` — per-turn context injection (handoff, state, tasks, scratchpad, git diff,
+  orchestration, progress checks, circuit breaker, conversation compaction, edit risk briefing, pattern rules) (1250 lines)
+- `core/prompt.py` — system prompt assembly, startup context (file tree, codebase map, git log)
 - `core/config.py` — TOML config loading, provider settings (718 lines)
 
 ### Sub-Agent System
@@ -81,6 +86,7 @@
 
 ### Tracking Files (self-modification audit)
 - `STATE.txt` — this file, architecture map
+- `TASKS.md` — task-to-file mapping index (orient yourself when starting new work)
 - `HANDOFF.md` — session-to-session continuity
 - `CHANGELOG.md` — structured change audit trail
 
@@ -121,6 +127,30 @@
     _ContextProxy, _TOOL_CONTEXT, and set_context. ``tools/reservations.py`` holds the
     file reservation system. Both re-exported through ``tools/__init__.py`` for
     backward compatibility.
+13. **Codebase map generation**: ``core/codebase_map.py`` uses AST (Python) and regex
+    (JS/TS) to extract symbols, module groupings, and import dependencies. Injected
+    into startup context as a ~2K token structural map, saving the agent 3-5
+    exploratory tool calls at session start.
+14. **Mid-session conversation compaction**: ``_compact_if_needed()`` in
+    ``context_inject.py`` runs at the start of every turn. When the conversation
+    exceeds 80% of the context window, oldest messages are pruned and summarized
+    using the existing ``_prune_by_tokens`` / ``_summarize_pruned`` pipeline,
+    preserving system prompt + recent context. Compaction targets 70% fill ratio
+    to leave room for turn growth. (new 2026-06-06)
+15. **Pre-edit risk briefing**: ``_inject_edit_risk_context()`` scans the most
+    recent assistant message for ``edit_file`` / ``write_file`` tool calls and
+    injects a risk briefing with: git modification frequency (hotspot detection),
+    co-change analysis (files modified in same commits), and missing test
+    coverage. Zero-token cost when no edits are pending. (new 2026-06-06)
+16. **File-pattern conditional rules**: ``.mini_agent/rules.toml`` defines
+    glob-pattern rules (e.g. ``core/*.py``, ``tests/*.py``). ``_inject_pattern_rules()``
+    checks recent file operations and injects only the rules matching touched
+    files. Each rule injected at most once per session. Zero-token when no
+    matching files are being worked on. (new 2026-06-06)
+17. **Task-to-file index**: ``TASKS.md`` provides a curated mapping from common
+    development tasks (\"Add a new tool\", \"Modify system prompt\", \"Change
+    memory storage\") to the relevant source files. Injected once at session
+    startup alongside HANDOFF.md and STATE.txt. (new 2026-06-06)
 
 ## Known Issues
 - `_json_rpc_shared.py` — shared drain_stderr() utility used by lsp.py and mcp_client.py

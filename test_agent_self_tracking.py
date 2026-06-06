@@ -118,6 +118,50 @@ class TestChangelogFile(unittest.TestCase):
         self.assertIn("### Reason", content)
 
 
+class TestTasksFile(unittest.TestCase):
+    """TASKS.md must exist and have required sections."""
+
+    def test_tasks_file_exists(self):
+        """TASKS.md should exist in the project root."""
+        root = _project_root()
+        tasks_path = os.path.join(root, "TASKS.md")
+        self.assertTrue(
+            os.path.isfile(tasks_path),
+            f"TASKS.md not found at {tasks_path}",
+        )
+
+    def test_tasks_has_sections(self):
+        """TASKS.md must cover core, tools, memory, and testing sections."""
+        root = _project_root()
+        tasks_path = os.path.join(root, "TASKS.md")
+        with open(tasks_path, encoding="utf-8") as f:
+            content = f.read()
+        # Key sections that should exist
+        required = [
+            "## Core System Changes",
+            "## Tools",
+            "## Memory & Persistence",
+            "## Testing",
+        ]
+        for section in required:
+            self.assertIn(section, content, f"Missing section: {section}")
+
+    def test_tasks_mentions_key_files(self):
+        """TASKS.md must reference key modules."""
+        root = _project_root()
+        tasks_path = os.path.join(root, "TASKS.md")
+        with open(tasks_path, encoding="utf-8") as f:
+            content = f.read()
+        key_files = [
+            "core/prompt.py",
+            "core/llm.py",
+            "tools/schema.py",
+            "memory/memory.py",
+        ]
+        for fname in key_files:
+            self.assertIn(fname, content, f"Missing reference: {fname}")
+
+
 class TestRulesHaveSelfModification(unittest.TestCase):
     """.mini_agent.rules must include self-modification guidance."""
 

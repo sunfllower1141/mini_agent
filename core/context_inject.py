@@ -32,6 +32,7 @@ _log = get_logger("context_inject")
 
 
 import json
+import fnmatch
 from collections import Counter
 
 # Circuit breaker constants and helpers (shared with llm.py)
@@ -134,6 +135,34 @@ def _inject_state_context(
         "content": (
             "Architecture state from your last session "
             "(you maintain this as your map of the codebase):\n\n"
+            + content
+        ),
+        "_transient": True,
+    })
+
+
+def _inject_tasks_context(
+    messages: list[dict], *, workspace_root: str = "",
+) -> None:
+    """Inject TASKS.md task-to-file index at session start (one-time)."""
+    if getattr(_TOOL_CONTEXT, "_tasks_injected", False) or not workspace_root:
+        return
+    _TOOL_CONTEXT._tasks_injected = True
+    tasks_path = os.path.join(workspace_root, "TASKS.md")
+    if not os.path.isfile(tasks_path):
+        return
+    try:
+        with open(tasks_path, encoding="utf-8", errors="replace") as f:
+            content = f.read().strip()
+    except OSError:
+        return
+    if not content:
+        return
+    messages.append({
+        "role": "user",
+        "content": (
+            "Task-to-file index for this codebase (read to orient yourself "
+            "when starting a new task):\n\n"
             + content
         ),
         "_transient": True,
@@ -370,6 +399,261 @@ def _inject_circuit_breaker(
     warning = _check_circuit(recent_tool_keys)
     if warning:
         messages.append({"role": "user", "content": warning, "_transient": True})
+
+
+# ---------------------------------------------------------------------------
+# Pre-edit risk briefing
+# ---------------------------------------------------------------------------
+
+# How many recent commits to check for co-change analysis
+_EDIT_RISK_GIT_DEPTH = 10
+# Max co-changed files to show
+_EDIT_RISK_MAX_COCHANGES = 5
+
+
+def _inject_edit_risk_context(messages: list[dict]) -> None:
+    """Inject a risk briefing when the agent is about to edit files.
+
+    Scans the most recent assistant message for edit_file / write_file
+    tool calls and checks git history for:
+      - Recent modification frequency (hotspot detection)
+      - Co-changed files (files that change in the same commits)
+      - Missing test coverage
+
+    Only injects when there are pending edits — zero tokens otherwise.
+    """
+    # Find the most recent assistant message with tool calls
+    edit_targets: list[str] = []
+    for m in reversed(messages):
+        if m.get("role") != "assistant":
+            continue
+        tool_calls = m.get("tool_calls", [])
+        if not tool_calls:
+            continue
+        for tc in tool_calls:
+            fn = tc.get("function", {})
+            name = fn.get("name", "")
+            if name in ("edit_file", "write_file"):
+                try:
+                    args = json.loads(fn.get("arguments", "{}"))
+                except json.JSONDecodeError:
+                    continue
+                path = args.get("path", "")
+                if path:
+                    edit_targets.append(path)
+        break  # Only scan the most recent assistant message
+
+    if not edit_targets:
+        return
+
+    workspace = None
+    read_gate = getattr(_TOOL_CONTEXT, "_read_gate", None)
+    if read_gate and hasattr(read_gate, "workspace_root"):
+        workspace = read_gate.workspace_root
+    if not workspace:
+        return
+
+    lines: list[str] = []
+    for target in edit_targets[:3]:  # max 3 files to avoid bloat
+        full_path = os.path.join(workspace, target) if not os.path.isabs(target) else target
+        if not os.path.isfile(full_path):
+            continue
+
+        risk_items: list[str] = []
+
+        # 1. Recent git changes to this file
+        try:
+            r = _sp.run(
+                ["git", "-C", workspace, "log", f"-{_EDIT_RISK_GIT_DEPTH}",
+                "--oneline", "--", target],
+                capture_output=True, text=True, timeout=3,
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                commit_lines = r.stdout.strip().split("\n")
+                count = len(commit_lines)
+                if count >= 3:
+                    risk_items.append(f"modified in {count}/{_EDIT_RISK_GIT_DEPTH} recent commits \u26a0\ufe0f")
+                elif count > 0:
+                    risk_items.append(f"modified in {count} recent commit(s)")
+        except (OSError, _sp.TimeoutExpired):
+            pass
+
+        # 2. Co-change analysis: files modified in same commits
+        try:
+            r = _sp.run(
+                ["git", "-C", workspace, "log", f"-{_EDIT_RISK_GIT_DEPTH}",
+                "--format=", "--name-only", "--", target],
+                capture_output=True, text=True, timeout=3,
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                all_files: set[str] = set()
+                for line in r.stdout.strip().split("\n"):
+                    line = line.strip()
+                    if line and line != target and "/" in line:
+                        all_files.add(line)
+                if all_files:
+                    shown = sorted(all_files)[:_EDIT_RISK_MAX_COCHANGES]
+                    cochange = ", ".join(shown)
+                    if len(all_files) > _EDIT_RISK_MAX_COCHANGES:
+                        cochange += f" (+{len(all_files) - _EDIT_RISK_MAX_COCHANGES} more)"
+                    risk_items.append(f"co-changes with: {cochange}")
+        except (OSError, _sp.TimeoutExpired):
+            pass
+
+        # 3. Test coverage check
+        base = os.path.basename(target)
+        if base.endswith(".py") and not base.startswith("test_"):
+            candidate = f"test_{base}"
+            dp = os.path.dirname(target)
+            test_path = os.path.join(dp, candidate) if dp else candidate
+            if not os.path.isfile(os.path.join(workspace, test_path)):
+                # Also check tests/ directory
+                alt_path = os.path.join("tests", candidate)
+                if not os.path.isfile(os.path.join(workspace, alt_path)):
+                    risk_items.append("no test file found \u26a0\ufe0f")
+
+        if risk_items:
+            lines.append(f"  {target}: {'; '.join(risk_items)}")
+
+    if lines:
+        messages.append({
+            "role": "user",
+            "content": (
+                "Pre-edit risk briefing for files you're about to modify:\n"
+                + "\n".join(lines)
+                + "\n\nProceed with appropriate caution."
+            ),
+            "_transient": True,
+        })
+
+
+# ---------------------------------------------------------------------------
+# File-pattern conditional rules
+# ---------------------------------------------------------------------------
+
+# Cache for loaded pattern rules: list of (pattern, instruction)
+_PATTERN_RULES: list[tuple[str, str]] | None = None
+# Set of pattern names already injected this session (avoid repeats)
+_PATTERN_RULES_INJECTED: set[str] = set()
+
+
+def _reset_pattern_rules() -> None:
+    """Reset pattern rules state for a new session."""
+    _PATTERN_RULES_INJECTED.clear()
+    global _PATTERN_RULES
+    _PATTERN_RULES = None  # force re-load on next session
+
+
+def _load_pattern_rules(workspace_root: str) -> list[tuple[str, str]]:
+    """Load file-pattern conditional rules from .mini_agent/rules.toml.
+
+    Returns list of (pattern, instruction) tuples. Cached globally.
+    Patterns use fnmatch glob syntax.
+    """
+    global _PATTERN_RULES
+    if _PATTERN_RULES is not None:
+        return _PATTERN_RULES
+
+    _PATTERN_RULES = []
+    rules_path = os.path.join(workspace_root, ".mini_agent", "rules.toml")
+    if not os.path.isfile(rules_path):
+        return _PATTERN_RULES
+
+    try:
+        import tomllib
+    except ImportError:
+        try:
+            import tomli as tomllib  # type: ignore[no-redef]
+        except ImportError:
+            return _PATTERN_RULES
+
+    try:
+        with open(rules_path, "rb") as f:
+            data = tomllib.load(f)
+    except Exception:
+        _log.debug("Failed to parse pattern rules: %s", rules_path)
+        return _PATTERN_RULES
+
+    rules_table = data.get("rules", {})
+    for rule_name, rule_def in rules_table.items():
+        pattern = rule_def.get("pattern", "")
+        instruction = rule_def.get("instruction", "").strip()
+        if pattern and instruction:
+            _PATTERN_RULES.append((pattern, instruction, rule_name))
+
+    _log.debug("Loaded %d pattern rules from %s", len(_PATTERN_RULES), rules_path)
+    return _PATTERN_RULES
+
+
+def _inject_pattern_rules(messages: list[dict]) -> None:
+    """Inject pattern-conditional rules when relevant files are being touched.
+
+    Scans recent assistant messages for file operations and matches
+    target files against pattern rules from .mini_agent/rules.toml.
+    Only injects rules that haven't been injected this session.
+    """
+    global _PATTERN_RULES_INJECTED
+
+    if not _PATTERN_RULES:
+        workspace = None
+        read_gate = getattr(_TOOL_CONTEXT, "_read_gate", None)
+        if read_gate and hasattr(read_gate, "workspace_root"):
+            workspace = read_gate.workspace_root
+        if not workspace:
+            return
+        _load_pattern_rules(workspace)
+        if not _PATTERN_RULES:
+            return
+
+    # Collect file paths from recent tool calls
+    file_paths: set[str] = set()
+    for m in messages:
+        if m.get("role") != "assistant":
+            continue
+        for tc in m.get("tool_calls", []):
+            fn = tc.get("function", {})
+            name = fn.get("name", "")
+            if name not in ("read_file", "edit_file", "write_file",
+                            "find_symbol", "search_files", "file_info",
+                            "list_directory", "run_shell", "run_tests"):
+                continue
+            try:
+                if "arguments" not in fn:
+                    continue
+                args = json.loads(fn.get("arguments", "{}"))
+            except json.JSONDecodeError:
+                continue
+            # Collect path, file_path, or target args
+            for key in ("path", "file_path", "target"):
+                val = args.get(key, "")
+                if val and isinstance(val, str):
+                    file_paths.add(val)
+
+    if not file_paths:
+        return
+
+    # Find matching rules that haven't been injected yet
+    to_inject: list[str] = []
+    for pattern, instruction, rule_name in _PATTERN_RULES:
+        if rule_name in _PATTERN_RULES_INJECTED:
+            continue
+        # Check if any file path matches the pattern
+        matched = False
+        for fp in file_paths:
+            if fnmatch.fnmatch(fp, pattern):
+                matched = True
+                break
+        if matched:
+            to_inject.append(instruction)
+            _PATTERN_RULES_INJECTED.add(rule_name)
+
+    if to_inject:
+        joined = "\n\n".join(to_inject)
+        messages.append({
+            "role": "user",
+            "content": f"Relevant project rules for your current work:\n\n{joined}",
+            "_transient": True,
+        })
 
 
 def _inject_scratchpad_nudge(messages: list[dict], *, turn_count: int) -> None:
@@ -842,12 +1126,20 @@ def _inject_context(
 
     Delegates to smaller helpers for one-time and per-turn injections.
     """
+    # Compaction must run FIRST — before injecting new context messages —
+    # so fresh context isn't immediately pruned.
+    _compact_if_needed(messages)
+
     # One-time injections (first turn only)
     _inject_handoff_context(
         messages,
         workspace_root=read_gate.workspace_root if read_gate else "",
     )
     _inject_state_context(
+        messages,
+        workspace_root=read_gate.workspace_root if read_gate else "",
+    )
+    _inject_tasks_context(
         messages,
         workspace_root=read_gate.workspace_root if read_gate else "",
     )
@@ -867,6 +1159,8 @@ def _inject_context(
         _inject_modified_files_checkpoint(messages, read_gate=read_gate)
 
     _inject_circuit_breaker(messages, recent_tool_keys=recent_tool_keys)
+    _inject_edit_risk_context(messages)
+    _inject_pattern_rules(messages)
     _inject_scratchpad_nudge(messages, turn_count=turn_count)
     _inject_strategy_hint(messages)
     _inject_plan_status(messages)
@@ -877,4 +1171,80 @@ def _inject_context(
     # Context-quality defences (research-backed: 25% fill degrades quality)
     _compress_stale_tool_results(messages)
     _inject_system_reminder(messages, turn_count=turn_count)
+
+
+# ---------------------------------------------------------------------------
+# Mid-session conversation compaction
+# ---------------------------------------------------------------------------
+
+# Compaction threshold: fraction of context window at which we compact
+_COMPACTION_THRESHOLD = 0.80
+# Target fraction after compaction (leave room for turn growth)
+_COMPACTION_TARGET = 0.70
+# Minimum number of messages at the tail to keep intact (preserve recent context)
+_COMPACTION_KEEP_RECENT = 20
+
+
+def _compact_if_needed(messages: list[dict]) -> None:
+    """Compact conversation when approaching the context window limit.
+
+    Uses the existing _prune_by_tokens to drop oldest messages and
+    _summarize_pruned_rules to inject a summary, keeping the model
+    aware of earlier context.  Preserves system prompt + startup
+    context (first 2 messages) and the most recent messages.
+
+    Called before context injection each turn to ensure fresh context
+    messages aren't immediately pruned.
+    """
+    from memory.memory_prune import _total_tokens, _prune_by_tokens, _summarize_pruned
+
+    config = getattr(_TOOL_CONTEXT, "_agent_config", None)
+    if config is None:
+        return
+    context_window = getattr(config, "context_window", 200_000)
+    if context_window <= 0:
+        return
+
+    # Only compact if over threshold
+    current_tokens = _total_tokens(messages)
+    threshold = int(context_window * _COMPACTION_THRESHOLD)
+    if current_tokens <= threshold:
+        return
+
+    # Preserve system prompt + startup context (first 2 messages)
+    if len(messages) <= _COMPACTION_KEEP_RECENT + 2:
+        return  # Not enough to compact meaningfully
+
+    system_msgs = messages[:2]
+    conversation = messages[2:]
+
+    # Prune to target fraction of context window
+    target = int(context_window * _COMPACTION_TARGET)
+    kept, pruned = _prune_by_tokens(
+        conversation, target, max_messages=len(conversation),
+    )
+
+    if not pruned:
+        return
+
+    # Build summary of what was pruned
+    summary = _summarize_pruned(pruned)
+
+    # Rebuild: system + summary + kept conversation
+    messages.clear()
+    messages.extend(system_msgs)
+    if summary:
+        messages.append({
+            "role": "user",
+            "content": summary,
+            "_transient": True,
+        })
+    messages.extend(kept)
+
+    _log.info(
+        "Compacted conversation: %d → %d messages (%d pruned)",
+        len(system_msgs) + len(conversation),
+        len(messages),
+        len(pruned),
+    )
 

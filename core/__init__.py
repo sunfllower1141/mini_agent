@@ -25,6 +25,9 @@ def __getattr__(name):
     if name == "build_startup_context":
         from core.prompt import build_startup_context
         return build_startup_context
+    if name == "build_codebase_map":
+        from core.codebase_map import build_codebase_map
+        return build_codebase_map
     if name == "ReadSafetyGate":
         from core.safety import ReadSafetyGate
         return ReadSafetyGate

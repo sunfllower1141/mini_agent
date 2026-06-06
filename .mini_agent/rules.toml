@@ -1,0 +1,87 @@
+# mini_agent File-Pattern Conditional Rules
+#
+# These rules are injected contextually — only when the agent is working with
+# files that match the glob pattern. Zero-token cost when not relevant.
+#
+# Format:
+#   [rules.<name>]
+#   pattern = "glob/**"     # fnmatch pattern against file paths
+#   instruction = """...""" # injected into context when files match
+
+[rules.test_files]
+pattern = "test_*.py"
+instruction = """
+When modifying test files:
+1. Each test function needs a docstring explaining what it validates
+2. Use pytest fixtures where appropriate; prefer unittest.TestCase for consistency
+3. Run the specific test file after changes: `python3 -m pytest test_<name>.py -v`
+4. If adding new assertions, verify they fail correctly before they pass
+"""
+
+[rules.tests_directory]
+pattern = "tests/*.py"
+instruction = """
+When modifying test suite files:
+1. Run full test suite after changes: `python3 -m pytest tests/ -v`
+2. Keep tests fast — use mocking for I/O, no real network calls
+3. Clean up tempdirs in tearDown
+"""
+
+[rules.core_module]
+pattern = "core/*.py"
+instruction = """
+When modifying core/ modules:
+1. Update STATE.txt to reflect architectural changes (new modules, removed abstractions)
+2. Run full test suite before considering work done
+3. Check impact on bootstrap.py (session startup) and llm.py (main agent loop)
+4. core/ modules are the critical path — favor small incremental edits over rewrites
+"""
+
+[rules.tool_module]
+pattern = "tools/*.py"
+instruction = """
+When adding or modifying tools:
+1. Register the tool in tools/schema.py (TOOLS list for LLM)
+2. Add dispatch handler in tools/__init__.py
+3. Return ToolResult dataclass from all tool implementations
+4. Write tests — every new tool needs at least one test
+5. Use structured logging via logging_setup.get_logger()
+"""
+
+[rules.memory_module]
+pattern = "memory/*.py"
+instruction = """
+When modifying memory/memory.py:
+1. MemoryStore is SQLite-backed — test with temp databases, not production
+2. Message pruning logic affects all sessions; add tests for edge cases
+3. Tool result compression should preserve key fields (content, path, success)
+"""
+
+[rules.config_module]
+pattern = "core/config.py"
+instruction = """
+When modifying config.py:
+1. All config fields need defaults — never add required fields without a fallback
+2. TOML keys use snake_case matching Python attribute names
+3. Test with MiniConfig() default construction and from_toml_file() parsing
+4. Document new fields in README.md
+"""
+
+[rules.state_and_tracking]
+pattern = "{STATE.txt,HANDOFF.md,CHANGELOG.md}"
+instruction = """
+When updating project tracking files:
+1. STATE.txt — update Module Map and Active Decisions sections
+2. HANDOFF.md — write at session end (changes, pending, modified files)
+3. CHANGELOG.md — log significant changes with date and reasoning
+"""
+
+[rules.electron_app]
+pattern = "mini_agent_electron/*"
+instruction = """
+When modifying the Electron desktop app:
+1. Test on macOS first (primary platform)
+2. Main process: main.js handles lifecycle; preload.js exposes IPC bridge
+3. Renderer: src/ contains React components
+4. Check dev tools console for errors before claiming a fix works
+"""
