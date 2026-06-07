@@ -13,6 +13,7 @@ synchronous tool dispatch.
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 import threading
 import json
@@ -163,7 +164,11 @@ class LspConnection:
             proc.wait(timeout=5)
         except (OSError, subprocess.TimeoutExpired):
             try:
-                proc.kill()
+                # Kill entire process group — critical for Node-based
+                # servers (typescript-language-server) that spawn child
+                # processes like tsserver.  proc.kill() alone leaves
+                # orphans that accumulate and cause system thrashing.
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
                 proc.wait(timeout=2)
             except OSError:
                 pass
@@ -230,6 +235,7 @@ class LspConnection:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             bufsize=0,
+            start_new_session=True,
             env={**os.environ, "PYTHONUNBUFFERED": "1"},
         )
         # On Windows, start a background reader thread since select doesn't work on pipes
@@ -631,6 +637,10 @@ class LspClientManager:
         else:
             conn = self._connections[language_id]
             if not conn.is_connected:
+                # Clean up the old subprocess tree before reconnecting.
+                # Without this, every reconnect leaks orphaned children
+                # (e.g. tsserver processes spawned by typescript-language-server).
+                conn.disconnect()
                 if not conn.connect(self._root_uri):
                     return None
         return conn
