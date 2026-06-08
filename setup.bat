@@ -72,21 +72,37 @@ echo   [OK] Python  (!PYTHON_VER!)  [%PYTHON_EXE%]
 
 :python_done
 
-REM Node.js — use direct version check (more reliable than 'where node')
-node --version >nul 2>&1
-if !errorlevel! equ 0 (
-    echo   [OK] Node.js found
+REM Node.js — check version (Electron 42 requires Node ≥ 22)
+for /f "tokens=1 delims=v" %%v in ('node --version 2^>nul') do set NODE_VER=%%v
+if defined NODE_VER (
+    for /f "tokens=1 delims=." %%m in ("!NODE_VER!") do set NODE_MAJOR=%%m
+    if !NODE_MAJOR! geq 22 (
+        echo   [OK] Node.js !NODE_VER!
+    ) else (
+        echo   [FAIL] Node.js !NODE_VER! is too old.
+        echo          Electron 42 requires Node.js ^>= 22.
+        echo          Install from https://nodejs.org (latest LTS)
+        echo          If already installed, you may need to upgrade.
+        set /a ERRORS+=1
+    )
 ) else (
     echo   [MISSING] Node.js not found.
-    echo     Install from https://nodejs.org (v18+ LTS)
+    echo     Install from https://nodejs.org (v22+ LTS)
     echo     If already installed, check your PATH or re-run the installer.
     set /a ERRORS+=1
 )
 
-REM npm
-npm --version >nul 2>&1
-if !errorlevel! equ 0 (
-    echo   [OK] npm found
+REM npm — check version (vite 8 needs npm ≥ 9)
+for /f "tokens=1" %%v in ('npm --version 2^>nul') do set NPM_VER=%%v
+if defined NPM_VER (
+    for /f "tokens=1 delims=." %%m in ("!NPM_VER!") do set NPM_MAJOR=%%m
+    if !NPM_MAJOR! geq 9 (
+        echo   [OK] npm v!NPM_VER!
+    ) else (
+        echo   [FAIL] npm v!NPM_VER! is too old. Need npm ^>= 9.
+        echo          Update with: npm install -g npm@latest
+        set /a ERRORS+=1
+    )
 ) else (
     echo   [MISSING] npm not found (bundled with Node.js)
     set /a ERRORS+=1
@@ -201,27 +217,73 @@ if not exist "mini_agent_electron\" (
 
 cd mini_agent_electron
 
+REM Clean up a broken node_modules from a previous failed install.
+REM Electron's binary download (~100 MB) can fail halfway — if the
+REM electron dist/ directory is missing, the install is incomplete.
 if exist "node_modules\" (
-    echo   [OK] node_modules\ already exists, updating...
-    call npm install --silent
-) else (
-    echo   Installing Electron + renderer packages (this may take a few minutes)...
-    call npm install --silent
+    if not exist "node_modules\electron\dist\electron.exe" (
+        echo   [WARN] node_modules\ exists but Electron binary is missing.
+        echo          Removing broken node_modules\ to reinstall cleanly...
+        rmdir /s /q "node_modules" 2>nul
+    )
 )
 
-if %errorlevel% equ 0 (
-    echo   [OK] Installed npm packages
+if exist "node_modules\" (
+    echo   [OK] node_modules\ already exists, updating...
+    call npm install --prefer-offline --no-audit --no-fund
 ) else (
+    echo   Installing Electron + renderer packages...
+    echo   This will download Electron (~100 MB). It may take a few minutes.
+    call npm install --prefer-offline --no-audit --no-fund
+)
+
+if %errorlevel% neq 0 (
+    echo.
     echo   [FAIL] npm install failed.
     echo.
-    echo   Common issues:
-    echo   - Node.js version too old (need v18+): node --version
-    echo   - PATH too long (Windows MAX_PATH=260). Move repo closer to drive root.
-    echo   - Network/firewall blocking npm registry.
+    echo   Common Windows issues:
+    echo   - PATH too long (Windows MAX_PATH=260). Move the repo closer to
+    echo     the drive root, e.g. C:\mini_agent\ instead of a deep folder.
+    echo   - Corporate proxy blocking npm registry or GitHub releases.
+    echo     Configure proxy: npm config set proxy http://proxy:port
+    echo     Configure Electron mirror: set ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
+    echo   - Antivirus blocking the Electron binary download.
+    echo     Temporarily disable real-time scanning and retry.
+    echo   - Old npm cache: npm cache clean --force  then retry.
     echo.
     cd ..
     pause
     exit /b 1
+)
+
+REM Verify Electron installed correctly (binary exists and is executable)
+if exist "node_modules\electron\dist\electron.exe" (
+    echo   [OK] Electron binary found
+) else (
+    echo.
+    echo   [FAIL] Electron binary not found after npm install.
+    echo          node_modules\electron\dist\electron.exe is missing.
+    echo.
+    echo   This usually means the Electron download was blocked or corrupted.
+    echo   Try: rmdir /s /q node_modules
+    echo        set ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
+    echo        npm install
+    echo.
+    cd ..
+    pause
+    exit /b 1
+)
+
+REM Quick smoke test: ask electron for its version
+node_modules\.bin\electron --version >nul 2>&1
+if !errorlevel! equ 0 (
+    for /f %%v in ('node_modules\.bin\electron --version 2^>^&1') do (
+        echo   [OK] Electron %%v works
+    )
+) else (
+    echo   [WARN] Electron binary exists but failed to run. This may be a
+    echo          missing Visual C++ redistributable. Install from:
+    echo          https://aka.ms/vs/17/release/vc_redist.x64.exe
 )
 
 REM ------------------------------------------------------------------
@@ -229,11 +291,18 @@ REM 5. Build Electron renderer
 REM ------------------------------------------------------------------
 
 echo [5/7] Building renderer...
-call npm run build --silent
+call npm run build
 if %errorlevel% equ 0 (
     echo   [OK] Renderer built -^> mini_agent_electron\renderer\dist\
 ) else (
-    echo   [WARN] Renderer build failed. npm start will auto-build on first launch anyway.
+    echo   [WARN] Renderer build failed (npm run build).
+    echo          This may be a vite issue. npm start will auto-build on
+    echo          first launch anyway. To debug:
+    echo            cd mini_agent_electron ^&^& npx vite build
+    echo.
+    echo          Common fixes:
+    echo          - Delete node_modules and re-run setup
+    echo          - npm cache clean --force then npm install
 )
 cd ..
 

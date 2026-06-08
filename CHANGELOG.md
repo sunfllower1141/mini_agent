@@ -2,6 +2,22 @@
 
 Self-modification audit trail — what the agent changed and why.
 
+## 2026-06-08 — Windows setup.bat hardening
+### Fixed
+- **Node.js version check**: Now requires Node ≥ 22 (not just any version).
+  Electron 42 bundles Node 22 internally; older host Node fails at build time.
+- **npm version check**: Now requires npm ≥ 9 (vite 8 needs it).
+- **Removed `--silent` from npm commands**: Errors during Electron binary download
+  (~100 MB from GitHub) were completely hidden. Output is now visible.
+- **Post-install verification**: Checks that `node_modules\electron\dist\electron.exe`
+  exists and can run `--version`. Catches broken/corrupted downloads.
+- **Broken node_modules cleanup**: Detects when `node_modules\` exists but the
+  Electron binary is missing (previous failed install) and removes it.
+- **Troubleshooting guidance**: Added ELECTRON_MIRROR, proxy config, npm cache
+  clean, and VC++ redistributable hints to the npm install failure path.
+- **Build error visibility**: Removed `--silent` from `npm run build`; expanded
+  failure message with debug commands and npm cache fix hints.
+
 ## 2026-06-03 (evening) — Code Audit: Injection, Import, and Data-Loss Fixes
 ### Fixed
 - **Injection flag lifecycle**: 4 flags reset in `run_agent_turn()` (per user message)
