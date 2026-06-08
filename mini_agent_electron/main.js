@@ -109,6 +109,14 @@ function spawnPythonBackend(workspacePath) {
   }
 
   const env = { ...process.env };
+  // Force UTF-8 on Windows to prevent 'charmap' codec errors when the
+  // Python backend writes Unicode characters (→, ☾, …) to stdout/stderr.
+  // Python's locale.getpreferredencoding() reads this at startup, so it
+  // must be set before spawning the child process.
+  if (process.platform === 'win32') {
+    env.PYTHONUTF8 = '1';
+    env.PYTHONIOENCODING = 'utf-8';
+  }
   if (workspacePath) {
     env.MINI_AGENT_WORKSPACE = workspacePath;
   }

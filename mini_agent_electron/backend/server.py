@@ -32,6 +32,22 @@ import subprocess
 import sys
 import threading
 
+# ---------------------------------------------------------------------------
+# Windows: force UTF-8 for all I/O.  Without this, Python defaults to the
+# system codepage (cp1252) and Unicode characters like → (U+2192) or ☾ (U+263E)
+# raise 'charmap' codec can't encode errors when written to stdout/stderr.
+# PYTHONUTF8=1 is the simplest fix (Python 3.7+) and also makes subprocess
+# calls inherit UTF-8 encoding when text=True is used.
+if sys.platform == "win32":
+    os.environ.setdefault("PYTHONUTF8", "1")
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+    # Reconfigure already-opened stdio streams to use UTF-8 + errors='replace'
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
 # Ensure the parent mini_agent package is importable.
 # main.js spawns us with cwd = mini_agent root, so cwd is the right path.
 _cwd = os.getcwd()
