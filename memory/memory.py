@@ -1135,7 +1135,8 @@ def _is_remote_fs(path: str) -> bool:
         st = os.statvfs(path)
         if st.f_fsid in _REMOTE_FS_TYPES:
             return True
-    except OSError:
+    except (OSError, AttributeError):
+        # AttributeError: os.statvfs doesn't exist on Windows
         pass
     return False
 
