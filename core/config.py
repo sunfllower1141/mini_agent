@@ -8,8 +8,6 @@ with env vars and CLI flags.  Priority: CLI > env var > config file > default.
 from __future__ import annotations
 
 import os
-import platform
-import subprocess as _sp
 import sys
 from dataclasses import dataclass, field
 
@@ -125,13 +123,6 @@ DEFAULT_ROUTING_MODEL = ""  # disabled by default; set to provider-specific chea
 DEFAULT_EXA_API_KEY = ""  # set via EXA_API_KEY env var or .mini_agent.toml
 DEFAULT_OPENAI_API_KEY = ""  # set via OPENAI_API_KEY env var or .mini_agent.toml
 
-# Windows SOCKS tunnel (auto-started on Windows to route all LLM traffic)
-_WINDOWS_TUNNEL_HOST   = "172.31.2.42"
-_WINDOWS_TUNNEL_PORT   = 1080
-_WINDOWS_TUNNEL_USER   = "gabriel"
-_WINDOWS_TUNNEL_KEY    = "gabekey"  # relative to $HOME
-SOCKS_PROXY_URL        = f"socks5://localhost:{_WINDOWS_TUNNEL_PORT}"
-
 # Truncation / timeout / connection-pool constants
 TREE_TRUNCATION_LINES   = 60   # max lines in workspace tree before truncating
 GIT_LOG_TIMEOUT         = 5    # seconds to wait for git log
@@ -209,7 +200,6 @@ class AgentConfig:
     approve_write_ops: bool = False
     unrestricted: bool = False
     frontend: str = "terminal"  # "terminal", "electron" — injected into system prompt
-    socks_proxy: str = ""  # SOCKS5 proxy URL (auto-set on Windows for SSH tunnel)
     mcp_servers: dict = field(default_factory=dict)  # {name: {command: [...], env: {...}}}
 
     # ------------------------------------------------------------------
@@ -242,58 +232,7 @@ class AgentConfig:
         return config
 
 
-def _start_windows_tunnel(config: AgentConfig) -> None:
-    """If running on Windows, launch an SSH SOCKS tunnel in the background.
-
-    Uses ``ssh -i %HOME%\\gabekey -D 1080 gabriel@172.31.2.42`` to create
-    a SOCKS5 proxy on localhost:1080.  All subsequent LLM API traffic is
-    routed through this tunnel.
-    """
-    if platform.system() != "Windows":
-        return  # no-op on macOS / Linux
-
-    key_path = os.path.join(os.path.expanduser("~"), _WINDOWS_TUNNEL_KEY)
-    if not os.path.isfile(key_path):
-        print(
-            f"Warning: Windows tunnel key not found at {key_path} — "
-            "skipping SOCKS tunnel",
-            file=sys.stderr,
-        )
-        return
-
-    cmd = [
-        "ssh",
-        "-i", key_path,
-        "-D", str(_WINDOWS_TUNNEL_PORT),
-        "-L", "11434:localhost:11434",  # forward Ollama API port
-        "-o", "StrictHostKeyChecking=no",
-        "-o", "ServerAliveInterval=60",
-        "-N",  # no shell, just tunnel
-        f"{_WINDOWS_TUNNEL_USER}@{_WINDOWS_TUNNEL_HOST}",
-    ]
-
-    try:
-        _sp.Popen(
-            cmd,
-            stdout=_sp.DEVNULL,
-            stderr=_sp.DEVNULL,
-            stdin=_sp.DEVNULL,
-        )
-        config.socks_proxy = SOCKS_PROXY_URL
-        print(
-            f"  \u2139 Windows SOCKS tunnel started: {SOCKS_PROXY_URL} "
-            f"-> {_WINDOWS_TUNNEL_USER}@{_WINDOWS_TUNNEL_HOST}",
-            file=sys.stderr,
-            flush=True,
-        )
-    except OSError as exc:
-        print(
-            f"Warning: failed to start Windows tunnel: {exc}",
-            file=sys.stderr,
-        )
-
-
-# Class-level TOML parse cache: maps (workspace, CONFIG_FILENAME) to the
+# Class-level TOML parse cache
 # parsed agent data dict so repeated calls to load() don't re-parse the file.
 #
 # Set after the class body (not inside) because it's a mutable default that must

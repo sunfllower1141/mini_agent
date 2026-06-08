@@ -59,7 +59,6 @@ HIDDEN_IMPORTS = [
     "emoji_svg",
     # Third-party
     "requests",
-    "socks",
     "tomllib",
     "numpy",
     "PIL",

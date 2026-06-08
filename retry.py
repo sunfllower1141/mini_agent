@@ -38,7 +38,6 @@ def _request_with_retry(
     stream: bool = False,
     cancel_event: threading.Event | None = None,
     timeout: tuple[float, float] = (10, 120),
-    proxies: dict | None = None,
     **kwargs,
 ) -> requests.Response | None:
     """Send an HTTP request with retry on transient errors.
@@ -58,7 +57,7 @@ def _request_with_retry(
         if cancel_event is not None and cancel_event.is_set():
             return None
         try:
-            r = post(*args, stream=stream, timeout=timeout, proxies=proxies, **kwargs)
+            r = post(*args, stream=stream, timeout=timeout, **kwargs)
             if r.ok or r.status_code not in _RETRYABLE_STATUSES:
                 return r
             # Transient error — retry

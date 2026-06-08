@@ -301,11 +301,6 @@ def call_llm(
 
     payload = _build_payload(config, messages, safe_messages)
 
-    # Build proxies dict if SOCKS proxy is configured
-    proxies_dict = None
-    if config.socks_proxy:
-        proxies_dict = {"http": config.socks_proxy, "https": config.socks_proxy}
-
     # Anthropic's OpenAI-compatible endpoint uses Bearer auth (same as DeepSeek)
     # Gate all LLM API calls through a semaphore to prevent thundering-herd
     # rate-limit storms when N sub-agents share the same API key.
@@ -329,7 +324,6 @@ def call_llm(
             json=payload,
             stream=config.stream,
             cancel_event=cancel_event,
-            proxies=proxies_dict,
         )
     finally:
         _LLM_SEMAPHORE.release()

@@ -37,7 +37,6 @@ class _MockConfig:
         self.presence_penalty = overrides.get("presence_penalty", 0.0)
         self.stop_sequences = overrides.get("stop_sequences", None)
         self.response_format = overrides.get("response_format", None)
-        self.socks_proxy = overrides.get("socks_proxy", "")
         self.sub_agent_max_turns = overrides.get("sub_agent_max_turns", 25)
 
 

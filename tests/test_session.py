@@ -149,7 +149,6 @@ class TestSwitchSession(unittest.TestCase):
             "stop_sequences": None,
             "response_format": None,
             "routing_model": "",
-            "socks_proxy": "",
             "sub_agent_max_turns": 25,
         }
         defaults.update(overrides)
