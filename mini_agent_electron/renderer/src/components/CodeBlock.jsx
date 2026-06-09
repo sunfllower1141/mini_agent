@@ -55,7 +55,7 @@ function getHighlighter() {
     highlighterPromise = createHighlighter({
       // Only the languages a coding agent actually encounters.
       // Each grammar is a WASM blob — fewer = less memory.
-      langs: ['python', 'javascript', 'typescript', 'bash', 'json', 'diff'],
+      langs: ['python', 'javascript', 'typescript', 'bash', 'json', 'diff', 'html'],
       themes: ['dark-plus'],
       engine: createJavaScriptRegexEngine(),
     });
