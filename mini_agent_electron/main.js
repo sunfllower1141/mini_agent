@@ -14,6 +14,10 @@ const fs = require('fs');
 // Resource tuning — this is a text-based chat app, not a game or browser.
 // Merge GPU into main process (saves ~180 MB separate GPU process).
 app.commandLine.appendSwitch('in-process-gpu');
+// Linux: disable sandbox when running outside a full desktop (e.g. SSH, VNC, WSL, containers)
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('no-sandbox');
+}
 // Cap V8 heap: 128 MB old-space, 16 MB nursery (young gen).
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=128 --max-semi-space-size=16');
 
