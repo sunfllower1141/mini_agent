@@ -32,12 +32,8 @@ keys
 result.txt
 
 # Local data mounted in workspace
-$HOME/
 .mini_agent_memory_session_default.db*
 .mini_agent_memory_session_images.db
-.mini_agent.toml
-*.toml
 reports/
-electron-ui/node_modules/
 error_traces.log
 mini_agent_electron/electron-dist/
