@@ -17,18 +17,41 @@ import SettingsPanel from './components/SettingsPanel';
 const MAX_RENDERED_CHAT_LINES = 400;
 const MAX_RENDERED_TOOL_LINES = 400;
 
+// ---------------------------------------------------------------------------
+// SVG icons — minimalistic Lucide-style, matching emoji_svg.py convention
+// ---------------------------------------------------------------------------
+// SVG icons — minimalistic Lucide-style, matching emoji_svg.py convention.
+// Defined as functions so React gets fresh elements each render.
+const SVG = {
+  moon:      () => <svg className="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>,
+  sun:       () => <svg className="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>,
+  droplet:   () => <svg className="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>,
+  snowflake: () => <svg className="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/><path d="m20 16-4-4 4-4"/><path d="m4 8 4 4-4 4"/><path d="m16 4-4 4-4-4"/><path d="m8 20 4-4 4 4"/></svg>,
+  coffee:    () => <svg className="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>,
+  flower:    () => <svg className="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M4.93 7.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 16.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>,
+  layers:    () => <svg className="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"/><line x1="12" y1="22" x2="12" y2="15.5"/><polyline points="22 8.5 12 15.5 2 8.5"/></svg>,
+  circleHalf: () => <svg className="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a10 10 0 1 0 0 20V2z"/></svg>,
+  moonStars: () => <svg className="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 3a5 5 0 0 0 0 10"/><path d="M6 7l1 1M9 10l-1-1M18 17l1 1M21 20l-1-1M3 17l3-3"/><circle cx="8" cy="17" r="2"/><path d="M21 12.79A9 9 0 1 1 11.21 3"/></svg>,
+  palette:   () => <svg className="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="13.5" cy="6.5" r="1.5" fill="currentColor"/><circle cx="17.5" cy="10.5" r="1.5" fill="currentColor"/><circle cx="8.5" cy="7.5" r="1.5" fill="currentColor"/><circle cx="6.5" cy="12.5" r="1.5" fill="currentColor"/><path d="M12 2C6.49 2 2 6.49 2 12s4.49 10 10 10a2 2 0 0 0 2-2c0-.52-.2-1-.53-1.37-.33-.36-.47-.83-.47-1.3 0-1.1.9-2 2-2h2.35c3.52 0 6.35-2.83 6.35-6.35C23.7 5.27 19.73 2 12 2z"/></svg>,
+  gitBranch: () => <svg className="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>,
+  circleFill: () => <svg className="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="12" cy="12" r="6"/></svg>,
+  refresh:   () => <svg className="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>,
+  circleDot: () => <svg className="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg>,
+  check:     () => <svg className="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>,
+};
+
 // Theme registry — name, data-theme value, status-bar icon
 const THEMES = [
-  { name: 'Dark',         id: 'dark',         icon: '☾' },
-  { name: 'Light',        id: 'light',        icon: '☀' },
-  { name: 'Dracula',      id: 'dracula',      icon: '🧛' },
-  { name: 'Nord',         id: 'nord',         icon: '❄️' },
-  { name: 'Catppuccin',   id: 'catppuccin',   icon: '🐱' },
-  { name: 'Rosé Pine',    id: 'rose-pine',    icon: '🌹' },
-  { name: 'Gruvbox',      id: 'gruvbox',      icon: '🪵' },
-  { name: 'Solarized',    id: 'solarized',    icon: '☯️' },
-  { name: 'Tokyo Night',  id: 'tokyo-night',  icon: '🌆' },
-  { name: 'Monokai',      id: 'monokai',      icon: '🎨' },
+  { name: 'Dark',         id: 'dark',         icon: SVG.moon },
+  { name: 'Light',        id: 'light',        icon: SVG.sun },
+  { name: 'Dracula',      id: 'dracula',      icon: SVG.droplet },
+  { name: 'Nord',         id: 'nord',         icon: SVG.snowflake },
+  { name: 'Catppuccin',   id: 'catppuccin',   icon: SVG.coffee },
+  { name: 'Rosé Pine',    id: 'rose-pine',    icon: SVG.flower },
+  { name: 'Gruvbox',      id: 'gruvbox',      icon: SVG.layers },
+  { name: 'Solarized',    id: 'solarized',    icon: SVG.circleHalf },
+  { name: 'Tokyo Night',  id: 'tokyo-night',  icon: SVG.moonStars },
+  { name: 'Monokai',      id: 'monokai',      icon: SVG.palette },
 ];
 
 function setThemeDom(id) {
@@ -72,6 +95,7 @@ function AppShell() {
   const submitTimeoutRef = useRef(null);
   const toolOutputStack = useRef([]); // stack of buffers for parallel tool calls
   const lineIdRef = useRef(0); // monotonically increasing ID for stable React keys
+  const themeToggleRef = useRef(null);
   const nextLineId = useCallback(() => ++lineIdRef.current, []);
   const [showSettings, setShowSettings] = useState(false);
   const [inputValue, setInputValue] = useState('');
@@ -104,6 +128,21 @@ function AppShell() {
     document.addEventListener('click', close);
     return () => document.removeEventListener('click', close);
   }, [themePickerOpen]);
+
+  // Native click listener on theme toggle (bypasses React synthetic events)
+  useEffect(() => {
+    const el = themeToggleRef.current;
+    if (!el) return;
+    const handler = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setThemePickerOpen((p) => !p);
+    };
+    el.addEventListener('click', handler, { capture: true });
+    return () => {
+      el.removeEventListener('click', handler, { capture: true });
+    };
+  }, []);
 
   // Helper to add a line to any log
   const addLine = useCallback((setter) => (line) => {
@@ -629,14 +668,14 @@ function AppShell() {
       {/* Status bar */}
       <div id="status-bar" className="status-bar dim">
         <span id="git-status">
-          {gitBranch && `⎇ ${gitBranch}${gitDirty ? '*' : ''}`}
+          {gitBranch && <>{SVG.gitBranch()} {gitBranch}{gitDirty ? '*' : ''}</>}
         </span>
         {isLive && (
-          <span id="live-indicator" onClick={handleCancel} title="Cancel"> ●</span>
+          <span id="live-indicator" onClick={handleCancel} title="Cancel"> {SVG.circleFill()}</span>
         )}
-        <span id="theme-toggle" onClick={() => setThemePickerOpen((p) => !p)} title={`Theme: ${themeEntry.name}`}>
-          {themeEntry.icon}
-        </span>
+        <button id="theme-toggle" ref={themeToggleRef} onClick={() => setThemePickerOpen((p) => !p)} title={`Theme: ${themeEntry.name}`}>
+          {themeEntry.icon()}
+        </button>
         {themePickerOpen && (
           <div className="theme-dropdown">
             {THEMES.map((t) => (
@@ -645,18 +684,18 @@ function AppShell() {
                 className={`theme-dropdown-item${t.id === theme ? ' theme-current' : ''}`}
                 onClick={() => applyTheme(t.id)}
               >
-                <span className="theme-icon">{t.icon}</span>
+                <span className="theme-icon">{t.icon()}</span>
                 <span className="theme-name">{t.name}</span>
-                {t.id === theme && <span className="theme-check">✓</span>}
+                {t.id === theme && <span className="theme-check">{SVG.check()}</span>}
               </div>
             ))}
           </div>
         )}
         {turnCountVal != null && (
-          <span id="turn-counter"> ↻ turn <span id="turn-count">{turnCountVal}</span></span>
+          <span id="turn-counter"> {SVG.refresh()} turn <span id="turn-count">{turnCountVal}</span></span>
         )}
         {tokenCountVal != null && (
-          <span id="token-counter"> ⊙ <span id="token-count">{tokenCountVal}</span> tok</span>
+          <span id="token-counter"> {SVG.circleDot()} <span id="token-count">{tokenCountVal}</span> tok</span>
         )}
         <div className="status-right">
           {restoredCount != null && (

@@ -689,6 +689,7 @@ html, body {
    Status bar
    --------------------------------------------------------------------------- */
 .status-bar {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 0;
@@ -723,6 +724,13 @@ html, body {
   opacity: 0.6;
   transition: opacity 0.15s;
   position: relative;
+  display: inline-flex;
+  align-items: center;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
 }
 #theme-toggle:hover {
   opacity: 1;
@@ -765,10 +773,18 @@ html, body {
 }
 
 .theme-icon {
-  font-size: 14px;
   flex-shrink: 0;
   width: 20px;
   text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Inline SVG icons — align with text baseline */
+.svg-icon {
+  vertical-align: middle;
+  flex-shrink: 0;
 }
 
 .theme-name {
