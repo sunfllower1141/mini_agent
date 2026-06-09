@@ -196,9 +196,8 @@ class AgentRunner:
         self._total_prompt_tokens = 0
         self._total_completion_tokens = 0
 
-        # Model context windows for budget tracking (DeepSeek V3: 128K, R1: 64K).
-        _model = (self.config.model or "").lower()
-        self._context_window = 65536 if ("reasoner" in _model or "r1" in _model) else 131072
+        # Read context window from config (provider defaults: V4-Pro 1M, R1 64K, etc.)
+        self._context_window = getattr(self.config, "context_window", 131072) or 131072
         self._input_queue: list[str] = []
         self._input_lock = threading.Lock()
         self._callbacks = StreamCallbacks()
