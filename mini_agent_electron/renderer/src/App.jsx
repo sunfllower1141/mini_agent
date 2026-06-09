@@ -174,6 +174,14 @@ function AppShell() {
         setGitDirty(!!data.git_dirty);
       }
       if (data.restored_count != null) setRestoredCount(data.restored_count);
+      if (data.turn_count != null) setTurnCountVal(data.turn_count);
+      if (data.tokens != null && data.token_remaining != null) {
+        const tok = data.tokens;
+        const used = tok >= 1000 ? `${(tok / 1000).toFixed(1)}k` : String(tok);
+        const remain = data.token_remaining;
+        const remainStr = remain >= 1000 ? `${(remain / 1000).toFixed(1)}k` : String(remain);
+        setTokenCountVal(`${used}/${remainStr}`);
+      }
       if (data.ready) {
         addToolLine({ text: 'backend ready', cls: 'dim' });
       }
@@ -289,8 +297,12 @@ function AppShell() {
         chatStream.reset();
       }
       if (data.usage?.total_tokens) {
-        const tok = data.usage.total_tokens;
-        setTokenCountVal(tok >= 1000 ? `${(tok / 1000).toFixed(1)}k` : String(tok));
+        const u = data.usage;
+        const tok = u.total_tokens;
+        const used = tok >= 1000 ? `${(tok / 1000).toFixed(1)}k` : String(tok);
+        const remain = u.remaining ?? (u.context_window ? u.context_window - tok : 0);
+        const remainStr = remain >= 1000 ? `${(remain / 1000).toFixed(1)}k` : String(remain);
+        setTokenCountVal(`${used}/${remainStr}`);
       }
       if (data.turn_count) setTurnCountVal(data.turn_count);
       setIsLive(false);

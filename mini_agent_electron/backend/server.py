@@ -193,6 +193,12 @@ class AgentRunner:
         self._turn_thread: threading.Thread | None = None
         self._total_turns = 0
         self._total_tokens = 0
+        self._total_prompt_tokens = 0
+        self._total_completion_tokens = 0
+
+        # Model context windows for budget tracking (DeepSeek V3: 128K, R1: 64K).
+        _model = (self.config.model or "").lower()
+        self._context_window = 65536 if ("reasoner" in _model or "r1" in _model) else 131072
         self._input_queue: list[str] = []
         self._input_lock = threading.Lock()
         self._callbacks = StreamCallbacks()
@@ -211,6 +217,17 @@ class AgentRunner:
 
     # -- status ---------------------------------------------------------
 
+    def _build_usage(self) -> dict:
+        """Return usage dict with actual API token breakdown + budget remaining."""
+        remaining = max(0, self._context_window - self._total_tokens)
+        return {
+            "total_tokens": self._total_tokens,
+            "prompt_tokens": self._total_prompt_tokens,
+            "completion_tokens": self._total_completion_tokens,
+            "context_window": self._context_window,
+            "remaining": remaining,
+        }
+
     def send_status(self) -> None:
         """Send current status to Electron."""
         # Derive session name from memory db path
@@ -228,6 +245,12 @@ class AgentRunner:
             "session_name": session_name,
             "git_branch": self._git_branch,
             "git_dirty": self._git_dirty,
+            "tokens": self._total_tokens,
+            "token_remaining": self._context_window - self._total_tokens,
+            "prompt_tokens": self._total_prompt_tokens,
+            "completion_tokens": self._total_completion_tokens,
+            "context_window": self._context_window,
+            "turn_count": getattr(self, '_total_turns', 0),
         }
         status["restored_count"] = max(0, len(self.messages) - 2)
         send_msg(status)
@@ -386,7 +409,7 @@ class AgentRunner:
             # Always send turn_complete so the renderer resets its loading state
             send_msg({
                 "type": "turn_complete",
-                "usage": {"total_tokens": self._total_tokens, "prompt_tokens": 0, "completion_tokens": 0},
+                "usage": self._build_usage(),
                 "turn_count": self._total_turns,
             })
             return
@@ -396,7 +419,7 @@ class AgentRunner:
         if self._cancel_event.is_set():
             send_msg({
                 "type": "turn_complete",
-                "usage": {"total_tokens": self._total_tokens, "prompt_tokens": 0, "completion_tokens": 0},
+                "usage": self._build_usage(),
                 "turn_count": self._total_turns,
                 "cancelled": True,
             })
@@ -405,6 +428,8 @@ class AgentRunner:
         if msg is not None:
             self._total_turns += msg.get("_turn_count", 0)
             usage = msg.get("_total_usage") or {}
+            self._total_prompt_tokens += usage.get("prompt_tokens", 0)
+            self._total_completion_tokens += usage.get("completion_tokens", 0)
             self._total_tokens += usage.get("total_tokens", 0)
 
         # Persist
@@ -413,7 +438,7 @@ class AgentRunner:
         # Notify Electron
         send_msg({
             "type": "turn_complete",
-            "usage": {"total_tokens": self._total_tokens, "prompt_tokens": 0, "completion_tokens": 0},
+            "usage": self._build_usage(),
             "turn_count": self._total_turns,
         })
 
@@ -434,6 +459,8 @@ class AgentRunner:
             self.memory.clear()
             self._total_turns = 0
             self._total_tokens = 0
+            self._total_prompt_tokens = 0
+            self._total_completion_tokens = 0
             send_msg({"type": "response", "lines": ["--- conversation cleared ---"]})
             return
 
@@ -467,6 +494,8 @@ class AgentRunner:
                 self.messages = sd["messages"]
                 self._total_turns = 0
                 self._total_tokens = 0
+                self._total_prompt_tokens = 0
+                self._total_completion_tokens = 0
                 send_msg({"type": "response", "lines": [f"Created session '{arg}'."]})
             elif sub == "switch" and arg:
                 from core.config import switch_session
@@ -477,6 +506,8 @@ class AgentRunner:
                 self.messages = sd["messages"]
                 self._total_turns = 0
                 self._total_tokens = 0
+                self._total_prompt_tokens = 0
+                self._total_completion_tokens = 0
                 send_msg({"type": "response", "lines": [f"Switched to '{arg}'."]})
             elif sub == "delete" and arg:
                 from core.config import delete_session
@@ -644,6 +675,8 @@ class AgentRunner:
                 self.session = new_data["session"]
                 self._total_turns = 0
                 self._total_tokens = 0
+                self._total_prompt_tokens = 0
+                self._total_completion_tokens = 0
                 self._refresh_git_status()
                 self.send_status()
                 send_msg({"type": "response", "lines": [f"Workspace set to: {new_workspace}"]})
@@ -719,6 +752,8 @@ def main() -> None:
                 runner.messages = sd["messages"]
                 runner._total_turns = 0
                 runner._total_tokens = 0
+                runner._total_prompt_tokens = 0
+                runner._total_completion_tokens = 0
                 runner.send_status()
 
         elif msg_type == "session_new":
@@ -735,6 +770,8 @@ def main() -> None:
                 runner.messages = sd["messages"]
                 runner._total_turns = 0
                 runner._total_tokens = 0
+                runner._total_prompt_tokens = 0
+                runner._total_completion_tokens = 0
                 runner.send_status()
 
         elif msg_type == "session_delete":
@@ -752,6 +789,8 @@ def main() -> None:
                     runner.messages = sd["messages"]
                     runner._total_turns = 0
                     runner._total_tokens = 0
+                    runner._total_prompt_tokens = 0
+                    runner._total_completion_tokens = 0
                 send_msg({"type": "session_delete_result", "ok": ok, "message": msg_text})
                 runner.send_status()
 
