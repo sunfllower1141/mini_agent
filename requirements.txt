@@ -17,7 +17,5 @@ pytest>=9.0
 #   pip install datasets  # for loading SWE-bench from HuggingFace
 #   pip install swebench   # for official Docker-based evaluation harness
 
-ripgrep>=15.0
-
 # System dependencies (brew install / apt-get):
-#   ripgrep (rg) — fast search, used by search_files (can also install via pip above)
+#   ripgrep (rg) — fast search, used by search_files
