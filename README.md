@@ -233,7 +233,7 @@ mini_agent is designed to modify and improve its own codebase. If you're a **hum
 | `tools/` | `__init__.py`, `schema.py`, `skills.py`, `context.py`, `reservations.py`, `file_ops.py`, `shell_ops.py`, `search_ops.py`, `agent_ops.py`, `agent_patterns.py`, `browser_ops.py`, `desktop_ops.py`, `macos_ops.py`, `lsp.py`, `mcp_client.py`, `failure_learning.py`, `tool_graph.py`, `error_hints.py` | Tool dispatch, schema definitions, skill gates, agent context, file reservations, all tool implementations |
 | `memory/` | `memory.py`, `memory_prune.py`, `session.py` | SQLite persistence, message pruning/compression, session lifecycle |
 | `agents/` | `agent_runtime.py`, `sub_agent.py` | Sub-agent runtime, task delegation |
-| `eval/` | `scorer.py`, `swebench_runner.py` | Local eval tasks + SWE-bench integration |
+| `eval/` | `scorer.py`, `runner.py` | Local eval tasks |
 
 ## Benchmarks
 
@@ -251,37 +251,3 @@ python -m pytest test_benchmarks.py --run-benchmarks -v -k "local"
 python -m pytest test_benchmarks.py --run-benchmarks -v -k "hello_world"
 ```
 
-### SWE-bench (industry standard)
-
-[SWE-bench](https://www.swebench.com/) is the standard benchmark for coding agents — 2,300 real GitHub issues across 12 Python repositories. mini_agent can generate predictions for official evaluation:
-
-```bash
-# Install optional dependency:
-pip install datasets
-
-# Smoke test: run 1 SWE-bench Lite task locally:
-python -m pytest test_benchmarks.py --run-benchmarks --swebench -v -k "smoke"
-
-# Generate predictions for the first 5 SWE-bench Lite tasks:
-python -m eval.swebench_runner \
-  --dataset princeton-nlp/SWE-bench_Lite \
-  --max-tasks 5 --output predictions.jsonl
-
-# Resume a previous run:
-python -m eval.swebench_runner \
-  --dataset princeton-nlp/SWE-bench_Lite \
-  --resume predictions.jsonl --output predictions.jsonl
-```
-
-Then evaluate with the official SWE-bench harness:
-
-```bash
-git clone https://github.com/princeton-nlp/SWE-bench.git
-cd SWE-bench
-python -m swebench.harness.run_evaluation \
-  --dataset_name princeton-nlp/SWE-bench_Lite \
-  --predictions_path /path/to/predictions.jsonl \
-  --max_workers 4 --run_id mini_agent
-```
-
-See [`eval/`](eval/) for the full evaluation architecture and [`eval/swebench_runner.py`](eval/swebench_runner.py) for the SWE-bench pipeline.

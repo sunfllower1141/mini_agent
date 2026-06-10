@@ -12,10 +12,5 @@ playwright>=1.40
 python-lsp-server>=1.14
 flake8>=7.0
 pytest>=9.0
-
-# Optional: SWE-bench evaluation
-#   pip install datasets  # for loading SWE-bench from HuggingFace
-#   pip install swebench   # for official Docker-based evaluation harness
-
 # System dependencies (brew install / apt-get):
 #   ripgrep (rg) — fast search, used by search_files

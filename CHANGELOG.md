@@ -95,14 +95,6 @@ Agent was repeating the same mistakes across sessions. Implemented MPR/VIGIL-ins
 ### Reason
 `edit_file` was the #1 source of tool failures. Each improvement addresses a specific failure pattern observed in production use.
 
-## 2026-05-20 — SWE-bench Evaluation
-### Added
-- `eval/swebench_runner.py` — SWE-bench Lite prediction pipeline
-- `eval/agent.py` — SWE-bench agent wrapper
-- `test_benchmarks.py` — local eval + SWE-bench tests
-### Reason
-Industry-standard benchmarking for coding agents. Validates tool-use and code-fix capabilities.
-
 ## 2026-05-18 — Context Injection Refactor
 ### Changed
 - `context_inject.py` — extracted from `llm.py` (per-turn injection logic)

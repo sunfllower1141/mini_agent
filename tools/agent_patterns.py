@@ -94,6 +94,7 @@ def fan_in(
 ) -> list[SubAgentResult]:
     """Collect results from all task_ids. Blocks until all complete or timeout.
 
+    The timeout is a global deadline for the entire fan_in call (not per-task).
     Returns results in the same order as task_ids (None for timed-out tasks).
     """
     from tools import _TOOL_CONTEXT
@@ -104,16 +105,20 @@ def fan_in(
             raise RuntimeError("Agent runtime not initialized.")
 
     results: list[SubAgentResult | None] = [None] * len(task_ids)
+    deadline = time.monotonic() + timeout
 
     for i, tid in enumerate(task_ids):
-        # Each task gets the full timeout independently — earlier tasks
-        # no longer starve later ones.        # Use wait_for with predicate to avoid lost-wakeup race.
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break  # global timeout exhausted; remaining tasks stay None
+
+        # Use wait_for with predicate to avoid lost-wakeup race.
         def _ready(tid=tid):
             status = runtime.get_status(tid)
             return status != "running"
 
         with runtime._condition:
-            runtime._condition.wait_for(_ready, timeout=timeout)
+            runtime._condition.wait_for(_ready, timeout=remaining)
 
         status = runtime.get_status(tid)
         if status == "completed":
