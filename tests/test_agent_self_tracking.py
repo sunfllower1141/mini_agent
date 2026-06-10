@@ -18,8 +18,8 @@ from tools import _TOOL_CONTEXT
 
 
 def _project_root() -> str:
-    """Return the project root directory (where this test file lives)."""
-    return os.path.dirname(os.path.abspath(__file__))
+    """Return the project root directory (parent of tests/)."""
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 class TestStateFile(unittest.TestCase):

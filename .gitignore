@@ -21,6 +21,9 @@ tui_stderr.log
 logs/
 api_error.log
 
+# Coverage
+.coverage
+
 # Secrets / local config (contains API keys)
 keys
 .mini_agent.toml
