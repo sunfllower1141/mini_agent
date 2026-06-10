@@ -481,6 +481,19 @@ class MemoryStore:
         """Store a project-level learning that persists across sessions."""
         try:
             conn = self._get_conn()
+            # Lazy-create table in case connection fell back to a bare DB
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS project_knowledge ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "category TEXT NOT NULL DEFAULT 'general',"
+                "summary TEXT NOT NULL,"
+                "detail TEXT NOT NULL DEFAULT '',"
+                "importance INTEGER NOT NULL DEFAULT 1,"
+                "hits INTEGER NOT NULL DEFAULT 0,"
+                "created_at TEXT NOT NULL DEFAULT (datetime('now')),"
+                "updated_at TEXT NOT NULL DEFAULT (datetime('now'))"
+                ")"
+            )
             conn.execute(
                 "INSERT INTO project_knowledge (category, summary, detail, importance)"
                 " VALUES (?, ?, ?, ?)",
@@ -744,6 +757,21 @@ class MemoryStore:
         """Store a session summary for next startup injection."""
         try:
             conn = self._get_conn()
+            # Ensure the project_knowledge table exists — the connection may
+            # have silently fallen back to a different DB file (see
+            # _write_messages for detailed rationale).
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS project_knowledge ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "category TEXT NOT NULL DEFAULT 'general',"
+                "summary TEXT NOT NULL,"
+                "detail TEXT NOT NULL DEFAULT '',"
+                "importance INTEGER NOT NULL DEFAULT 1,"
+                "hits INTEGER NOT NULL DEFAULT 0,"
+                "created_at TEXT NOT NULL DEFAULT (datetime('now')),"
+                "updated_at TEXT NOT NULL DEFAULT (datetime('now'))"
+                ")"
+            )
             conn.execute(
                 "DELETE FROM project_knowledge WHERE category = 'session_summary'"
             )
@@ -760,6 +788,18 @@ class MemoryStore:
         """Return the most recent session summary, or None."""
         try:
             conn = self._get_conn()
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS project_knowledge ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "category TEXT NOT NULL DEFAULT 'general',"
+                "summary TEXT NOT NULL,"
+                "detail TEXT NOT NULL DEFAULT '',"
+                "importance INTEGER NOT NULL DEFAULT 1,"
+                "hits INTEGER NOT NULL DEFAULT 0,"
+                "created_at TEXT NOT NULL DEFAULT (datetime('now')),"
+                "updated_at TEXT NOT NULL DEFAULT (datetime('now'))"
+                ")"
+            )
             row = conn.execute(
                 "SELECT summary, detail FROM project_knowledge"
                 " WHERE category = 'session_summary'"
@@ -831,6 +871,12 @@ class MemoryStore:
         for attempt in range(_SAVE_MAX_RETRIES):
             try:
                 conn = self._get_conn()
+                # Ensure the messages table exists — the connection may have
+                # silently fallen back to a different DB file that doesn't
+                # have all tables (e.g. after a disk I/O error on the
+                # workspace DB).  Follows the same lazy-creation pattern as
+                # get_scratchpad() / set_scratchpad().
+                conn.execute(_CREATE_TABLE)
                 conn.execute("BEGIN IMMEDIATE")
                 need_full_rewrite = (
                     bool(pruned) or compressed or len(kept) < self._last_saved_count
