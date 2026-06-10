@@ -256,6 +256,15 @@ def _learn_from_failure(name: str, result: "ToolResult | None") -> None:
             result.content = (result.content or "") + f"\n\n[Recovery hint] {generic}"
 
     # --- Persist to cross-session knowledge ---
+    # Guard: skip all persistence during interpreter shutdown to avoid
+    # cascading "no such table" / "disk I/O error" noise.
+    try:
+        from memory.memory import is_shutting_down
+        if is_shutting_down():
+            return
+    except ImportError:
+        pass
+
     try:
         memory = getattr(_TOOL_CONTEXT, "_memory_store", None)
         if memory is None:

@@ -238,6 +238,14 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     # single failure blocks the rest or prints tracebacks during interpreter
     # teardown (when stderr may already be closed).
     def _cleanup_on_exit() -> None:
+        # 0. Signal shutdown — blocks writes from error_hints and similar
+        #    persistence code so they don't hit a closed/corrupt DB.
+        try:
+            from memory.memory import mark_shutting_down
+            mark_shutting_down()
+        except ImportError:
+            pass
+
         # 1. Auto-write HANDOFF.md for next-session continuity
         try:
             import warnings as _wrn
@@ -288,14 +296,21 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
         except Exception:
             pass
 
-        # 3. Shutdown LSP connections (skip on remote workspaces).
+        # 3. Close memory store (releases the shared SQLite connection so
+        #    the DB file is truly released before interpreter teardown).
+        try:
+            memory.close()
+        except Exception:
+            pass
+
+        # 4. Shutdown LSP connections (skip on remote workspaces).
         if not remote:
             try:
                 _shutdown_lsp()
             except Exception:
                 pass
 
-        # 4. Close HTTP session.
+        # 5. Close HTTP session.
         try:
             session.close()
         except Exception:

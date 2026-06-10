@@ -39,6 +39,24 @@ _mem_log = get_logger("memory")
 _conn_cache: dict[str, sqlite3.Connection] = {}
 _conn_cache_lock = threading.Lock()
 
+# --- shutdown guard: prevent writes during interpreter teardown ---
+# Set by bootstrap._cleanup_on_exit before closing connections.
+# error_hints.py and similar persistence code check this to avoid
+# cascading "no such table" / "disk I/O error" noise on exit.
+_SHUTTING_DOWN: bool = False
+
+
+def mark_shutting_down() -> None:
+    """Signal that the agent is shutting down — stop all persistence writes."""
+    global _SHUTTING_DOWN
+    _SHUTTING_DOWN = True
+
+
+def is_shutting_down() -> bool:
+    """Check if agent is in shutdown — callers should skip persistence writes."""
+    return _SHUTTING_DOWN
+
+
 # --- sqlite3 error escalation: track consecutive errors ---
 _consecutive_sqlite_errors: int = 0
 _CONSECUTIVE_ERROR_THRESHOLD = 3
