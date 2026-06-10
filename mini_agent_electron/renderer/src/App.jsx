@@ -175,12 +175,12 @@ function AppShell() {
       }
       if (data.restored_count != null) setRestoredCount(data.restored_count);
       if (data.turn_count != null) setTurnCountVal(data.turn_count);
-      if (data.tokens != null && data.token_remaining != null) {
+      if (data.tokens != null && data.context_window != null) {
         const tok = data.tokens;
         const used = tok >= 1000 ? `${(tok / 1000).toFixed(1)}k` : String(tok);
-        const remain = data.token_remaining;
-        const remainStr = remain >= 1000 ? `${(remain / 1000).toFixed(1)}k` : String(remain);
-        setTokenCountVal(`${used}/${remainStr}`);
+        const total = data.context_window;
+        const totalStr = total >= 1000 ? `${(total / 1000).toFixed(1)}k` : String(total);
+        setTokenCountVal(`${used}/${totalStr}`);
       }
       if (data.ready) {
         addToolLine({ text: 'backend ready', cls: 'dim' });
@@ -300,9 +300,9 @@ function AppShell() {
         const u = data.usage;
         const tok = u.total_tokens;
         const used = tok >= 1000 ? `${(tok / 1000).toFixed(1)}k` : String(tok);
-        const remain = u.remaining ?? (u.context_window ? u.context_window - tok : 0);
-        const remainStr = remain >= 1000 ? `${(remain / 1000).toFixed(1)}k` : String(remain);
-        setTokenCountVal(`${used}/${remainStr}`);
+        const total = u.context_window ?? 0;
+        const totalStr = total >= 1000 ? `${(total / 1000).toFixed(1)}k` : String(total);
+        setTokenCountVal(`${used}/${totalStr}`);
       }
       if (data.turn_count) setTurnCountVal(data.turn_count);
       setIsLive(false);

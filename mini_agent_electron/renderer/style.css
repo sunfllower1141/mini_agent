@@ -701,6 +701,7 @@ html, body {
 }
 
 .status-bar span { margin-right: 12px; }
+.status-bar button { margin-right: 12px; }
 
 .status-right {
   margin-left: auto;

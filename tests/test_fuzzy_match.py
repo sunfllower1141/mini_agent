@@ -379,7 +379,7 @@ class TestReadBeforeEdit(unittest.TestCase):
     """Tests for read-before-edit enforcement."""
 
     def setUp(self):
-        self._saved = set(_READ_FILES)
+        self._saved = dict(_READ_FILES)
 
     def tearDown(self):
         _READ_FILES.clear()
@@ -388,7 +388,7 @@ class TestReadBeforeEdit(unittest.TestCase):
     def test_read_tracks_file(self):
         _READ_FILES.clear()
         self.assertNotIn("/tmp/test.py", _READ_FILES)
-        _READ_FILES.add("/tmp/test.py")
+        _READ_FILES["/tmp/test.py"] = 0.0
         self.assertIn("/tmp/test.py", _READ_FILES)
 
 
