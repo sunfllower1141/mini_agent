@@ -431,6 +431,154 @@ def _inject_circuit_breaker(
         messages.append({"role": "user", "content": warning, "_transient": True})
 
 
+# ---------------------------------------------------------------------------
+# Learning nudge — reminds agent to use remember() after failures
+# ---------------------------------------------------------------------------
+
+# How many failures before injecting a remember nudge
+_LEARNING_NUDGE_FAILURE_THRESHOLD: int = 1
+
+# Cooldown between learning nudges (turns)
+_LEARNING_NUDGE_COOLDOWN: int = 3
+
+
+def _inject_learning_nudge(
+    messages: list[dict], *, turn_count: int,
+) -> None:
+    """Inject a reminder to use remember() after tool failures.
+
+    Research shows agents rarely call remember() without explicit prompting.
+    This nudge fires after any tool failure and reminds the agent to capture
+    the pattern for cross-session persistence.
+
+    Uses a cooldown to avoid nagging on every turn.
+    """
+    # Check cooldown
+    last_nudge_turn = getattr(_TOOL_CONTEXT, "_last_learning_nudge_turn", -999)
+    if turn_count - last_nudge_turn < _LEARNING_NUDGE_COOLDOWN:
+        return
+
+    # Check for failures in the most recent assistant message
+    has_failures = False
+    failure_names: list[str] = []
+    for m in reversed(messages):
+        if m.get("role") == "tool" and not m.get("_transient"):
+            content = m.get("content") or ""
+            if '"success": false' in content.lower() or '"success":false' in content.lower():
+                has_failures = True
+                # Extract tool name from tool_call_id
+                tc_id = m.get("tool_call_id", "")
+                # Find the matching tool call in the assistant message
+                for am in messages:
+                    if am.get("role") == "assistant":
+                        for tc in am.get("tool_calls", []):
+                            if tc.get("id") == tc_id:
+                                failure_names.append(tc.get("function", {}).get("name", "unknown"))
+                                break
+    if not has_failures or not failure_names:
+        return
+
+    _TOOL_CONTEXT._last_learning_nudge_turn = turn_count
+
+    unique_names = list(dict.fromkeys(failure_names))  # deduplicate preserving order
+    nudge = (
+        f"💡 LEARNING NUDGE: You just had tool failure(s) with: {', '.join(unique_names)}.\n\n"
+        f"Before retrying, consider calling remember() to capture:\n"
+        f"  - What pattern caused this failure (wrong param? file not read? whitespace mismatch?)\n"
+        f"  - What fix strategy worked (if you already fixed it)\n"
+        f"  - Any new convention or workaround you discovered\n\n"
+        f"This makes the fix available to future sessions via project_knowledge.\n"
+        f"Use topic='...' and detail='...' — category auto-detected."
+    )
+    messages.append({"role": "user", "content": nudge, "_transient": True})
+
+
+# ---------------------------------------------------------------------------
+# Plan gate — warns when editing files not in the active plan
+# ---------------------------------------------------------------------------
+
+
+def _inject_plan_gate(messages: list[dict]) -> None:
+    """Warn when the agent is editing files not covered by the active plan.
+
+    Scans the most recent assistant message for edit_file/write_file calls
+    and checks whether target paths appear in the plan's file scope.
+    Only injects when a plan is active and edits diverge from it.
+    """
+    # Check if a plan is active
+    plan = getattr(_TOOL_CONTEXT, "_plan", None)
+    if not plan or not isinstance(plan, dict):
+        return
+
+    plan_steps = plan.get("steps", [])
+    if not plan_steps:
+        return
+
+    # Collect file paths mentioned in plan steps
+    plan_files: set[str] = set()
+    import re as _re
+    for step in plan_steps:
+        text = step.get("description", "") if isinstance(step, dict) else str(step)
+        for match in _re.findall(r'[\w/\-.]+\.py\b', text):
+            plan_files.add(match)
+
+    if not plan_files:
+        return  # Plan doesn't mention specific files, can't gate
+
+    # Scan the most recent assistant message for edit targets
+    edit_targets: list[str] = []
+    for m in reversed(messages):
+        if m.get("role") != "assistant":
+            continue
+        tool_calls = m.get("tool_calls", [])
+        if not tool_calls:
+            continue
+        for tc in tool_calls:
+            fn = tc.get("function", {})
+            name = fn.get("name", "")
+            if name in ("edit_file", "write_file"):
+                try:
+                    args = json.loads(fn.get("arguments", "{}"))
+                except json.JSONDecodeError:
+                    continue
+                path = args.get("path", "")
+                paths = args.get("paths", [])
+                if path:
+                    edit_targets.append(path)
+                if isinstance(paths, list):
+                    edit_targets.extend(paths)
+        break
+
+    if not edit_targets:
+        return
+
+    # Check which targets aren't in the plan
+    outliers = []
+    for target in edit_targets:
+        filename = os.path.basename(target)
+        if filename not in plan_files and target not in plan_files:
+            # Also check partial matches
+            matched = any(pf in target for pf in plan_files)
+            if not matched:
+                outliers.append(target)
+
+    if outliers:
+        outlier_list = "\n".join(f"  - {o}" for o in outliers[:5])
+        plan_list = "\n".join(f"  - {pf}" for pf in sorted(plan_files)[:8])
+        messages.append({
+            "role": "user",
+            "content": (
+                f"⚠️ PLAN GATE: You are editing file(s) not mentioned in your active plan:\n"
+                f"{outlier_list}\n\n"
+                f"Plan scope includes:\n{plan_list}\n\n"
+                f"If this edit is intentional (new requirement discovered during implementation), "
+                f"update your plan with plan_status() to reflect the expanded scope. "
+                f"Otherwise, reconsider whether this edit is necessary."
+            ),
+            "_transient": True,
+        })
+
+
 def _inject_post_edit_verification(messages: list[dict]) -> None:
     """Inject post-edit verification suggestions when files have been modified.
 
@@ -1342,6 +1490,8 @@ def _inject_context(
         _inject_modified_files_checkpoint(messages, read_gate=read_gate)
 
     _inject_circuit_breaker(messages, recent_tool_keys=recent_tool_keys)
+    _inject_learning_nudge(messages, turn_count=turn_count)
+    _inject_plan_gate(messages)
     _inject_edit_risk_context(messages)
     _inject_pattern_rules(messages)
     _inject_scratchpad_nudge(messages, turn_count=turn_count)

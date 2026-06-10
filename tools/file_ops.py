@@ -11,6 +11,7 @@ import re
 import stat as stat_module
 import shutil
 import sys
+import tempfile
 import time
 
 from core.safety import ReadSafetyGate, WriteSafetyGate
@@ -83,7 +84,7 @@ def _canonicalize_for_match(s: str) -> str:
 # ensure the model has seen the current file content.
 # ---------------------------------------------------------------------------
 
-_READ_FILES: set[str] = set()
+_READ_FILES: dict[str, float] = {}  # resolved_path → mtime at read time
 
 # Build fast translation tables at import time
 for _cp, _replacement in _QUOTE_NORMALIZE_MAP.items():
@@ -163,6 +164,61 @@ def _backup_before_write(resolved_path: str) -> None:
     _BACKUPS[resolved_path] = backup_path
 
 
+def _atomic_write(resolved_path: str, content: str, encoding: str = "utf-8") -> None:
+    """Write *content* to *resolved_path* atomically via tempfile + os.replace.
+
+    Writes to a temp file in the same directory (same filesystem) then atomically
+    renames it over the target.  This guarantees that readers always see either
+    the old file or the complete new file — never a partial write.
+
+    On any error the temp file is cleaned up before re-raising.
+    """
+    dirname = os.path.dirname(resolved_path) or "."
+    fd, tmp_path = tempfile.mkstemp(
+        dir=dirname, prefix=".tmp_" + os.path.basename(resolved_path) + "_",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding=encoding) as f:
+            f.write(content)
+        os.replace(tmp_path, resolved_path)
+    except BaseException:
+        # Clean up the temp file on any failure
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+# --- Text file detection ---
+# Files with more than this fraction of null bytes in the first chunk
+# are considered binary.  UTF-8 text files (including Python, JS, etc.)
+# never contain null bytes; binary formats (images, compiled code, etc.)
+# almost always do.
+_TEXT_NULL_BYTE_THRESHOLD = 0.0  # any null byte → binary
+_TEXT_SCAN_BYTES = 8192          # scan first 8 KiB
+
+
+def _is_likely_text(filepath: str) -> bool:
+    """Return True if *filepath* looks like a text file (not binary).
+
+    Checks the first _TEXT_SCAN_BYTES for null bytes.  Also returns True
+    for non-existent or empty files (they'll fail later with a clearer
+    error).
+    """
+    if not os.path.isfile(filepath):
+        return True  # let the caller produce a clear "not found" error
+    try:
+        with open(filepath, "rb") as f:
+            chunk = f.read(_TEXT_SCAN_BYTES)
+    except OSError:
+        return True  # can't read → let caller handle
+    if not chunk:
+        return True  # empty file is text
+    null_count = chunk.count(b"\x00")
+    return null_count <= int(len(chunk) * _TEXT_NULL_BYTE_THRESHOLD)
+
+
 # ---------------------------------------------------------------------------
 # read_file
 # ---------------------------------------------------------------------------
@@ -183,6 +239,16 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
             content=f"Read blocked by safety layer: {safety_result.reason}",
         )
     resolved = safety_result.resolved_path
+
+    # Refuse to read binary files as text
+    if not _is_likely_text(resolved):
+        return ToolResult(
+            success=False,
+            content=(
+                f"Read blocked: '{resolved}' appears to be a binary file. "
+                f"Use file_info to inspect its metadata."
+            ),
+        )
 
     # Apply offset and limit
     offset = args.get("offset", 0)
@@ -250,7 +316,10 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
             pass
 
     # Track this file as read for read-before-edit enforcement
-    _READ_FILES.add(resolved)
+    try:
+        _READ_FILES[resolved] = os.path.getmtime(resolved)
+    except OSError:
+        _READ_FILES[resolved] = 0.0
 
     if lines_after_offset > limit:
         truncated = "\n".join(collected[:limit])
@@ -300,15 +369,17 @@ def _write_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
         if parent:
             os.makedirs(parent, exist_ok=True)
         _backup_before_write(safety_result.resolved_path)
-        with open(safety_result.resolved_path, "w", encoding="utf-8") as f:
-            f.write(content)
+        _atomic_write(safety_result.resolved_path, content)
         from tools import add_modified_file
         add_modified_file(safety_result.resolved_path)
         clear_tool_cache()
         # Invalidate cross-turn file cache
         _FILE_CACHE.pop(safety_result.resolved_path, None)
         # Track as read for read-before-edit enforcement (agent wrote it, knows content)
-        _READ_FILES.add(safety_result.resolved_path)
+        try:
+            _READ_FILES[safety_result.resolved_path] = os.path.getmtime(safety_result.resolved_path)
+        except OSError:
+            _READ_FILES[safety_result.resolved_path] = 0.0
         # Keep symbol index fresh for newly written .py files
         if path.endswith(".py"):
             from tools.search_ops import _reindex_file
@@ -694,6 +765,22 @@ def _line_match(content_lines, search_lines, trim, content=''):
     return (start_byte, end_byte)
 
 
+def _reflexion_prompt(failure_kind: str) -> str:
+    """Build a structured reflexion prompt for edit_file/write_file failures.
+
+    Research (Reflexion, SAMUEL, PreFlect) shows that prompting the agent
+    to write a structured post-mortem after tool failures improves
+    self-correction by 2-3x vs. just showing the error message.
+    """
+    return (
+        f"\n\n=== REFLEXION PROMPT (answer before retrying) ===\n"
+        f"Failure type: {failure_kind}\n"
+        f"1. What went wrong? (be specific about your assumption)\n"
+        f"2. What was the incorrect assumption you made?\n"
+        f"3. What will you do differently on the next attempt?\n"
+        f"After answering, call remember() to capture this pattern, then retry.\n"
+    )
+
 
 def _apply_single_edit(
     path: str,
@@ -703,8 +790,14 @@ def _apply_single_edit(
     preview: bool,
     wg: WriteSafetyGate,
     args: dict,
+    dry_run: bool = False,
 ) -> _EditResult:
-    """Apply an edit to a single file. Returns (path, ToolResult)."""
+    """Apply an edit to a single file. Returns (path, ToolResult).
+
+    When *dry_run* is True, validate everything (safety, read-before-edit,
+    binary check, fuzzy match) but do NOT write or modify state (backups,
+    caches, plan advancement, modified-files tracking).
+    """
     safety_result = wg.check(path)
     if not safety_result.allowed:
         return (path, ToolResult(
@@ -730,9 +823,37 @@ def _apply_single_edit(
                 f"This ensures the model sees the current file content and can construct\n"
                 f"an accurate old_string for matching."
             ),
+        ).with_typed_error(
+            "read_before_edit",
+            retry_budget=2,
+            suggested_action="Call read_file to read the file, then retry the edit with the exact text.",
         ))
 
+    # Warn if the file was modified externally since last read (stale mental model)
+    _stale_warning = ""
     try:
+        _stored_mtime = _READ_FILES.get(resolved, 0.0)
+        _current_mtime = os.path.getmtime(resolved)
+        if _stored_mtime and _current_mtime > _stored_mtime + 0.01:  # 10ms tolerance
+            _stale_warning = (
+                f"\n[WARNING] '{resolved}' was modified after last read_file "
+                f"(stored mtime: {_stored_mtime:.3f}, current: {_current_mtime:.3f}). "
+                f"Consider re-reading the file to get the latest content."
+            )
+    except OSError:
+        pass
+
+    try:
+        # Refuse to edit binary files
+        if not _is_likely_text(resolved):
+            return (path, ToolResult(
+                success=False,
+                content=(
+                    f"Edit blocked: '{resolved}' appears to be a binary file. "
+                    f"Use file_info to inspect its metadata."
+                ),
+            ))
+
         with open(resolved, "r", encoding="utf-8", errors="replace") as f:
             original = f.read()
         diff = wg.generate_diff("edit_file", args)
@@ -792,10 +913,32 @@ def _apply_single_edit(
                         )
                 except Exception as exc:
                     print(f"  ⚠ backup skipped: {exc}", file=sys.stderr, flush=True)
-            return (path, ToolResult(success=False, content=hint))
+            return (path, ToolResult(
+                success=False,
+                content=hint + _reflexion_prompt("not_found"),
+            ).with_typed_error(
+                "not_found",
+                retry_budget=2,
+                suggested_action="Call read_file to copy the exact text from the file, then retry with the exact old_string.",
+            ))
 
         if count == -1:
             occurrences = original.count(old)
+            if occurrences == 0:
+                return (path, ToolResult(
+                    success=False,
+                    content=(
+                        f"Edit failed: old_string not found in '{resolved}' when using count=-1.\n"
+                        f"Hint: count=-1 requires an exact substring match. The fuzzy matcher\n"
+                        f"found a match via normalization, but str.replace requires the exact\n"
+                        f"old_string. Use read_file to copy the exact text from the file,\n"
+                        f"then use count=1 to edit a single occurrence."
+                    ) + _reflexion_prompt("count_mismatch"),
+                ).with_typed_error(
+                    "not_found",
+                    retry_budget=1,
+                    suggested_action="The fuzzy matcher found a match but str.replace didn't. Use read_file to get exact text, then use count=1.",
+                ))
             updated = original.replace(old, new)
             replaced = occurrences
         elif count >= 1:
@@ -817,8 +960,16 @@ def _apply_single_edit(
                 content=f"Preview: proposed edit to {resolved}\n{raw_diff}",
             ))
 
-        with open(resolved, "w", encoding="utf-8") as f:
-            f.write(updated)
+        if dry_run:
+            # Batch-edit pre-validation: match found, would succeed.
+            return (path, ToolResult(
+                success=True,
+                content=(
+                    f"OK: dry-run validation passed for {resolved}"
+                ),
+            ))
+
+        _atomic_write(resolved, updated)
 
         from tools import add_modified_file
         add_modified_file(resolved)
@@ -839,6 +990,7 @@ def _apply_single_edit(
             content=(
                 f"OK: replaced {label} in {resolved}"
                 + (f" (+{added} lines)" if added > 0 else f" ({added} lines)" if added < 0 else "")
+                + _stale_warning
             ),
             diff_preview=diff.preview_text if diff.changed else None,
         ))
@@ -858,18 +1010,36 @@ def _edit_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResu
     paths = args.get("paths", None)
 
     if paths is not None:
-        # Batch edit: apply same old→new to all paths
+        # Batch edit: phase 1 — validate all files (dry_run), phase 2 — write all
         if not isinstance(paths, list) or not paths:
             return ToolResult(
                 success=False,
                 content="'paths' must be a non-empty list of file paths.",
             )
+        # Phase 1: dry-run validation — check every file before writing any
+        dry_results: list[_EditResult] = []
+        for p in paths:
+            result = _apply_single_edit(p, old, new, count, preview, wg, {**args, "path": p}, dry_run=True)
+            dry_results.append(result)
+        all_valid = all(r.success for _, r in dry_results)
+        if not all_valid:
+            # Report which files failed validation
+            lines: list[str] = ["Batch edit aborted — validation failed (no files were modified):"]
+            for p, r in dry_results:
+                first_line = r.content.split("\n")[0]
+                status = "[OK]" if r.success else "[FAIL]"
+                lines.append(f"  {status} {p}: {first_line}")
+            return ToolResult(
+                success=False,
+                content="\n".join(lines),
+            )
+        # Phase 2: all valid — write for real
         results: list[_EditResult] = []
         for p in paths:
             result = _apply_single_edit(p, old, new, count, preview, wg, {**args, "path": p})
             results.append(result)
         all_ok = all(r.success for _, r in results)
-        lines: list[str] = []
+        lines = ["Batch edit results:"]
         failures: list[str] = []
         for p, r in results:
             first_line = r.content.split("\n")[0]

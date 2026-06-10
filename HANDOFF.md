@@ -1,7 +1,7 @@
 # Session Handoff
 # Auto-generated at session end. Read at next session start for continuity.
 
-## Last Session: 2026-06-09 22:15 UTC
+## Last Session: 2026-06-10 00:02 UTC
 
 ### What I Changed
 (no git changes detected)
@@ -10,15 +10,13 @@
 (none recorded)
 
 ### Plan Progress
-Plan (8/8 complete):
-  [✓] 1. Step 1: Survey all Python source files — identify the audit scope, count modules, note any obvious smells
-  [✓] 2. Step 2: Audit core/ modules — llm.py, safety.py, config.py, prompt.py, context_inject.py
-  [✓] 3. Step 3: Audit memory/ — memory.py, memory_prune.py, session.py
-  [✓] 4. Step 4: Audit tools/ — shell_ops.py, file_ops.py, agent_ops.py, failure_learning.py, tool_graph.py, search_ops.py, browser_ops.py, desktop_ops.py, macos_ops.py, mcp_client.py, lsp.py, skills.py
-  [✓] 5. Step 5: Audit root modules — api.py, stream.py, retry.py, logging_setup.py, terminal.py
-  [✓] 6. Step 6: Audit agents/ — agent_runtime.py, sub_agent.py
-  [✓] 7. Step 7: Audit eval/ and Electron backend
-  [✓] 8. Step 8: Compile prioritized findings with severity ratings
+Plan (3/6 complete):
+  [○] 1. Implement atomic writes (tempfile + os.replace) in both edit_file and write_file paths
+  [○] 2. Add count=-1 zero-occurrence guard in _apply_single_edit
+  [○] 3. Add mtime tracking to _READ_FILES for stale-state detection
+  [✓] 4. Add binary file detection (null-byte check)
+  [✓] 5. Add batch edit atomicity (compute all, then write all)
+  [✓] 6. Test each fix end-to-end
 
 ### Modified Files
 (none tracked)

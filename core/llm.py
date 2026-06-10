@@ -674,6 +674,10 @@ def run_agent_turn(
                 cancel_event=cancel_event,
             )
 
+            # Store recent_tool_keys on _TOOL_CONTEXT so execute_tool can
+            # enforce the circuit breaker (hard stop after 3+ identical calls).
+            _TOOL_CONTEXT._recent_tool_keys = recent_tool_keys
+
             # ----- phase 2: API call -----
             msg, deferred_stream_results, executed_tool_indices = _api_call_phase(
                 messages, config, session, write_gate, read_gate,

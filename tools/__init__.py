@@ -408,6 +408,36 @@ def execute_tool(
                     hint="\n".join(hint_parts),
                 )
 
+    # --- Circuit breaker: reject tool calls that have been made 3+ times ---
+    # with the same tool name and identical arguments in the recent window.
+    tool_call_key = f"{name}:{json.dumps(args, sort_keys=True)}"
+    recent_keys = getattr(_TOOL_CONTEXT, "_recent_tool_keys", None)
+    if recent_keys is not None:
+        from collections import Counter
+        recent_list = list(recent_keys)
+        if len(recent_list) >= 3:
+            counts = Counter(recent_list)
+            if counts.get(tool_call_key, 0) >= 3:
+                return ToolResult(
+                    success=False,
+                    content=(
+                        f"⛔ CIRCUIT BREAKER TRIPPED: '{name}' with these exact arguments "
+                        f"has been called {counts[tool_call_key]} times in the last "
+                        f"{len(recent_list)} tool calls.\n\n"
+                        f"This is a HARD STOP. The same call keeps failing identically.\n"
+                        f"Do NOT retry with the same arguments. Instead:\n"
+                        f"  1. Read relevant files with read_file to understand current state\n"
+                        f"  2. Check your assumptions — are you using the correct tool? correct path? correct parameter names?\n"
+                        f"  3. Try a fundamentally different approach\n"
+                        f"  4. Call remember() to capture what you've learned from these failures\n"
+                        f"  5. If stuck, use web_search for help or ask the user to clarify"
+                    ),
+                ).with_typed_error(
+                    "circuit_breaker",
+                    retry_budget=0,
+                    suggested_action="Stop retrying. Read files, check assumptions, try a different approach.",
+                )
+
     dispatch = _TOOL_DISPATCH.get(name)
     if dispatch is None:
         known = sorted(td["function"]["name"] for td in TOOLS)

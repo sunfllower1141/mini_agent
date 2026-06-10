@@ -99,6 +99,10 @@ def _fingerprint_error(name: str, content: str) -> str:
     """
     cl = content.lower()
     if name == "edit_file":
+        if "not been read" in cl or "read_file first" in cl or "read the file before" in cl:
+            return "read-before-edit"
+        if "modified after last read" in cl or "stored mtime" in cl or "stale" in cl:
+            return "stale"
         if "not found" in cl or "does not exist" in cl:
             return "not found"
         if "whitespace" in cl or "indentation" in cl or "tab" in cl or "trailing" in cl:
@@ -107,6 +111,8 @@ def _fingerprint_error(name: str, content: str) -> str:
             return "ambiguous"
         if "count" in cl or "invalid count" in cl:
             return "count"
+        if "blocked" in cl or "safety" in cl:
+            return "blocked"
     elif name == "write_file":
         if "blocked" in cl or "safety" in cl:
             return "blocked"

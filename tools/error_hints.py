@@ -112,6 +112,10 @@ def _fingerprint_error(name: str, content: str) -> str:
     """
     cl = content.lower()
     if name == "edit_file":
+        if "not been read" in cl or "read_file first" in cl or "read the file before" in cl:
+            return "read-before-edit"
+        if "modified after last read" in cl or "stored mtime" in cl or "stale" in cl:
+            return "stale"
         if "not found" in cl or "does not exist" in cl:
             return "not found"
         if "whitespace" in cl or "indentation" in cl or "tab" in cl or "trailing" in cl:
@@ -120,6 +124,8 @@ def _fingerprint_error(name: str, content: str) -> str:
             return "ambiguous"
         if "count" in cl or "invalid count" in cl:
             return "count"
+        if "blocked" in cl or "safety" in cl:
+            return "blocked"
     elif name == "write_file":
         if "blocked" in cl or "safety" in cl:
             return "blocked"
@@ -155,10 +161,13 @@ def _fingerprint_error(name: str, content: str) -> str:
 # Fingerprints come from _fingerprint_error() above.
 _FAILURE_PATTERNS: dict[str, dict[str, str]] = {
     "edit_file": {
+        "read-before-edit": "You must read the file with read_file BEFORE editing it. The system enforces this to ensure you have current content. Read the file first, then try the edit again.",
+        "stale": "The file was modified externally after your last read. Re-read with read_file to get the latest content before editing.",
         "not found": "The string must match exactly -- check whitespace, indentation, and line endings. Try read_file first to see the exact text.",
         "whitespace": "Whitespace mismatch. Try copying the exact text from read_file output, including all leading/trailing spaces.",
         "ambiguous": "Multiple matches found. Use a more specific old_string or set count=-1 to replace all.",
         "count": "Invalid count value. Use count=1 (first only) or count=-1 (all occurrences).",
+        "blocked": "Edit blocked by safety layer. Use a path inside the workspace or enable unrestricted mode.",
     },
     "write_file": {
         "blocked": "Use force=True to bypass overwrite protection, or write to a different path.",
