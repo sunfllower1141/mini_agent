@@ -109,7 +109,7 @@ _BACKUPS: dict[str, str] = {}  # resolved_path -> backup path
 # Key: resolved path (str), Value: (content: str, mtime: float)
 # Capped at _FILE_CACHE_MAX entries; oldest entries are evicted (LRU via insertion order).
 _FILE_CACHE: dict[str, tuple[str, float]] = {}
-_FILE_CACHE_MAX = 50
+_FILE_CACHE_MAX = 128
 
 
 # ---------------------------------------------------------------------------
@@ -197,14 +197,27 @@ def _atomic_write(resolved_path: str, content: str, encoding: str = "utf-8") -> 
 # almost always do.
 _TEXT_NULL_BYTE_THRESHOLD = 0.0  # any null byte → binary
 _TEXT_SCAN_BYTES = 8192          # scan first 8 KiB
+# Encrypted/random-data heuristic: if >15% of scanned bytes are ASCII control
+# characters (0x00-0x08, 0x0B-0x1F, excluding tab/LF/CR), treat as binary.
+# Normal UTF-8 text (including smart quotes, emoji, CJK) has very few of
+# these; encrypted ciphertext and compressed data have many.
+_BINARY_CONTROL_RATIO = 0.15  # >15% control chars → likely binary
 
 
 def _is_likely_text(filepath: str) -> bool:
     """Return True if *filepath* looks like a text file (not binary).
 
-    Checks the first _TEXT_SCAN_BYTES for null bytes.  Also returns True
-    for non-existent or empty files (they'll fail later with a clearer
-    error).
+    Two-stage detection:
+    1. Null-byte scan: any null byte in the first 8 KiB → binary.
+       Catches compiled code, images, archives, and most binary formats.
+    2. Control-character heuristic: if >15% of bytes are ASCII control
+       characters (0x00-0x08, 0x0B-0x1F, excluding tab/LF/CR), treat as
+       binary.  Catches encrypted files (enterprise DLP), ciphertext, and
+       compressed data — which have abnormal concentrations of control chars
+       that UTF-8 text files (even with smart quotes, emoji, CJK) don't.
+
+    Returns True for non-existent or empty files (they'll fail later with
+    a clearer error).
     """
     if not os.path.isfile(filepath):
         return True  # let the caller produce a clear "not found" error
@@ -215,8 +228,24 @@ def _is_likely_text(filepath: str) -> bool:
         return True  # can't read → let caller handle
     if not chunk:
         return True  # empty file is text
+
+    # Stage 1: null byte scan (fast, catches most binaries)
     null_count = chunk.count(b"\x00")
-    return null_count <= int(len(chunk) * _TEXT_NULL_BYTE_THRESHOLD)
+    if null_count > int(len(chunk) * _TEXT_NULL_BYTE_THRESHOLD):
+        return False
+
+    # Stage 2: control-character heuristic (catches encrypted/mangled files
+    # that pass the null-byte check but have high entropy typical of
+    # ciphertext/compressed data rather than UTF-8 text)
+    # Control chars are 0x00-0x08 and 0x0B-0x1F (excludes tab=0x09, LF=0x0A, CR=0x0D)
+    control_count = sum(
+        1 for b in chunk
+        if b < 0x20 and b not in (0x09, 0x0A, 0x0D)
+    )
+    if control_count > len(chunk) * _BINARY_CONTROL_RATIO:
+        return False
+
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -227,6 +256,11 @@ def _is_likely_text(filepath: str) -> bool:
 _DEFAULT_READ_LINES = 300
 # Absolute maximum (safety cap) — never return more than this.
 _ABSOLUTE_MAX_LINES = 1000
+# Maximum bytes of text content returned by read_file.  Guards against
+# cumulative payload blowout when reading files with very long lines
+# (e.g. minified JS, one-line JSON) or many files in one turn.
+# Matches Claude Code's 256 KB hard limit.
+_MAX_READ_BYTES = 256 * 1024  # 256 KB
 
 
 @_register("read_file")
@@ -249,6 +283,22 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
                 f"Use file_info to inspect its metadata."
             ),
         )
+
+    # File-size pre-check: warn if the file is large so the agent uses
+    # offset/limit selectively.  A 50 MB log file with few newlines could
+    # still blow payload, so this is a soft warning, not a hard block.
+    _size_warning = ""
+    try:
+        file_size = os.path.getsize(resolved)
+        if file_size > _MAX_READ_BYTES:
+            _size_warning = (
+                f"\n[NOTE] '{os.path.basename(resolved)}' is {file_size // 1024} KB "
+                f"— larger than the {_MAX_READ_BYTES // 1024} KB read buffer. "
+                f"Output will be truncated. Consider using offset/limit to read "
+                f"specific sections."
+            )
+    except OSError:
+        pass
 
     # Apply offset and limit
     offset = args.get("offset", 0)
@@ -303,6 +353,38 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
     full_content = "\n".join(collected)
     lines_after_offset = total_lines - offset + 1
 
+    # Apply line-based truncation first (if needed)
+    line_truncated = ""
+    if lines_after_offset > limit:
+        full_content = "\n".join(collected[:limit])
+        line_truncated = (
+            f"\n… (truncated at {limit} lines — {lines_after_offset} total in selection. "
+            f"Use a higher limit or offset to see more.)"
+        )
+
+    # Byte-size guard: cap output at _MAX_READ_BYTES to prevent payload blowout
+    # from files with very long lines (minified JS/JSON, one-line data files).
+    # Applied AFTER line truncation so both guards compose correctly.
+    content_bytes = full_content.encode("utf-8")
+    byte_truncated = ""
+    if len(content_bytes) > _MAX_READ_BYTES:
+        # Leave 512 bytes of headroom for truncation notices appended below
+        byte_limit = _MAX_READ_BYTES - 512
+        # Truncate at the last valid UTF-8 boundary ≤ byte_limit
+        for cut in range(byte_limit, byte_limit - 5, -1):
+            try:
+                full_content = content_bytes[:cut].decode("utf-8")
+                break
+            except UnicodeDecodeError:
+                continue
+        else:
+            full_content = content_bytes[:byte_limit].decode("utf-8", errors="replace")
+        byte_truncated = (
+            f"\n… (byte-truncated at {_MAX_READ_BYTES // 1024} KB — "
+            f"total selection is {len(content_bytes) // 1024} KB. "
+            f"Use a smaller limit, higher offset, or line_numbers=false to reduce.)"
+        )
+
     # Cache full file content for cross-turn reuse (only when reading from offset 0)
     # We store the actual full content from disk for the cache invalidation pattern.
     if offset == 0:
@@ -321,16 +403,10 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
     except OSError:
         _READ_FILES[resolved] = 0.0
 
-    if lines_after_offset > limit:
-        truncated = "\n".join(collected[:limit])
-        msg = (
-            f"{truncated}\n"
-            f"… (truncated at {limit} lines — {lines_after_offset} total in selection. "
-            f"Use a higher limit or offset to see more.)"
-        )
-        return ToolResult(success=True, content=msg)
-
-    return ToolResult(success=True, content=full_content)
+    return ToolResult(
+        success=True,
+        content=full_content + line_truncated + byte_truncated + _size_warning,
+    )
 
 
 @_summarize("read_file")
