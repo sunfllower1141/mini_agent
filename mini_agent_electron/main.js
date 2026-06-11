@@ -17,6 +17,17 @@ app.commandLine.appendSwitch('in-process-gpu');
 // Cap V8 heap: 128 MB old-space, 16 MB nursery (young gen).
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=128 --max-semi-space-size=16');
 
+// Windows: Chromium's disk cache can hit "Access is denied" (0x5) on some
+// machines when trying to write to the default %LOCALAPPDATA% cache location.
+// Disable the GPU cache (the app doesn't need GPU-accelerated rendering)
+// and use a temp dir for the HTTP disk cache that's guaranteed writable.
+if (process.platform === 'win32') {
+  app.commandLine.appendSwitch('disable-gpu-cache');
+  const cacheDir = path.join(require('os').tmpdir(), 'mini_agent_cache');
+  try { fs.mkdirSync(cacheDir, { recursive: true }); } catch (e) { /* ignore */ }
+  app.setPath('cache', cacheDir);
+}
+
 // ---------------------------------------------------------------------------
 // Load .env file — GUI apps on macOS don't inherit shell profile vars
 // ---------------------------------------------------------------------------
