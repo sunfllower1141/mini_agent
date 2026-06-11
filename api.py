@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 import threading
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -359,7 +360,37 @@ def call_llm(
         raise APIError(status_code=r.status_code, body=str(err))
 
     if config.stream:
-        return _parse_stream(r, on_token, on_tool_ready, cancel_event=cancel_event)
+        # Run stream parsing with a wall-clock timeout guard.
+        # On some platforms (notably Windows), socket read timeouts may not
+        # fire reliably when the server closes the connection (CLOSE_WAIT),
+        # causing iter_lines to block indefinitely.  This guard runs
+        # _parse_stream in a background thread and returns partial results
+        # if the overall stream exceeds the deadline.
+        from stream import _STREAM_TIMEOUT
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(
+                _parse_stream, r, on_token, on_tool_ready, cancel_event
+            )
+            try:
+                return future.result(timeout=_STREAM_TIMEOUT)
+            except FutureTimeoutError:
+                # Stream timed out — close the response to free the socket
+                # and return whatever was accumulated so far (partial).
+                try:
+                    r.close()
+                except Exception:
+                    pass
+                print(
+                    f"\n  ⚠ stream timed out after {_STREAM_TIMEOUT}s — using partial response",
+                    file=sys.stderr, flush=True,
+                )
+                # The future may still produce a result; try a brief wait.
+                try:
+                    return future.result(timeout=2)
+                except FutureTimeoutError:
+                    pass
+                # Return a minimal message so the turn can continue.
+                return {"role": "assistant", "content": ""}
     else:
         return r.json()["choices"][0]["message"]
 

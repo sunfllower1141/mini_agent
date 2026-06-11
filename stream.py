@@ -12,6 +12,7 @@ import json
 import sys
 import threading
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
 import requests
 
@@ -24,6 +25,13 @@ THINKING_END = "\n[/thinking]"
 
 # SSE prefix for DeepSeek's server-sent event stream
 _SSE_PREFIX = "data: "
+
+# Per-stream timeout: maximum wall-clock time for the entire SSE stream.
+# If the server stalls mid-stream (TCP open but no data), iter_lines blocks
+# indefinitely on some platforms (notably Windows in CLOSE_WAIT state).
+# This guard runs the parsing in a background thread and returns partial
+# results if the timeout expires.
+_STREAM_TIMEOUT = 300  # 5 minutes — generous for long reasoning streams
 
 def _parse_stream(response: requests.Response, on_token: Callable[[str], None] | None = None, on_tool_ready: Callable[[dict], None] | None = None, cancel_event: threading.Event | None = None) -> dict:
     """Parse an SSE streamed response, printing text as it arrives.
@@ -149,7 +157,9 @@ def _parse_stream(response: requests.Response, on_token: Callable[[str], None] |
     except (
         requests.exceptions.ChunkedEncodingError,
         requests.exceptions.ConnectionError,
+        requests.exceptions.ReadTimeout,
         requests.exceptions.StreamConsumedError,
+        requests.exceptions.Timeout,
         OSError,
     ) as exc:
         print(
