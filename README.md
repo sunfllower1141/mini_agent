@@ -39,20 +39,42 @@ cd mini_agent
 bash setup.sh
 ```
 
-**Windows (Command Prompt or PowerShell):**
+**Windows (Command Prompt or PowerShell) — manual steps:**
+
+`setup.bat` is provided but may not work reliably on all Windows configurations. If it fails, follow these manual steps:
+
 ```bat
 git clone https://github.com/GabrielMalone/mini_agent.git
 cd mini_agent
-setup.bat
-```
 
-The setup script checks prerequisites, creates a Python venv, installs all dependencies (including Playwright browsers), and builds the Electron renderer.
+:: 1. Create and activate a Python virtual environment
+python -m venv venv
+venv\Scripts\activate
+
+:: 2. Install Python dependencies
+pip install -r requirements.txt
+
+:: 3. Install Playwright browsers (needed for browser automation tools)
+playwright install
+
+:: 4. Build and run the Electron app
+cd mini_agent_electron
+npm install
+npm run build
+npm start
+```
 
 ### Launch
 
+**macOS / Linux:**
 ```bash
 cd mini_agent_electron
 npm start            # auto-builds renderer if needed, then opens the desktop app
+```
+
+**Windows:** After following the manual steps above, you'll already be in `mini_agent_electron` with everything built. Run:
+```bat
+npm start
 ```
 
 > **Windows note:** On first launch, Windows Defender Firewall may prompt you to allow Node.js network access. Click "Allow" — the app needs this to communicate with the AI provider's API.
