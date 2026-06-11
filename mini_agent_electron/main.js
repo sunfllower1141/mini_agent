@@ -5,7 +5,7 @@
  * between the renderer (via IPC) and the Python process (via JSON-lines
  * on stdin/stdout).
  */
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, protocol, net } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
@@ -27,6 +27,42 @@ if (process.platform === 'win32') {
   // HTTP disk cache (fixes: ERROR:net\disk_cache\disk_cache.cc:284)
   app.commandLine.appendSwitch('disable-http-cache');
   console.log('[main] Windows: disabled disk caches to avoid Access Denied errors');
+}
+
+// ---------------------------------------------------------------------------
+// Custom protocol — serves renderer files with CORS headers so ES modules
+// work.  Chromium blocks <script type="module"> from file:// URLs; using a
+// custom scheme with corsEnabled bypasses this.
+// ---------------------------------------------------------------------------
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'miniagent',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true,
+    },
+  },
+]);
+
+/**
+* Resolve a miniagent:// path to an absolute file-system path inside
+* renderer/dist/.  Returns null if the path tries to escape the dist dir
+* (path traversal prevention).
+*/
+function resolveDistPath(urlPath) {
+  // Strip leading slash
+  const rel = urlPath.replace(/^\/+/, '') || 'index.html';
+  // Prevent path traversal
+  if (rel.includes('..') || rel.includes(':')) return null;
+  const abs = path.join(__dirname, 'renderer', 'dist', rel);
+  if (!fs.existsSync(abs)) {
+    // If not found, fall back to index.html (for SPA routing)
+    return path.join(__dirname, 'renderer', 'dist', 'index.html');
+  }
+  return abs;
 }
 
 // ---------------------------------------------------------------------------
@@ -574,12 +610,12 @@ function createWindow() {
     // Load from Vite dev server
     const VITE_URL = 'http://localhost:5173';
     win.loadURL(VITE_URL).catch(() => {
-      // Fallback: load built files if dev server isn't running
-      win.loadFile(path.join(__dirname, 'renderer', 'dist', 'index.html'));
+      // Fallback: load built files via custom protocol (CORS-safe) if dev server isn't running
+      win.loadURL('miniagent://index.html');
     });
   } else {
-    // Production: load built files
-    win.loadFile(path.join(__dirname, 'renderer', 'dist', 'index.html'));
+    // Production: load built files via custom protocol
+    win.loadURL('miniagent://index.html');
   }
 
   // Open DevTools in dev mode
@@ -605,6 +641,13 @@ function createWindow() {
 // ---------------------------------------------------------------------------
 
 app.whenReady().then(() => {
+  // Register the custom protocol handler
+  protocol.handle('miniagent', (request) => {
+    const filePath = resolveDistPath(new URL(request.url).pathname);
+    if (!filePath) return new Response('Not found', { status: 404 });
+    return net.fetch(`file:///${filePath.replace(/\\/g, '/')}`);
+  });
+
   setupIPC();
   createWindow();
 
