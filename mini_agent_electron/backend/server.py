@@ -642,11 +642,6 @@ class AgentRunner:
                 send_msg({"type": "response", "lines": [f"Not a directory or inaccessible: {new_workspace}"]})
                 return
 
-            # Persist old session before switching
-            self.messages = self.memory.save(self.messages)
-            self.memory.close()
-            self.workspace = new_workspace
-
             # Notify the UI that we're loading the new workspace
             send_msg({"type": "status", "workspace": new_workspace, "session_name": "loading...",
                       "git_branch": "", "git_dirty": False, "restored_count": 0,
@@ -664,9 +659,12 @@ class AgentRunner:
                 send_msg({"type": "error", "message": f"Timeout initializing workspace: {new_workspace}. "
                                                        "The remote share may be too slow. "
                                                        "Try a local workspace instead."})
-                # Roll back — keep using old config
-                self.memory = None  # will be recreated below
                 return
+
+            # Persist old session before switching to the new state
+            self.messages = self.memory.save(self.messages)
+            self.memory.close()
+            self.workspace = new_workspace
 
             try:
                 self.config = new_data["config"]
