@@ -238,19 +238,19 @@ def build_startup_context(
     import subprocess as _sp
     from core.config import TREE_TRUNCATION_LINES, GIT_LOG_COUNT, GIT_LOG_TIMEOUT
 
+    from core.constants import SKIP_DIRS
+
     parts: list[str] = []
     parts.append("[WORKSPACE CONTEXT — injected once at session start]")
 
     # 1. File tree (skip hidden dirs, __pycache__, .git, venv, node_modules)
-    SKIP = {".git", "__pycache__", ".venv", "venv", "node_modules", ".mypy_cache",
-            ".pytest_cache", ".ruff_cache", "dist", "build", ".tox"}
     tree_lines: list[str] = []
     try:
         walk = list(os.walk(workspace))
     except OSError:
         walk = []
     for dirpath, dirnames, filenames in walk:
-        dirnames[:] = sorted(d for d in dirnames if d not in SKIP and not d.startswith("."))
+        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS and not d.startswith("."))
         depth = dirpath[len(workspace):].count(os.sep)
         indent = "  " * depth
         label = os.path.basename(dirpath) or workspace.rstrip(os.sep).rsplit(os.sep, 1)[-1]

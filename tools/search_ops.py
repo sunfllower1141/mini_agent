@@ -486,10 +486,20 @@ def _sem_preload() -> None:
     def _loader() -> None:
         global _SEM_MODEL
         try:
+            # Suppress huggingface_hub "unauthenticated requests" warning
+            # and tqdm progress bars during model load at startup.
+            import logging
+            logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
+            os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
             from sentence_transformers import SentenceTransformer
             _SEM_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
-        except Exception:
-            pass  # model load failed — _sem_get_model() will retry on demand
+        except Exception as e:
+            import sys as _sys
+            _sys.stderr.write(
+                f"  ⚠ Embedding model preload failed ({e}). "
+                "semantic_search will try again on first use.\n"
+            )
+            _sys.stderr.flush()
         finally:
             if event is not None:
                 event.set()
@@ -530,6 +540,9 @@ def _sem_get_model():
     print('  ⏳ Loading embedding model (first use, ~9s)...',
           file=sys.stderr, end='', flush=True)
     try:
+        import logging
+        logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
+        os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
         from sentence_transformers import SentenceTransformer
         _SEM_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
     except Exception as e:

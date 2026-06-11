@@ -28,11 +28,7 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 # Directories to skip entirely during the walk
-SKIP_DIRS: set[str] = {
-    ".git", "__pycache__", ".venv", "venv", "node_modules", ".mypy_cache",
-    ".pytest_cache", ".ruff_cache", "dist", "build", ".tox", ".eggs",
-    "*.egg-info",
-}
+from core.constants import SKIP_DIRS  # noqa: E402 — shared skip-dir set
 
 # File extensions we can extract symbols from
 PYTHON_EXT: set[str] = {".py"}

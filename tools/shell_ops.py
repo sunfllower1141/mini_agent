@@ -445,9 +445,7 @@ def _run_shell_summary(args: dict) -> str:
 # search_files
 # ---------------------------------------------------------------------------
 
-_SKIP_DIRS = {".git", ".hg", ".svn", "__pycache__", ".pytest_cache",
-              "venv", ".venv", "node_modules", ".mypy_cache", ".tox",
-              "dist", "build", ".eggs"}
+from core.constants import SKIP_DIRS as _SKIP_DIRS  # noqa: E402 — shared skip-dir set
 
 # Binary / non-text extensions to skip during search
 _BINARY_EXTS = {".pyc", ".pyo", ".so", ".o", ".a", ".dylib", ".dll",

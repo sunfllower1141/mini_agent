@@ -408,3 +408,30 @@ class AgentRuntime:
                 1 for tid in self.tasks
                 if tid not in self.results
             )
+
+    def shutdown(self, *, timeout: float = 5.0) -> int:
+        """Cancel all running sub-agents and join their threads.
+
+        Called at session exit to avoid orphaned daemon threads writing to
+        closed file handles.  Returns the number of agents that were cancelled.
+
+        Args:
+            timeout: Max seconds to wait for each thread to join (default 5s).
+        """
+        count = self.cancel_all()
+        if not count:
+            return 0
+        # Snapshot thread references under lock, then join outside lock
+        # to avoid deadlock with store_result acquiring the same lock.
+        with self._lock:
+            threads = dict(self.tasks)
+        import sys as _sys
+        for tid, thread in threads.items():
+            if thread.is_alive():
+                thread.join(timeout=timeout)
+                if thread.is_alive():
+                    print(
+                        f"  ⚠ sub-agent '{tid}' did not stop within {timeout}s",
+                        file=_sys.stderr, flush=True,
+                    )
+        return count

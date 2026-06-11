@@ -237,6 +237,14 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     # shutdown → HTTP session close.  Wrapped in broad try/except so no
     # single failure blocks the rest or prints tracebacks during interpreter
     # teardown (when stderr may already be closed).
+    def _cleanup_warn(msg: str) -> None:
+        """Write a cleanup warning to stderr, guarded against closed handles."""
+        try:
+            sys.stderr.write(f"  ⚠ cleanup: {msg}\n")
+            sys.stderr.flush()
+        except (OSError, ValueError):
+            pass  # stderr already closed — nothing we can do
+
     def _cleanup_on_exit() -> None:
         # 0. Signal shutdown — blocks writes from error_hints and similar
         #    persistence code so they don't hit a closed/corrupt DB.
@@ -273,8 +281,8 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
                 plan_steps=plan_steps if plan_steps else None,
                 plan_done=plan_done if plan_done else None,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            _cleanup_warn(f"HANDOFF.md write failed: {e}")
 
         # 2. Capture session summary (best-effort, must run before memory is
         #    affected by LSP or session teardown).
@@ -293,28 +301,36 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
             detail = f"Scratchpad:\n{scratchpad[:500]}\n\nTurn history:\n{turn_text[:500]}"
             if summary.strip():
                 memory.capture_session_summary(summary[:200], detail[:1000])
-        except Exception:
-            pass
+        except Exception as e:
+            _cleanup_warn(f"session summary capture failed: {e}")
 
         # 3. Close memory store (releases the shared SQLite connection so
         #    the DB file is truly released before interpreter teardown).
         try:
             memory.close()
-        except Exception:
-            pass
+        except Exception as e:
+            _cleanup_warn(f"memory close failed: {e}")
 
         # 4. Shutdown LSP connections (skip on remote workspaces).
         if not remote:
             try:
                 _shutdown_lsp()
-            except Exception:
-                pass
+            except Exception as e:
+                _cleanup_warn(f"LSP shutdown failed: {e}")
 
-        # 5. Close HTTP session.
+        # 5. Cancel running sub-agents (AgentRuntime.shutdown).
+        try:
+            from tools import _AGENT_RUNTIME
+            if _AGENT_RUNTIME is not None:
+                _AGENT_RUNTIME.shutdown()
+        except Exception as e:
+            _cleanup_warn(f"agent runtime shutdown failed: {e}")
+
+        # 6. Close HTTP session.
         try:
             session.close()
-        except Exception:
-            pass
+        except Exception as e:
+            _cleanup_warn(f"HTTP session close failed: {e}")
 
     atexit.register(_cleanup_on_exit)
 
