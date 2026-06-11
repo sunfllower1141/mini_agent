@@ -72,69 +72,71 @@ echo   [OK] Python  (!PYTHON_VER!)  [%PYTHON_EXE%]
 
 :python_done
 
-REM Node.js — check version (Electron 42 requires Node ≥ 22)
+REM Node.js — check version (Electron 42 requires Node >= 22)
 for /f "tokens=1 delims=v" %%v in ('node --version 2^>nul') do set NODE_VER=%%v
-if defined NODE_VER (
-    for /f "tokens=1 delims=." %%m in ("!NODE_VER!") do set NODE_MAJOR=%%m
-    if !NODE_MAJOR! geq 22 (
-        echo   [OK] Node.js !NODE_VER!
-    ) else (
-        echo   [FAIL] Node.js !NODE_VER! is too old.
-        echo          Electron 42 requires Node.js ^>= 22.
-        echo          Install from https://nodejs.org (latest LTS)
-        echo          If already installed, you may need to upgrade.
-        set /a ERRORS+=1
-    )
-) else (
-    echo   [MISSING] Node.js not found.
-    echo     Install from https://nodejs.org (v22+ LTS)
-    echo     If already installed, check your PATH or re-run the installer.
-    set /a ERRORS+=1
-)
+if not defined NODE_VER goto :node_missing
+for /f "tokens=1 delims=." %%m in ("!NODE_VER!") do set NODE_MAJOR=%%m
+if !NODE_MAJOR! lss 22 goto :node_old
+echo   [OK] Node.js !NODE_VER!
+goto :node_done
 
-REM npm — check version (vite 8 needs npm ≥ 9)
+:node_old
+echo   [FAIL] Node.js !NODE_VER! is too old.
+echo          Electron 42 requires Node.js ^>= 22.
+echo          Install from https://nodejs.org (latest LTS)
+echo          If already installed, you may need to upgrade.
+set /a ERRORS+=1
+goto :node_done
+
+:node_missing
+echo   [MISSING] Node.js not found.
+echo     Install from https://nodejs.org (v22+ LTS)
+echo     If already installed, check your PATH or re-run the installer.
+set /a ERRORS+=1
+
+:node_done
+
+REM npm — check version (vite 8 needs npm >= 9)
 for /f "tokens=1" %%v in ('npm --version 2^>nul') do set NPM_VER=%%v
-if defined NPM_VER (
-    for /f "tokens=1 delims=." %%m in ("!NPM_VER!") do set NPM_MAJOR=%%m
-    if !NPM_MAJOR! geq 9 (
-        echo   [OK] npm v!NPM_VER!
-    ) else (
-        echo   [FAIL] npm v!NPM_VER! is too old. Need npm ^>= 9.
-        echo          Update with: npm install -g npm@latest
-        set /a ERRORS+=1
-    )
-) else (
-    echo   [MISSING] npm not found (bundled with Node.js)
-    set /a ERRORS+=1
-)
+if not defined NPM_VER goto :npm_missing
+for /f "tokens=1 delims=." %%m in ("!NPM_VER!") do set NPM_MAJOR=%%m
+if !NPM_MAJOR! lss 9 goto :npm_old
+echo   [OK] npm v!NPM_VER!
+goto :npm_done
+
+:npm_old
+echo   [FAIL] npm v!NPM_VER! is too old. Need npm ^>= 9.
+echo          Update with: npm install -g npm@latest
+set /a ERRORS+=1
+goto :npm_done
+
+:npm_missing
+echo   [MISSING] npm not found (bundled with Node.js)
+set /a ERRORS+=1
+
+:npm_done
 
 REM ripgrep (strongly recommended) — auto-install if missing
 where rg >nul 2>nul
-if %errorlevel% equ 0 (
-    echo   [OK] ripgrep
-) else (
-    echo   [WARN] ripgrep (rg) not found. Attempting auto-install via winget...
-    winget install BurntSushi.ripgrep.MSVC --accept-package-agreements --accept-source-agreements -q 2>nul
-    if !errorlevel! equ 0 (
-        echo   [OK] ripgrep installed
-    ) else (
-        echo   [WARN] Could not auto-install ripgrep. File search will be slower.
-    )
-)
+if %errorlevel% equ 0 goto :rg_ok
+echo   [WARN] ripgrep (rg) not found. Attempting auto-install via winget...
+winget install BurntSushi.ripgrep.MSVC --accept-package-agreements --accept-source-agreements -q 2>nul
+if !errorlevel! equ 0 (echo   [OK] ripgrep installed) else (echo   [WARN] Could not auto-install ripgrep. File search will be slower.)
+goto :rg_done
+:rg_ok
+echo   [OK] ripgrep
+:rg_done
 
 REM Git — auto-install if missing
 where git >nul 2>nul
-if %errorlevel% equ 0 (
-    echo   [OK] git
-) else (
-    echo   [WARN] git not found. Attempting auto-install via winget...
-    winget install Git.Git --accept-package-agreements --accept-source-agreements -q 2>nul
-    if !errorlevel! equ 0 (
-        echo   [OK] git installed
-    ) else (
-        echo   [WARN] Could not auto-install git. Some tools won't work.
-    )
-)
+if %errorlevel% equ 0 goto :git_ok
+echo   [WARN] git not found. Attempting auto-install via winget...
+winget install Git.Git --accept-package-agreements --accept-source-agreements -q 2>nul
+if !errorlevel! equ 0 (echo   [OK] git installed) else (echo   [WARN] Could not auto-install git. Some tools won't work.)
+goto :git_done
+:git_ok
+echo   [OK] git
+:git_done
 
 if !ERRORS! gtr 0 (
     echo.
@@ -156,18 +158,18 @@ if not defined PYTHON_EXE (
     echo   [SKIP] No Python found, cannot create venv
     goto :skip_venv
 )
-if not exist "venv\" (
-    "%PYTHON_EXE%" -m venv venv
-    if %errorlevel% equ 0 (
-        echo   [OK] Created venv\
-    ) else (
-        echo   [FAIL] Could not create venv\. Check your Python installation.
-        pause
-        exit /b 1
-    )
+if exist "venv\" goto :venv_skip
+"%PYTHON_EXE%" -m venv venv
+if %errorlevel% equ 0 (
+    echo   [OK] Created venv\
 ) else (
-    echo   [OK] venv\ already exists, skipping
+    echo   [FAIL] Could not create venv\. Check your Python installation.
+    pause
+    exit /b 1
 )
+goto :skip_venv
+:venv_skip
+echo   [OK] venv\ already exists, skipping
 :skip_venv
 
 REM ------------------------------------------------------------------
@@ -285,15 +287,14 @@ if exist "node_modules\electron\dist\electron.exe" (
 
 REM Quick smoke test: ask electron for its version
 node_modules\.bin\electron --version >nul 2>&1
-if !errorlevel! equ 0 (
-    for /f %%v in ('node_modules\.bin\electron --version 2^>^&1') do (
-        echo   [OK] Electron %%v works
-    )
-) else (
-    echo   [WARN] Electron binary exists but failed to run. This may be a
-    echo          missing Visual C++ redistributable. Install from:
-    echo          https://aka.ms/vs/17/release/vc_redist.x64.exe
-)
+if !errorlevel! neq 0 goto :electron_smoke_fail
+for /f %%v in ('node_modules\.bin\electron --version 2^>^&1') do echo   [OK] Electron %%v works
+goto :electron_smoke_done
+:electron_smoke_fail
+echo   [WARN] Electron binary exists but failed to run. This may be a
+echo          missing Visual C++ redistributable. Install from:
+echo          https://aka.ms/vs/17/release/vc_redist.x64.exe
+:electron_smoke_done
 
 REM ------------------------------------------------------------------
 REM 5. Build Electron renderer
@@ -321,22 +322,25 @@ REM ------------------------------------------------------------------
 
 echo [6/7] Project .env file...
 
-if exist ".env" (
-    findstr /R "API_KEY=" .env >nul 2>nul
-    if !errorlevel! equ 0 (
-        echo   [OK] .env file found with API keys
-    ) else (
-        echo   [OK] .env file exists but no API_KEY entries detected
-    )
+if not exist ".env" goto :env_missing
+findstr /R "API_KEY=" .env >nul 2>nul
+if !errorlevel! equ 0 (
+    echo   [OK] .env file found with API keys
 ) else (
-    echo   [INFO] No .env file in project root (optional).
-    echo          Create one to persist your API keys:
-    echo            notepad .env
-    echo.
-    echo          Example content:
-    echo            DEEPSEEK_API_KEY=sk-...
-    echo            CLAUDE_API_KEY=sk-ant-...
+    echo   [OK] .env file exists but no API_KEY entries detected
 )
+goto :env_done
+
+:env_missing
+echo   [INFO] No .env file in project root (optional).
+echo          Create one to persist your API keys:
+echo            notepad .env
+echo.
+echo          Example content:
+echo            DEEPSEEK_API_KEY=sk-...
+echo            CLAUDE_API_KEY=sk-ant-...
+
+:env_done
 
 REM ------------------------------------------------------------------
 REM 7. API key check
