@@ -610,12 +610,18 @@ function createWindow() {
     // Load from Vite dev server
     const VITE_URL = 'http://localhost:5173';
     win.loadURL(VITE_URL).catch(() => {
-      // Fallback: load built files via custom protocol (CORS-safe) if dev server isn't running
-      win.loadURL('miniagent://index.html');
+      // Fallback: load built files directly (CORS-safe via custom protocol)
+      const distIndex = path.join(__dirname, 'renderer', 'dist', 'index.html');
+      if (fs.existsSync(distIndex)) {
+        win.loadFile(distIndex);
+      } else {
+        win.loadURL('miniagent://app/index.html');
+      }
     });
   } else {
-    // Production: load built files via custom protocol
-    win.loadURL('miniagent://index.html');
+    // Production: load built files directly
+    const distIndex = path.join(__dirname, 'renderer', 'dist', 'index.html');
+    win.loadFile(distIndex);
   }
 
   // Open DevTools in dev mode
