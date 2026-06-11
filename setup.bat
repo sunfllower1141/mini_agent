@@ -108,23 +108,32 @@ if defined NPM_VER (
     set /a ERRORS+=1
 )
 
-REM ripgrep (strongly recommended)
+REM ripgrep (strongly recommended) — auto-install if missing
 where rg >nul 2>nul
 if %errorlevel% equ 0 (
     echo   [OK] ripgrep
 ) else (
-    echo   [WARN] ripgrep (rg) not found.
-    echo          Install: winget install BurntSushi.ripgrep.MSVC
-    echo          Without it, file search falls back to slower methods.
+    echo   [WARN] ripgrep (rg) not found. Attempting auto-install via winget...
+    winget install BurntSushi.ripgrep.MSVC --accept-package-agreements --accept-source-agreements -q 2>nul
+    if !errorlevel! equ 0 (
+        echo   [OK] ripgrep installed
+    ) else (
+        echo   [WARN] Could not auto-install ripgrep. File search will be slower.
+    )
 )
 
-REM Git
+REM Git — auto-install if missing
 where git >nul 2>nul
 if %errorlevel% equ 0 (
     echo   [OK] git
 ) else (
-    echo   [WARN] git not found. Some agent tools (git skill, branch detection) won't work.
-    echo         Install: winget install Git.Git
+    echo   [WARN] git not found. Attempting auto-install via winget...
+    winget install Git.Git --accept-package-agreements --accept-source-agreements -q 2>nul
+    if !errorlevel! equ 0 (
+        echo   [OK] git installed
+    ) else (
+        echo   [WARN] Could not auto-install git. Some tools won't work.
+    )
 )
 
 if !ERRORS! gtr 0 (
@@ -379,10 +388,6 @@ echo To launch the desktop app:
 echo.
 echo   cd mini_agent_electron ^&^& npm start
 echo.
-echo For development mode (hot-reload renderer + DevTools):
-echo.
-echo   cd mini_agent_electron ^&^& npm run dev
-echo.
 echo ---------------------------------------------------
 echo   Windows tips
 echo ---------------------------------------------------
@@ -397,4 +402,5 @@ echo     Enter        Submit message
 echo     Shift+Enter  New line
 echo     Escape       Cancel streaming response
 echo.
-pause
+endlocal
+exit /b 0
