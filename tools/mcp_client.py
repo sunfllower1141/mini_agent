@@ -123,12 +123,17 @@ class McpConnection:
         if self.env:
             merged_env.update(self.env)
 
+        creationflags = 0
+        if os.name == 'nt':
+            creationflags = subprocess.CREATE_NO_WINDOW
+
         self.process = subprocess.Popen(
             self.command,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             bufsize=0,
+            creationflags=creationflags or 0,
             env=merged_env,
         )
         drain_stderr(self.process, f"mcp-stderr-{self.name}")

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import ast
 import os
+import platform
 import re
 import threading
 from collections import defaultdict
@@ -33,6 +34,29 @@ SKIP_DIRS: set[str] = {
     ".pytest_cache", ".ruff_cache", "dist", "build", ".tox", ".eggs",
     "*.egg-info",
 }
+
+# Windows reserved device names — os.walk can encounter files/dirs with
+# these names (nul, con, prn, aux, com1-9, lpt1-9) which resolve to
+# NT namespace paths like \\.\nul, breaking os.path.relpath.
+_WIN_RESERVED: set[str] = {
+    "nul", "con", "prn", "aux",
+    *(f"com{i}" for i in range(1, 10)),
+    *(f"lpt{i}" for i in range(1, 10)),
+}
+
+
+def _is_win_reserved(name: str) -> bool:
+    """Check if a bare name (no extension) is a Windows reserved device name."""
+    stem, _ = os.path.splitext(name.lower())
+    return stem in _WIN_RESERVED
+
+
+def _safe_relpath(filepath: str, start: str) -> str | None:
+    """os.path.relpath that tolerates different Windows mounts."""
+    try:
+        return os.path.relpath(filepath, start)
+    except ValueError:
+        return None
 
 # File extensions we can extract symbols from
 PYTHON_EXT: set[str] = {".py"}
@@ -346,7 +370,9 @@ def update_file_in_map(filepath: str, workspace: str) -> None:
     global _MAP_CACHE, _MAP_CACHE_WORKSPACE_PACKAGES, _MAP_CACHE_WORKSPACE
     if not os.path.isfile(filepath):
         return
-    rel_path = os.path.relpath(filepath, workspace)
+    rel_path = _safe_relpath(filepath, workspace)
+    if rel_path is None:
+        return
     if os.path.basename(filepath).startswith("."):
         return
     if _MAP_CACHE_WORKSPACE != workspace or not _MAP_CACHE_WORKSPACE_PACKAGES:
@@ -363,7 +389,9 @@ def update_file_in_map(filepath: str, workspace: str) -> None:
 def remove_file_from_map(filepath: str, workspace: str) -> None:
     """Remove a file from the cached codebase map (e.g. on deletion)."""
     global _MAP_CACHE
-    rel_path = os.path.relpath(filepath, workspace)
+    rel_path = _safe_relpath(filepath, workspace)
+    if rel_path is None:
+        return
     with _MAP_CACHE_LOCK:
         _MAP_CACHE.pop(rel_path, None)
 
@@ -452,14 +480,20 @@ def build_codebase_map(
             for dirpath, dirnames, filenames in os.walk(workspace):
                 dirnames[:] = sorted(
                     d for d in dirnames
-                    if d not in SKIP_DIRS and not d.startswith(".")
+                    if d not in SKIP_DIRS
+                    and not d.startswith(".")
+                    and not _is_win_reserved(d)
                 )
 
                 for fname in sorted(filenames):
                     if fname.startswith("."):
                         continue
+                    if _is_win_reserved(fname):
+                        continue
                     filepath = os.path.join(dirpath, fname)
-                    rel_path = os.path.relpath(filepath, workspace)
+                    rel_path = _safe_relpath(filepath, workspace)
+                    if rel_path is None:
+                        continue
 
                     symbols = _extract_single_file(
                         filepath, rel_path, workspace_packages,

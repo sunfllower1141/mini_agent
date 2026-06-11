@@ -67,7 +67,6 @@ if not any(td["function"]["name"] == "remember" for td in TOOLS):
 _TOOL_SCHEMA_MAP: dict[str, dict] = {}
 _TOOL_SCHEMA_MAP_LEN: int = 0
 
-
 def _get_tool_schema(name: str) -> dict | None:
     """Look up a tool's parameter schema from TOOLS at runtime.
 
@@ -337,12 +336,19 @@ from tools.error_hints import (  # noqa: E402, F401
 )
 
 
+# Module-level cancel event so tool functions (e.g. _run_shell) can
+# detect cancellation and stop blocking on subprocess I/O.  Set by
+# execute_tool() before dispatching; cleared after the thread completes.
+# This is NOT a ContextVar — it's shared across all threads on purpose.
+_CURRENT_CANCEL_EVENT: threading.Event | None = None
+
 def execute_tool(
     tool_call: dict,
     write_gate: WriteSafetyGate,
     read_gate: ReadSafetyGate,
     on_output: callable = None,
     approve_callback: callable = None,
+    cancel_event: threading.Event | None = None,
 ) -> ToolResult:
     """Execute a single tool call.  All read/write paths go through safety gates.
 
@@ -439,6 +445,7 @@ def execute_tool(
     _result_container: list[ToolResult | Exception] = []
 
     def _run_and_capture():
+        _t0 = _time.monotonic()
         try:
             if accepts_on_output:
                 _result_container.append(dispatch(args, write_gate, read_gate, on_output=on_output))
@@ -446,15 +453,73 @@ def execute_tool(
                 _result_container.append(dispatch(args, write_gate, read_gate))
         except Exception as exc:
             _result_container.append(exc)
+        _elapsed = _time.monotonic() - _t0
+        # (dispatch timing collected but no longer logged to console)
 
-    t = threading.Thread(target=_run_and_capture, daemon=True)
-    t.start()
-    t.join(timeout=_TOOL_TIMEOUT)
+    import sys as _sys
+    import time as _time
+    _turn = getattr(_TOOL_CONTEXT, '_turn_count', 0)
+    _sys.stderr.write(f"[turn {_turn}] dispatching '{name}' (timeout={_TOOL_TIMEOUT}s)\n")
+    _sys.stderr.flush()
+    _t_dispatch_start = _time.monotonic()
+    _t_start = _time.monotonic()
+    # Set the module-level cancel event so tool functions like _run_shell
+    # can detect cancellation and stop blocking on subprocess I/O.
+    global _CURRENT_CANCEL_EVENT
+    _prev_cancel = _CURRENT_CANCEL_EVENT
+    _CURRENT_CANCEL_EVENT = cancel_event
+    try:
+        t = threading.Thread(target=_run_and_capture, daemon=True)
+        t.start()
+        if cancel_event is not None:
+            # Poll with short intervals so the user can cancel during streaming.
+            # A single t.join(timeout=120) blocks the SSE parsing loop and makes
+            # the UI appear hung — especially on Windows where the first open()
+            # call in a new thread can be delayed by antivirus filter drivers.
+            _poll_interval = 0.1  # 100 ms
+            _deadline = _time.monotonic() + _TOOL_TIMEOUT
+            _last_hb = _t_dispatch_start
+            while t.is_alive() and _time.monotonic() < _deadline:
+                if cancel_event.is_set():
+                    _sys.stderr.write(f"[turn {_turn}] cancelled '{name}' thread (elapsed={_time.monotonic() - _t_dispatch_start:.2f}s)\n")
+                    _sys.stderr.flush()
+                    # Kill any active process trees immediately to unblock
+                    # tool threads waiting on subprocess I/O (e.g. _run_shell
+                    # blocking on t_out.join).  This prevents orphaned bash.exe
+                    # / cmd.exe from accumulating.
+                    try:
+                        from tools.shell_ops import _cleanup_all_procs
+                        _cleanup_all_procs()
+                    except Exception:
+                        pass
+                    # Don't return yet — give the thread a brief grace period
+                    # to finish (50 ms).  We can't kill Python threads safely.
+                    t.join(timeout=0.05)
+                    break
+                t.join(timeout=_poll_interval)
+                # Heartbeat: log every 5s so we can tell if thread is stuck
+                _now = _time.monotonic()
+                if _now - _last_hb >= 5.0:
+                    _sys.stderr.write(f"[turn {_turn}] '{name}' still running ({_now - _t_dispatch_start:.1f}s elapsed)...\n")
+                    _sys.stderr.flush()
+                    _last_hb = _now
+        else:
+            t.join(timeout=_TOOL_TIMEOUT)
+    finally:
+        _CURRENT_CANCEL_EVENT = _prev_cancel
     if t.is_alive():
         # Thread still running after timeout — it's stuck.
         # We cannot safely kill a Python thread, so return a timeout result.
         # The daemon thread will continue running but will be terminated
         # when the process exits.
+        #
+        # On Windows, kill any orphaned subprocess trees to prevent
+        # process multiplication (e.g. thousands of bash.exe).
+        try:
+            from tools.shell_ops import _cleanup_all_procs
+            _cleanup_all_procs()
+        except Exception:
+            pass
         return ToolResult(
             success=False,
             content=f"Tool '{name}' timed out after {_TOOL_TIMEOUT}s.",
@@ -465,6 +530,14 @@ def execute_tool(
     if isinstance(raw, Exception):
         raise raw
     result = raw
+
+    # --- console: success / failure status ---
+    _turn = getattr(_TOOL_CONTEXT, '_turn_count', 0)
+    if result.success:
+        _sys.stderr.write(f"[turn {_turn}] '{name}' ✓\n")
+    else:
+        _sys.stderr.write(f"[turn {_turn}] '{name}' ✗ — {result.content[:120]}\n")
+    _sys.stderr.flush()
 
     # Normalize: every failed result gets a _build_error_hint so the LLM
     # always sees the same structure (tool name, error, valid params, retry

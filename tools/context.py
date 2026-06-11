@@ -46,6 +46,7 @@ class AgentContext:
         self._plan_steps: list[str] = []
         self._plan_done: set[int] = set()
         self._plan_last_advanced_turn: int = 0
+        self._turn_count: int = 0     # current turn number (set by run_agent_turn each iteration)
         self._memory_store = None  # MemoryStore instance (set by init_session)
         self._failure_pattern_store = None  # FailurePatternStore (set by init_session)
         self._self_critique = None  # SelfCritique instance (set by init_session)

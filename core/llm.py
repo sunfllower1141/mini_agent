@@ -188,7 +188,8 @@ def _execute_single_no_pipe(
         on_tool_start(tool_summary(tc))
     result = execute_tool(tc, write_gate, read_gate,
                           on_output=on_tool_output,
-                          approve_callback=approve_callback)
+                          approve_callback=approve_callback,
+                          cancel_event=cancel_event)
     _append_tool_result(messages, tc, result, on_tool_end,
                         recent_keys=recent_tool_keys,
                         lock=tool_keys_lock)
@@ -217,7 +218,8 @@ def _execute_parallel_no_pipes(
     def _run_tool(tc: dict) -> tuple[dict, "ToolResult"]:
         return tc, execute_tool(tc, write_gate, read_gate,
                                 on_output=on_tool_output,
-                                approve_callback=approve_callback)
+                                approve_callback=approve_callback,
+                                cancel_event=cancel_event)
 
     parallel_results: list[tuple] = []
     with ThreadPoolExecutor(max_workers=len(remaining)) as pool:
@@ -318,7 +320,8 @@ def _execute_groups(
                 break
             result = execute_tool(tc, write_gate, read_gate,
                                   on_output=on_tool_output,
-                                  approve_callback=approve_callback)
+                                  approve_callback=approve_callback,
+                                  cancel_event=cancel_event)
             pipe_results[i] = result
             _append_tool_result(messages, tc, result, on_tool_end,
                                 recent_keys=recent_tool_keys)
@@ -331,7 +334,8 @@ def _execute_groups(
                 _apply_pipe(tc, i, pipe_deps, pipe_results, json)
                 return i, tc, execute_tool(tc, write_gate, read_gate,
                                             on_output=on_tool_output,
-                                            approve_callback=approve_callback)
+                                            approve_callback=approve_callback,
+                                            cancel_event=cancel_event)
 
             with ThreadPoolExecutor(max_workers=len(group)) as pool:
                 futures = {pool.submit(_run_piped, i): i for i in group}
@@ -422,7 +426,8 @@ def _execute_tools(
                 break
             result = execute_tool(tc, write_gate, read_gate,
                                   on_output=on_tool_output,
-                                  approve_callback=approve_callback)
+                                  approve_callback=approve_callback,
+                                  cancel_event=cancel_event)
             pipe_results[i] = result
             _append_tool_result(messages, tc, result, on_tool_end,
                                 recent_keys=recent_tool_keys)
@@ -490,10 +495,16 @@ def _api_call_phase(
             return
         if on_tool_start is not None:
             on_tool_start(tool_summary(tc))
+        import sys as _sys_otr
+        _sys_otr.stderr.write(f"[_on_tool_ready] calling execute_tool for '{tc.get('function',{}).get('name','?')}'...\n")
+        _sys_otr.stderr.flush()
         try:
             result = execute_tool(tc, write_gate, read_gate,
                                   on_output=on_tool_output,
-                                  approve_callback=approve_callback)
+                                  approve_callback=approve_callback,
+                                  cancel_event=cancel_event)
+            _sys_otr.stderr.write(f"[_on_tool_ready] execute_tool returned success={result.success}\n")
+            _sys_otr.stderr.flush()
             executed_tool_indices.add(idx)
         except Exception as _exc:
             # NEVER leave a tool_call_id orphaned — a failure result
@@ -661,6 +672,7 @@ def run_agent_turn(
     try:
         for _ in range(max_turns):
             turn_count += 1
+            _TOOL_CONTEXT._turn_count = turn_count
             if cancel_event is not None and cancel_event.is_set():
                 return None
 

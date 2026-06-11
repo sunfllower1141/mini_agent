@@ -13,10 +13,12 @@ import shutil
 import subprocess
 import threading
 import uuid
+import threading
 
 from core.safety import ReadSafetyGate, WriteSafetyGate
 from tools import _register, _summarize, ToolResult, _TASK_REGISTRY
 
+_WINDOWS = platform.system() == "Windows"
 
 # ---------------------------------------------------------------------------
 # Platform helpers for cross-platform shell execution
@@ -227,16 +229,21 @@ def _task_status_summary(args: dict) -> str:
 
 @_register("run_shell")
 def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: callable = None) -> ToolResult:
+    import sys as _sys
+    import time as _time
     command = args["command"]
     force = args.get("force", False)
     timeout = min(int(args.get("timeout", 60)), 300)
     stdin_text = args.get("stdin", None)  # optional stdin to pipe to the process
+    _sys.stderr.write(f"[shell] _run_shell start: {command[:100]}\n")
+    _sys.stderr.flush()
+    _t_start = _time.monotonic()
     # Windows: prefer bash for safer, more compatible command execution
     _windows_cmd_note = ""
     if platform.system() == "Windows":
         if _is_bash_available():
             bash = _get_shell_command()[0]
-            command = f'{bash} -c "{command}"'
+            command = f'"{bash}" -c "{command}"'
         elif not force:
             _windows_cmd_note = (
                 "\nNote: Running on Windows cmd.exe. "
@@ -263,9 +270,9 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
         # Commands that need a real terminal (sudo, ssh, etc.) get spawned
         # in a separate terminal window so the user can interact with them.
         _INTERACTIVE_PATTERNS = [
-            r'\bsudo\b', r'\bssh\b', r'\bsu\b', r'\bpasswd\b',
-            r'\blogin\b', r'\bhg\s+commit\b', r'\bpkexec\b',
-            r'\bgit\s+push\b', r'\bgit\s+pull\b', r'\bgit\s+clone\b',
+            r"\bsudo\b", r"\bssh\b", r"\bsu\b", r"\bpasswd\b",
+            r"\blogin\b", r"\bhg\s+commit\b", r"\bpkexec\b",
+            r"\bgit\s+push\b", r"\bgit\s+pull\b", r"\bgit\s+clone\b",
         ]
         _interactive = (
             not args.get("background", False)
@@ -275,11 +282,8 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
         )
         if _interactive:
             import shutil
-            # Prefer terminals that support -e; cosmic-term (Pop!_OS) does not.
-            # x-terminal-emulator on COSMIC points to cosmic-term, so check xterm first.
             term = (shutil.which("xterm") or shutil.which("gnome-terminal")
                     or shutil.which("konsole") or shutil.which("kitty"))
-            # Only use x-terminal-emulator if it's NOT cosmic-term
             xte = shutil.which("x-terminal-emulator")
             if term is None and xte:
                 if os.path.islink(xte):
@@ -303,109 +307,167 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
                                       timeout=timeout)
                 return ToolResult(success=(proc.returncode == 0),
                                   content=f"exit_code={proc.returncode}")
-            # fall through to normal subprocess if no terminal found
 
         # Default to DEVNULL so interactive prompts don't hang the TUI.
-        # Callers that need stdin pass stdin_text which switches to PIPE.
         stdin_kw = {"stdin": subprocess.DEVNULL}
         if stdin_text is not None:
             stdin_kw["stdin"] = subprocess.PIPE
-        proc = subprocess.Popen(
-            command,
-            shell=True,
-            cwd=rg.workspace_root,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            **stdin_kw,
-        )
 
+        # On Windows, prevent console windows from flashing
+        popen_kwargs = {}
+        if _WINDOWS:
+            popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+
+        # On Windows: command already wrapped at line 241, skip double wrapping
+        if _WINDOWS and False and _is_bash_available():
+            pass  # never taken — use shell=True below
+        elif not _is_bash_available() and shutil.which("powershell"):
+            proc = subprocess.Popen(
+                ["powershell", "-Command", command], shell=False,
+                cwd=rg.workspace_root,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                **stdin_kw, **popen_kwargs,
+            )
+        else:
+            proc = subprocess.Popen(
+                command, shell=True,
+                cwd=rg.workspace_root,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                **stdin_kw, **popen_kwargs,
+            )
+
+        _register_proc(proc)
         stdout_lines: list[str] = []
         stderr_lines: list[str] = []
 
-        # Background mode: register and return immediately
         background = args.get("background", False)
         if background:
             task_id = str(uuid.uuid4())[:8]
             _TASK_REGISTRY[task_id] = proc
-            # Drain stdout/stderr in daemon threads to prevent pipe-buffer deadlock
             threading.Thread(target=_stream_reader, args=(proc.stdout, []), daemon=True).start()
             threading.Thread(target=_stream_reader, args=(proc.stderr, []), daemon=True).start()
-            # Write stdin in a daemon thread to avoid blocking
             if stdin_text is not None and proc.stdin is not None:
-                threading.Thread(target=lambda p, t: (p.stdin.write(t), p.stdin.close()), args=(proc, stdin_text), daemon=True).start()
-            # Auto-cleanup: remove from registry when the process exits, so
-            # _TASK_REGISTRY doesn't grow unbounded if task_status is never called.
-            def _auto_cleanup(reg: dict, tid: str, p: subprocess.Popen) -> None:
+                threading.Thread(target=lambda p, t: (p.stdin.write(t), p.stdin.close()),
+                                 args=(proc, stdin_text), daemon=True).start()
+            def _auto_cleanup(reg, tid, p):
                 try:
+                    if _WINDOWS:
+                        p.stdout.close(); p.stderr.close()
                     p.wait()
                 except (OSError, subprocess.SubprocessError):
                     pass
                 finally:
                     reg.pop(tid, None)
+                    _unregister_proc(p)
             threading.Thread(target=_auto_cleanup, args=(_TASK_REGISTRY, task_id, proc), daemon=True).start()
-            return ToolResult(
-                success=True,
-                content=f"Started background task {task_id}. Use task_status to check.",
-            )
+            return ToolResult(success=True,
+                              content=f"Started background task {task_id}. Use task_status to check.")
 
         if on_output is not None:
-            # Streaming mode: need threads to forward output in real-time
-            # Write stdin before starting reader threads to avoid race
             if stdin_text is not None and proc.stdin is not None:
                 proc.stdin.write(stdin_text)
                 proc.stdin.close()
-            t_out = threading.Thread(
-                target=_stream_reader, args=(proc.stdout, stdout_lines, True, on_output, ""), daemon=True,
-            )
-            t_err = threading.Thread(
-                target=_stream_reader, args=(proc.stderr, stderr_lines, True, on_output, "[stderr] "), daemon=True,
-            )
+            t_out = threading.Thread(target=_stream_reader,
+                                     args=(proc.stdout, stdout_lines, True, on_output, ""), daemon=True)
+            t_err = threading.Thread(target=_stream_reader,
+                                     args=(proc.stderr, stderr_lines, True, on_output, "[stderr] "), daemon=True)
             t_out.start()
             t_err.start()
 
-            # Register this proc so the TUI can kill it on Ctrl+Z
             from tools import _TOOL_CONTEXT
             _TOOL_CONTEXT._active_proc = proc
-            try:
+
+            if _WINDOWS:
+                kill_fired = threading.Event()
+                def _kill_timer():
+                    kill_fired.set()
+                    _kill_process_tree_windows(proc)
+                timer = threading.Timer(timeout, _kill_timer)
+                timer.daemon = True; timer.start()
+                try:
+                    # Poll t_out.join with short intervals so we can detect
+                    # cancellation (via the module-level _CURRENT_CANCEL_EVENT).
+                    # A single t_out.join(timeout=70) blocks the tool thread
+                    # and prevents cancellation from working.
+                    _poll_deadline = _time.monotonic() + timeout + 10
+                    while t_out.is_alive() and _time.monotonic() < _poll_deadline:
+                        # Check module-level cancel event
+                        try:
+                            from tools import _CURRENT_CANCEL_EVENT as _cce
+                            if _cce is not None and _cce.is_set():
+                                kill_fired.set()
+                                _kill_process_tree_windows(proc)
+                                break
+                        except ImportError:
+                            pass
+                        t_out.join(timeout=0.1)
+                    else:
+                        # Normal completion or timeout — join t_err briefly
+                        t_err.join(timeout=5)
+                finally:
+                    timer.cancel()
+                if kill_fired.is_set():
+                    _unregister_proc(proc)
+                    _TOOL_CONTEXT._active_proc = None
+                    return ToolResult(success=False,
+                                      content=f"Command timed out after {timeout}s (process tree killed)")
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
+            else:
                 try:
                     proc.wait(timeout=timeout)
                 except subprocess.TimeoutExpired:
                     proc.kill()
                     t_out.join(timeout=2)
                     t_err.join(timeout=2)
+                    _unregister_proc(proc)
+                    _TOOL_CONTEXT._active_proc = None
                     return ToolResult(success=False, content=f"Command timed out after {timeout}s")
-            finally:
-                _TOOL_CONTEXT._active_proc = None
+                finally:
+                    _TOOL_CONTEXT._active_proc = None
 
             t_out.join(timeout=2)
             t_err.join(timeout=2)
-
+            _TOOL_CONTEXT._active_proc = None
             stdout = "\n".join(stdout_lines)
             stderr = "\n".join(stderr_lines)
         else:
-            # No streaming: use communicate() to avoid thread overhead
-            # Register this proc so the TUI can kill it on Ctrl+Z
             from tools import _TOOL_CONTEXT
             _TOOL_CONTEXT._active_proc = proc
-            try:
-                out, err = proc.communicate(input=stdin_text, timeout=timeout)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                out, err = proc.communicate()
-                _TOOL_CONTEXT._active_proc = None
-                return ToolResult(success=False, content=f"Command timed out after {timeout}s")
-            finally:
-                _TOOL_CONTEXT._active_proc = None
-            stdout = out
-            stderr = err
+
+            if stdin_text is not None and proc.stdin is not None:
+                proc.stdin.write(stdin_text)
+                proc.stdin.close()
+
+            if _WINDOWS:
+                try:
+                    stdout, stderr = _communicate_windows(proc, timeout)
+                except subprocess.TimeoutExpired:
+                    _unregister_proc(proc)
+                    _TOOL_CONTEXT._active_proc = None
+                    return ToolResult(success=False, content=f"Command timed out after {timeout}s")
+            else:
+                try:
+                    out, err = proc.communicate(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    out, err = proc.communicate()
+                    _unregister_proc(proc)
+                    _TOOL_CONTEXT._active_proc = None
+                    return ToolResult(success=False, content=f"Command timed out after {timeout}s")
+                stdout = out
+                stderr = err
+
+            _TOOL_CONTEXT._active_proc = None
 
         parts = [f"exit_code={proc.returncode}"]
         if stdout:
-            lines = stdout.split("\n")
-            if len(lines) > 500:
-                stdout = "\n".join(lines[:500])
-                stdout += f"\n… (truncated at 500 lines — {len(lines)} total. "
+            lines_out = stdout.split("\n")
+            if len(lines_out) > 500:
+                stdout = "\n".join(lines_out[:500])
+                stdout += f"\n\u2026 (truncated at 500 lines \u2014 {len(lines_out)} total. "
                 stdout += "Use read_file with offset/limit for the full log if needed.)"
             parts.append(f"stdout:\n{stdout}")
         if stderr:
@@ -413,17 +475,15 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
             err_lines = err_output.split("\n")
             if len(err_lines) > 100:
                 err_output = "\n".join(err_lines[:100])
-                err_output += f"\n… (stderr truncated at 100 lines — {len(err_lines)} total)"
+                err_output += f"\n\u2026 (stderr truncated at 100 lines \u2014 {len(err_lines)} total)"
             parts.append(f"stderr:\n{err_output}")
-        content = "\n".join(parts)
+        content_out = "\n".join(parts)
         if _windows_cmd_note:
-            content += _windows_cmd_note
+            content_out += _windows_cmd_note
         if proc.returncode == 127:
-            content += "\nHint: Command not found. Check the spelling and that it is installed."
-        return ToolResult(
-            success=proc.returncode == 0,
-            content=content,
-        )
+            content_out += "\nHint: Command not found. Check the spelling and that it is installed."
+        _unregister_proc(proc)
+        return ToolResult(success=proc.returncode == 0, content=content_out)
     except Exception as e:
         hint = "\nHint: Check the command and flag spelling. Try with --help first, or use search_files to find the right syntax."
         return ToolResult(success=False, content=f"Error running command: {e}{hint}{_windows_cmd_note}")
@@ -686,6 +746,7 @@ def _run_tests(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
         proc = subprocess.Popen(
             cmd, cwd=rg.workspace_root,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            **({"creationflags": subprocess.CREATE_NO_WINDOW} if _WINDOWS else {}),
         )
     except Exception as e:
         return ToolResult(success=False, content=f"Error starting pytest: {e}")
@@ -711,10 +772,16 @@ def _run_tests(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
         )
 
     try:
-        out, err = proc.communicate(timeout=timeout)
+        if _WINDOWS:
+            out, err = _communicate_windows(proc, timeout)
+        else:
+            out, err = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
-        proc.kill()
-        out, err = proc.communicate()
+        if not _WINDOWS:
+            proc.kill()
+            out, err = proc.communicate()
+        else:
+            out, err = "", ""
         return ToolResult(success=False, content=f"Tests timed out after {timeout}s")
 
     output = (out + err).strip()
@@ -1232,3 +1299,100 @@ def _diagnose_failures(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> 
 @_summarize("diagnose_failures")
 def _diagnose_failures_summary(args: dict) -> str:
     return "diagnose_failures()"
+
+_ACTIVE_PROCS: set = set()
+_ACTIVE_PROCS_LOCK = threading.Lock()
+
+def _register_proc(proc):
+    with _ACTIVE_PROCS_LOCK: _ACTIVE_PROCS.add((proc.pid, proc))
+
+def _unregister_proc(proc):
+    with _ACTIVE_PROCS_LOCK: _ACTIVE_PROCS.discard((proc.pid, proc))
+
+def _kill_process_tree_windows(proc):
+    """Kill the process tree rooted at *proc* as aggressively as possible.
+
+    Tries three approaches in order:
+    1. ``taskkill /F /T`` — kills the whole tree including children.
+    2. ``proc.kill()`` — TerminateProcess (parent only, but may cause
+      children to exit when pipes break).
+    3. ``taskkill`` with just /F (no /T) — last resort.
+
+    Timeouts are short (4 s for taskkill) to avoid this function itself
+    hanging and leaking processes.
+    """
+    pid = proc.pid
+    # Method 1: taskkill /F /T (kills entire tree)
+    try:
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                      capture_output=True, timeout=4)
+    except Exception:
+        pass
+    # Method 2: TerminateProcess on the parent (may leave orphans, but
+    #            breaking stdout/stderr pipes often causes children to exit)
+    try:
+        proc.kill()
+    except Exception:
+        pass
+    # Method 3: taskkill /F (just the parent, no /T)
+    try:
+        subprocess.run(["taskkill", "/F", "/PID", str(pid)],
+                      capture_output=True, timeout=4)
+    except Exception:
+        pass
+
+def _cleanup_all_procs():
+    with _ACTIVE_PROCS_LOCK:
+        procs = list(_ACTIVE_PROCS)
+        _ACTIVE_PROCS.clear()
+    for _pid, proc in procs:
+        try:
+            if _WINDOWS:
+                _kill_process_tree_windows(proc)
+            else:
+                proc.kill()
+        except Exception:
+            pass
+
+def _communicate_windows(proc, timeout):
+    import time as _time
+    if not _WINDOWS:
+        raise RuntimeError("_communicate_windows called on non-Windows")
+    out_lines, err_lines = [], []
+    t_out = threading.Thread(target=_stream_reader, args=(proc.stdout, out_lines), daemon=True)
+    t_err = threading.Thread(target=_stream_reader, args=(proc.stderr, err_lines), daemon=True)
+    t_out.start(); t_err.start()
+    kill_fired = threading.Event()
+    def _kill():
+        kill_fired.set()
+        _kill_process_tree_windows(proc)
+    timer = threading.Timer(timeout, _kill)
+    timer.daemon = True; timer.start()
+    try:
+        # Poll t_out.join with short intervals to detect cancellation.
+        # A single t_out.join(timeout=timeout+10) blocks the tool thread
+        # and prevents cancellation from working.
+        _deadline = _time.monotonic() + timeout + 10
+        while t_out.is_alive() and _time.monotonic() < _deadline:
+            try:
+                from tools import _CURRENT_CANCEL_EVENT as _cce
+                if _cce is not None and _cce.is_set():
+                    kill_fired.set()
+                    _kill_process_tree_windows(proc)
+                    break
+            except ImportError:
+                pass
+            t_out.join(timeout=0.1)
+        else:
+            t_err.join(timeout=5)
+    finally:
+        timer.cancel()
+    if kill_fired.is_set():
+        raise subprocess.TimeoutExpired(cmd=" ".join(proc.args or []), timeout=timeout)
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
+    return "\n".join(out_lines), "\n".join(err_lines)
+
+

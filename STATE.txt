@@ -1,4 +1,11 @@
 # mini_agent Architecture State
+# Last updated: 2026-06-11 (Windows: requirements.txt refresh, WINDOWS_INSTALL.md, run_shell summary fix)
+# Last updated: 2026-06-11 (diagnostics: stderr logging in warmup, execute_tool, _run_shell)
+# Last updated: 2026-06-11 (fix: HF_HUB_DISABLE_SYMLINKS_WARNING + encode warmup in daemon thread)
+# Last updated: 2026-06-11 (fix: HF Hub warmup encode + sys.executable subprocess warmup)
+# Last updated: 2026-06-11 (fix: first tool call hang — daemon-thread subprocess warmup + preload reorder)
+# Last updated: 2026-06-11 (fix: first tool call 7.8s hang — GIL contention from _sem_preload)
+# Last updated: 2026-06-11 (Windows: fix bash quoting bug, _read_file_direct on Windows)
 # Last updated: 2026-06-06 (context engineering: codebase_map + compaction)
 # Last updated: 2026-06-06 (electron: fix hang on exit — app.quit() on window-all-closed)
 # Last updated: 2026-06-06 (self-audit wiring: knowledge_graph + git blame + tree-sitter + post-edit verification)
@@ -178,6 +185,51 @@
     cached symbol map (``_MAP_CACHE``) updated incrementally via
     ``update_file_in_map()`` on every file write/edit. Avoids full workspace
     re-scans. ``_extract_single_file()`` uses tree-sitter when available.
+
+23. **Windows subprocess hardening (2026-06-11)**: On Windows, ``proc.communicate()`` and
+    ``proc.wait()`` can hang forever in kernel I/O (antivirus hooks, filter drivers).
+    ``tools/shell_ops.py`` now provides ``_communicate_windows()`` — a shared helper that
+    uses read threads (``_stream_reader``) + ``threading.Timer`` watchdog calling
+    ``taskkill /F /T`` to kill the process tree when a timeout fires. Used by
+    ``_run_shell``, ``_run_tests``, and ``_verify``.
+    ``CREATE_NO_WINDOW`` prevents conhost.exe per-process console windows.
+    ``CREATE_NEW_PROCESS_GROUP`` was REMOVED (caused first-call freeze on Windows
+    11 with certain antivirus/security configs). ``taskkill /F /T /PID`` works
+    without process groups.
+    ``mini_agent_electron/main.js`` has a restart throttle (max 3 restarts in 30s with
+    exponential backoff) and uses ``taskkill /F /T /PID`` on shutdown.
+
+24. **Bash path quoting fix (2026-06-11)**: ``tools/shell_ops.py`` line 243 (was 241): the
+    MSYS2 bash path ``C:\Program Files\Git\bin\bash.exe`` must be quoted when building
+    the bash wrapper command. Changed from ``f'{bash} -c "{command}"'`` to
+    ``f'"{bash}" -c "{command}"'``. Without quotes, the double-wrapping at lines 319-327
+    caused bash to treat ``C:\Program`` as a command name. The double-wrapping block was
+    also bypassed (``if _WINDOWS and False and _is_bash_available():``) to use cmd.exe
+    ``shell=True`` directly, since the command is already wrapped in bash.
+
+25. **Windows fork prep (2026-06-11)**: ``requirements.txt`` refreshed with Windows
+    notes (PyTorch CPU-only option, Playwright separate install, Defender exclusions).
+    Added ``pytest-timeout>=2.0`` for Windows test safety. Created ``WINDOWS_INSTALL.md``
+    with comprehensive Windows 11 install guide including Python Store stub avoidance,
+    Node.js 22+ requirement, Visual C++ redist, PATH length workarounds, and
+    troubleshooting (Defender, Electron white screen, proxy config). README.md
+    updated to reference the Windows guide.
+
+26. **Direct file reads on Windows (2026-06-11)**: ``tools/file_ops.py`` line 340:
+    ``_worker.py`` subprocess hangs at ``open()`` on some Windows 11 systems (possibly
+    antivirus filter driver). Changed ``if _WINDOWS:`` to ``if False:`` so all reads
+    use ``_read_file_direct()`` in-process. This avoids the subprocess hang but loses
+    the protection against kernel-filter hangs that the subprocess was designed to
+    provide. Pre-existing nested-quote issue: commands with ``"`` break the bash
+    wrapping at line 241.
+
+26. **Startup warmup for Windows antivirus (2026-06-11)**: ``core/bootstrap.py``
+    ``init_session()`` now runs ``cmd.exe /c rem`` at startup to absorb any first-call
+    antivirus/EDR scan delay for cmd.exe and conhost.exe. Windows Defender and other
+    EDR products can pause the first execution of a new binary for behavioral
+    analysis, making the first ``run_shell`` tool call appear to "freeze."
+    The warmup runs during startup (before the first user prompt) so the delay
+    is invisible to the user.
 
 ## Known Issues
 - `_json_rpc_shared.py` — shared drain_stderr() utility used by lsp.py and mcp_client.py

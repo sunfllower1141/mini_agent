@@ -2,6 +2,95 @@
 
 Self-modification audit trail — what the agent changed and why.
 
+## 2026-06-11 — Windows fork prep: requirements.txt refresh, WINDOWS_INSTALL.md
+### Added
+- **WINDOWS_INSTALL.md**: Comprehensive Windows 11 install guide with prerequisites,
+  manual setup steps, launch instructions, keyboard shortcuts, running tests, and
+  a full troubleshooting section (Store Python, Defender exclusions, Electron white
+  screen, proxy, C++ build tools, PATH length).
+### Changed
+- **requirements.txt**: Refreshed with Windows-specific comments. Added
+  `pytest-timeout>=2.0` (prevents hanging tests). Documented system dependencies
+  (ripgrep, Node.js, git, Python) with winget install commands. Added Windows notes
+  about PyTorch CPU-only option and Defender exclusions.
+- **README.md**: Added reference to WINDOWS_INSTALL.md for Windows users.
+### Tests
+- 1027 passed, 10 failed (all pre-existing), 34 errors (Win32 teardown PermissionError).
+
+## 2026-06-11 — First tool call: HF Hub warmup encode + sys.executable warmup
+### Fixed
+- **HF Hub download interrupts first tool call**: After model preload completes in
+  bootstrap, added a warmup `model.encode("warmup")` call to trigger any lazy
+  initialization (tokenizer downloads, HF Hub auth warnings). This ensures all
+  SentenceTransformer setup happens during bootstrap, not during the first tool call
+  where it can interfere with concurrent subprocess tool execution.
+- **sys.executable warmup**: The bootstrap warmup thread only called `cmd.exe`, but
+  tool calls (read_file, run_shell) spawn `python.exe` subprocesses. Added a
+  `subprocess.run([sys.executable, "-c", "print"])` warmup to absorb the antivirus
+  filter-driver cost for the Python executable separately from cmd.exe.
+
+## 2026-06-11 — First tool call hang: daemon-thread subprocess warmup + preload timeout fix
+### Fixed
+- **First tool call hangs on Windows (run_shell stuck)**: Two root causes fixed in
+  `core/bootstrap.py`:
+  1. `_warmup_thread_io` only warmed file I/O, not `subprocess.Popen`. On Windows, the
+     first `CreateProcess` from a daemon thread triggers fresh antivirus filter-driver
+     scans. Added a `cmd.exe /c rem` invocation inside the warmup daemon thread.
+  2. The embedding model preload (`_sem_preload`) started late in bootstrap (after slow
+     `build_symbol_index` + `set_lsp_root`) and only waited 30s. On a cold HF cache
+     (first-ever run), the model download (~90 MB) would still be in progress when the
+     first tool call dispatched to a daemon thread — and the concurrent network I/O from
+     the preload thread interfered with tool thread startup. Fix: start `_sem_preload`
+     EARLY (before the slow scans), wait at the END with timeout=120s (matching
+     `_SEM_MODEL_TIMEOUT`). The slow scans now overlap with the model download.
+
+## 2026-06-11 — Windows tool freeze fixes (bash quoting + CREATE_NEW_PROCESS_GROUP removal + startup warmup)
+### Fixed
+- **run_shell freeze on Windows**: Bash path `C:\Program Files\Git\bin\bash.exe` was unquoted
+  in the wrapper at line 241, and the command was double-wrapped in bash (line 319-327).
+  Fix: quoted the bash path, bypassed the double wrapping via `if _WINDOWS and False`.
+- **CREATE_NEW_PROCESS_GROUP removed**: Removed `subprocess.CREATE_NEW_PROCESS_GROUP` from all
+  subprocess spawns (`_run_shell`, `_run_tests`, `_verify`, `lsp.py`, `mcp_client.py`,
+  `file_ops.py`). The flag is unnecessary (taskkill /T works without process groups) and may
+  trigger EDR/antivirus behavioral analysis on first invocation, causing ~15-60s freezes.
+  Only `CREATE_NO_WINDOW` is kept to prevent conhost.exe window flash.
+- **Startup warmup for antivirus**: `core/bootstrap.py` now runs `cmd.exe /c rem` during
+  `init_session()` to warm up cmd.exe/conhost.exe before the first user prompt. This absorbs
+  any first-call EDR scan delay during startup rather than on the first tool call.
+- **read_file hangs on Windows**: `tools/file_ops.py` line 340: `_worker.py` subprocess hangs
+  at `open()` on some Windows 11 systems (antivirus filter driver). Bypassed via `if False:`
+  — all reads now use `_read_file_direct()` in-process.
+
+## 2026-06-11 — Windows subprocess hardening (run_shell hang + process bomb fix)
+### Fixed
+- **run_shell hangs on Windows**: Replaced ALL `proc.communicate()` calls in `_run_shell`,
+  `_run_tests`, and `_verify` with read threads (`_stream_reader`) + shared `_communicate_windows()`
+  helper using `threading.Timer` watchdog that calls `taskkill /F /T`. `proc.communicate()` on
+  Windows uses `WaitForSingleObject` which can hang forever in kernel I/O (antivirus hooks,
+  filter drivers). The kill-timer approach escapes via OS-level process tree termination.
+- **Process bomb (thousands of base.exe)**: `main.js` now throttles backend restarts to max
+  3 within 30s with exponential backoff (1.5s → 3s → 6s). Previously, each crash triggered
+  an unconditional restart after 1.5s, causing runaway process multiplication.
+- **conhost.exe per command**: Added `subprocess.CREATE_NO_WINDOW` to `creationflags` in ALL
+  subprocess spawns (`_run_shell`, `_run_tests`, `_verify`, `lsp.py`, `mcp_client.py`) so
+  shell subprocesses no longer spawn Windows Console Host instances.
+- **Shutdown cleanup**: `window-all-closed`, `before-quit`, and `settings:restartBackend`
+  now use `taskkill /F /T /PID` on Windows instead of `proc.kill()` (which only kills the
+  immediate process, leaving child trees orphaned).
+- **Timeout handler fix**: In `_run_tests` and `_verify`, the `TimeoutExpired` handler no
+  longer calls `proc.communicate()` on Windows (the process is already killed by taskkill,
+  and calling `communicate()` on a dead process is safe but we avoid it for safety).
+- **`_stream_reader` hardening**: Now catches `OSError`/`ValueError`/`BrokenPipeError`
+  (pipe breaks when process is killed externally) and safely closes the stream in `finally`.
+
+### Changed Files
+- `tools/shell_ops.py` — Added `_communicate_windows()` shared helper; refactored
+  `_run_shell`, `_run_tests`, `_verify` to use it; added `CREATE_NO_WINDOW` everywhere;
+  hardened `_stream_reader`; fixed timeout handlers
+- `tools/lsp.py` — Added `CREATE_NO_WINDOW` to LSP server subprocess
+- `tools/mcp_client.py` — Added `CREATE_NO_WINDOW` to MCP server subprocess
+- `mini_agent_electron/main.js` — Restart throttle (max 3/30s + backoff); tree-kill on shutdown
+
 ## 2026-06-08 — Windows setup.bat hardening
 ### Fixed
 - **Node.js version check**: Now requires Node ≥ 22 (not just any version).

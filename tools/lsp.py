@@ -229,6 +229,10 @@ class LspConnection:
     def _start_process(self) -> None:
         """Launch the LSP server subprocess."""
         cmd = [self.server_command] + list(self.server_args)
+        creationflags = 0
+        if os.name == 'nt':
+            # Prevent conhost.exe spam on Windows
+            creationflags = subprocess.CREATE_NO_WINDOW
         self.process = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
@@ -236,6 +240,7 @@ class LspConnection:
             stderr=subprocess.PIPE,
             bufsize=0,
             start_new_session=True,
+            creationflags=creationflags or 0,
             env={**os.environ, "PYTHONUNBUFFERED": "1"},
         )
         # On Windows, start a background reader thread since select doesn't work on pipes

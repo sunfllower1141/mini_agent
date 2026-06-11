@@ -37,3 +37,10 @@ result.txt
 reports/
 error_traces.log
 mini_agent_electron/electron-dist/
+
+# Temp / scratch files
+_*.py
+_*.bat
+nul
+list_pkgs_temp.py
+_cleanup_temp.py

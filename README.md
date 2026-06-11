@@ -46,6 +46,8 @@ cd mini_agent
 setup.bat
 ```
 
+> **First time on Windows?** Read the [Windows 11 Install Guide](WINDOWS_INSTALL.md) for detailed steps, prerequisites, and troubleshooting.
+
 The setup script checks prerequisites, creates a Python venv, installs all dependencies (including Playwright browsers), and builds the Electron renderer.
 
 ### Launch

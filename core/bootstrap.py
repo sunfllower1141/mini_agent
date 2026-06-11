@@ -78,6 +78,15 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     Returns dict with keys: config, write_gate, read_gate, memory,
     messages, session.
     """
+    # Suppress HF Hub warnings EARLY — before any huggingface_hub import.
+    # The sentence-transformers model is cached locally; the "unauthenticated
+    # requests" warning is pure noise in the Electron stderr log and can
+    # cause the first tool call to appear hung while the warning writes to
+    # stderr (especially on Windows where I/O is synchronous).
+    import os as _os_bootstrap
+    _os_bootstrap.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+    _os_bootstrap.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+
     from tools import set_context, build_symbol_index
     from tools.skills import reset_skills
 
@@ -137,12 +146,127 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     except (OSError, _sp.TimeoutExpired):
         _TOOL_CONTEXT._session_start_head = None
 
+    # Warmup: run a trivial cmd.exe call to absorb any first-invocation
+    # antivirus scan delay (Windows Defender is known to pause first
+    # cmd.exe / conhost.exe launches for behavioral analysis).
+    if os.name == 'nt':
+        try:
+            _sp.run(["cmd.exe", "/c", "rem"], capture_output=True, timeout=10)
+        except Exception:
+            pass
+
+    # Warmup: do a trivial open() to absorb any first-file-I/O antivirus
+    # scan delay.  On Windows, the first CreateFile call from a new process
+    # can be intercepted by minifilter drivers (antivirus, backup agents)
+    # and delayed by several seconds.  Doing this here, before the user
+    # sends their first prompt, hides that latency.
+    _warmup_path = os.path.join(workspace, "CHANGELOG.md")
+    try:
+        if not os.path.isfile(_warmup_path):
+            _warmup_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "CHANGELOG.md")
+        if os.path.isfile(_warmup_path):
+            with open(_warmup_path, "r", encoding="utf-8", errors="replace") as _wf:
+                _wf.read(4096)  # read a small chunk to warm the FS cache
+    except Exception:
+        pass  # best-effort; never block startup on warmup failure
+
+    # Warmup: thread I/O — execute_tool() dispatches every tool call in a
+    # fresh daemon thread.  Some Windows filter drivers (antivirus, DLP,
+    # backup agents) associate I/O operations with thread context, so the
+    # first CreateFile in a *new thread* can still be delayed even after the
+    # main-thread warmup above.  Spawn a thread that does a trivial
+    # open() + read() so the filter drivers absorb their scan cost before
+    # the user's first prompt.
+    #
+    # We warm up MULTIPLE files because the first tool call typically
+    # reads a different file than CHANGELOG.md, and some filter drivers
+    # trigger per-file scanning on first access.
+    if os.name == 'nt':
+        import threading as _thr
+        _thr_warmup_done = _thr.Event()
+        # Files the LLM is likely to read on its first turn (based on
+        # system prompt rules and startup context).
+        _warmup_files = []
+        for _wf_name in ("CHANGELOG.md", "STATE.txt", "README.md",
+                         ".mini_agent.rules", "HANDOFF.md"):
+            _wp = os.path.join(workspace, _wf_name)
+            if os.path.isfile(_wp):
+                _warmup_files.append(_wp)
+        def _warmup_thread_io():
+            try:
+                import sys as _sys_warmup
+                _sys_warmup.stderr.write("[warmup] thread started\n")
+                _sys_warmup.stderr.flush()
+                for _wp in _warmup_files:
+                    _sys_warmup.stderr.write(f"[warmup] reading {os.path.basename(_wp)}\n")
+                    _sys_warmup.stderr.flush()
+                    with open(_wp, "r", encoding="utf-8", errors="replace") as _wtf:
+                        _wtf.read(4096)
+                # Also warm subprocess.Popen from a daemon thread: on Windows,
+                # the first CreateProcess call in a new thread can be delayed
+                # by antivirus filter drivers (same as the file-I/O warmup).
+                # A trivial cmd.exe invocation absorbs this latency so the
+                # user's first tool call doesn't hang.
+                try:
+                    _sys_warmup.stderr.write("[warmup] spawning cmd.exe\n")
+                    _sys_warmup.stderr.flush()
+                    _sp.run(["cmd.exe", "/c", "rem"],
+                            capture_output=True, timeout=10)
+                except Exception:
+                    pass
+                # Also warm sys.executable (python.exe) — tool calls like
+                # read_file spawn "python -m tools._worker" subprocesses.
+                # The first CreateProcess for a new executable can trigger
+                # separate antivirus scanning even after cmd.exe is warm.
+                try:
+                    _sys_warmup.stderr.write("[warmup] spawning python.exe\n")
+                    _sys_warmup.stderr.flush()
+                    _sp.run([sys.executable, "-c", "print"],
+                            capture_output=True, timeout=10)
+                except Exception:
+                    pass
+                # Also warm the SentenceTransformer encode() call so any
+                # HF Hub warnings / lazy downloads / tokenizer warmup happen
+                # in the background before the first tool call.
+                try:
+                    _sys_warmup.stderr.write("[warmup] loading embedding model\n")
+                    _sys_warmup.stderr.flush()
+                    from tools.search_ops import _sem_get_model
+                    _model = _sem_get_model()
+                    if _model is not None:
+                        _sys_warmup.stderr.write("[warmup] running encode()\n")
+                        _sys_warmup.stderr.flush()
+                        _model.encode("warmup", show_progress_bar=False)
+                except Exception:
+                    pass
+                _sys_warmup.stderr.write("[warmup] thread done\n")
+                _sys_warmup.stderr.flush()
+            except Exception:
+                pass
+            finally:
+                _thr_warmup_done.set()
+        _tw = _thr.Thread(target=_warmup_thread_io, daemon=True)
+        _tw.start()
+        _thr_warmup_done.wait(timeout=30)
+
     # Reset skill gates — start each session with core tools only
     reset_skills()
 
     # Initialize multi-agent runtime
     runtime = AgentRuntime()
     set_context(_agent_config=config, _agent_runtime=runtime)
+
+    # --- Start embedding model preload EARLY so the download overlaps with
+    # the slow workspace scan and LSP init below.  _sem_preload() starts a
+    # daemon thread and returns immediately.  We wait for it at the end of
+    # bootstrap, after all other slow init has been kicked off.
+    _sem_preload_event = None
+    try:
+        from tools.search_ops import _sem_preload, _SEM_PRELOAD_EVENT
+        _sem_preload()
+        _sem_preload_event = _SEM_PRELOAD_EVENT  # snapshot: set atomically
+    except Exception:
+        pass  # model preload is best-effort; semantic_search degrades gracefully
 
     # --- workspace scanning (skip on remote filesystems to avoid hangs) ---
     remote = _is_remote_workspace(workspace)
@@ -173,13 +297,25 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
         except Exception:
             pass  # MCP servers are optional — tolerate startup failures
 
-    # Preload semantic search model in background (non-blocking)
-    # so the ~9s cold start hides behind the first user interaction.
-    try:
-        from tools.search_ops import _sem_preload
-        _sem_preload()
-    except Exception:
-        pass  # sentence-transformers may not be installed — tolerate
+    # Wait for the embedding model preload to finish (started above).
+    # On a cold cache (first run), SentenceTransformer downloads ~90 MB from
+    # HuggingFace Hub.  We give it up to 120 s (matching _SEM_MODEL_TIMEOUT).
+    # The overlap with build_symbol_index / set_lsp_root above means much of
+    # this wait is already elapsed by the time we get here.
+    if _sem_preload_event is not None:
+        _sem_preload_event.wait(timeout=120)
+        # Warmup: do a trivial encoding to trigger any lazy initialization
+        # (tokenizer download, HF Hub auth warnings, etc.) NOW during bootstrap
+        # instead of during the first tool call. On Windows, the first
+        # SentenceTransformer.encode() call can trigger HuggingFace Hub
+        # downloads that interfere with concurrent subprocess tool calls.
+        try:
+            from tools.search_ops import _sem_get_model
+            model = _sem_get_model()
+            if model is not None:
+                model.encode("warmup", show_progress_bar=False)
+        except Exception:
+            pass  # best-effort; model is optional
 
     # Auto-init .mini_agent.rules and .mini_agent.toml if they don't exist yet.
     # Skip on remote workspaces — os.path.isfile() can hang on stale SMB mounts.

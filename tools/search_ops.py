@@ -465,10 +465,10 @@ def _sem_preload() -> None:
     by the time anyone calls semantic_search.  Safe to call multiple times
     — subsequent calls are no-ops if the model is already loading or loaded.
 
-    The preload is non-blocking: _sem_get_model() will still block only if
+    The preload is non-blocking: _sem_get_model() will block only if
     the model hasn't finished loading yet.  But with typical app startup
-    (user typing first query, LLM thinking), the 8s load time hides
-    completely behind the initial turn.
+    (user typing first query, LLM thinking), the load completes behind
+    the initial turn.
     """
     global _SEM_PRELOAD_EVENT, _SEM_PRELOAD_THREAD, _SEM_MODEL
     with _SEM_PRELOAD_LOCK:
@@ -527,7 +527,7 @@ def _sem_get_model():
         # Fall through to synchronous load below.
     # Fallback: synchronous load (preload was never called or failed)
     import sys
-    print('  ⏳ Loading embedding model (first use, ~9s)...',
+    print('  ⏳ Loading embedding model...',
           file=sys.stderr, end='', flush=True)
     try:
         from sentence_transformers import SentenceTransformer

@@ -99,6 +99,13 @@ let pythonReady = false;
 let pendingRequests = [];
 let lastStatus = null; // cached status for renderer to fetch on mount
 let _shuttingDown = false;  // set during window-close to prevent restart loops
+// Restart throttle: prevent infinite restart loops that spawn thousands of
+// processes when the Python backend keeps crashing (e.g. hung proc.communicate()
+// on Windows that can't be killed from userspace).
+let _restartCount = 0;
+let _restartWindowStart = 0;
+const _MAX_RESTARTS = 3;
+const _RESTART_WINDOW_MS = 30000;
 
 function spawnPythonBackend(workspacePath) {
   const backendScript = path.join(__dirname, 'backend', 'server.py');
@@ -195,7 +202,7 @@ function spawnPythonBackend(workspacePath) {
       if (text.includes('multiprocess/resource_tracker.py') && text.includes('_recursion_count')) {
         return;
       }
-      process.stderr.write(`[python:stderr] ${data}`);
+      console.log(`[python:stderr] ${data}`);
     }
   });
 
@@ -209,11 +216,29 @@ function spawnPythonBackend(workspacePath) {
       app.quit();
       return;
     }
-    // Auto-restart on unexpected exit (not a clean shutdown)
+    // Auto-restart on unexpected exit (not a clean shutdown).
+    // Throttle restarts to prevent infinite spawn loops that can
+    // create thousands of base.exe/conhost.exe processes on Windows.
     if (code !== 0 && code !== null) {
+      const now = Date.now();
+      if (now - _restartWindowStart > _RESTART_WINDOW_MS) {
+        _restartCount = 0;
+        _restartWindowStart = now;
+      }
+      _restartCount++;
+      if (_restartCount > _MAX_RESTARTS) {
+        const msg = `Backend crashed ${_restartCount}x in ${Math.round((now - _restartWindowStart) / 1000)}s — giving up. Please restart the app.`;
+        console.error(msg);
+        const win = BrowserWindow.getAllWindows()[0];
+        if (win) win.webContents.send('stream:error', { message: msg });
+        return;
+      }
       const win = BrowserWindow.getAllWindows()[0];
-      if (win) win.webContents.send('stream:error', { message: `Backend crashed (exit ${code}). Restarting...` });
+      const restartMsg = `Backend crashed (exit ${code}). Restarting (attempt ${_restartCount}/${_MAX_RESTARTS})...`;
+      if (win) win.webContents.send('stream:error', { message: restartMsg });
       const restartWorkspace = workspacePath;
+      // Exponential backoff: 1.5s → 3s → 6s
+      const delay = 1500 * Math.pow(2, _restartCount - 1);
       setTimeout(() => {
         if (!pythonProcess) {
           pythonProcess = spawnPythonBackend(restartWorkspace);
@@ -223,7 +248,7 @@ function spawnPythonBackend(workspacePath) {
             console.error('Backend script not found — agent will not start.');
           }
         }
-      }, 1500);
+      }, delay);
     }
   });
 
@@ -477,7 +502,13 @@ function setupIPC() {
       } catch (e) { /* ignore */ }
       setTimeout(() => {
         if (pythonProcess && !pythonProcess.killed) {
-          try { pythonProcess.kill(); } catch (e) { /* ignore */ }
+          try {
+            if (process.platform === 'win32') {
+              require('child_process').execSync(`taskkill /F /T /PID ${pythonProcess.pid}`, { timeout: 5000 });
+            } else {
+              pythonProcess.kill();
+            }
+          } catch (e) { /* ignore */ }
         }
       }, 2000);
     }
@@ -615,10 +646,19 @@ app.on('window-all-closed', () => {
       pythonProcess.stdin.write(JSON.stringify({ type: 'shutdown' }) + '\n');
       pythonProcess.stdin.end();
     } catch (e) { /* ignore */ }
-    // Hard timeout: if Python hasn't exited within 5s, force-kill and quit.
+    // Hard timeout: if Python hasn't exited within 5s, force-kill the entire
+    // process tree (on Windows this is critical — proc.kill() only kills the
+    // immediate process, leaving orphaned bash.exe/conhost.exe children).
     setTimeout(() => {
       if (pythonProcess && !pythonProcess.killed) {
-        try { pythonProcess.kill('SIGKILL'); } catch (e) { /* ignore */ }
+        try {
+          if (process.platform === 'win32') {
+            // Kill entire process tree via taskkill
+            require('child_process').execSync(`taskkill /F /T /PID ${pythonProcess.pid}`, { timeout: 5000 });
+          } else {
+            pythonProcess.kill('SIGKILL');
+          }
+        } catch (e) { /* ignore */ }
       }
       // On macOS, also force quit — window-all-closed normally skips app.quit()
       // but we're shutting down the backend, not just hiding the window.
@@ -636,7 +676,13 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
-  if (pythonProcess) {
-    try { pythonProcess.kill(); } catch (e) { /* ignore */ }
+  if (pythonProcess && !pythonProcess.killed) {
+    try {
+      if (process.platform === 'win32') {
+        require('child_process').execSync(`taskkill /F /T /PID ${pythonProcess.pid}`, { timeout: 5000 });
+      } else {
+        pythonProcess.kill();
+      }
+    } catch (e) { /* ignore */ }
   }
 });

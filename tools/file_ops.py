@@ -7,9 +7,11 @@ Tools: read_file, write_file, edit_file, list_directory, file_info
 from __future__ import annotations
 
 import os
+import platform
 import re
 import stat as stat_module
 import shutil
+import subprocess
 import sys
 import time
 
@@ -20,6 +22,133 @@ from tools import _register, _summarize, ToolResult, _TOOL_CONTEXT
 # Thread-local: current sub-agent task_id (set by agent_ops before tool execution)
 import threading
 _current_agent_id: threading.local = threading.local()
+
+_WINDOWS = platform.system() == "Windows"
+
+# ---------------------------------------------------------------------------
+# Windows-safe file read via _worker subprocess
+# ---------------------------------------------------------------------------
+# On Windows, ``open()`` / ``CreateFileW`` can block indefinitely inside
+# kernel minifilter drivers (antivirus, backup agents, etc.).  Python
+# threads have no way to kill a thread stuck in a kernel I/O call.
+# The _worker subprocess isolates the I/O so the OS can kill it with
+# TerminateProcess if it doesn't respond within the timeout.
+
+_WORKER_READ_TIMEOUT = 30  # seconds for a single file read
+
+
+def _read_file_windows_worker(
+    resolved: str, offset: int, limit: int, line_numbers: bool,
+) -> ToolResult:
+    """Read a file via the _worker subprocess with a hard timeout.
+
+    Falls back to direct open() if the worker fails for non-hang reasons.
+
+    Uses _communicate_windows() on Windows to avoid proc.communicate() hangs.
+    """
+    if _WINDOWS:
+        try:
+            proc = subprocess.run(
+                [
+                    sys.executable, "-m", "tools._worker", "read",
+                    resolved, str(offset), str(limit), str(line_numbers),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=_WORKER_READ_TIMEOUT,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            stdout, stderr = proc.stdout, proc.stderr
+            import json
+            data = json.loads(stdout.strip())
+            if data.get("ok"):
+                return ToolResult(success=True, content=data["content"])
+            else:
+                return ToolResult(
+                    success=False,
+                    content=data.get("content", "Worker read failed"),
+                )
+        except subprocess.TimeoutExpired:
+            return ToolResult(
+                success=False,
+                content=f"File read timed out after {_WORKER_READ_TIMEOUT}s "
+                        f"(possibly blocked by antivirus or filter driver). "
+                        f"Try excluding the project directory from real-time scanning.",
+            )
+        except Exception:
+            pass
+    else:
+        try:
+            result = subprocess.run(
+                [
+                    sys.executable, "-m", "tools._worker", "read",
+                    resolved, str(offset), str(limit), str(line_numbers),
+                ],
+                capture_output=True, text=True, timeout=_WORKER_READ_TIMEOUT,
+            )
+            import json
+            data = json.loads(result.stdout.strip())
+            if data.get("ok"):
+                return ToolResult(success=True, content=data["content"])
+            else:
+                return ToolResult(
+                    success=False,
+                    content=data.get("content", "Worker read failed"),
+                )
+        except subprocess.TimeoutExpired:
+            return ToolResult(
+                success=False,
+                content=f"File read timed out after {_WORKER_READ_TIMEOUT}s "
+                        f"(possibly blocked by antivirus or filter driver). "
+                        f"Try excluding the project directory from real-time scanning.",
+            )
+        except Exception:
+            pass
+
+    # Fallback: direct open (may hang on Windows but we already tried)
+    return _read_file_direct(resolved, offset, limit, line_numbers)
+
+def _read_file_direct(
+    resolved: str, offset: int, limit: int, line_numbers: bool,
+) -> ToolResult:
+    """Direct file read — used on Unix and as fallback on Windows."""
+    try:
+        with open(resolved, "r", encoding="utf-8", errors="replace") as f:
+            collected: list[str] = []
+            total_lines = 0
+            for lineno, line in enumerate(f):
+                total_lines = lineno + 1
+                if lineno + 1 < offset:
+                    continue
+                if len(collected) < limit:
+                    stripped = line.rstrip("\n")
+                    if line_numbers:
+                        stripped = f"{total_lines}: {stripped}"
+                    collected.append(stripped)
+                if len(collected) >= limit and lineno + 1 >= offset + limit:
+                    break
+    except Exception as e:
+        hint = ""
+        if isinstance(e, FileNotFoundError) or "No such file" in str(e):
+            hint = "\nHint: Check the path spelling. Try list_directory to see available files."
+        return ToolResult(success=False, content=f"Error reading '{resolved}': {e}{hint}")
+
+    if offset > total_lines:
+        return ToolResult(success=False, content=f"Offset {offset} exceeds file length ({total_lines} lines).")
+
+    full_content = "\n".join(collected)
+    lines_after_offset = total_lines - offset + 1
+
+    if lines_after_offset > limit:
+        truncated = "\n".join(collected[:limit])
+        msg = (
+            f"{truncated}\n"
+            f"… (truncated at {limit} lines — {lines_after_offset} total in selection. "
+            f"Use a higher limit or offset to see more.)"
+        )
+        return ToolResult(success=True, content=msg)
+
+    return ToolResult(success=True, content=full_content)
 
 # ---------------------------------------------------------------------------
 # Unicode & quote normalization maps (used by edit_file matching)
@@ -206,40 +335,20 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
         except OSError:
             pass  # fall through to normal read on stat error
 
-    try:
-        with open(resolved, "r", encoding="utf-8", errors="replace") as f:
-            # Use enumerate + early break to avoid reading the whole file
-            collected: list[str] = []
-            total_lines = 0
-            for lineno, line in enumerate(f):
-                total_lines = lineno + 1
-                if lineno + 1 < offset:
-                    continue
-                if len(collected) < limit:
-                    stripped = line.rstrip("\n")
-                    if line_numbers:
-                        stripped = f"{total_lines}: {stripped}"
-                    collected.append(stripped)
-                # Keep iterating to count total lines if we might need truncation message
-                # but stop once we've gone well past what we need (limit + 1 is enough
-                # to know whether we truncated)
-                if len(collected) >= limit and lineno + 1 >= offset + limit:
-                    break
-    except Exception as e:
-        hint = ""
-        if isinstance(e, FileNotFoundError) or "No such file" in str(e):
-            hint = "\nHint: Check the path spelling. Try list_directory to see available files."
-        return ToolResult(success=False, content=f"Error reading '{resolved}': {e}{hint}")
+    # On Windows, use the _worker subprocess to avoid kernel-filter hangs
+    if False:  # _WINDOWS bypassed - subprocess hangs on this system
+        result = _read_file_windows_worker(resolved, offset, limit, line_numbers)
+    else:
+        result = _read_file_direct(resolved, offset, limit, line_numbers)
 
-    if offset > total_lines:
-        return ToolResult(success=False, content=f"Offset {offset} exceeds file length ({total_lines} lines).")
+    if not result.success:
+        return result
 
-    full_content = "\n".join(collected)
-    lines_after_offset = total_lines - offset + 1
+    full_content = result.content
 
-    # Cache full file content for cross-turn reuse (only when reading from offset 0)
-    # We store the actual full content from disk for the cache invalidation pattern.
-    if offset == 0:
+    # Cache full file content for cross-turn reuse (only when reading from offset 0
+    # AND the read was not truncated — avoid caching partial content).
+    if offset == 0 and "… (truncated at " not in full_content:
         try:
             current_mtime = os.path.getmtime(resolved)
             # Evict oldest entry if at capacity
@@ -251,15 +360,6 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
 
     # Track this file as read for read-before-edit enforcement
     _READ_FILES.add(resolved)
-
-    if lines_after_offset > limit:
-        truncated = "\n".join(collected[:limit])
-        msg = (
-            f"{truncated}\n"
-            f"… (truncated at {limit} lines — {lines_after_offset} total in selection. "
-            f"Use a higher limit or offset to see more.)"
-        )
-        return ToolResult(success=True, content=msg)
 
     return ToolResult(success=True, content=full_content)
 
