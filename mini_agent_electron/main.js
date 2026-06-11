@@ -19,13 +19,14 @@ app.commandLine.appendSwitch('js-flags', '--max-old-space-size=128 --max-semi-sp
 
 // Windows: Chromium's disk cache can hit "Access is denied" (0x5) on some
 // machines when trying to write to the default %LOCALAPPDATA% cache location.
-// Disable the GPU cache (the app doesn't need GPU-accelerated rendering)
-// and use a temp dir for the HTTP disk cache that's guaranteed writable.
+// This is a local-first chat app that loads files via file:// — disk caches
+// are not needed.  Disable them entirely to avoid permission errors.
 if (process.platform === 'win32') {
-  app.commandLine.appendSwitch('disable-gpu-cache');
-  const cacheDir = path.join(require('os').tmpdir(), 'mini_agent_cache');
-  try { fs.mkdirSync(cacheDir, { recursive: true }); } catch (e) { /* ignore */ }
-  app.setPath('cache', cacheDir);
+  // GPU shader disk cache (fixes: ERROR:gpu\ipc\host\gpu_disk_cache.cc:737)
+  app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
+  // HTTP disk cache (fixes: ERROR:net\disk_cache\disk_cache.cc:284)
+  app.commandLine.appendSwitch('disable-http-cache');
+  console.log('[main] Windows: disabled disk caches to avoid Access Denied errors');
 }
 
 // ---------------------------------------------------------------------------
