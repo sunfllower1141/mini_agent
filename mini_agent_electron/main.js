@@ -194,9 +194,15 @@ function spawnPythonBackend(workspacePath) {
     // HF warnings, tqdm bars, etc. are noise in the UI.
     const text = data.toString().trim();
     if (text) {
-      // Suppress known-harmless multiprocess shutdown traceback (Python 3.12+)
-      // multiprocess 0.70.x resource_tracker hits AttributeError on _recursion_count
-      if (text.includes('multiprocess/resource_tracker.py') && text.includes('_recursion_count')) {
+      // Suppress known-harmless multiprocess shutdown tracebacks (Python 3.12+).
+      // multiprocess 0.70.x resource_tracker __del__ fires after interpreter
+      // teardown begins, causing AttributeError on _recursion_count, _stop, etc.
+      if (text.includes('multiprocess/resource_tracker.py') && text.includes('Exception ignored')) {
+        return;
+      }
+      // Suppress HuggingFace unauthenticated-request warning (noise in UI).
+      // sentence-transformers downloads models from HF Hub without an auth token.
+      if (text.includes('unauthenticated requests to the HF Hub')) {
         return;
       }
       process.stderr.write(`[python:stderr] ${data}`);

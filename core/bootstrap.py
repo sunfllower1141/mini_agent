@@ -225,6 +225,10 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     # Reset pattern rules for new session
     from core.context_inject import _reset_pattern_rules
     _reset_pattern_rules()
+    # Reset strategy hint dedup cache so hints can fire in new sessions
+    from core.context_inject import _inject_strategy_hint
+    if hasattr(_inject_strategy_hint, '_injected'):
+        _inject_strategy_hint._injected.clear()
 
     session = _requests.Session()
     # Set default timeout (connect, read) for every request.

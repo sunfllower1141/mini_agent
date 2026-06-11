@@ -51,6 +51,7 @@ LOG_DIR = os.path.join(os.path.expanduser("~"), ".mini_agent", "logs")
 AGENT_LOG = os.path.join(LOG_DIR, "agent.log")
 API_ERROR_LOG = os.path.join(LOG_DIR, "api_error.log")
 ERROR_TRACES_LOG = os.path.join(LOG_DIR, "error_traces.log")
+PROMPT_LOG = os.path.join(LOG_DIR, "prompts.log")
 
 os.makedirs(LOG_DIR, exist_ok=True)
 
@@ -227,6 +228,48 @@ def log_api_error(
         "API error | provider=%s model=%s status=%s body=%s",
         provider, model, status_code, error_body[:200],
         extra={"provider": provider, "status_code": status_code},
+    )
+
+
+def log_prompt(
+    messages: list[dict],
+    *,
+    provider: str = "",
+    model: str = "",
+    turn: int = 0,
+    session: str = "",
+) -> None:
+    """Write the full LLM prompt (messages array) to prompts.log.
+
+    Called once per API call from ``call_llm()`` in api.py.  Writes a
+    JSON-lines entry with the complete message list plus metadata so
+    every prompt is auditable.
+    """
+    # Rough token estimate: char count / 4
+    msg_json = json.dumps(messages, default=str, ensure_ascii=False)
+    est_tokens = len(msg_json) // 4
+
+    entry: dict = {
+        "ts": _ts(),
+        "provider": provider,
+        "model": model,
+        "turn": turn,
+        "message_count": len(messages),
+        "estimated_tokens": est_tokens,
+        "session": session,
+        "messages": messages,
+    }
+    try:
+        with open(PROMPT_LOG, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, default=str, ensure_ascii=False) + "\n")
+    except OSError:
+        pass  # Last-resort: don't crash on log write failure
+
+    # Also write a lightweight info line to the main agent.log
+    logger = get_logger("prompts")
+    logger.debug(
+        "Prompt sent | provider=%s model=%s turn=%d messages=%d est_tokens=%d",
+        provider, model, turn, len(messages), est_tokens,
     )
 
 

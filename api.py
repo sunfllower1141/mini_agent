@@ -27,7 +27,7 @@ from core.config import AgentConfig
 from retry import _request_with_retry
 from stream import _parse_stream
 from tools.skills import get_active_tools
-from logging_setup import log_api_error
+from logging_setup import log_api_error, log_prompt
 
 # ---------------------------------------------------------------------------
 # API rate limiter — prevents thundering-herd when N sub-agents share one key
@@ -146,10 +146,11 @@ def _compute_complexity(messages: list[dict]) -> str:
             if len(user_text) > 2000:
                 break
     result = "simple" if (len(user_text) < 300 and not _ROUTE_SIMPLE_KEYWORDS.search(user_text)) else "complex"
-    _complexity_cache[list_id] = result
-    # Cap to prevent unbounded growth from stale entries
-    if len(_complexity_cache) > _MAX_COMPLEXITY_CACHE_ENTRIES:
-        _complexity_cache.pop(next(iter(_complexity_cache)))
+    with _clean_messages_cache_lock:
+        _complexity_cache[list_id] = result
+        # Cap to prevent unbounded growth from stale entries
+        if len(_complexity_cache) > _MAX_COMPLEXITY_CACHE_ENTRIES:
+            _complexity_cache.pop(next(iter(_complexity_cache)))
     return result
 
 
@@ -300,6 +301,14 @@ def call_llm(
     safe_messages = _strip_orphaned_tool_messages(clean_messages)
 
     payload = _build_payload(config, messages, safe_messages)
+
+    # Log every prompt sent to the LLM for audit/debugging
+    log_prompt(
+        safe_messages,
+        provider=config.api_provider,
+        model=payload.get("model", "?"),
+        turn=getattr(config, "turn_count", 0),
+    )
 
     # Anthropic's OpenAI-compatible endpoint uses Bearer auth (same as DeepSeek)
     # Gate all LLM API calls through a semaphore to prevent thundering-herd

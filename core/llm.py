@@ -97,9 +97,6 @@ def _save_turn_summary(
         _TOOL_CONTEXT._min_turn = oldest + 1
 
 
-# Read-only nudge threshold (used by context_inject._inject_progress_check via _TOOL_CONTEXT)
-_READ_ONLY_NUDGE_THRESHOLD: int = 3  # turns of pure reads before nudge
-
 # ---------------------------------------------------------------------------
 # Context injection — imported from context_inject.py
 # (extracted to keep the orchestrator focused on the main loop).
