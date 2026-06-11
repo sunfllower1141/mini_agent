@@ -53,6 +53,11 @@ API_ERROR_LOG = os.path.join(LOG_DIR, "api_error.log")
 ERROR_TRACES_LOG = os.path.join(LOG_DIR, "error_traces.log")
 PROMPT_LOG = os.path.join(LOG_DIR, "prompts.log")
 
+# Rotation constants for non-standard log files (not using RotatingFileHandler
+# because these logs write custom JSON entries, not standard log records)
+_LOG_MAX_BYTES = 10 * 1024 * 1024   # 10 MB
+_LOG_BACKUP_COUNT = 3               # keep .1 .. .3 backups
+
 os.makedirs(LOG_DIR, exist_ok=True)
 
 # ---------------------------------------------------------------------------
@@ -220,6 +225,7 @@ def log_api_error(
         "session": session,
     }
     try:
+        _rotate_log_file(API_ERROR_LOG)
         with open(API_ERROR_LOG, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry, default=str) + "\n")
     except OSError:
@@ -229,6 +235,42 @@ def log_api_error(
         provider, model, status_code, error_body[:200],
         extra={"provider": provider, "status_code": status_code},
     )
+
+
+def _rotate_log_file(log_path: str, max_bytes: int | None = None,
+                     backup_count: int | None = None) -> None:
+    """Rotate *log_path* when it exceeds *max_bytes*.
+
+    Uses the same rollover scheme as RotatingFileHandler: rename .2→.3,
+    .1→.2, base→.1, then start a new base file.  Defaults to module-level
+    _LOG_MAX_BYTES / _LOG_BACKUP_COUNT.
+    """
+    if max_bytes is None:
+        max_bytes = _LOG_MAX_BYTES
+    if backup_count is None:
+        backup_count = _LOG_BACKUP_COUNT
+
+    if not os.path.exists(log_path):
+        return
+    try:
+        if os.path.getsize(log_path) < max_bytes:
+            return
+    except OSError:
+        return
+
+    # Roll backups: log.2 → .3, .1 → .2, base → .1
+    for i in range(backup_count - 1, 0, -1):
+        old = f"{log_path}.{i}"
+        new = f"{log_path}.{i + 1}"
+        try:
+            if os.path.exists(old):
+                os.replace(old, new)
+        except OSError:
+            pass
+    try:
+        os.replace(log_path, f"{log_path}.1")
+    except OSError:
+        pass
 
 
 def log_prompt(
@@ -260,6 +302,7 @@ def log_prompt(
         "messages": messages,
     }
     try:
+        _rotate_log_file(PROMPT_LOG)
         with open(PROMPT_LOG, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry, default=str, ensure_ascii=False) + "\n")
     except OSError:
@@ -297,6 +340,7 @@ def log_error_trace(
         entry["traceback"] = traceback.format_exc()
 
     try:
+        _rotate_log_file(ERROR_TRACES_LOG)
         with open(ERROR_TRACES_LOG, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry, default=str) + "\n")
     except OSError:

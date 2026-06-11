@@ -433,6 +433,11 @@ class AgentRunner:
 
         # Persist
         self.messages = self.memory.save(self.messages)
+        # memory.save() strips system messages to save DB space (see
+        # _clean_messages).  Restore the main system prompt so the next
+        # turn runs with proper instructions.
+        if not self.messages or self.messages[0].get("role") != "system":
+            self.messages.insert(0, {"role": "system", "content": build_system_prompt(self.config)})
 
         # Notify Electron
         send_msg({

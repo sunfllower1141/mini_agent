@@ -502,6 +502,7 @@ def run_sub_agent(
                 session=requests,
                 cancel_event=cancel_event,
                 on_token=on_token,
+                turn_count=turn_count,
             )
             config.model = _saved_model
             config.api_key = _saved_key

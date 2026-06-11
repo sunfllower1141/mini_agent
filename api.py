@@ -236,6 +236,8 @@ def call_llm(
     session: requests.Session | None = None,
     on_tool_ready: Callable[[dict], Any] | None = None,
     cancel_event: threading.Event | None = None,
+    *,
+    turn_count: int = 0,
 ) -> dict | None:
     """Send messages to the LLM, return the assistant message dict.
 
@@ -307,7 +309,8 @@ def call_llm(
         safe_messages,
         provider=config.api_provider,
         model=payload.get("model", "?"),
-        turn=getattr(config, "turn_count", 0),
+        turn=turn_count,
+        session=config.workspace or "",
     )
 
     # Anthropic's OpenAI-compatible endpoint uses Bearer auth (same as DeepSeek)

@@ -465,6 +465,7 @@ def _api_call_phase(
     approve_callback: Callable[..., Any] | None = None,
     cancel_event: threading.Event | None = None,
     agent_id: str = "",
+    turn_count: int = 0,
 ) -> tuple[dict, list[tuple], set[int]]:
     """Call the LLM, handling streaming tool execution during the call.
 
@@ -510,7 +511,8 @@ def _api_call_phase(
 
     msg = call_llm(messages, config, on_token=_outer_on_token,
                         session=session, on_tool_ready=_on_tool_ready,
-                        cancel_event=cancel_event)
+                        cancel_event=cancel_event,
+                        turn_count=turn_count)
 
     # Strip internal tracking fields and merge into executed set
     fired_indices: set[int] = set(msg.pop("_fired_indices", []))
@@ -684,6 +686,7 @@ def run_agent_turn(
                 on_tool_output=on_tool_output,
                 approve_callback=approve_callback,
                 cancel_event=cancel_event,
+                turn_count=turn_count,
             )
 
             if cancel_event is not None and cancel_event.is_set():
