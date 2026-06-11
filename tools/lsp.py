@@ -168,7 +168,12 @@ class LspConnection:
                 # servers (typescript-language-server) that spawn child
                 # processes like tsserver.  proc.kill() alone leaves
                 # orphans that accumulate and cause system thrashing.
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                # On Windows, process groups are not supported so we fall
+                # back to proc.kill() (which calls TerminateProcess).
+                if os.name == 'nt':
+                    proc.kill()
+                else:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
                 proc.wait(timeout=2)
             except OSError:
                 pass
@@ -235,7 +240,7 @@ class LspConnection:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             bufsize=0,
-            start_new_session=True,
+            start_new_session=(os.name != 'nt'),
             env={**os.environ, "PYTHONUNBUFFERED": "1"},
         )
         # On Windows, start a background reader thread since select doesn't work on pipes
