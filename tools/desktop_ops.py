@@ -25,9 +25,12 @@ Tools:
 
 from __future__ import annotations
 
+import logging
 import platform
 import subprocess
 import time
+
+_log = logging.getLogger(__name__)
 
 from core.safety import ReadSafetyGate, WriteSafetyGate
 from tools import _register, _summarize, ToolResult
@@ -205,7 +208,7 @@ def _get_mcp_desktop_server() -> str | None:
                 if any(kw in lower for kw in desktop_keywords):
                     return name
     except Exception:
-        pass
+        _log.debug("_find_desktop_mcp_server: MCP connection scan failed", exc_info=True)
     return None
 
 
@@ -368,7 +371,7 @@ def _walk_atomacos_tree(element, depth: int = 0, max_depth: int = 4,
                     _walk_atomacos_tree(child, depth + 1, max_depth, deadline)
                 )
     except Exception:
-        pass
+        _log.debug("_walk_atomacos_tree: child iteration failed", exc_info=True)
 
     return elements
 
@@ -384,11 +387,11 @@ def _format_app_no_window(app) -> str:
                 try:
                     menu_items.append(str(getattr(item, 'AXTitle', item)))
                 except Exception:
-                    pass
+                    _log.debug("_format_app_no_window: menu item read failed", exc_info=True)
         if menu_items:
             return f"Frontmost app: {app_name}\nMenu bar items: {', '.join(menu_items)}"
     except Exception:
-        pass
+        _log.debug("_format_app_no_window: menu bar access failed", exc_info=True)
     return f"Frontmost app: {app_name} (no windows open)"
 
 
@@ -433,7 +436,7 @@ def _macos_atomacos_click(role: str, name: str) -> ToolResult:
                     if element:
                         break
             except Exception:
-                pass
+                _log.debug("_find_atomacos_element: window scan failed", exc_info=True)
 
         if element is None:
             return ToolResult(
@@ -505,7 +508,7 @@ def _find_atomacos_element(element, role: str, name: str, max_depth: int = 8,
                 if result is not None:
                     return result
     except Exception:
-        pass
+        _log.debug("_find_atomacos_element: child search failed", exc_info=True)
 
     return None
 
@@ -621,7 +624,7 @@ def _walk_uia_tree(element, depth: int = 0, max_depth: int = 5) -> list[dict]:
         for child in children:
             elements.extend(_walk_uia_tree(child, depth + 1, max_depth))
     except Exception:
-        pass
+        _log.debug("_walk_uia_tree: child iteration failed", exc_info=True)
 
     return elements
 
@@ -675,7 +678,7 @@ def _find_uia_element(element, role: str, name: str, max_depth: int = 6):
             if result is not None:
                 return result
     except Exception:
-        pass
+        _log.debug("_find_uia_element: child search failed", exc_info=True)
 
     return None
 

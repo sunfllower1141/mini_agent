@@ -43,6 +43,87 @@ _TURN_INTERVAL_COMM_NUDGE = 3        # turns between communication nudges
 
 
 # ---------------------------------------------------------------------------
+# Sub-agent helpers
+# ---------------------------------------------------------------------------
+
+
+def _write_sub_agent_report(
+    task_id: str,
+    task_preview: str,
+    result: "SubAgentResult",
+) -> "SubAgentResult":
+    """Write a sub-agent report to disk and return result with inline preview.
+
+    Writes to reports/<task_id>.md, rotates old reports/logs (keeps 20 each),
+    and replaces result.content with a smart preview that prioritizes
+    findings/markers over preamble.
+    """
+    import os as _os
+    _os.makedirs("reports", exist_ok=True)
+    _label = task_id
+    _path = f"reports/{_label}.md"
+    try:
+        with open(_path, "w", encoding="utf-8") as _f:
+            _f.write(f"# Sub-agent report: {_label}\n\n")
+            _f.write(f"**Task**: {task_preview}\n\n")
+            _f.write(f"**Success**: {result.success}\n")
+            _f.write(f"**Turns**: {result.turns_used}\n")
+            _f.write(f"**Tool calls**: {result.tool_calls_made}\n")
+            if result.error:
+                _f.write(f"**Error**: {result.error}\n\n")
+            _f.write(f"\n## Result\n\n{result.content}\n")
+            if result.scratchpad:
+                _f.write(f"\n## Scratchpad\n\n{result.scratchpad}\n")
+        # Auto-cleanup: keep only the most recent N reports by mtime
+        _MAX_REPORTS = 20
+        _report_dir = "reports"
+        try:
+            _all_reports = sorted(
+                [_os.path.join(_report_dir, f) for f in _os.listdir(_report_dir) if f.endswith(".md")],
+                key=_os.path.getmtime,
+            )
+            for _old in _all_reports[:-_MAX_REPORTS]:
+                _os.remove(_old)
+        except OSError:
+            pass
+        # Auto-cleanup: keep only the most recent N stderr logs by mtime
+        _MAX_LOGS = 20
+        _log_dir = "logs"
+        try:
+            _all_logs = sorted(
+                [_os.path.join(_log_dir, f) for f in _os.listdir(_log_dir) if f.endswith("_stderr.log")],
+                key=_os.path.getmtime,
+            )
+            for _old in _all_logs[:-_MAX_LOGS]:
+                _os.remove(_old)
+        except OSError:
+            pass
+        # Smart inline preview: prioritize findings/structured content over preamble
+        _content = result.content
+        _finding_markers = [
+            "## Findings", "## Issues", "| Severity |", "| File |",
+            "### \u274c CRITICAL", "### \u274c HIGH", "### \U0001f534", "### \U0001f7e1",
+            "**CRITICAL**", "**HIGH**", "| Priority |",
+        ]
+        _best_idx = len(_content)
+        for _marker in _finding_markers:
+            _idx = _content.find(_marker)
+            if _idx != -1 and _idx < _best_idx:
+                _best_idx = _idx
+        _preview_start = 0
+        if _best_idx < len(_content) and _best_idx > 0:
+            _preview_start = max(0, _best_idx - 50)
+            _preview = _content[_preview_start:_preview_start + 500]
+        else:
+            _preview = _content[:300]
+        _truncated = len(_content) > len(_preview) + _preview_start if _best_idx < len(_content) else len(_content) > 300
+        result.content = f"[report: {_path}] {'...' if _best_idx > 50 else ''}{_preview}{'...' if _truncated else ''}"
+    except OSError:
+        pass  # can't write report; return inline as fallback
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Sub-agent loop (runs in a background thread)
 # ---------------------------------------------------------------------------
 
@@ -194,71 +275,7 @@ def run_sub_agent(
 
     # ── Helper: write sub-agent report to file (step 4) ──
     def _write_report(result: SubAgentResult) -> SubAgentResult:
-        import os as _os
-        _os.makedirs("reports", exist_ok=True)
-        _label = task_id  # unique per sub-agent
-        _path = f"reports/{_label}.md"
-        try:
-            with open(_path, "w", encoding="utf-8") as _f:
-                _f.write(f"# Sub-agent report: {_label}\n\n")
-                _f.write(f"**Task**: {task[:200]}\n\n")
-                _f.write(f"**Success**: {result.success}\n")
-                _f.write(f"**Turns**: {result.turns_used}\n")
-                _f.write(f"**Tool calls**: {result.tool_calls_made}\n")
-                if result.error:
-                    _f.write(f"**Error**: {result.error}\n\n")
-                _f.write(f"\n## Result\n\n{result.content}\n")
-                if result.scratchpad:
-                    _f.write(f"\n## Scratchpad\n\n{result.scratchpad}\n")
-            # Auto-cleanup: keep only the most recent N reports by mtime
-            _MAX_REPORTS = 20
-            _report_dir = "reports"
-            try:
-                _all_reports = sorted(
-                    [_os.path.join(_report_dir, f) for f in _os.listdir(_report_dir) if f.endswith(".md")],
-                    key=_os.path.getmtime,
-                )
-                for _old in _all_reports[:-_MAX_REPORTS]:
-                    _os.remove(_old)
-            except OSError:
-                pass  # best-effort cleanup
-            # Auto-cleanup: keep only the most recent N stderr logs by mtime
-            _MAX_LOGS = 20
-            _log_dir = "logs"
-            try:
-                _all_logs = sorted(
-                    [_os.path.join(_log_dir, f) for f in _os.listdir(_log_dir) if f.endswith("_stderr.log")],
-                    key=_os.path.getmtime,
-                )
-                for _old in _all_logs[:-_MAX_LOGS]:
-                    _os.remove(_old)
-            except OSError:
-                pass  # best-effort cleanup
-            # Smart inline preview: prioritize findings/structured content over preamble.
-            # Scan for finding markers; if found, show those. Otherwise fall back to head truncation.
-            _content = result.content
-            _finding_markers = [
-                "## Findings", "## Issues", "| Severity |", "| File |",
-                "### ❌ CRITICAL", "### ❌ HIGH", "### 🔴", "### 🟡",
-                "**CRITICAL**", "**HIGH**", "| Priority |",
-            ]
-            _best_idx = len(_content)  # fallback: show from start
-            for _marker in _finding_markers:
-                _idx = _content.find(_marker)
-                if _idx != -1 and _idx < _best_idx:
-                    _best_idx = _idx
-            _preview_start = 0
-            if _best_idx < len(_content) and _best_idx > 0:
-                # Found a marker — show from 50 chars before it, or from start if near beginning
-                _preview_start = max(0, _best_idx - 50)
-                _preview = _content[_preview_start:_preview_start + 500]
-            else:
-                _preview = _content[:300]
-            _truncated = len(_content) > len(_preview) + _preview_start if _best_idx < len(_content) else len(_content) > 300
-            result.content = f"[report: {_path}] {'...' if _best_idx > 50 else ''}{_preview}{'...' if _truncated else ''}"
-        except OSError:
-            pass  # can't write report; return inline as fallback
-        return result
+        return _write_sub_agent_report(task_id, task[:200], result)
 
     # ── Helper: build SubAgentResult with current local state ──
     def _make_result(success: bool, content: str, error: str | None = None) -> SubAgentResult:

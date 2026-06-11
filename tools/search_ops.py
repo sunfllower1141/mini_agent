@@ -7,10 +7,13 @@ Tools: find_symbol, find_usages, semantic_search, web_search
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re as _re
 import threading
 from typing import Any
+
+_log = logging.getLogger(__name__)
 
 from core.safety import ReadSafetyGate, WriteSafetyGate
 from tools import _register, _summarize, ToolResult, _TOOL_CONTEXT
@@ -85,7 +88,7 @@ def build_symbol_index(root: str) -> dict[str, list[dict]]:
         if os.path.exists(cache_path):
             cache_mtime = os.path.getmtime(cache_path)
     except Exception:
-        pass
+        _log.debug("_get_symbol_index: cache mtime check failed", exc_info=True)
 
     # Fast path: if cache exists and we know no .py file is newer, return cached data
     if cache_mtime > 0.0 and _INDEX_MAX_MTIME > 0.0 and cache_mtime >= _INDEX_MAX_MTIME:
@@ -183,7 +186,7 @@ def build_symbol_index(root: str) -> dict[str, list[dict]]:
             _json.dump({"symbols": symbol_idx, "references": ref_idx}, f)
         os.replace(tmp, cache_path)  # atomic rename
     except Exception:
-        pass
+        _log.debug("_build_symbol_index: cache write failed", exc_info=True)
 
     return symbol_idx
 
@@ -262,7 +265,7 @@ def _reindex_file(filepath: str, root: str) -> None:
             json.dump({"symbols": _SYMBOL_INDEX, "references": _REF_INDEX or {}}, f)
         os.replace(tmp, cache_path)  # atomic rename
     except Exception:
-        pass
+        _log.debug("_persist_index: cache write failed", exc_info=True)
 
 
 def _get_symbol_index(root: str) -> dict[str, list[dict]]:

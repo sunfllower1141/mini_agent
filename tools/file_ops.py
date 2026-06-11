@@ -6,6 +6,7 @@ Tools: read_file, write_file, edit_file, list_directory, file_info
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 import stat as stat_module
@@ -13,6 +14,8 @@ import shutil
 import sys
 import tempfile
 import time
+
+_log = logging.getLogger(__name__)
 
 from core.safety import ReadSafetyGate, WriteSafetyGate
 from tools import clear_tool_cache
@@ -1345,7 +1348,7 @@ def _init_rules(args: dict, _wg, read_gate: ReadSafetyGate) -> ToolResult:
                             if kw in line_stripped and kw not in frameworks:
                                 frameworks[kw] = cat
             except Exception:
-                pass
+                _log.debug("_init_rules: framework detection failed", exc_info=True)
         for framework, cat in sorted(frameworks.items()):
             knowledge.append((
                 f"Uses {framework} ({cat})",

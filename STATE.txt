@@ -1,4 +1,5 @@
 # mini_agent Architecture State
+# Last updated: 2026-06-11 (code audit: extract json_repair, fix bare excepts, decompose sub_agent)
 # Last updated: 2026-06-10 (file_ops hardening: byte-size guard, binary heuristic, cache bump)
 # Last updated: 2026-06-06 (context engineering: codebase_map + compaction)
 # Last updated: 2026-06-06 (electron: fix hang on exit — app.quit() on window-all-closed)
@@ -192,6 +193,21 @@
     >15% ratio (``_BINARY_CONTROL_RATIO=0.15``). Catches encrypted/ciphertext files
     that pass null-byte check. (c) **File cache 50→128**: ``_FILE_CACHE_MAX=128``
     with LRU eviction on insertion. Mtime-based invalidation for cross-turn reuse.
+
+24. **JSON repair extracted to tools/json_repair.py**: The ``_repair_json()`` function
+    (91 lines) moved from ``tools/__init__.py`` to its own module. ``tools/__init__.py``
+    imports ``repair_json as _repair_json`` for backward compatibility. Also removed
+    unused ``sqlite3`` import from ``tools/__init__.py``. (new 2026-06-11)
+
+25. **Bare except:pass replaced with debug logging**: 28 instances of
+    ``except Exception: pass`` across 9 files now use ``_log.debug(..., exc_info=True)``.
+    All are best-effort patterns (cleanup, tree walking, context injection) where
+    the previous silent swallowing made debugging impossible. No behavioral change.
+    (new 2026-06-11)
+
+26. **sub_agent report writer extracted**: ``_write_sub_agent_report()`` moved from
+    inner function of ``run_sub_agent()`` (681 lines) to module-level helper.
+    Function reduced to 617 lines; further decomposition pending. (new 2026-06-11)
 
 ## Known Issues
 - `_json_rpc_shared.py` — shared drain_stderr() utility used by lsp.py and mcp_client.py

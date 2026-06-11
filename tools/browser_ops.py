@@ -17,9 +17,12 @@ a clear error message if it's missing.
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import webbrowser as _webbrowser
+
+_log = logging.getLogger(__name__)
 
 from core.safety import ReadSafetyGate, WriteSafetyGate
 from tools import _register, _summarize, ToolResult
@@ -138,7 +141,7 @@ def _close_browser():
         try:
             _PLAYWRIGHT_INSTANCE.__exit__(None, None, None)
         except Exception:
-            pass
+            _log.debug("_close_browser: Playwright exit failed", exc_info=True)
         _PLAYWRIGHT_INSTANCE = None
     _PAGE = None
     _BROWSER_THREAD_ID = None
@@ -150,7 +153,7 @@ def _close_browser():
             loop.stop()
         loop.close()
     except Exception:
-        pass
+        _log.debug("_close_browser: event loop shutdown failed", exc_info=True)
 
 
 # ---------------------------------------------------------------------------

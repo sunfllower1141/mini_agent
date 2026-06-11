@@ -27,10 +27,13 @@ Protocol (Python → Electron):
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import sys
 import threading
+
+_log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Windows: force UTF-8 for all I/O.  Without this, Python defaults to the
@@ -46,7 +49,7 @@ if sys.platform == "win32":
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
         except Exception:
-            pass
+            _log.debug("server: stdio reconfigure failed", exc_info=True)
 
 # Ensure the parent mini_agent package is importable.
 # main.js spawns us with cwd = mini_agent root, so cwd is the right path.
@@ -807,7 +810,7 @@ def main() -> None:
         runner.messages = runner.memory.save(runner.messages)
         runner.memory.close()
     except Exception:
-        pass
+        _log.debug("server: session cleanup failed", exc_info=True)
 
 
 if __name__ == "__main__":

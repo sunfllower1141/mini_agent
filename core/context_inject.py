@@ -11,8 +11,11 @@ Extracted from llm.py to keep the orchestrator focused on the main loop.
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess as _sp
+
+_log = logging.getLogger(__name__)
 import sys
 import threading
 from collections import deque
@@ -409,7 +412,7 @@ def _inject_modified_files_checkpoint(
                 if caller_summaries:
                     kg_hint = "\nCaller impact analysis:\n" + "\n".join(caller_summaries)
         except Exception:
-            pass
+            _log.debug("_inject_modified_files_checkpoint: caller analysis failed", exc_info=True)
 
     ckpt = (
         f"Files modified this session:\n{mod_list}\n"
@@ -647,7 +650,7 @@ def _inject_post_edit_verification(messages: list[dict]) -> None:
                         names_str += f" (+{len(names) - 3})"
                     lines.append(f"  {f}: {names_str}")
     except Exception:
-        pass
+        _log.debug("_inject_post_edit_verification: caller lookup failed", exc_info=True)
 
     lines.append("\nConsider running `verify` or `run_tests` for affected files.")
     messages.append({
@@ -796,7 +799,7 @@ def _inject_edit_risk_context(messages: list[dict]) -> None:
                         caller_summary += f" (+{len(callers) - 3} more files)"
                     risk_items.append(f"callers: {caller_summary} — verify after changes")
             except Exception:
-                pass
+                _log.debug("_inject_edit_risk_context: caller analysis failed", exc_info=True)
 
         # 5. Git blame — who last modified this file
         try:
@@ -1459,7 +1462,7 @@ def _inject_context(
             from core.knowledge_graph import ensure_graph_built
             ensure_graph_built(workspace)
         except Exception:
-            pass
+            _log.debug("_inject_context: knowledge graph build failed", exc_info=True)
 
     # One-time injections (first turn only)
     _inject_handoff_context(

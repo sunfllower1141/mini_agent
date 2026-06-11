@@ -6,6 +6,7 @@ Tools: run_shell, task_status, search_files, run_tests, verify, git
 """
 from __future__ import annotations
 
+import logging
 import os
 import platform
 import re
@@ -13,6 +14,8 @@ import shutil
 import subprocess
 import threading
 import uuid
+
+_log = logging.getLogger(__name__)
 
 from core.safety import ReadSafetyGate, WriteSafetyGate
 from tools import _register, _summarize, ToolResult, _TASK_REGISTRY
@@ -139,7 +142,7 @@ def _persist_test_output(output: str) -> None:
         conn.commit()
         conn.close()
     except Exception:
-        pass
+        _log.debug("_write_test_output: SQLite write failed", exc_info=True)
 
 
 _STREAM_READER_MAX_LINES = 10000  # cap to prevent unbounded memory growth
@@ -159,7 +162,7 @@ def _stream_reader(stream, collector: list[str], forward: bool = False,
             try:
                 on_output(prefix + line)
             except Exception:
-                pass
+                _log.debug("_stream_reader: on_output callback failed", exc_info=True)
     stream.close()
 
 
@@ -216,7 +219,7 @@ def _task_status(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolR
                 test_out = "\n".join(lines[:100]) + f"\n... (truncated - {len(lines)} total lines)"
             output_msg = f"\n\n--- Test Output ---\n{test_out}"
     except Exception:
-        pass
+        _log.debug("task_status: test output formatting failed", exc_info=True)
     return ToolResult(success=True, content=f"Task {task_id}: completed with exit_code={returncode}.{output_msg}")
 
 

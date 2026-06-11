@@ -13,8 +13,11 @@ Both ``llm.py`` and ``sub_agent.py`` import from here — no cycle.
 
 from __future__ import annotations
 
+import logging
 import re
 import threading
+
+_log = logging.getLogger(__name__)
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from typing import Any, TYPE_CHECKING
@@ -379,7 +382,7 @@ def call_llm(
                 try:
                     r.close()
                 except Exception:
-                    pass
+                    _log.debug("stream: response close failed after timeout", exc_info=True)
                 print(
                     f"\n  ⚠ stream timed out after {_STREAM_TIMEOUT}s — using partial response",
                     file=sys.stderr, flush=True,

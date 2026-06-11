@@ -2,6 +2,26 @@
 
 Self-modification audit trail — what the agent changed and why.
 
+## 2026-06-11 — Code Audit: Cleanup & Decomposition
+### Changed
+- **Extracted `_repair_json`** → `tools/json_repair.py`. Removed 88 lines from
+  `tools/__init__.py`. Backward-compatible import kept.
+- **Removed unused `sqlite3` import** from `tools/__init__.py`.
+- **Fixed 28 bare `except Exception: pass` blocks** across 9 files
+  (desktop_ops, browser_ops, search_ops, shell_ops, file_ops, context_inject,
+  api, server, tools/__init__.py). Replaced with `_log.debug(..., exc_info=True)`
+  so errors are traceable but behavior is unchanged.
+- **Decomposed `run_sub_agent()`**: extracted `_write_sub_agent_report()` from
+  inner function to module-level. Function reduced from 681→617 lines.
+- **Added `logging` module imports** to 6 files that previously had no logger
+  (desktop_ops, browser_ops, search_ops, shell_ops, file_ops, context_inject,
+  api, server).
+### Reason
+Code audit found 4 critical/medium issues: oversized monolith functions,
+28 silent error swallowers, an unused import, and an inline JSON repair
+function better suited as its own module. All changes are behavioral no-ops
+verified by 1084 passing tests.
+
 ## 2026-06-08 — Windows setup.bat hardening
 ### Fixed
 - **Node.js version check**: Now requires Node ≥ 22 (not just any version).
