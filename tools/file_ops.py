@@ -214,6 +214,35 @@ def _canonicalize_for_match(s: str) -> str:
 
 _READ_FILES: set[str] = set()
 
+# ---------------------------------------------------------------------------
+# ACI (Agent-Computer Interface) upgrade: syntax validation before applying
+# edits.  Catch broken Python syntax before the edit cascades into a series
+# of compounding failures.  This is the SWE-agent linter-in-edit pattern.
+# ---------------------------------------------------------------------------
+
+def _validate_python_syntax(content: str, filepath: str) -> str | None:
+    """Return an error message if *content* is not valid Python, else None.
+
+    Uses ``compile()`` for fast in-process validation.  Only checks .py files.
+    """
+    if not filepath.endswith(".py"):
+        return None
+    try:
+        compile(content, filepath, "exec")
+    except SyntaxError as e:
+        # Build a helpful pointer line
+        lines = content.split("\n")
+        lineno = e.lineno or 1
+        pointer = f"  line {lineno}: {lines[lineno - 1][:100] if lineno <= len(lines) else '?'}"
+        return (
+            f"SyntaxError in {filepath}: {e.msg} at line {lineno}\n"
+            f"{pointer}\n"
+            f"Fix the syntax error before applying. If unsure, read the file "
+            f"with offset near line {lineno} first."
+        )
+    return None
+
+
 # Build fast translation tables at import time
 for _cp, _replacement in _QUOTE_NORMALIZE_MAP.items():
     _QUOTE_TRANS_TABLE[_cp] = _replacement
@@ -386,6 +415,19 @@ def _write_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
                 f"Hint: Use a path inside the workspace ({wg.workspace_root}) or enable unrestricted mode."
             ),
         )
+    # Read-before-edit enforcement (ACI upgrade): reject writes to
+    # .py files that haven't been read_file'd this session, unless
+    # the file doesn't exist yet (new file creation is allowed).
+    _resolved = safety_result.resolved_path
+    if _resolved.endswith(".py") and os.path.isfile(_resolved) and _resolved not in _READ_FILES:
+        return ToolResult(
+            success=False,
+            content=(
+                f"Read-before-edit guard: '{_resolved}' has not been read this session. "
+                f"Read the file with read_file first so you have the current content "
+                f"before writing. This prevents accidental overwrites of recent changes."
+            ),
+        )
     # File reservation check — prevent sub-agent collisions
     agent_id = getattr(_current_agent_id, "task_id", None)
     if agent_id is not None:
@@ -400,6 +442,27 @@ def _write_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
         if parent:
             os.makedirs(parent, exist_ok=True)
         _backup_before_write(safety_result.resolved_path)
+        # --- ACI upgrade: syntax validation for .py files ---
+        # Only gate if the existing file was already valid Python. If the file
+        # doesn't even compile now (e.g. prose in a .py test fixture), skip.
+        syntax_error = None
+        if safety_result.resolved_path.endswith(".py"):
+            try:
+                with open(safety_result.resolved_path, "r", encoding="utf-8") as _f:
+                    _prev = _f.read()
+                compile(_prev, safety_result.resolved_path, "exec")
+            except (FileNotFoundError, SyntaxError):
+                pass  # No existing file, or existing content isn't valid Python
+            else:
+                syntax_error = _validate_python_syntax(content, safety_result.resolved_path)
+        if syntax_error:
+            return ToolResult(
+                success=False,
+                content=(
+                    f"Syntax validation failed — file NOT written to prevent broken code.\n"
+                    f"{syntax_error}"
+                ),
+            )
         with open(safety_result.resolved_path, "w", encoding="utf-8") as f:
             f.write(content)
         from tools import add_modified_file
@@ -915,6 +978,27 @@ def _apply_single_edit(
             return (path, ToolResult(
                 success=True,
                 content=f"Preview: proposed edit to {resolved}\n{raw_diff}",
+            ))
+
+        # --- ACI upgrade: syntax validation before applying edit ---
+        # Only gate if the file was already valid Python. If it doesn't even
+        # compile now (e.g. prose in a .py test fixture), skip the gate.
+        syntax_error = None
+        if resolved.endswith(".py"):
+            try:
+                compile(original, resolved, "exec")
+            except SyntaxError:
+                pass  # Existing content isn't valid Python — skip gate
+            else:
+                syntax_error = _validate_python_syntax(updated, resolved)
+        if syntax_error:
+            return (path, ToolResult(
+                success=False,
+                content=(
+                    f"Syntax validation failed — edit NOT applied to prevent broken code.\n"
+                    f"{syntax_error}\n"
+                    f"Revert your edit and fix the syntax issue. The file is unchanged."
+                ),
             ))
 
         with open(resolved, "w", encoding="utf-8") as f:

@@ -14,6 +14,7 @@ import threading
 
 import requests
 
+from core.config import HTTP_CONNECT_TIMEOUT, HTTP_READ_TIMEOUT
 from logging_setup import get_logger
 
 _retry_log = get_logger("retry")
@@ -37,7 +38,7 @@ def _request_with_retry(
     *args,
     stream: bool = False,
     cancel_event: threading.Event | None = None,
-    timeout: tuple[float, float] = (10, 120),
+    timeout: tuple[float, float] = (HTTP_CONNECT_TIMEOUT, HTTP_READ_TIMEOUT),
     **kwargs,
 ) -> requests.Response | None:
     """Send an HTTP request with retry on transient errors.

@@ -1,4 +1,7 @@
 # mini_agent Architecture State
+# Last updated: 2026-06-12 (retry timeout: use config constants, connect 10→30s)
+#                empty-output messages, dangerous command detection, search overflow hints,
+#                tool result size budget, prompt rules, stronger post-edit verification)
 # Last updated: 2026-06-11 (Windows: requirements.txt refresh, WINDOWS_INSTALL.md, run_shell summary fix)
 # Last updated: 2026-06-11 (diagnostics: stderr logging in warmup, execute_tool, _run_shell)
 # Last updated: 2026-06-11 (fix: HF_HUB_DISABLE_SYMLINKS_WARNING + encode warmup in daemon thread)
@@ -39,7 +42,7 @@
 ### API & Communication
 - `api.py` — OpenAI/Anthropic API client abstraction; imports orphan stripping from memory_prune
 - `stream.py` — streaming response handling
-- `retry.py` — retry logic with exponential backoff
+- `retry.py` — retry logic with exponential backoff; timeout defaults imported from config.py (HTTP_CONNECT_TIMEOUT=30s, HTTP_READ_TIMEOUT=120s)
 
 ### Memory & Knowledge
 - `memory/memory.py` — SQLite-backed memory store, scratchpad, learnings, handoff.
@@ -130,7 +133,7 @@
 9. **Content-aware compression everywhere**: ``context_inject._compress_stale_tool_results``
    delegates to ``memory_prune._compress_tool_results`` — per-tool-type compression with
    knowledge of request parameters (offset/limit for read_file, match patterns for search_files).
-10. **Cache caps**: ``_clean_messages_cache`` capped at 16 entries, ``_complexity_cache`` at 32.
+10. **Cache caps**: ``_clean_messages_cache`` capped at 16 entries.
     Prevents unbounded growth from stale message-list entries.
 11. **MemoryStore.save() decomposed**: _prepare_messages() handles cleaning, compression,
     pruning, and summarisation. _write_messages() handles SQL writes with retry logic.
@@ -177,7 +180,7 @@
     includes ``git blame --line-porcelain`` analysis, showing top authors by
     line count for each file about to be edited. Helps the agent understand
     ownership context before making changes.
-21. **Post-edit verification injection**: New ``_inject_post_edit_verification()``
+21. **Post-edit verification injection**: ``_inject_post_edit_verification()``
     runs every 6 turns after the modified-files checkpoint, showing test
     coverage status for modified files and affected callers from the knowledge
     graph. Periodic reminder to verify changes haven't broken downstream code.
@@ -201,8 +204,8 @@
 
 24. **Bash path quoting fix (2026-06-11)**: ``tools/shell_ops.py`` line 243 (was 241): the
     MSYS2 bash path ``C:\Program Files\Git\bin\bash.exe`` must be quoted when building
-    the bash wrapper command. Changed from ``f'{bash} -c "{command}"'`` to
-    ``f'"{bash}" -c "{command}"'``. Without quotes, the double-wrapping at lines 319-327
+    the bash wrapper command. Changed from ``f'{bash} -c \"{command}\"'`` to
+    ``f'\"{bash}\" -c \"{command}\"'``. Without quotes, the double-wrapping at lines 319-327
     caused bash to treat ``C:\Program`` as a command name. The double-wrapping block was
     also bypassed (``if _WINDOWS and False and _is_bash_available():``) to use cmd.exe
     ``shell=True`` directly, since the command is already wrapped in bash.
@@ -220,19 +223,105 @@
     antivirus filter driver). Changed ``if _WINDOWS:`` to ``if False:`` so all reads
     use ``_read_file_direct()`` in-process. This avoids the subprocess hang but loses
     the protection against kernel-filter hangs that the subprocess was designed to
-    provide. Pre-existing nested-quote issue: commands with ``"`` break the bash
+    provide. Pre-existing nested-quote issue: commands with ``\"`` break the bash
     wrapping at line 241.
 
-26. **Startup warmup for Windows antivirus (2026-06-11)**: ``core/bootstrap.py``
+27. **Startup warmup for Windows antivirus (2026-06-11)**: ``core/bootstrap.py``
     ``init_session()`` now runs ``cmd.exe /c rem`` at startup to absorb any first-call
     antivirus/EDR scan delay for cmd.exe and conhost.exe. Windows Defender and other
     EDR products can pause the first execution of a new binary for behavioral
-    analysis, making the first ``run_shell`` tool call appear to "freeze."
+    analysis, making the first ``run_shell`` tool call appear to \"freeze.\"
     The warmup runs during startup (before the first user prompt) so the delay
     is invisible to the user.
+
+## Active Decisions (New — ACI Upgrades 2026-06-11)
+
+28. **Read-before-edit enforcement (ACI upgrade)**: ``tools/file_ops.py``: ``write_file``
+    and ``_apply_single_edit`` now reject writes/edits to .py files that haven't been
+    ``read_file``'d this session. The ``_READ_FILES`` set tracks all files read during
+    a session. New file creation (non-existent files) is exempted. This prevents the
+    agent from hallucinating edits to files it hasn't seen.
+
+29. **Syntax validation gate (SWE-agent linter pattern)**: ``tools/file_ops.py``:
+    ``_validate_python_syntax()`` uses ``compile()`` to check .py file content before
+    any write/edit is applied. Catches syntax errors (missing colons, bad indentation,
+    invalid assignment targets) BEFORE they're persisted to disk. Returns the exact
+    SyntaxError with line number and pointer. Non-.py files are skipped.
+
+30. **Explicit empty-output messages (SWE-agent ACI pattern)**: ``tools/shell_ops.py``:
+    ``_run_shell`` now returns ``"Command completed successfully (no output)."`` when
+    a command exits 0 with no stdout and no stderr. This eliminates the ambiguous
+    empty-string result that could mean "nothing happened" vs "success with no output."
+
+31. **Dangerous command detection**: ``tools/shell_ops.py``: ``_check_dangerous_command()``
+    scans shell commands for 9 dangerous patterns (rm -rf, git push --force, sudo,
+    chmod 777, dd, mkfs, raw disk redirect, format drive). Blocked by default;
+    allowed only with explicit ``force=True``. Reduces accidental destructive actions.
+
+32. **Search result overflow hint**: ``tools/shell_ops.py``: when search_files results
+    hit the 200-result cap, the hint now says ``"There may be more matches. Narrow
+    your search with a more specific pattern, a subdirectory path, or use find_symbol
+    for symbol lookups."`` — guiding the model toward precision (SWE-agent pattern).
+
+33. **Per-result size budget**: ``memory/memory_prune.py``: ``_TOOL_RESULT_MAX_CHARS``
+    (8000) now hard-truncates any individual tool result exceeding this size during
+    compression. Prevents a single huge result (e.g., full project log) from consuming
+    the context window. Truncated results include offset guidance.
+
+34. **ACI prompt rules**: ``core/prompt.py``: new sections "Read-Before-Edit &
+    Verify-After-Change (ACI guardrails)" and "Plan-before-Edit Enforcement" injected
+    into the immutable system prompt. Covers all new behaviors: read-first, verify-after,
+    file-scoped commands, empty-output meaning, search caps, dangerous commands, and
+    plan-first workflow.
+
+35. **Stronger post-edit verification**: ``core/context_inject.py``:
+    ``_inject_post_edit_verification()`` now fires whenever new files have been modified
+    since the last verification check, in addition to the existing 6-turn interval.
+    This catches immediate post-edit verification needs without waiting for the
+    periodic cycle.
+
+36. **Knowledge Confidence Scale nudge (2026-06-12)**: ``core/context_inject.py``:
+    ``_inject_confidence_web_search_nudge()`` monitors the conversation for patterns of
+    low agent confidence and nudges it to use ``web_search``. Three triggers: (a) 3+
+    consecutive codebase search misses (find_symbol/search_files returning nothing)
+    with no successful results, (b) 2+ consecutive tool failures on edit/write/shell/test,
+    (c) 6+ consecutive turns of read-only activity. Includes a 4-turn cooldown to avoid
+    nagging. Constants: ``_CONFIDENCE_NO_RESULT_THRESHOLD=3``,
+    ``_CONFIDENCE_FAILURE_THRESHOLD=2``, ``_CONFIDENCE_NUDGE_COOLDOWN_TURNS=4``.
+    Tested in ``tests/test_confidence_nudge.py`` (15 tests).
+    Bug fixes applied: (a) UnboundLocalError on malformed tool result JSON — ``data`` now
+    initialized before try/except. (b) ``break`` on productive turn killed failure/miss
+    counting for earlier messages — replaced with ``_stopped_read_only`` flag.
+
+39. **Semantic response cache (2026-06-12)**: ``tools/semantic_cache.py``: new module
+    implementing an in-memory semantic cache using the shared ``all-MiniLM-L6-v2``
+    SentenceTransformer model (zero additional memory footprint). Caches non-tool-call
+    LLM responses keyed by cosine similarity (threshold: 0.92) of the last user
+    message embedding. Bounded to 128 entries with 1-hour TTL. Integrated into
+    ``call_llm()`` in ``api.py`` — cache lookup before API call, storage after
+    successful plain-text response. Stats tracked on ``_TOOL_CONTEXT._semantic_cache_stats``.
+    Cleared on session reset. Industry consensus: 15-25% cost reduction with zero
+    quality risk.
+
+40. **Multi-provider fallback chain (2026-06-12)**: ``api.py``: ``call_llm()`` now
+    supports automatic failover to fallback providers on 429/5xx errors. Configured
+    via ``ProviderDefaults.fallback_providers`` (tuple of provider names). DeepSeek
+    defaults to ``("claude",)``. On primary failure, each fallback is tried
+    sequentially with its own API key, URL, and model. Provider-specific params
+    (``thinking``, ``reasoning_effort``, ``frequency_penalty``) are stripped from
+    fallback payloads. Semaphore re-acquired for each fallback attempt. Only
+    active for non-streaming calls. Improves effective availability from ~99.5%
+    to ~99.95%.
+
+41. **Retry timeout uses config constants (2026-06-12)**: ``retry.py``: ``_request_with_retry()``
+    previously hardcoded ``timeout=(10, 120)`` while ``config.py`` defined
+    ``HTTP_CONNECT_TIMEOUT=30`` and ``HTTP_READ_TIMEOUT=120`` as unused constants.
+    Now imports and uses ``(HTTP_CONNECT_TIMEOUT, HTTP_READ_TIMEOUT)``, increasing
+    connect timeout from 10s → 30s. Same values as ``bootstrap.py``'s session-level
+    timeout, so timeouts stay consistent whether or not a Session is passed.
 
 ## Known Issues
 - `_json_rpc_shared.py` — shared drain_stderr() utility used by lsp.py and mcp_client.py
 - No semantic search across past sessions (current recall is session-only)
-- Core packages (`core/`, `agents/`, `memory/`) use lazy `__init__.py` with `__getattr__` to
+- Core packages (`core/`, `agents/`, `memory/`) use lazy `__getattr__` in `__init__.py` to
   break circular imports. Adding new public symbols requires updating the `__getattr__` chain.

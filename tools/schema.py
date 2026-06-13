@@ -39,7 +39,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "todo_write",
-            "description": "Create or update a todo item for tracking progress. Set content to empty string to delete. Use this to track your own progress on complex multi-step tasks.",
+            "description": "Create or update a todo item for tracking progress. Set content to empty string to delete. Use to track progress on complex multi-step tasks.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -70,7 +70,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "remember",
-            "description": "Manually capture a learning or observation to project_knowledge for cross-session persistence. Use this when you discover a pattern, workaround, or convention worth remembering in future sessions.",
+            "description": "Capture a learning or observation to project_knowledge for cross-session persistence. Use when you discover a pattern, workaround, or convention worth remembering.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -88,6 +88,31 @@ TOOLS = [
                     }
                 },
                 "required": ["topic", "detail"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "memory_core",
+            "description": "Manage your persistent core memory (frozen snapshot injected at session start). The agent's durable memory of facts, preferences, conventions, and environment notes. Changes persist to disk immediately but appear in the system prompt NEXT session. Use 'read' to see current snapshot, 'add' to append, 'replace' to rewrite entirely, 'remove' to delete by line number. Hard-capped at ~2,500 chars — when full, consolidate (merge similar entries, remove stale ones) before adding. Example: memory_core(action='add', content='Python uses ruff for linting')",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "Action: 'read' (view current), 'add' (append entry), 'replace' (rewrite entire content), 'remove' (delete line by number)."
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Content to add/replace. Required for 'add' and 'replace' actions."
+                    },
+                    "line": {
+                        "type": "integer",
+                        "description": "Line number to remove (1-indexed). Required for 'remove' action."
+                    }
+                },
+                "required": ["action"]
             }
         }
     },
@@ -116,7 +141,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "find_symbol",
-            "description": "Find where a Python symbol (function, class, method name) is defined in the workspace. Returns file path and line number for each match. Much faster than grep/search_files for symbol lookup. Use this to locate definitions before editing code.",
+            "description": "Find where a Python symbol (function, class, method name) is defined in the workspace. Returns file path and line number for each match. Much faster than grep/search_files for symbol lookup. Supports substring matching.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -190,7 +215,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "edit_file",
-            "description": "Edit a file by replacing a specific string with another. Replaces the first occurrence of old_string with new_string by default. Use count=-1 to replace all occurrences. When preview=True, skips the write and returns a unified diff preview. Use 'paths' (list of strings) to apply the same old\u2192new edit to multiple files at once (batch edit). Returns an error if old_string is not found in the file.",
+            "description": "Edit a file by replacing a specific string with another. Replaces first occurrence by default; use count=-1 for all. When preview=True, returns a unified diff without writing. Use 'paths' (list) for batch multi-file edits.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -251,7 +276,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "run_shell",
-            "description": "Run a shell command inside the workspace directory. Returns exit code, stdout, and stderr. Commands time out after 60 seconds (configurable via timeout param, max 300s). Use this to run tests, check syntax, invoke build tools, etc.",
+            "description": "Run a shell command inside the workspace directory. Returns exit code, stdout, and stderr. Timeout defaults to 60s, max 300s. Use for tests, syntax checks, build tools, etc.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -286,7 +311,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_files",
-            "description": "Search for a text pattern recursively in files within the workspace. Returns matching lines with file path and line number. Skips hidden directories, binary files, and common VCS/venv dirs. Capped at 200 results. Use offset for pagination.",
+            "description": "Search for a text pattern recursively in files within the workspace. Returns matching lines with file path and line number. Skips hidden directories, binary files, and common VCS/venv dirs. Capped at 200 results.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -325,7 +350,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "file_info",
-            "description": "Get metadata about a file or directory at the given path. Returns size, permissions, modification time, and type (file/directory). For directories, also returns child count and total size of immediate children. Also reports whether the path exists.",
+            "description": "Get metadata about a file or directory at the given path. Returns size, permissions, modification time, type (file/directory), and whether the path exists. For directories also reports child count and total child size.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -478,7 +503,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "write_scratchpad",
-            "description": "Write content to the agent's scratchpad — a persistent working note that survives across turns. Use this to track your plan, progress, decisions, things you've tried, and open questions. The scratchpad is shown to you at the start of every turn. Overwrites previous content.",
+            "description": "Write content to the agent's scratchpad — a persistent working note that survives across turns. Tracks plan, progress, decisions, things tried, and open questions. Shown at start of each turn. Overwrites previous content.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -561,6 +586,27 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "session_search",
+            "description": "Full-text search across all past session messages. Use when the user references something from a previous conversation ('we fixed this before', 'use the approach from last time'). Returns matching message excerpts ordered by relevance. Uses FTS5 full-text indexing for fast retrieval.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search terms to find in past messages."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max results to return (default 10)."
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "fetch_url",
             "description": "Fetch a web page URL and return its text content (truncated). Supports text/html and text/plain content types. Use this to read documentation, API references, or any web page.",
             "parameters": {
@@ -587,7 +633,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "plan",
-            "description": "Declare a structured task plan with numbered steps. Overwrites any previous plan. Use this before starting multi-step work so progress can be tracked. The plan will be shown at the start of each turn until all steps are complete.",
+            "description": "Declare a structured task plan with numbered steps. Overwrites any previous plan. Use before multi-step work so progress is tracked. Shown at start of each turn until all steps complete.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -605,7 +651,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "plan_status",
-            "description": "Mark a plan step as complete, or report current plan progress. Call with no arguments to see the current plan and which steps are done. Call with 'step' to mark that step complete (1-indexed).",
+            "description": "Mark a plan step complete, or view current plan progress. No args: see plan and which steps are done. With 'step' (1-indexed): mark that step complete.",
             "parameters": {
                 "type": "object",
                 "properties": {

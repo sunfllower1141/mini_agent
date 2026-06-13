@@ -169,6 +169,38 @@ def _inject_tasks_context(
     })
 
 
+def _inject_core_memory_context(
+    messages: list[dict], *, memory_store: Any = None,
+) -> None:
+    """Inject core memory at session start (one-time, frozen snapshot).
+
+    Core memory is a bounded, consolidated summary of what the agent
+    has learned across sessions. Injected ONCE at session start so the
+    agent benefits from past learning without burning tokens every turn.
+    """
+    if memory_store is None:
+        return
+    if getattr(_TOOL_CONTEXT, "_core_memory_injected", False):
+        return
+    _TOOL_CONTEXT._core_memory_injected = True
+    try:
+        core_content = memory_store.get_core_memory()
+        if not core_content or not core_content.strip():
+            return
+        messages.append({
+            "role": "user",
+            "content": (
+                "[CORE MEMORY — persistent learnings from past sessions]\n"
+                "You wrote this in a previous session to help your future self. "
+                "Use it to avoid re-discovering things:\n\n"
+                + core_content.strip()
+            ),
+            "_transient": True,
+        })
+    except Exception:
+        pass  # best-effort; never break the session over memory
+
+
 def _inject_scratchpad_context(
     messages: list[dict], *, memory_store: Any = None,
 ) -> None:
@@ -431,6 +463,22 @@ def _inject_circuit_breaker(
         messages.append({"role": "user", "content": warning, "_transient": True})
 
 
+def _inject_cache_degradation_alert(messages: list[dict]) -> None:
+    """Inject a warning if DeepSeek prompt cache hit rate has dropped sharply.
+
+    The alert is only injected when degradation is detected (most turns:
+    nothing happens, zero cost).  Uses the per-turn cache tracking in
+    api.py:_report_cache_hit.
+    """
+    try:
+        from api import _check_cache_degradation
+        alert = _check_cache_degradation()
+        if alert:
+            messages.append({"role": "user", "content": alert, "_transient": True})
+    except Exception:
+        pass  # never block the turn on cache monitoring failure
+
+
 def _inject_post_edit_verification(messages: list[dict]) -> None:
     """Inject post-edit verification suggestions when files have been modified.
 
@@ -454,12 +502,22 @@ def _inject_post_edit_verification(messages: list[dict]) -> None:
     if not py_files:
         return
 
-    # Only inject periodically (every 6 turns after checkpoint) to avoid noise
+    # Inject more frequently: every 6 turns OR whenever there's a new edit
+    # since last verification check.
     turn = getattr(_TOOL_CONTEXT, "_turn_count", 0)
+    last_verified = getattr(_TOOL_CONTEXT, "_last_verification_turn", 0)
+    edits_since_last = turn > last_verified and modified != getattr(
+        _TOOL_CONTEXT, "_last_verified_modified", set()
+    )
+
     if turn <= MODIFIED_FILES_CHECKPOINT_TURN:
         return
-    if (turn - MODIFIED_FILES_CHECKPOINT_TURN) % 6 != 0:
+    if (turn - MODIFIED_FILES_CHECKPOINT_TURN) % 6 != 0 and not edits_since_last:
         return
+
+    # Update tracking
+    _TOOL_CONTEXT._last_verification_turn = turn
+    _TOOL_CONTEXT._last_verified_modified = set(modified)
 
     lines: list[str] = []
     lines.append("Post-edit verification — files modified this session:")
@@ -1056,6 +1114,158 @@ def _inject_self_critique(messages: list[dict], *, turn_count: int) -> None:
         pass
 
 
+# ---------------------------------------------------------------------------
+# Confidence-based web_search nudge
+# ---------------------------------------------------------------------------
+
+# Thresholds for the confidence nudge
+_CONFIDENCE_NO_RESULT_THRESHOLD = 3      # consecutive search misses before nudging
+_CONFIDENCE_FAILURE_THRESHOLD = 2        # consecutive tool failures before nudging
+_CONFIDENCE_NUDGE_COOLDOWN_TURNS = 4     # turns between repeat nudges
+# Tools whose "no results" indicate low knowledge confidence (not just bad queries)
+_CONFIDENCE_SEARCH_TOOLS = {"find_symbol", "search_files", "find_usages",
+                            "semantic_search", "lsp_definition", "lsp_references"}
+# Tools whose repeated failure suggests external knowledge gap
+_CONFIDENCE_FAILURE_TOOLS = {"edit_file", "write_file", "run_shell", "run_tests"}
+
+def _inject_confidence_web_search_nudge(
+    messages: list[dict], *, turn_count: int,
+) -> None:
+    """Inject a web_search nudge when the agent shows signs of low confidence.
+
+    Detects patterns that suggest the agent doesn't know the answer and is
+    flailing with local codebase tools instead of looking things up:
+      - 3+ consecutive search misses (find_symbol, search_files returning nothing)
+      - 2+ consecutive tool failures on edit/write/shell/test
+      - 3+ turns of reading code without progress (complement to read-only nudge)
+
+    When triggered, injects a brief nudge to use web_search/use_skill('web').
+    Has a cooldown to avoid nagging.
+    """
+    # --- Cooldown check ---
+    last_nudge_turn = getattr(_TOOL_CONTEXT, "_confidence_nudge_last_turn", 0)
+    if turn_count - last_nudge_turn < _CONFIDENCE_NUDGE_COOLDOWN_TURNS:
+        return
+
+    # --- Scan recent tool results for difficulty patterns ---
+    consecutive_misses = 0
+    max_consecutive_misses = 0
+    consecutive_failures = 0
+    max_consecutive_failures = 0
+    total_read_only_turns = 0
+    found_any_result = False
+
+    # Walk messages in reverse (most recent first) to count consecutive patterns
+    _stopped_read_only = False
+    for msg in reversed(messages):
+        role = msg.get("role", "")
+
+        if role == "tool":
+            # Parse the tool result
+            content = msg.get("content", "")
+            data = None
+            try:
+                import json as _json
+                data = _json.loads(content)
+                success = data.get("success", True)
+                result_content = data.get("content", "")
+            except Exception:
+                success = True
+                result_content = content
+                data = {}  # ensure data is defined for isinstance check below
+
+            # Find matching tool call
+            tcid = msg.get("tool_call_id", "")
+            tool_name = ""
+            for prev_msg in messages:
+                if prev_msg.get("role") == "assistant":
+                    for tc in prev_msg.get("tool_calls", []):
+                        if tc.get("id") == tcid:
+                            tool_name = tc.get("function", {}).get("name", "")
+                            break
+                    if tool_name:
+                        break
+
+            # Track search misses
+            if tool_name in _CONFIDENCE_SEARCH_TOOLS:
+                is_miss = (
+                    "no match" in str(result_content).lower()
+                    or "not found" in str(result_content).lower()
+                    or "no results" in str(result_content).lower()
+                    or (isinstance(data, dict) and not data.get("content", "").strip())
+                )
+                if is_miss:
+                    consecutive_misses += 1
+                    max_consecutive_misses = max(max_consecutive_misses, consecutive_misses)
+                else:
+                    consecutive_misses = 0
+                    found_any_result = True
+
+            # Track tool failures
+            elif tool_name in _CONFIDENCE_FAILURE_TOOLS:
+                if not success:
+                    consecutive_failures += 1
+                    max_consecutive_failures = max(max_consecutive_failures, consecutive_failures)
+                else:
+                    consecutive_failures = 0
+
+        elif role == "assistant":
+            # Track read-only turns (no tool calls that write/execute)
+            # Once we encounter a productive turn, stop incrementing read-only
+            # counter, but keep iterating for tool failure/miss tracking.
+            tool_calls = msg.get("tool_calls", [])
+            if not _stopped_read_only:
+                if tool_calls:
+                    all_reads = all(
+                        tc.get("function", {}).get("name", "") in
+                        ("read_file", "find_symbol", "search_files", "list_directory",
+                        "file_info", "find_usages", "lsp_definition", "lsp_references",
+                        "lsp_diagnostics", "lsp_hover", "semantic_search", "todo_read",
+                        "plan_status", "session_stats", "recall_turn", "agent_status",
+                        "memory_core", "session_search", "todo_write", "write_scratchpad",
+                        "plan")
+                        for tc in tool_calls
+                    )
+                    if all_reads:
+                        total_read_only_turns += 1
+                    else:
+                        _stopped_read_only = True  # found productive turn, stop counting reads
+                else:
+                    total_read_only_turns += 1
+
+    # --- Determine if a nudge is warranted ---
+    nudge = ""
+    if max_consecutive_misses >= _CONFIDENCE_NO_RESULT_THRESHOLD and not found_any_result:
+        nudge = (
+            f"\u26a0\ufe0f CONFIDENCE CHECK: Your last {max_consecutive_misses} codebase "
+            f"searches returned no results. Your knowledge confidence appears LOW "
+            f"(\u22643/10). Before searching further locally, use "
+            f"web_search to look up documentation for the relevant library, API, "
+            f"or concept. Then return with the right terminology to search effectively."
+        )
+    elif max_consecutive_failures >= _CONFIDENCE_FAILURE_THRESHOLD:
+        nudge = (
+            f"\u26a0\ufe0f CONFIDENCE CHECK: Your last {max_consecutive_failures} "
+            f"tool calls failed. Your approach may be based on incorrect assumptions. "
+            f"Consider web_search to verify the correct API, syntax, or pattern "
+            f"before retrying."
+        )
+    elif total_read_only_turns >= 6:
+        nudge = (
+            f"\u26a0\ufe0f CONFIDENCE CHECK: You've spent {total_read_only_turns} "
+            f"turns reading code without writing. If you're unsure how to proceed, "
+            f"use web_search to find the relevant documentation or examples."
+        )
+
+    if nudge:
+        _TOOL_CONTEXT._confidence_nudge_last_turn = turn_count
+        messages.append({
+            "role": "user",
+            "content": nudge,
+            "_transient": True,
+        })
+
+
 def _inject_strategy_hint(messages: list[dict]) -> None:
     """#5 Auto tool strategy hints — suggest optimal search tool.
 
@@ -1326,6 +1536,7 @@ def _inject_context(
         messages,
         workspace_root=read_gate.workspace_root if read_gate else "",
     )
+    _inject_core_memory_context(messages, memory_store=memory_store)
     _inject_scratchpad_context(messages, memory_store=memory_store)
     _inject_git_diff(messages, memory_store=memory_store, read_gate=read_gate)
 
@@ -1342,12 +1553,14 @@ def _inject_context(
         _inject_modified_files_checkpoint(messages, read_gate=read_gate)
 
     _inject_circuit_breaker(messages, recent_tool_keys=recent_tool_keys)
+    _inject_cache_degradation_alert(messages)
     _inject_edit_risk_context(messages)
     _inject_pattern_rules(messages)
     _inject_scratchpad_nudge(messages, turn_count=turn_count)
     _inject_strategy_hint(messages)
     _inject_plan_status(messages)
     _inject_self_critique(messages, turn_count=turn_count)
+    _inject_confidence_web_search_nudge(messages, turn_count=turn_count)
     _inject_tool_graph_context(messages)
     _inject_experience_context(messages, memory_store=memory_store)
     _inject_post_edit_verification(messages)

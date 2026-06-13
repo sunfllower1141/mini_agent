@@ -148,7 +148,6 @@ class TestSwitchSession(unittest.TestCase):
             "presence_penalty": 0.0,
             "stop_sequences": None,
             "response_format": None,
-            "routing_model": "",
             "sub_agent_max_turns": 25,
         }
         defaults.update(overrides)

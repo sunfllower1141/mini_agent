@@ -188,7 +188,9 @@ class TestUriFromPath(unittest.TestCase):
     def test_relative_path_converts_to_absolute(self) -> None:
         uri = _uri_from_path("test.py")
         self.assertTrue(uri.startswith("file://"))
-        self.assertIn(os.path.abspath("test.py"), uri.replace("file://", ""))
+        # Path.as_uri() always uses forward slashes; normalize for comparison
+        expected = os.path.abspath("test.py").replace("\\", "/")
+        self.assertIn(expected, uri.replace("file://", ""))
 
     def test_windows_style_path(self) -> None:
         uri = _uri_from_path("C:\\Users\\test.py")

@@ -28,7 +28,6 @@ class _MockConfig:
         self.api_key = overrides.get("api_key", "test-key")
         self.api_url = overrides.get("api_url", "https://api.test.com/v1")
         self.model = overrides.get("model", "test-model")
-        self.routing_model = overrides.get("routing_model", "")
         self.max_tokens = overrides.get("max_tokens", 4096)
         self.context_window = overrides.get("context_window", 32000)
         self.stream = overrides.get("stream", False)
@@ -335,30 +334,6 @@ class TestBuildPayload(unittest.TestCase):
         self.assertIn("tools", payload)
         self.assertIn("stream", payload)
         self.assertIn("max_tokens", payload)
-
-    def test_routing_model_used_for_simple_prompts(self):
-        config = _MockConfig(
-            api_provider="deepseek",
-            model="big-model",
-            routing_model="small-model",
-        )
-        simple_msgs = [{"role": "user", "content": "what does this do?"}]
-        clean = [_clean_message(m, i) for i, m in enumerate(simple_msgs)]
-        with patch("api.get_active_tools", return_value=[]):
-            payload = _build_payload(config, simple_msgs, clean)
-        self.assertEqual(payload["model"], "small-model")
-
-    def test_main_model_used_for_complex_prompts(self):
-        config = _MockConfig(
-            api_provider="deepseek",
-            model="big-model",
-            routing_model="small-model",
-        )
-        complex_msgs = [{"role": "user", "content": "write a new module"}]
-        clean = [_clean_message(m, i) for i, m in enumerate(complex_msgs)]
-        with patch("api.get_active_tools", return_value=[]):
-            payload = _build_payload(config, complex_msgs, clean)
-        self.assertEqual(payload["model"], "big-model")
 
 
 # ---------------------------------------------------------------------------

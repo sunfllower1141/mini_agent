@@ -115,9 +115,11 @@ class TestFailurePatternStore:
     def store(self):
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             db_path = f.name
+        from memory.memory import _close_shared_conn
         fps = FailurePatternStore(db_path)
         fps.init_schema()
         yield fps
+        _close_shared_conn(db_path)
         os.unlink(db_path)
 
     def test_record_failure_new(self, store):

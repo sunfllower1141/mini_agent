@@ -16,10 +16,51 @@ if TYPE_CHECKING:
 
 
 def build_system_prompt(config: "AgentConfig") -> str:
-    """Build the full system prompt with dynamic context injected.
+    """Build the immutable system prompt.
 
-    Includes a header showing the current workspace location and
-    safety flag status, followed by the static behavioural prompt.
+    Returns ONLY the static behavioural prompt + provider note — no dynamic
+    content (date, OS, workspace, rules, git).  This makes the system message
+    unchanged across sessions, allowing DeepSeek's prefix-based disk cache to
+    achieve cross-session cache hits on the ~2,000 token static prefix.
+
+    Dynamic session metadata is now in ``build_session_header()`` (injected as
+    a user message, after the immutable system prefix).
+    """
+    provider = getattr(config, "api_provider", None) or "deepseek"
+    provider_notes: dict[str, str] = {
+        "deepseek": (
+            "\n\nNote: running on DeepSeek. DeepSeek is prone to tool-call loops in long "
+            "contexts — if you call the same tool with the same arguments twice, switch "
+            "approaches immediately."
+        ),
+        "claude": (
+            "\n\nNote: running on Claude. Claude excels at long-form code generation and "
+            "architectural reasoning. Prefer larger, well-structured edits over many small ones."
+        ),
+        "xai": (
+            "\n\nNote: running on xAI/Grok. Grok is capable but may need more explicit "
+            "step-by-step guidance for complex multi-file refactors."
+        ),
+        "ollama": (
+            "\n\nNote: running on local Ollama (qwen3.6). Context window is smaller "
+            "(64K tokens). Be extra vigilant about scratchpad use and avoid very long "
+            "conversations without pruning."
+        ),
+    }
+    provider_note = provider_notes.get(provider, "")
+    return _STATIC_PROMPT + provider_note
+
+
+def build_session_header(config: "AgentConfig") -> str:
+    """Build dynamic session metadata as a user message.
+
+    Includes the session date, OS, shell, workspace path, safety flags,
+    hierarchical .mini_agent.rules, and current git status.  All of this
+    is dynamic (changes per session/workspace) so it's injected as a
+    user message AFTER the immutable system prompt prefix.
+
+    Keeping it out of the system message lets DeepSeek's prefix-based
+    disk cache reuse the ~2,000 token static prompt across sessions.
     """
     workspace = os.path.abspath(config.workspace) if config.workspace else os.getcwd()
 
@@ -43,8 +84,9 @@ def build_system_prompt(config: "AgentConfig") -> str:
     safety_lines.append(f"  approve_write_ops = {config.approve_write_ops}")
 
     header = (
+        "[SESSION METADATA — injected once at session start]\n"
         "\n"
-        "══════════════════════════════════════════════════════════════\n"
+        "══════════════════════════════════════════════════════════\n"
         f"  DATE        : {date_str}\n"
         f"  OS          : {os_str}\n"
         f"  SHELL       : {shell}\n"
@@ -52,44 +94,12 @@ def build_system_prompt(config: "AgentConfig") -> str:
         f"  WORKSPACE   : {workspace}\n"
         f"  SAFETY FLAGS:\n"
         + "\n".join(safety_lines) +
-        "\n══════════════════════════════════════════════════════════════"
+        "\n══════════════════════════════════════════════════════════"
     )
 
-    # --- Cached prefix: static identity FIRST for DeepSeek prompt caching ---
-    # DeepSeek's cache_control is on the first system message.
-    # By putting _STATIC_PROMPT at the front, the cache can hit ~2,000
-    # tokens of static content that never changes across workspaces.
-    # Dynamic header + rules + git status are appended after so they
-    # don't invalidate the cached prefix.
-    # --- Provider-specific note ---
-    provider = getattr(config, "api_provider", None) or "deepseek"
-    provider_notes: dict[str, str] = {
-        "deepseek": (
-            "Note: running on DeepSeek. DeepSeek is prone to tool-call loops in long "
-            "contexts — if you call the same tool with the same arguments twice, switch "
-            "approaches immediately."
-        ),
-        "claude": (
-            "Note: running on Claude. Claude excels at long-form code generation and "
-            "architectural reasoning. Prefer larger, well-structured edits over many small ones."
-        ),
-        "xai": (
-            "Note: running on xAI/Grok. Grok is capable but may need more explicit "
-            "step-by-step guidance for complex multi-file refactors."
-        ),
-        "ollama": (
-            "Note: running on local Ollama (qwen3.6). Context window is smaller "
-            "(64K tokens). Be extra vigilant about scratchpad use and avoid very long "
-            "conversations without pruning."
-        ),
-    }
-    provider_note = provider_notes.get(provider, "")
-    if provider_note:
-        provider_note = f"\n\n{provider_note}\n"
+    parts = [header]
 
-    prompt = _STATIC_PROMPT + "\n\n" + header + provider_note
-    # --- Win 2: Hierarchical .mini_agent.rules ---
-    # Walk directory tree upward from workspace, merging all rules files
+    # --- Hierarchical .mini_agent.rules ---
     rules_parts: list[str] = []
     search_dir = os.path.abspath(config.workspace)
     seen: set[str] = set()
@@ -109,9 +119,9 @@ def build_system_prompt(config: "AgentConfig") -> str:
             break
         search_dir = parent
     if rules_parts:
-        prompt += "\n\nPROJECT RULES:\n" + "\n\n".join(rules_parts) + "\n"
+        parts.append("PROJECT RULES:\n" + "\n\n".join(rules_parts))
 
-    # --- Win 1: Git context ---
+    # --- Git context ---
     try:
         import subprocess
         branch = subprocess.check_output(
@@ -131,15 +141,52 @@ def build_system_prompt(config: "AgentConfig") -> str:
                     git_info.append(f"... and {len(status.split(chr(10))) - 15} more files")
             else:
                 git_info.append("(working tree clean)")
-            prompt += "\n\nREPOSITORY STATUS (git):\n" + "\n".join(git_info) + "\n"
+            parts.append("REPOSITORY STATUS (git):\n" + "\n".join(git_info))
     except (OSError, subprocess.SubprocessError):
-        # git not installed or repo not initialized — skip status block
         pass
 
-    return prompt
+    return "\n\n".join(parts) + "\n"
 
 
-_STATIC_PROMPT = (
+# ---------------------------------------------------------------------------
+# Core memory snapshot builder (Hermes-style frozen-at-load pattern)
+# ---------------------------------------------------------------------------
+
+def build_memory_snapshot(core_memory_content: str) -> str:
+    """Build the frozen core memory snapshot injected at session start.
+
+    This is a single bounded text blob (default 2,500 chars) that serves as
+    the agent's persistent memory — durable facts, preferences, conventions,
+    environment notes, and learned corrections.
+
+    The snapshot is frozen for the entire session (never changes mid-session)
+    to preserve LLM prefix cache.  Writes hit disk immediately but appear in
+    the next session.  The agent uses the ``memory_core`` tool to add, replace,
+    or remove entries.
+
+    Returns an empty string if there's no core memory content.
+    """
+    content = core_memory_content.strip()
+    if not content:
+        return ""
+
+    return (
+        "[CORE MEMORY — frozen snapshot loaded at session start]\n"
+        "The following is your persistent memory. It survives across sessions.\n"
+        "It does NOT change during this session. Use the memory_core tool to\n"
+        "add, replace, or remove entries (changes appear next session).\n"
+        "\n"
+        + content
+        + "\n"
+        "\n[END CORE MEMORY]\n"
+    )
+
+
+# Public immutable system prompt — the ONLY content in the system message.
+# Because it never changes, DeepSeek's prefix-based disk cache can reuse the
+# KV-cache across every session (hours to days).  All dynamic content (date,
+# OS, workspace, rules, git status) is injected as user messages instead.
+STATIC_PROMPT = _STATIC_PROMPT = (
     "You are mini_agent, a terminal AI coding assistant powered by an LLM with a "
     "Electron desktop UI.  You operate on a workspace directory using the tools provided by "
     "the runtime.  Key modules:\n"
@@ -161,12 +208,25 @@ _STATIC_PROMPT = (
     "- Each skill adds 2-15 tools. The API `tools` parameter only includes\n"
     "  core + activated skill schemas (not all 63 tools).\n"
     "\n"
-    "WEB SEARCH (use when needed):\n"
+    "KNOWLEDGE CONFIDENCE SCALE:\n"
+    "- Before answering a question that involves external knowledge (APIs, libraries,\n"
+    "  frameworks, language features, algorithms, configuration formats, etc.),\n"
+    "  silently rate your confidence in your answer on a 1-10 scale:\n"
+    "    1-3:  You're guessing. DON'T answer. Use web_search FIRST.\n"
+    "    4-6:  You're uncertain. Strongly prefer web_search before answering.\n"
+    "    7-8:  You're fairly sure, but should verify if consequences are high.\n"
+    "    9-10: You know this well. Answer directly.\n"
+    "- If you've spent 2+ turns reading code without making progress, your\n"
+    "  confidence in the local solution is low \u2192 web_search for documentation.\n"
+    "- Codebase-first rule: for local repo questions, search the codebase before\n"
+    "  reaching for the web. But if codebase search misses, web_search promptly.\n"
+    "\n"
+    "WEB SEARCH (use proactively):\n"
     "Use web_search and fetch_url for documentation, API references, external\n"
     "knowledge, or current information not in your training data. Also useful\n"
     "when you're stuck (3+ consecutive tool failures) or the user asks about\n"
-    "something outside the codebase. For local repo tasks, search the codebase\n"
-    "first before reaching for the web.\n"
+    "something outside the codebase. Preference: when confidence is < 7/10,\n"
+    "web_search BEFORE giving an answer \u2014 not after.\n"
     "\n"
     "Behavior:\n"
     "- Be direct and concise. Prefer normal answers when no tool is needed.\n"
@@ -188,11 +248,30 @@ _STATIC_PROMPT = (
     "- Update write_scratchpad every 3 turns.\n"
     "- Context grows stale: rely on scratchpad and plan, not old tool results.\n"
     "\n"
+    "Read-Before-Edit & Verify-After-Change (ACI guardrails):\n"
+    "- You CANNOT write/edit .py files you haven't read_file'd this session.\n"
+    "- After edit_file/write_file, verify with single-file syntax check or test.\n"
+    "- Prefer file-scoped commands (pytest path/to/test.py -v) over project-wide.\n"
+    "- Shell commands that exit 0 with no output say 'Command completed\n"
+    "  successfully (no output).' This is normal, not an error.\n"
+    "- Search capped at 200 results; narrow pattern if you hit the cap.\n"
+    "- Dangerous commands (rm -rf, git push --force, sudo) are blocked\n"
+    "  unless force=True. Explain why you need force before using it.\n"
+    "\n"
+    "Plan-before-Edit Enforcement:\n"
+    "- For changes spanning 3+ files or 50+ lines: call plan() FIRST.\n"
+    "- Plan: (1) files to touch, (2) order, (3) how to verify each.\n"
+    "- Mark steps done with plan_status(step=N).\n"
+    "- Started without a plan and hit a problem? STOP and create one.\n"
+    "\n"
     "Parallel tool execution: batch ALL independent tool calls in ONE response.\n"
     "\n"
     "Scratchpad & memory:\n"
     "- write_scratchpad: working note across turns. Update after every tool round.\n"
     "- remember: long-term cross-session memory.\n"
+    "- memory_core: manage your persistent core memory (add/replace/remove\n"
+    "  entries). Core memory is injected frozen at session start. Changes\n"
+    "  are visible next session.\n"
     "- Check project_knowledge (injected at startup) before rediscovering.\n"
     "\n"
     "Code changes:\n"
@@ -216,7 +295,7 @@ _STATIC_PROMPT = (
     "\n"
     "Session handoff (IMPORTANT): before signing off, call write_session_handoff()\n"
     "so the next session has context about what you changed and what's pending.\n"
-    "It auto-generates from git diff \u2014 just pass pending='...' if you have open items.\n"
+    "It auto-generates from git diff — just pass pending='...' if you have open items.\n"
 )
 
 # ---------------------------------------------------------------------------
@@ -286,47 +365,15 @@ def build_startup_context(
         lines = []
         session_entries = [e for e in knowledge if e.get("category") == "session_summary"]
         other_entries = [e for e in knowledge if e.get("category") != "session_summary"]
-
         if session_entries:
-            summary = session_entries[0].get("summary", "")
-            detail = session_entries[0].get("detail", "")
-            lines.append("\n## Last Session Summary")
-            lines.append(f"{summary}")
-            if detail:
-                lines.append(f"{detail}")
-
+            lines.append("## Past Session Summaries")
+            for e in session_entries[:3]:
+                lines.append(f"- {e.get('summary', '')[:200]}")
         if other_entries:
-            # Group by category for cleaner presentation
-            from collections import defaultdict
-            by_cat: dict[str, list[dict]] = defaultdict(list)
-            for entry in other_entries:
-                cat = entry.get("category", "general")
-                by_cat[cat].append(entry)
-
-            CATEGORY_LABELS = {
-                "tool_usage": "Tool Usage Patterns",
-                "code_pattern": "Code Patterns & Conventions",
-                "error_pattern": "Known Error Patterns & Fixes",
-                "convention": "Project Conventions",
-                "architecture": "Architecture Insights",
-                "workaround": "Known Workarounds",
-                "dependency": "Dependencies & Setup",
-                "error": "Learned Error Patterns",
-                "general": "General Learnings",
-            }
-
-            lines.append("\n## Project Learnings (from past sessions)")
-            for cat, cat_label in CATEGORY_LABELS.items():
-                entries = by_cat.get(cat, [])
-                if entries:
-                    lines.append(f"\n### {cat_label}")
-                    for entry in entries[:8]:  # Cap per category
-                        s = entry.get("summary", "")
-                        d = entry.get("detail", "")
-                        hits = entry.get("hits", 0)
-                        hit_info = f" [{hits}× used]" if hits > 1 else ""
-                        lines.append(f"- {s}{hit_info}" + (f" — {d}" if d else ""))
-
-        parts.append("\n".join(lines))
-
-    return "\n".join(parts) + "\n"
+            lines.append("## Project Knowledge")
+            for e in other_entries[:10]:
+                cat = e.get("category", "general")
+                lines.append(f"- [{cat}] {e.get('summary', '')[:200]}")
+        if lines:
+            parts.append("\n".join(lines))
+    return "\n\n".join(parts) + "\n"

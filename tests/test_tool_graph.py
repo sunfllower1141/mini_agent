@@ -13,9 +13,11 @@ class TestToolGraph:
     def graph(self):
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             db_path = f.name
+        from memory.memory import _close_shared_conn
         tg = ToolGraph(db_path)
         tg.init_schema()
         yield tg
+        _close_shared_conn(db_path)
         os.unlink(db_path)
 
     def test_record_single_transition(self, graph):

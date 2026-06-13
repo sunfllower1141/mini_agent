@@ -37,7 +37,15 @@ CORE_TOOLS: list[str] = [
     "find_symbol",
     "write_scratchpad",
     "remember",
+    "memory_core",
+    "session_search",
     "use_skill",
+    # Extended core — fundamental for all sessions
+    "web_search",
+    "todo_write",
+    "todo_read",
+    "plan",
+    "plan_status",
 ]
 
 SKILLS: dict[str, list[str]] = {
@@ -58,7 +66,6 @@ SKILLS: dict[str, list[str]] = {
         "lsp_diagnostics",
     ],
     "web": [
-        "web_search",
         "fetch_url",
         "open_url",
         "browser_navigate",
@@ -86,12 +93,6 @@ SKILLS: dict[str, list[str]] = {
         "scatter_gather",
         "audit_parallel",
         "wait_for_agent",
-    ],
-    "planning": [
-        "todo_write",
-        "todo_read",
-        "plan",
-        "plan_status",
     ],
     "search": [
         "find_usages",
@@ -215,7 +216,7 @@ USE_SKILL_SCHEMA: dict = {
             "properties": {
                 "name": {
                     "type": "string",
-                    "description": "Skill name to activate (e.g. 'git', 'test', 'web', 'agents', 'planning').",
+                    "description": "Skill name to activate (e.g. 'git', 'test', 'web', 'agents', 'search').",
                 }
             },
             "required": ["name"],

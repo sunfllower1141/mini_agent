@@ -189,6 +189,36 @@ def _parse_pytest_output(raw_output: str, exit_code: int = 0) -> tuple[str, bool
 # run_shell
 # ---------------------------------------------------------------------------
 
+# Patterns for dangerous commands that should warn or block
+_DANGEROUS_COMMANDS: list[tuple[str, str]] = [
+    # (regex pattern, explanation)
+    (r"\brm\s+-rf\b", "rm -rf: recursive force delete — will permanently remove files"),
+    (r"\bgit\s+push\s+.*--force\b", "git push --force: overwrites remote history"),
+    (r"\bgit\s+push\s+.*-f\b", "git push -f: overwrites remote history"),
+    (r"\bsudo\b", "sudo: requires elevated privileges"),
+    (r"\bchmod\s+777\b", "chmod 777: makes files world-writable (security risk)"),
+    (r"\bdd\s+if=", "dd: raw disk write — can destroy data"),
+    (r"\bmkfs\.", "mkfs: creates filesystems (destroys existing data)"),
+    (r">\s*/dev/sd[a-z]", "redirect to /dev/sd*: raw disk write"),
+    (r"\bformat\s+[A-Z]:\\?", "format drive: destroys all data on the drive"),
+]
+
+def _check_dangerous_command(command: str, force: bool) -> str | None:
+    """Return a warning/block message for dangerous commands, or None if safe."""
+    for pattern, explanation in _DANGEROUS_COMMANDS:
+        if re.search(pattern, command, re.IGNORECASE):
+            if force:
+                return (
+                    f"\u26a0\ufe0f DANGEROUS COMMAND: {explanation}\n"
+                    f"The 'force=True' flag was set, so this command WILL execute."
+                )
+            else:
+                return (
+                    f"\u26a0\ufe0f DANGEROUS COMMAND BLOCKED: {explanation}\n"
+                    f"This command was NOT executed. If you are absolutely sure, "
+                    f"set force=True to bypass this safety check."
+                )
+    return None
 
 
 
@@ -238,17 +268,19 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
     _sys.stderr.write(f"[shell] _run_shell start: {command[:100]}\n")
     _sys.stderr.flush()
     _t_start = _time.monotonic()
-    # Windows: prefer bash for safer, more compatible command execution
+    # ACI upgrade: check for dangerous commands before executing
+    danger_warning = _check_dangerous_command(command, force)
+    if danger_warning and not force:
+        return ToolResult(success=False, content=danger_warning)
+    # If force=True, retain the warning to prepend to final output
+    _danger_prefix = danger_warning + "\n\n" if danger_warning else ""
+    # Windows: note when bash is unavailable (cmd.exe has different pipe/redirect syntax)
     _windows_cmd_note = ""
-    if platform.system() == "Windows":
-        if _is_bash_available():
-            bash = _get_shell_command()[0]
-            command = f'"{bash}" -c "{command}"'
-        elif not force:
-            _windows_cmd_note = (
-                "\nNote: Running on Windows cmd.exe. "
-                "Some shell commands (pipes, redirects, etc.) may behave differently than on Unix."
-            )
+    if platform.system() == "Windows" and not _is_bash_available() and not force:
+        _windows_cmd_note = (
+            "\nNote: Running on Windows cmd.exe. "
+            "Some shell commands (pipes, redirects, etc.) may behave differently than on Unix."
+        )
     # Auto-backup files before any rm command (prevents permanent data loss)
     if force and re.search(r'\brm\b', command):
         from tools.file_ops import _backup_before_write
@@ -318,23 +350,15 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
         if _WINDOWS:
             popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
 
-        # On Windows: command already wrapped at line 241, skip double wrapping
-        if _WINDOWS and False and _is_bash_available():
-            pass  # never taken — use shell=True below
-        elif not _is_bash_available() and shutil.which("powershell"):
-            proc = subprocess.Popen(
-                ["powershell", "-Command", command], shell=False,
-                cwd=rg.workspace_root,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                **stdin_kw, **popen_kwargs,
-            )
-        else:
-            proc = subprocess.Popen(
-                command, shell=True,
-                cwd=rg.workspace_root,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                **stdin_kw, **popen_kwargs,
-            )
+        # Always use shell=True: cmd.exe on Windows, /bin/sh on Unix.
+        # No bash wrapping — it creates a fragile cmd→bash→command chain
+        # and can cause process explosions when quoting is mishandled.
+        proc = subprocess.Popen(
+            command, shell=True,
+            cwd=rg.workspace_root,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            **stdin_kw, **popen_kwargs,
+        )
 
         _register_proc(proc)
         stdout_lines: list[str] = []
@@ -444,9 +468,13 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
             if _WINDOWS:
                 try:
                     stdout, stderr = _communicate_windows(proc, timeout)
-                except subprocess.TimeoutExpired:
+                except subprocess.TimeoutExpired as exc:
                     _unregister_proc(proc)
                     _TOOL_CONTEXT._active_proc = None
+                    partial = getattr(exc, "output", None) or ""
+                    if partial:
+                        return ToolResult(success=False,
+                                          content=f"Command timed out after {timeout}s\n\n{partial}")
                     return ToolResult(success=False, content=f"Command timed out after {timeout}s")
             else:
                 try:
@@ -470,6 +498,10 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
                 stdout += f"\n\u2026 (truncated at 500 lines \u2014 {len(lines_out)} total. "
                 stdout += "Use read_file with offset/limit for the full log if needed.)"
             parts.append(f"stdout:\n{stdout}")
+        elif proc.returncode == 0 and not stderr:
+            # ACI upgrade: explicit empty-output message (SWE-agent pattern).
+            # Silence is ambiguous \u2014 the model needs to know the command ran OK.
+            parts.append("Command completed successfully (no output).")
         if stderr:
             err_output = stderr.rstrip()
             err_lines = err_output.split("\n")
@@ -478,6 +510,8 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
                 err_output += f"\n\u2026 (stderr truncated at 100 lines \u2014 {len(err_lines)} total)"
             parts.append(f"stderr:\n{err_output}")
         content_out = "\n".join(parts)
+        if _danger_prefix:
+            content_out = _danger_prefix + content_out
         if _windows_cmd_note:
             content_out += _windows_cmd_note
         if proc.returncode == 127:
@@ -614,7 +648,9 @@ def _search_with_rg(root_dir: str, pattern: str, use_regex: bool, ignore_case: b
             lines = lines[offset:]
         output = "\n".join(lines[:_SEARCH_MAX_RESULTS])
         if len(lines) > _SEARCH_MAX_RESULTS:
-            output += f"\n\u2026 (capped at {_SEARCH_MAX_RESULTS} results)"
+            output += f"\n\u2026 (showing first {_SEARCH_MAX_RESULTS} results. "
+            output += "There may be more matches. Narrow your search with a more specific "
+            output += "pattern, a subdirectory path, or use find_symbol for symbol lookups.)"
         return ToolResult(success=True, content=output)
     except (subprocess.TimeoutExpired, Exception):
         return ToolResult(success=False, content="rg search failed or timed out")
@@ -742,14 +778,28 @@ def _run_tests(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
     if target:
         cmd.append(target)
 
-    try:
-        proc = subprocess.Popen(
-            cmd, cwd=rg.workspace_root,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            **({"creationflags": subprocess.CREATE_NO_WINDOW} if _WINDOWS else {}),
-        )
-    except Exception as e:
-        return ToolResult(success=False, content=f"Error starting pytest: {e}")
+    # On Windows, use shell=True (same as _run_shell) to avoid pipe-EOF
+    # detection issues with CreateProcess and _communicate_windows.
+    # On Unix, keep the list form (shell=False) for reliability.
+    if _WINDOWS:
+        cmd_str = subprocess.list2cmdline(cmd)
+        try:
+            proc = subprocess.Popen(
+                cmd_str, shell=True, cwd=rg.workspace_root,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        except Exception as e:
+            return ToolResult(success=False, content=f"Error starting pytest: {e}")
+    else:
+        try:
+            proc = subprocess.Popen(
+                cmd, cwd=rg.workspace_root,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            )
+        except Exception as e:
+            return ToolResult(success=False, content=f"Error starting pytest: {e}")
 
     if background:
         task_id = str(uuid.uuid4())[:8]
@@ -776,12 +826,17 @@ def _run_tests(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
             out, err = _communicate_windows(proc, timeout)
         else:
             out, err = proc.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
         if not _WINDOWS:
             proc.kill()
             out, err = proc.communicate()
         else:
-            out, err = "", ""
+            out = getattr(exc, "output", None) or ""
+            err = getattr(exc, "stderr", None) or ""
+        output = (out + err).strip()
+        if output:
+            return ToolResult(success=False,
+                              content=f"Tests timed out after {timeout}s\n\n{output}")
         return ToolResult(success=False, content=f"Tests timed out after {timeout}s")
 
     output = (out + err).strip()
@@ -1388,7 +1443,18 @@ def _communicate_windows(proc, timeout):
     finally:
         timer.cancel()
     if kill_fired.is_set():
-        raise subprocess.TimeoutExpired(cmd=" ".join(proc.args or []), timeout=timeout)
+        # proc.args is a list when shell=False, a string when shell=True
+        _args = proc.args
+        if isinstance(_args, list):
+            _cmd = " ".join(_args)
+        else:
+            _cmd = str(_args or "unknown")
+        raise subprocess.TimeoutExpired(
+            cmd=_cmd,
+            timeout=timeout,
+            output="\n".join(out_lines),
+            stderr="\n".join(err_lines),
+        )
     try:
         proc.wait(timeout=5)
     except subprocess.TimeoutExpired:

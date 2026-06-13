@@ -282,6 +282,7 @@ class MemoryStore:
         self._skip_load: bool = False  # set True to skip loading knowledge/summaries (used by switch_session)
         self._save_count: int = 0  # monotonic save counter for periodic VACUUM
         self._prune_cooldown: int = 0  # saves remaining before next pruning allowed
+        self.last_prune_summary: str = ""  # surfaced to UI so the user sees what was pruned
 
         # Detect remote filesystems early — if the workspace is on a network
         # mount, pre-emptively switch to a local path so that downstream
@@ -338,6 +339,62 @@ class MemoryStore:
                 "created_at TEXT NOT NULL DEFAULT (datetime('now')),"
                 "updated_at TEXT NOT NULL DEFAULT (datetime('now'))"
                 ")"
+            )
+            # Core memory — bounded snapshot injected frozen at session start.
+            # Model-agnostic persistent memory that the agent itself curates.
+            # Hard-capped by CHAR limit (not lines): the bound forces consolidation.
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS core_memory ("
+                "id INTEGER PRIMARY KEY CHECK (id = 1),"
+                "content TEXT NOT NULL DEFAULT '',"
+                "char_limit INTEGER NOT NULL DEFAULT 2500"
+                ")"
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO core_memory (id, content, char_limit)"
+                " VALUES (1, '', 2500)"
+            )
+            # FTS5 full-text search index over saved messages (session search).
+            # The delete trigger uses DELETE FROM fts WHERE rowid=old.id instead
+            # of the standard INSERT INTO fts(messages_fts, ...) VALUES('delete', ...)
+            # because the latter causes "SQL logic error" on some SQLite builds
+            # (e.g. 3.53.1 on Windows).
+            #
+            # Migration: drop old triggers + FTS table in case they used the
+            # broken 'delete' INSERT pattern from v1.0.x.
+            conn.execute("DROP TRIGGER IF EXISTS messages_fts_insert")
+            conn.execute("DROP TRIGGER IF EXISTS messages_fts_delete")
+            conn.execute("DROP TRIGGER IF EXISTS messages_fts_update")
+            conn.execute("DROP TABLE IF EXISTS messages_fts")
+            conn.execute(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts"
+                " USING fts5(content, tokenize='unicode61 remove_diacritics 2')"
+            )
+            conn.execute(
+                "INSERT INTO messages_fts(rowid, content)"
+                " SELECT id, content FROM messages"
+            )
+            conn.execute(
+                "CREATE TRIGGER IF NOT EXISTS messages_fts_insert"
+                " AFTER INSERT ON messages"
+                " BEGIN"
+                "  INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);"
+                " END"
+            )
+            conn.execute(
+                "CREATE TRIGGER IF NOT EXISTS messages_fts_delete"
+                " AFTER DELETE ON messages"
+                " BEGIN"
+                "  DELETE FROM messages_fts WHERE rowid = old.id;"
+                " END"
+            )
+            conn.execute(
+                "CREATE TRIGGER IF NOT EXISTS messages_fts_update"
+                " AFTER UPDATE ON messages"
+                " BEGIN"
+                "  DELETE FROM messages_fts WHERE rowid = old.id;"
+                "  INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);"
+                " END"
             )
             # Failure patterns table — self-learning from tool failures (MPR/VIGIL-inspired)
             conn.execute(
@@ -755,6 +812,123 @@ class MemoryStore:
             return None
 
     # ------------------------------------------------------------------
+    # Core memory — bounded snapshot (Hermes-style MEMORY.md / USER.md)
+    # ------------------------------------------------------------------
+    # Frozen-at-load pattern: content is loaded once at session start and
+    # never changes mid-session. Writes hit disk immediately but don't
+    # appear in the prompt until next session. Hard char limit forces the
+    # agent to consolidate rather than accumulate infinitely.
+
+    CORE_MEMORY_DEFAULT_CHAR_LIMIT: int = 2500
+
+    def get_core_memory(self) -> str:
+        """Return the core memory content as a string (for injection at session start)."""
+        try:
+            conn = self._get_conn()
+            row = conn.execute(
+                "SELECT content FROM core_memory WHERE id = 1"
+            ).fetchone()
+            if row:
+                return row[0]
+            return ""
+        except sqlite3.Error:
+            warnings.warn("Failed to read core memory", stacklevel=2)
+            return ""
+
+    def get_core_memory_info(self) -> dict:
+        """Return core memory content, char_limit, and current length."""
+        try:
+            conn = self._get_conn()
+            row = conn.execute(
+                "SELECT content, char_limit FROM core_memory WHERE id = 1"
+            ).fetchone()
+            if row:
+                return {"content": row[0], "char_limit": row[1], "length": len(row[0])}
+            return {"content": "", "char_limit": self.CORE_MEMORY_DEFAULT_CHAR_LIMIT, "length": 0}
+        except sqlite3.Error:
+            warnings.warn("Failed to read core memory", stacklevel=2)
+            return {"content": "", "char_limit": self.CORE_MEMORY_DEFAULT_CHAR_LIMIT, "length": 0}
+
+    def write_core_memory(self, content: str) -> dict:
+        """Write/update core memory content.
+
+        Returns {'ok': bool, 'message': str, 'remaining': int (chars free)}.
+        Enforces char_limit — returns ok=False if content exceeds limit.
+        """
+        try:
+            conn = self._get_conn()
+            row = conn.execute(
+                "SELECT char_limit FROM core_memory WHERE id = 1"
+            ).fetchone()
+            char_limit = row[0] if row else self.CORE_MEMORY_DEFAULT_CHAR_LIMIT
+            content_len = len(content)
+
+            if content_len > char_limit:
+                return {
+                    "ok": False,
+                    "message": (
+                        f"Core memory content ({content_len} chars) exceeds "
+                        f"limit of {char_limit} chars. Consolidate by merging "
+                        f"or removing entries (e.g., combine 3 related facts "
+                        f"into one line, remove stale paths, move procedures "
+                        f"to project_knowledge). Try again with shorter content."
+                    ),
+                    "remaining": 0,
+                    "char_limit": char_limit,
+                }
+
+            conn.execute(
+                "UPDATE core_memory SET content = ? WHERE id = 1",
+                (content,),
+            )
+            conn.commit()
+            remaining = char_limit - content_len
+            return {
+                "ok": True,
+                "message": (
+                    f"Core memory updated ({content_len} chars). "
+                    f"{remaining} chars remaining."
+                ),
+                "remaining": remaining,
+                "char_limit": char_limit,
+            }
+        except sqlite3.Error:
+            warnings.warn("Failed to write core memory", stacklevel=2)
+            return {"ok": False, "message": "Database error writing core memory.", "remaining": 0, "char_limit": 0}
+
+    # ------------------------------------------------------------------
+    # Session search — FTS5 full-text search across all saved messages
+    # ------------------------------------------------------------------
+
+    def search_messages(
+        self, query: str, limit: int = 10,
+    ) -> list[dict]:
+        """Full-text search across all saved messages.
+
+        Uses FTS5 with unicode61 tokenizer. Returns list of
+        {rowid, content, rank} dicts ordered by relevance.
+        """
+        try:
+            conn = self._get_conn()
+            # Escape special FTS5 characters
+            safe_query = query.replace('"', '""')
+            rows = conn.execute(
+                "SELECT rowid, content, rank"
+                " FROM messages_fts"
+                " WHERE messages_fts MATCH ?"
+                " ORDER BY rank"
+                " LIMIT ?",
+                (f'"{safe_query}"', limit),
+            ).fetchall()
+            return [
+                {"rowid": r[0], "content": r[1], "rank": r[2]}
+                for r in rows
+            ]
+        except sqlite3.Error:
+            warnings.warn("Failed to search messages", stacklevel=2)
+            return []
+
+    # ------------------------------------------------------------------
     # save() helpers — split from the main method (was ~100 lines).
     # ------------------------------------------------------------------
 
@@ -793,6 +967,7 @@ class MemoryStore:
                     summary_msg = {"role": "user", "content": summary}
                     kept.insert(0, summary_msg)
                     self._token_count += _estimate_tokens(summary_msg)
+                    self.last_prune_summary = summary
             self._prune_cooldown = _PRUNE_COOLDOWN
         else:
             pruned: list[dict] = []
@@ -831,6 +1006,7 @@ class MemoryStore:
                             [(m["role"], json.dumps(m)) for m in new_msgs],
                         )
                 conn.commit()
+                _reset_sqlite_errors()
                 self._save_count += 1
                 self._maybe_cap_rows(conn)
                 self._maybe_vacuum(conn, after_full_rewrite=need_full_rewrite)
@@ -936,6 +1112,7 @@ class MemoryStore:
                 if summary:
                     summary_msg = {"role": "user", "content": summary}
                     kept.insert(0, summary_msg)
+                    self.last_prune_summary = summary
 
             # Re-inject persisted project knowledge so key facts survive pruning
             knowledge = self.get_top_knowledge(limit=10)
@@ -969,6 +1146,7 @@ class MemoryStore:
             conn.execute(_VACUUM)
         except (sqlite3.Error, OSError):
             try:
+                self.close()
                 os.remove(self._db_path)
             except FileNotFoundError:
                 pass

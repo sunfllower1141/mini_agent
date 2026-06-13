@@ -24,7 +24,7 @@ from .config import (
 )
 from .safety import ReadSafetyGate, WriteSafetyGate
 from memory.memory import MemoryStore
-from .prompt import build_system_prompt, build_startup_context
+from .prompt import build_system_prompt, build_startup_context, build_session_header, build_memory_snapshot
 from agents.agent_runtime import AgentRuntime
 
 # MCP tool schemas — injected into TOOLS lazily when config.mcp_servers is non-empty.
@@ -340,12 +340,20 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
             summary = _summarize_pruned(pruned)
             if summary:
                 saved.insert(0, {"role": "user", "content": summary})
+                memory.last_prune_summary = summary
     knowledge = memory.get_top_knowledge(limit=15) if memory else []
+    core_memory = memory.get_core_memory() if memory else ""
+    memory_snapshot = build_memory_snapshot(core_memory)
+
     startup_ctx = build_startup_context(workspace, knowledge=knowledge)
+    session_header = build_session_header(config)
     messages: list[dict] = [
         {"role": "system", "content": build_system_prompt(config)},
-        {"role": "user", "content": startup_ctx},
+        {"role": "user", "content": session_header},
     ]
+    if memory_snapshot:
+        messages.append({"role": "user", "content": memory_snapshot})
+    messages.append({"role": "user", "content": startup_ctx})
     if saved:
         messages.extend(saved)
 

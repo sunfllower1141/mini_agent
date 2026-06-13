@@ -13,7 +13,6 @@ Both ``llm.py`` and ``sub_agent.py`` import from here — no cycle.
 
 from __future__ import annotations
 
-import re
 import threading
 from collections.abc import Callable
 from typing import Any, TYPE_CHECKING
@@ -27,6 +26,7 @@ from core.config import AgentConfig
 from retry import _request_with_retry
 from stream import _parse_stream
 from tools.skills import get_active_tools
+from tools.semantic_cache import get_semantic_cache
 from logging_setup import log_api_error
 
 # ---------------------------------------------------------------------------
@@ -114,45 +114,6 @@ def _clean_message(msg: dict, index: int, provider: str = "deepseek") -> dict | 
     return m2
 
 
-# Simple-prompt keywords for model routing.
-_ROUTE_SIMPLE_KEYWORDS = re.compile(
-    r"\b(write|edit|delete|create|modify|refactor|implement|build|fix|patch|"
-    r"restructure|rewrite|replace|change|update|rename|move|remove|add)\b",
-    re.IGNORECASE,
-)
-
-
-# Cache: per-messages-list complexity result (doesn't change within a turn)
-_complexity_cache: dict[int, str] = {}
-_MAX_COMPLEXITY_CACHE_ENTRIES = 32
-
-def _compute_complexity(messages: list[dict]) -> str:
-    """Return 'simple' or 'complex' for the last user message, for model routing.
-
-    Result is cached per messages list identity — complexity doesn't change
-    within a turn (only new tool results are appended, not user messages).
-    """
-    if not messages:
-        return "complex"
-    list_id = id(messages)
-    cached = _complexity_cache.get(list_id)
-    if cached is not None:
-        return cached
-    # Check the last 2 user messages
-    user_text = ""
-    for m in reversed(messages):
-        if m.get("role") == "user":
-            user_text += " " + str(m.get("content", ""))
-            if len(user_text) > 2000:
-                break
-    result = "simple" if (len(user_text) < 300 and not _ROUTE_SIMPLE_KEYWORDS.search(user_text)) else "complex"
-    _complexity_cache[list_id] = result
-    # Cap to prevent unbounded growth from stale entries
-    if len(_complexity_cache) > _MAX_COMPLEXITY_CACHE_ENTRIES:
-        _complexity_cache.pop(next(iter(_complexity_cache)))
-    return result
-
-
 # _strip_orphaned_tool_messages moved to memory/memory_prune.py — canonical
 # single source of truth.  Backward-compatible aliases kept here.
 from memory.memory_prune import _strip_orphaned_tool_messages  # noqa: E402
@@ -177,15 +138,13 @@ def _build_payload(
     """
     provider = config.api_provider
 
-    # Model selection (routing model for simple prompts, if configured)
     model = config.model
-    if config.routing_model and _compute_complexity(messages) == "simple":
-        model = config.routing_model
+    tools = get_active_tools()
 
     payload: dict = {
         "model": model,
         "messages": clean_messages,
-        "tools": get_active_tools(),
+        "tools": tools,
         "stream": config.stream,
         "max_tokens": config.max_tokens,
     }
@@ -199,6 +158,9 @@ def _build_payload(
             payload["stop"] = config.stop_sequences
         if config.response_format:
             payload["response_format"] = {"type": config.response_format}
+        # Enable thinking mode for DeepSeek V4 at full reasoning depth.
+        payload["thinking"] = {"type": "enabled"}
+        payload["reasoning_effort"] = "high"
 
     elif provider == "claude":
         # Claude OpenAI-compat: no temperature, top_p, freq/presence penalties,
@@ -301,6 +263,39 @@ def call_llm(
 
     payload = _build_payload(config, messages, safe_messages)
 
+    # --- Semantic cache check (Layer 1: bypass API entirely on similar query) ---
+    # Only check cache for non-streaming, non-cancelled calls.
+    # Extract last user message ONCE — used for both cache lookup and storage.
+    _last_user_text = ""
+    for m in reversed(messages):
+        if m.get("role") == "user" and not m.get("_transient"):
+            _last_user_text = m.get("content", "") or ""
+            break
+
+    if _last_user_text and not config.stream and cancel_event is None:
+        _cache = get_semantic_cache()
+        _cached_response, _cache_sim = _cache.lookup(_last_user_text)
+        if _cached_response is not None:
+            _log = __import__("logging_setup", fromlist=["get_logger"]).get_logger("api")
+            _log.info(
+                "semantic_cache_hit similarity=%.3f model=%s text=%s",
+                _cache_sim,
+                _cached_response.get("model", payload.get("model", "?")),
+                _last_user_text[:80].replace("\n", " "),
+            )
+            # Track semantic cache stats on _TOOL_CONTEXT
+            try:
+                from tools import _TOOL_CONTEXT
+                if _TOOL_CONTEXT is not None:
+                    if not hasattr(_TOOL_CONTEXT, "_semantic_cache_stats"):
+                        _TOOL_CONTEXT._semantic_cache_stats = {
+                            "hits": 0, "misses": 0, "estimated_usd_saved": 0.0,
+                        }
+                    _TOOL_CONTEXT._semantic_cache_stats["hits"] += 1
+            except Exception:
+                pass
+            return _cached_response
+
     # Anthropic's OpenAI-compatible endpoint uses Bearer auth (same as DeepSeek)
     # Gate all LLM API calls through a semaphore to prevent thundering-herd
     # rate-limit storms when N sub-agents share the same API key.
@@ -331,32 +326,303 @@ def call_llm(
     if r is None:
         return None  # cancelled during retry
 
+    # --- Multi-provider fallback (Layer 5: on 429/5xx, try next provider) ---
+    _fallback_providers: tuple[str, ...] = ()
+    try:
+        from core.config import PROVIDER_DEFAULTS
+        pd = PROVIDER_DEFAULTS.get(config.api_provider)
+        if pd:
+            _fallback_providers = pd.fallback_providers
+    except Exception:
+        _fallback_providers = ()
+
+    _last_error: APIError | None = None
+    if not r.ok and _fallback_providers and not config.stream:
+        try:
+            err_body = r.json()
+        except (ValueError, AttributeError):
+            err_body = r.text
+        log_api_error(
+            provider=config.api_provider, model=payload.get("model", "?"),
+            status_code=r.status_code, error_body=str(err_body),
+            turn=getattr(config, "turn_count", 0),
+        )
+        _last_error = APIError(status_code=r.status_code, body=str(err_body))
+
+        for fb_prov in _fallback_providers:
+            fb = PROVIDER_DEFAULTS.get(fb_prov)
+            if not fb:
+                continue
+            fb_key = _get_fallback_api_key(fb_prov)
+            if not fb_key:
+                continue
+            fb_payload = dict(payload)
+            fb_payload["model"] = fb.model
+            fb_payload.pop("cache_control", None)
+            fb_payload.pop("thinking", None)
+            fb_payload.pop("reasoning_effort", None)
+            fb_payload.pop("frequency_penalty", None)
+            fb_payload.pop("presence_penalty", None)
+            fb_payload.pop("response_format", None)
+
+            acquired2 = _LLM_SEMAPHORE.acquire(timeout=60)
+            if not acquired2:
+                continue
+            try:
+                r2 = _request_with_retry(
+                    session, fb.api_url,
+                    headers={
+                        "Authorization": f"Bearer {fb_key}",
+                        "Content-Type": "application/json",
+                        "User-Agent": "mini_agent/1.0",
+                    },
+                    json=fb_payload, stream=False,
+                    cancel_event=cancel_event,
+                )
+            finally:
+                _LLM_SEMAPHORE.release()
+
+            if r2 is None:
+                continue
+            if r2.ok:
+                r = r2
+                payload = fb_payload
+                _last_error = None
+                break
+            else:
+                try:
+                    fb_err_body = r2.json()
+                except (ValueError, AttributeError):
+                    fb_err_body = r2.text
+                _last_error = APIError(r2.status_code, str(fb_err_body))
+
+    if _last_error is not None:
+        raise _last_error
+
     if not r.ok:
         try:
             err = r.json()
         except (ValueError, AttributeError):
             err = r.text
-        # --- Persist full error payload/response to api_error.log ---
         log_api_error(
-            provider=config.api_provider,
-            model=payload.get("model", "?"),
-            status_code=r.status_code,
-            error_body=str(err),
+            provider=config.api_provider, model=payload.get("model", "?"),
+            status_code=r.status_code, error_body=str(err),
             turn=getattr(config, "turn_count", 0),
         )
         raise APIError(status_code=r.status_code, body=str(err))
 
     if config.stream:
-        return _parse_stream(r, on_token, on_tool_ready, cancel_event=cancel_event)
+        msg = _parse_stream(r, on_token, on_tool_ready, cancel_event=cancel_event)
     else:
-        return r.json()["choices"][0]["message"]
+        body = r.json()
+        msg = body["choices"][0]["message"]
+        # Capture usage from non-streaming response
+        usage = body.get("usage", {})
+        if usage:
+            msg["_usage"] = usage
+
+    # --- Cache hit monitoring ---
+    # DeepSeek returns prompt_cache_hit_tokens / prompt_cache_miss_tokens in
+    # usage.  Log the hit rate and store on _TOOL_CONTEXT for session_stats.
+    _report_cache_hit(msg.get("_usage", {}), config)
+
+    # --- Semantic cache storage (Layer 1: store non-tool responses) ---
+    _store_semantic_cache(msg, _last_user_text, payload, config)
+
+    return msg
+
+
+def _report_cache_hit(usage: dict, config: "AgentConfig") -> None:
+    """Log prompt cache hit rate from API usage and store for session_stats."""
+    hit = usage.get("prompt_cache_hit_tokens", 0)
+    miss = usage.get("prompt_cache_miss_tokens", 0)
+    total_prompt_cache = hit + miss
+    if total_prompt_cache <= 0:
+        return
+    hit_rate = 100.0 * hit / total_prompt_cache
+    _log = __import__("logging_setup", fromlist=["get_logger"]).get_logger("api")
+    _log.info(
+        "cache_hit=%.1f%% hit_tokens=%d miss_tokens=%d prompt=%d completion=%d",
+        hit_rate, hit, miss,
+        usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0),
+    )
+    # Store for session_stats visibility
+    try:
+        from tools import _TOOL_CONTEXT
+        if _TOOL_CONTEXT is not None:
+            if not hasattr(_TOOL_CONTEXT, "_cache_stats"):
+                _TOOL_CONTEXT._cache_stats = {
+                    "hits": 0, "misses": 0, "calls": 0,
+                    "input_tokens": 0, "output_tokens": 0,
+                }
+            _TOOL_CONTEXT._cache_stats["hits"] += hit
+            _TOOL_CONTEXT._cache_stats["misses"] += miss
+            _TOOL_CONTEXT._cache_stats["calls"] += 1
+            _TOOL_CONTEXT._cache_stats["input_tokens"] += usage.get("prompt_tokens", 0)
+            _TOOL_CONTEXT._cache_stats["output_tokens"] += usage.get("completion_tokens", 0)
+            # --- Per-turn tracking for degradation detection ---
+            turn = int(getattr(_TOOL_CONTEXT, "_turn_count", 0) or 0)
+            if not hasattr(_TOOL_CONTEXT, "_cache_turn_history"):
+                _TOOL_CONTEXT._cache_turn_history = []
+            history = _TOOL_CONTEXT._cache_turn_history
+            # Append per-turn entry (or merge into last entry if same turn)
+            if history and history[-1].get("turn") == turn:
+                entry = history[-1]
+            else:
+                entry = {"turn": turn, "hits": 0, "misses": 0, "calls": 0}
+                history.append(entry)
+                # Cap at 64 entries (prevents unbounded growth)
+                if len(history) > 64:
+                    history[:] = history[-64:]
+            entry["hits"] += hit
+            entry["misses"] += miss
+            entry["calls"] += 1
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Cache degradation detection
+# ---------------------------------------------------------------------------
+
+# Thresholds for anomaly alerting
+_DEGRADE_MIN_CALLS = 3           # need at least 3 turns with cache data
+_DEGRADE_MIN_BASELINE_CALLS = 2  # baseline needs at least 2 turns
+_DEGRADE_RATIO_THRESHOLD = 0.50  # alert if hit rate < 50% of baseline
+_DEGRADE_ABSOLUTE_THRESHOLD = 25.0  # alert if hit rate < 25% (absolute)
+_DEGRADE_ALERT_COOLDOWN = 8      # turns before re-alerting
+
+
+def _check_cache_degradation() -> str | None:
+    """Return an alert string if cache hit rate has degraded, else None.
+
+    Compares recent turns (last 3) against baseline (all earlier turns).
+    Fires only once per cooldown period to avoid alert fatigue.
+
+    Returns a one-line warning suitable for injecting as a transient user
+    message, or None when everything looks normal.
+    """
+    try:
+        from tools import _TOOL_CONTEXT
+        if _TOOL_CONTEXT is None:
+            return None
+        history = getattr(_TOOL_CONTEXT, "_cache_turn_history", None)
+        if not history or len(history) < _DEGRADE_MIN_CALLS:
+            return None
+
+        # Enforce cooldown (only if an alert has actually fired before)
+        last_alert_turn = getattr(_TOOL_CONTEXT, "_cache_alert_last_turn", 0)
+        current_turn = int(getattr(_TOOL_CONTEXT, "_turn_count", 0) or 0)
+        if last_alert_turn > 0 and (current_turn - last_alert_turn) < _DEGRADE_ALERT_COOLDOWN:
+            return None
+
+        # Split: last 3 turns vs all earlier
+        recent = history[-3:]
+        baseline = history[:-3]
+        if len(baseline) < _DEGRADE_MIN_BASELINE_CALLS:
+            return None
+
+        def _rate(entries):
+            h = sum(e["hits"] for e in entries)
+            m = sum(e["misses"] for e in entries)
+            total = h + m
+            return (h / total * 100) if total > 0 else 0.0
+
+        baseline_rate = _rate(baseline)
+        recent_rate = _rate(recent)
+
+        # Only alert on meaningful degradation
+        if baseline_rate <= 0:
+            return None
+        ratio = recent_rate / baseline_rate
+
+        if ratio < _DEGRADE_RATIO_THRESHOLD or recent_rate < _DEGRADE_ABSOLUTE_THRESHOLD:
+            _TOOL_CONTEXT._cache_alert_last_turn = current_turn
+            return (
+                f"\u26a0\ufe0f Cache hit rate dropped to {recent_rate:.0f}% "
+                f"(was {baseline_rate:.0f}% avg). "
+                f"Session may restart cheaply."
+            )
+        return None
+    except Exception:
+        return None
 
 
 # Backward-compatible alias
 call_deepseek = call_llm
 
 
+def _get_fallback_api_key(provider: str) -> str:
+    """Get the API key for a fallback provider from environment.
+
+    Each provider has its own env var: DEEPSEEK_API_KEY, CLAUDE_API_KEY, etc.
+    """
+    env_map = {
+        "deepseek": "DEEPSEEK_API_KEY",
+        "claude": "CLAUDE_API_KEY",
+        "xai": "XAI_API_KEY",
+        "ollama": "OLLAMA_API_KEY",
+    }
+    env_var = env_map.get(provider, "")
+    if not env_var:
+        return ""
+    import os
+    return os.environ.get(env_var, "")
+
+
 def clear_api_cache() -> None:
-    """Clear the incremental message-cleaning cache (called at turn start)."""
+    """Clear the message-cleaning cache (called at turn start)."""
     _clean_messages_cache.clear()
-    _complexity_cache.clear()
+
+    # Also clear semantic cache at session end / reset
+    from tools.semantic_cache import clear_semantic_cache
+    clear_semantic_cache()
+
+
+def _store_semantic_cache(
+    msg: dict,
+    last_user_text: str,
+    payload: dict,
+    config: "AgentConfig",
+) -> None:
+    """Store a non-tool-call LLM response in the semantic cache.
+
+    Only cache plain text responses (no tool_calls) from non-streaming calls.
+    The cached response includes the model tag so the UI can show it on replay.
+    """
+    if not last_user_text:
+        return
+    if msg.get("tool_calls"):
+        return  # don't cache tool-call responses
+    content = msg.get("content")
+    if not content or not str(content).strip():
+        return  # don't cache empty responses
+
+    model = payload.get("model", "?")
+    usage = msg.get("_usage", {})
+    input_tokens = usage.get("prompt_tokens", 0) if isinstance(usage, dict) else 0
+    output_tokens = usage.get("completion_tokens", 0) if isinstance(usage, dict) else 0
+
+    # Get pricing for savings estimate
+    from core.config import PROVIDER_DEFAULTS
+    provider = config.api_provider
+    pd_defaults = PROVIDER_DEFAULTS.get(provider)
+    input_price = pd_defaults.input_price if pd_defaults else 0.0
+    output_price = pd_defaults.output_price if pd_defaults else 0.0
+
+    cache = get_semantic_cache()
+    # Build a clean cached response dict (no _usage, no streaming metadata)
+    cached_response = {
+        "role": "assistant",
+        "content": content,
+        "model": model,
+    }
+    cache.store(
+        query_text=last_user_text,
+        response=cached_response,
+        model=model,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cost_per_million_input=input_price,
+        cost_per_million_output=output_price,
+    )

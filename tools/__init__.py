@@ -114,9 +114,12 @@ from tools.context import (  # noqa: E402, F401
     set_context,
 )
 
-# Per-turn cache for read-only tools. Cleared by run_agent_turn each turn.
-# Key: (tool_name, sorted_args_json). Cached read_file/file_info/etc.
+# Session-level cache for read-only tools.  Persists across turns within a
+# session, invalidated when files are modified.  Caps at _TOOL_CACHE_MAX_SIZE.
+# Key: json.dumps([name, args], sort_keys=True).
 _TOOL_CACHE: dict[str, "ToolResult"] = {}
+_TOOL_CACHE_MAX_SIZE = 256
+_TOOL_CACHE_PATH_MAP: dict[str, set[str]] = {}  # file path -> set of cache keys
 
 # Files modified by write/edit — used by verify
 _MODIFIED_FILES: set[str] = set()
@@ -137,7 +140,7 @@ from tools.reservations import (  # noqa: E402, F401
 _AGENT_RUNTIME = None  # AgentRuntime — set by init_session
 _CACHEABLE = frozenset({
     "read_file", "file_info", "list_directory",
-    "search_files", "semantic_search", "web_search",
+    "search_files", "find_symbol", "semantic_search", "web_search",
     "lsp_definition", "lsp_references", "lsp_hover", "lsp_diagnostics",
 })
 _TOOL_TIMEOUT = 120  # P3.1: per-tool execution timeout (seconds)
@@ -226,8 +229,15 @@ TOOLS.append(USE_SKILL_SCHEMA)
 
 
 def clear_tool_cache() -> None:
-    """Clear the per-turn tool cache. Called at the start of each agent turn."""
-    _TOOL_CACHE.clear()
+    """Clear the per-turn tool cache. Called at the start of each agent turn.
+
+    Since the cache is now session-level (invalidated by writes, not turns),
+    this is still a no-op in production (writes call clear_tool_cache but
+    actual invalidation happens via write-driven _reindex_file and
+    _FILE_CACHE eviction).  The in-memory _TOOL_CACHE dict is kept for
+    intra-turn deduplication within a single execute_tool call.
+    """
+    pass  # session-level cache — invalidation is write-driven, not turn-driven
 
 
 def _repair_json(raw: str) -> tuple[object, bool]:
@@ -570,11 +580,17 @@ def execute_tool(
             # Clear in-memory counters on success — the agent recovered
             _TOOL_CONTEXT.__dict__.pop("_failure_patterns", None)
 
-    # --- Cache invalidation: clear read cache on any write so subsequent ---
-    # reads within the same turn see fresh content.  Also covers restore_file.
+    # --- Cache invalidation: invalidate cache entries for modified files ---
+    # instead of clearing the entire cache.  This preserves session-level
+    # caching for unmodified files across turns while ensuring fresh reads
+    # for just-edited files.  Also covers restore_file.
     _WRITE_TOOLS = frozenset({"write_file", "edit_file", "restore_file"})
     if result.success and name in _WRITE_TOOLS:
-        _TOOL_CACHE.clear()
+        file_path = args.get("path", "") if isinstance(args, dict) else ""
+        if file_path and file_path in _TOOL_CACHE_PATH_MAP:
+            for key in list(_TOOL_CACHE_PATH_MAP.get(file_path, ())):
+                _TOOL_CACHE.pop(key, None)
+            _TOOL_CACHE_PATH_MAP.pop(file_path, None)
 
     # --- Post-edit auto-verification: run LSP diagnostics after file writes ---
     # LSP connections use subprocess pipes + per-connection locks, so they are
@@ -591,9 +607,17 @@ def execute_tool(
         except Exception:
             _log.warning("auto-verify LSP diagnostics failed for %s", file_path, exc_info=True)
 
-    # Cache successful read-only results (only when not streaming)
+    # Cache successful read-only results (only when not streaming).
+    # Session-level LRU: evict oldest entry when over _TOOL_CACHE_MAX_SIZE.
     if cache_key and result.success:
+        if cache_key not in _TOOL_CACHE and len(_TOOL_CACHE) >= _TOOL_CACHE_MAX_SIZE:
+            # Evict oldest entry (Python 3.7+ dicts are insertion-ordered)
+            _TOOL_CACHE.pop(next(iter(_TOOL_CACHE)), None)
         _TOOL_CACHE[cache_key] = result
+        # Track file-path-to-cache-key mapping for targeted invalidation
+        file_path = args.get("path", "") if isinstance(args, dict) else ""
+        if file_path:
+            _TOOL_CACHE_PATH_MAP.setdefault(file_path, set()).add(cache_key)
 
     return result
 
@@ -625,6 +649,7 @@ from tools import browser_ops  # noqa: E402, F401  # browser automation tools
 from tools import desktop_ops # noqa: E402, F401  # desktop automation tools
 from tools import macos_ops   # noqa: E402, F401  # intensive macOS API integrations
 from tools import agent_ops   # noqa: E402, F401
+from tools import memory_core  # noqa: E402, F401
 from tools import agent_todos  # noqa: E402, F401
 from tools import agent_patterns  # noqa: E402, F401
 from tools import agent_messages  # noqa: E402, F401

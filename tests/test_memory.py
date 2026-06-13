@@ -117,6 +117,7 @@ class TestMemoryStore(unittest.TestCase):
         self.assertEqual(self.store.load(), [])
 
     def test_clear_no_file_is_noop(self):
+        self.store.close()
         os.remove(self.store._db_path)
         self.store.clear()
 

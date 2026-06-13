@@ -719,12 +719,16 @@ def run_agent_turn(
                     )
                     messages.append({"role": "user", "content": recovery})
                     continue  # retry the turn loop
+
+                # Return the result directly — no Flash→Pro handoff.
                 if total_usage:
                     msg["_total_usage"] = total_usage
                 if turn_count > 1:
                     msg["_turn_count"] = turn_count
                 messages.append(msg)
                 _save_turn_summary(turn_count, msg, [], messages)
+                # Background consolidation: extract durable facts after turn
+                _run_consolidation(messages, config)
                 return msg
 
             # ----- phase 3: tool execution -----
@@ -744,6 +748,9 @@ def run_agent_turn(
             )
             # _tool_execution_phase returns False when all tools were
             # already streamed — just continue the loop.
+
+            # Background consolidation: extract durable facts after turn
+            _run_consolidation(messages, config)
 
             # --- Track consecutive read-only turns ---
             _write_tools = {"write_file", "edit_file", "run_shell"}
@@ -832,3 +839,17 @@ def _append_cancel_results(
         )
         _append_tool_result(messages, tc, result, on_tool_end,
                             recent_keys=recent_keys, lock=lock)
+
+
+def _run_consolidation(messages: list[dict], config: Any) -> None:
+    """Kick off background memory consolidation after a turn completes.
+
+    Uses a cheap model to extract durable facts and update core memory.
+    Non-blocking: runs in a daemon thread. Best-effort — never crashes
+    the main loop.
+    """
+    try:
+        from tools.memory_consolidation import consolidate_if_needed
+        consolidate_if_needed(messages, config)
+    except Exception:
+        pass

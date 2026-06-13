@@ -65,7 +65,7 @@ from core.config import (
 from core.llm import run_agent_turn
 from stream import THINKING_START, THINKING_END
 from core.safety import ReadSafetyGate, WriteSafetyGate
-from core.prompt import build_system_prompt, build_startup_context
+from core.prompt import build_system_prompt, build_startup_context, build_session_header
 from api import clear_api_cache
 from emoji_svg import clean_text
 
@@ -410,6 +410,13 @@ class AgentRunner:
         # Persist
         self.messages = self.memory.save(self.messages)
 
+        # Surface any prune summary to the chat panel so the user sees
+        # what was pruned (not just the LLM's internal reasoning about it).
+        summary = self.memory.last_prune_summary
+        if summary:
+            self.memory.last_prune_summary = ""
+            send_msg({"type": "response", "lines": [summary]})
+
         # Notify Electron
         send_msg({
             "type": "turn_complete",
@@ -428,7 +435,8 @@ class AgentRunner:
             knowledge = self.memory.get_top_knowledge(limit=15) if hasattr(self, 'memory') else []
             self.messages = [
                 {"role": "system", "content": build_system_prompt(self.config)},
-                {"role": "system", "content": build_startup_context(self.config.workspace, knowledge=knowledge)},
+                {"role": "user", "content": build_session_header(self.config)},
+                {"role": "user", "content": build_startup_context(self.config.workspace, knowledge=knowledge)},
             ]
             clear_api_cache()
             self.memory.clear()

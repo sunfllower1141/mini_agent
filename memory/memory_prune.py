@@ -35,12 +35,15 @@ _SAVE_RETRY_DELAY = 0.25  # seconds, multiplied by attempt number
 
 # Token estimation
 _CHARS_PER_TOKEN = 2                 # heuristic: ~2 characters per token (code is denser)
+_CHARS_PER_TOKEN_ENGLISH = 4        # English prose: ~4 chars/token (e.g. user messages)
+_CHARS_PER_TOKEN_JSON = 3           # JSON/structured tool results: ~3 chars/token
 _MIN_TOKEN_ESTIMATE = 1              # floor for token count estimates
 
 # Tool result compression
 _COMPRESSION_KEEP_RECENT = 6         # messages at the tail left uncompressed
 _COMPRESSION_MAX_LINES = 5           # lines before a tool result is compressed
 _COMPRESSION_MAX_FIRST_LINE = 500    # max length of the first line kept
+_TOOL_RESULT_MAX_CHARS = 8000        # per-result size budget before hard truncation
 
 # Conversation summarization
 _SUMMARY_PREVIEW_LENGTH = 120        # character limit for content previews
@@ -96,9 +99,11 @@ def _get_tool_content(msg: dict) -> str:
 def _estimate_tokens(msg: dict) -> int:
     """Rough token estimate for a single message.
 
-    Heuristic: ~4 characters per token (works well for English/code).
-    For tool results (JSON content), we parse and estimate just the
-    content field — the JSON wrapper overhead is negligible.
+    Uses content-type-aware heuristics:
+    - User messages (English prose): ~4 chars/token
+    - Assistant messages (mixed): ~3 chars/token
+    - Tool results (JSON): ~3 chars/token
+    - Tool call arguments (code/structured): ~2 chars/token
 
     Caches results by message identity so repeated calls on the same
     message within a single save() are O(1) after the first call.
@@ -109,10 +114,12 @@ def _estimate_tokens(msg: dict) -> int:
     except KeyError:
         pass
 
-    if msg.get("role") == "tool":
+    role = msg.get("role", "")
+    if role == "tool":
         text = _get_tool_content(msg)
-    elif msg.get("role") == "assistant" and msg.get("tool_calls"):
-        # Tool-call messages: count the arguments text
+        divisor = _CHARS_PER_TOKEN_JSON
+    elif role == "assistant" and msg.get("tool_calls"):
+        # Tool-call messages: count the arguments text (code/JSON, denser)
         total = len(msg.get("content", "") or "")
         for tc in msg["tool_calls"]:
             fn = tc.get("function", {})
@@ -120,10 +127,15 @@ def _estimate_tokens(msg: dict) -> int:
         result = max(_MIN_TOKEN_ESTIMATE, total // _CHARS_PER_TOKEN)
         _TOKEN_EST_CACHE[mid] = result
         return result
+    elif role == "user":
+        text = msg.get("content", "") or ""
+        divisor = _CHARS_PER_TOKEN_ENGLISH
     else:
+        # assistant text, system, etc.
         text = msg.get("content", "") or json.dumps(msg)
+        divisor = _CHARS_PER_TOKEN  # default: code-dense
 
-    result = max(_MIN_TOKEN_ESTIMATE, len(text) // _CHARS_PER_TOKEN)
+    result = max(_MIN_TOKEN_ESTIMATE, len(text) // divisor)
     _TOKEN_EST_CACHE[mid] = result
     return result
 
@@ -273,6 +285,22 @@ def _compress_tool_results(
             continue
 
         lines = text.split("\n")
+
+        # ACI upgrade: per-result size budget.  Huge tool results consume
+        # context and confuse the model — hard-truncate anything over budget.
+        if len(text) > _TOOL_RESULT_MAX_CHARS:
+            truncated = text[:_TOOL_RESULT_MAX_CHARS]
+            truncated += (
+                f"\n\u2026 (result truncated at {_TOOL_RESULT_MAX_CHARS} chars "
+                f"out of {len(text)} total. Use read_file with offset to see "
+                f"specific sections if needed.)"
+            )
+            data["content"] = truncated
+            m["content"] = json.dumps(data)
+            _TOOL_PARSE_CACHE.pop(id(m), None)
+            _TOKEN_EST_CACHE.pop(id(m), None)
+            changed = True
+            continue
 
         # Detect tool type from the forward-built map (P0.3: O(1) lookup)
         tcid = m.get("tool_call_id", "")
