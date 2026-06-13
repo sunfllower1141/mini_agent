@@ -61,6 +61,7 @@ if %errorlevel% neq 0 (
 echo.
 echo [4] Installing Node Dependencies...
 cd mini_agent_electron
+call npm run build
 call npm install 
 if %errorlevel% neq 0 (
     echo [FAIL] Failed to install Node dependencies.
