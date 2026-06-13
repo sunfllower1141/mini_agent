@@ -65,12 +65,24 @@ def _todo_read(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
 
 @_summarize("todo_write")
 def _todo_write_summary(args: dict) -> str:
-    return f"todo_write({args.get('id', '?')})"
+    todo_id = args.get("id", "")
+    content = args.get("content", "")
+    status = args.get("status", "pending")
+    preview = content[:40].replace("\n", " ")
+    if len(content) > 40:
+        preview += "..."
+    return f"todo_write(id='{todo_id}', status='{status}', content='{preview}')"
 
 
 @_summarize("todo_read")
 def _todo_read_summary(args: dict) -> str:
-    return f"todo_read({args.get('id', args.get('status', 'all'))})"
+    todo_id = args.get("id", "")
+    status = args.get("status", "")
+    if todo_id:
+        return f"todo_read(id='{todo_id}')"
+    if status:
+        return f"todo_read(status='{status}')"
+    return "todo_read(all)"
 
 
 # ---------------------------------------------------------------------------
