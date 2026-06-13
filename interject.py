@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""interject.py — thread-safe user interjection queue for mini_agent.
+"""interject.py -- thread-safe user interjection queue for mini_agent.
 
 Allows the user to type messages while the agent is working.  Messages are
 queued and injected into the conversation at the next tool-call boundary

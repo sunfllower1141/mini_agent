@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-context_inject.py — per-turn context injection for the agent orchestrator.
+context_inject.py -- per-turn context injection for the agent orchestrator.
 
 Injects scratchpad, git diff, orchestration status, progress reminders,
 circuit breaker warnings, self-critique, and strategy hints into the
@@ -58,7 +58,7 @@ def _check_circuit(recent_keys: list[str]) -> str | None:
     for key, count in counts.items():
         if count >= _CIRCUIT_THRESHOLD:
             return (
-                f"\u26a0\ufe0f Circuit breaker: you have called '{key}' {count} times "
+                f"WARNING: Circuit breaker: you have called '{key}' {count} times "
                 f"in the last {len(recent_keys)} tool calls. "
                 "The same call keeps being made with identical arguments. "
                 "Stop, diagnose why it isn't working, and try a different "
@@ -77,11 +77,11 @@ MODIFIED_FILES_CHECKPOINT_TURN = 2  # turn to show modified-files checkpoint
 
 
 # One-time context injection flags are stored on _TOOL_CONTEXT
-# (_scratchpad_injected, _git_diff_injected) — no module-level globals.
+# (_scratchpad_injected, _git_diff_injected) -- no module-level globals.
 
 
 # ---------------------------------------------------------------------------
-# Context injection helpers — each appends one kind of context message.
+# Context injection helpers -- each appends one kind of context message.
 # ---------------------------------------------------------------------------
 
 
@@ -190,7 +190,7 @@ def _inject_core_memory_context(
         messages.append({
             "role": "user",
             "content": (
-                "[CORE MEMORY — persistent learnings from past sessions]\n"
+                "[CORE MEMORY -- persistent learnings from past sessions]\n"
                 "You wrote this in a previous session to help your future self. "
                 "Use it to avoid re-discovering things:\n\n"
                 + core_content.strip()
@@ -213,7 +213,7 @@ def _inject_scratchpad_context(
         messages.append({
             "role": "user",
             "content": (
-                "Your scratchpad (current working notes — use write_scratchpad "
+                "Your scratchpad (current working notes -- use write_scratchpad "
                 "to update):\n\n" + scratchpad
             ),
             "_transient": True,
@@ -245,7 +245,7 @@ def _inject_git_diff(
                 "_transient": True,
             })
     except (OSError, _sp.TimeoutExpired) as exc:
-        print(f"  ⚠ git diff failed: {exc}", file=sys.stderr, flush=True)
+        print(f"  WARNING: git diff failed: {exc}", file=sys.stderr, flush=True)
 
 
 def _inject_orchestration_context(messages: list[dict]) -> None:
@@ -336,7 +336,7 @@ def _inject_orchestration_context(messages: list[dict]) -> None:
                     last_action = status_snap.get("last_action", "")
                     if last_action and last_action != "idle":
                         runtime.extend_turns(tid, 10)
-                        parts.append(f"  🔄 Auto-extended '{tid}' (+10 turns, {remaining} left)")
+                        parts.append(f"  [LOOP] Auto-extended '{tid}' (+10 turns, {remaining} left)")
         if parts:
             messages.append({
                 "role": "user",
@@ -378,7 +378,7 @@ def _inject_progress_check(messages: list[dict], *, turn_count: int) -> None:
                 f"You've spent {_TOOL_CONTEXT._consecutive_read_only_turns} turns reading "
                 "code without making changes. If you have enough context to "
                 "answer the user, do so NOW. If you need more, state what "
-                "SPECIFIC information you're still missing — don't just keep "
+                "SPECIFIC information you're still missing -- don't just keep "
                 "reading files broadly."
             ),
             "_transient": True,
@@ -391,7 +391,7 @@ def _inject_progress_check(messages: list[dict], *, turn_count: int) -> None:
         "Briefly assess your progress: are you making headway, "
         "stuck in a loop, or done? If you can wrap up now, "
         "give the final answer. If you truly need more turns, "
-        "continue — but be specific about what remains."
+        "continue -- but be specific about what remains."
     )
     messages.append({"role": "user", "content": reminder, "_transient": True})
 
@@ -437,7 +437,7 @@ def _inject_modified_files_checkpoint(
                             if len(cf["callers"]) > 2:
                                 names_str += f" (+{len(cf['callers']) - 2})"
                             cf_parts.append(f"{cf['file']}({names_str})")
-                        caller_summaries.append(f"  {mf} → called by: {', '.join(cf_parts)}")
+                        caller_summaries.append(f"  {mf} -> called by: {', '.join(cf_parts)}")
                 if caller_summaries:
                     kg_hint = "\nCaller impact analysis:\n" + "\n".join(caller_summaries)
         except Exception:
@@ -520,7 +520,7 @@ def _inject_post_edit_verification(messages: list[dict]) -> None:
     _TOOL_CONTEXT._last_verified_modified = set(modified)
 
     lines: list[str] = []
-    lines.append("Post-edit verification — files modified this session:")
+    lines.append("Post-edit verification -- files modified this session:")
 
     # Test coverage: show which modified files have/haven't test coverage
     for mf in py_files[:5]:
@@ -532,8 +532,8 @@ def _inject_post_edit_verification(messages: list[dict]) -> None:
         if not has_test:
             alt_path = os.path.join("tests", candidate)
             has_test = os.path.isfile(os.path.join(workspace, alt_path))
-        status = "✅ has test" if has_test else "⚠️ no test found"
-        lines.append(f"  {mf} — {status}")
+        status = "[OK] has test" if has_test else "WARNING: no test found"
+        lines.append(f"  {mf} -- {status}")
 
     # Knowledge graph: show affected callers across all modified files
     try:
@@ -588,7 +588,7 @@ def _inject_edit_risk_context(messages: list[dict]) -> None:
       - Knowledge graph caller analysis (which callers may break)
       - Git blame (who last touched these lines)
 
-    Only injects when there are pending edits — zero tokens otherwise.
+    Only injects when there are pending edits -- zero tokens otherwise.
     """
     # Find the most recent assistant message with tool calls
     edit_targets: list[str] = []
@@ -648,7 +648,7 @@ def _inject_edit_risk_context(messages: list[dict]) -> None:
                 commit_lines = r.stdout.strip().split("\n")
                 count = len(commit_lines)
                 if count >= 3:
-                    risk_items.append(f"modified in {count}/{_EDIT_RISK_GIT_DEPTH} recent commits ⚠️")
+                    risk_items.append(f"modified in {count}/{_EDIT_RISK_GIT_DEPTH} recent commits WARNING:")
                 elif count > 0:
                     risk_items.append(f"modified in {count} recent commit(s)")
         except (OSError, _sp.TimeoutExpired):
@@ -686,7 +686,7 @@ def _inject_edit_risk_context(messages: list[dict]) -> None:
                 # Also check tests/ directory
                 alt_path = os.path.join("tests", candidate)
                 if not os.path.isfile(os.path.join(workspace, alt_path)):
-                    risk_items.append("no test file found ⚠️")
+                    risk_items.append("no test file found WARNING:")
 
         # 4. Knowledge graph caller analysis (if graph is available)
         if _kg_available and target.endswith(".py"):
@@ -704,11 +704,11 @@ def _inject_edit_risk_context(messages: list[dict]) -> None:
                     caller_summary = "; ".join(caller_parts)
                     if len(callers) > 3:
                         caller_summary += f" (+{len(callers) - 3} more files)"
-                    risk_items.append(f"callers: {caller_summary} — verify after changes")
+                    risk_items.append(f"callers: {caller_summary} -- verify after changes")
             except Exception:
                 pass
 
-        # 5. Git blame — who last modified this file
+        # 5. Git blame -- who last modified this file
         try:
             r = _sp.run(
                 ["git", "-C", workspace, "blame", "--line-porcelain", target],
@@ -884,15 +884,15 @@ def _inject_scratchpad_nudge(messages: list[dict], *, turn_count: int) -> None:
         messages.append({
             "role": "user",
             "content": (
-                "⚠️ Your scratchpad hasn't been updated in several turns. "
+                "WARNING: Your scratchpad hasn't been updated in several turns. "
                 "Consider using write_scratchpad to capture your current "
                 "plan, progress, and decisions before continuing.\n\n"
                 "Good scratchpad format:\n"
-                "  GOAL: [1 line — what the user wants]\n"
+                "  GOAL: [1 line -- what the user wants]\n"
                 "  DONE: [what you've accomplished so far]\n"
-                "  NEXT: [exactly what you'll do next turn — be specific]\n"
+                "  NEXT: [exactly what you'll do next turn -- be specific]\n"
                 "  QUESTIONS: [anything you're uncertain about]\n"
-                "Keep it short — this is for YOUR memory, not the user."
+                "Keep it short -- this is for YOUR memory, not the user."
             ),
             "_transient": True,
         })
@@ -904,7 +904,7 @@ def _inject_plan_status(messages: list[dict]) -> None:
     plan_steps = _TOOL_CONTEXT._plan_steps
     if not plan_steps:
         return
-    # Suppress plan when sub-agents are running — avoids confusion
+    # Suppress plan when sub-agents are running -- avoids confusion
     runtime = getattr(_TOOL_CONTEXT, "_agent_runtime", None)
     if runtime is not None:
         if runtime.get_running_ids():
@@ -912,7 +912,7 @@ def _inject_plan_status(messages: list[dict]) -> None:
     plan_done = _TOOL_CONTEXT._plan_done
     lines = [f"Active plan ({len(plan_done)}/{len(plan_steps)} done):"]
     for i, s in enumerate(plan_steps, 1):
-        mark = "✓" if (i - 1) in plan_done else "○"
+        mark = "V" if (i - 1) in plan_done else "o"
         lines.append(f"  [{mark}] {i}. {s}")
     lines.append("Use plan_status to mark steps complete as you finish them.")
 
@@ -923,7 +923,7 @@ def _inject_plan_status(messages: list[dict]) -> None:
     stale_turns = turn_count - last_advanced
     if len(plan_done) < len(plan_steps) and stale_turns >= _PLAN_STALE_TURNS:
         lines.append(
-            f"\n⚠️ PLAN STALLED: No step advanced in {stale_turns} turns. "
+            f"\nWARNING: PLAN STALLED: No step advanced in {stale_turns} turns. "
             "Either you're stuck on the current step, or you forgot to call "
             "plan_status when you finished it. Re-evaluate: are you making "
             "progress? If stuck, read relevant files, try a different approach, "
@@ -938,14 +938,14 @@ def _inject_plan_status(messages: list[dict]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Main context injector — orchestrates all helpers.
+# Main context injector -- orchestrates all helpers.
 # ---------------------------------------------------------------------------
 
 
 
 def _inject_system_reminder(messages: list[dict], *, turn_count: int) -> None:
     """Re-inject critical rules near end of long contexts to fight
-    'instruction centrifugation' — the system prompt fading as context grows.
+    'instruction centrifugation' -- the system prompt fading as context grows.
 
     Triggers when message count > 20 (~6-7 turns), repeats every 8 messages
     for DeepSeek (prone to tool-call loops), 12 for other providers.
@@ -962,12 +962,12 @@ def _inject_system_reminder(messages: list[dict], *, turn_count: int) -> None:
     _TOOL_CONTEXT._system_reminder_last_msg_count = len(messages)
 
     reminder = (
-        "⚠️ SYSTEM REMINDER (context is long — critical rules):\n\n"
+        "WARNING: SYSTEM REMINDER (context is long -- critical rules):\n\n"
         "LOOP PREVENTION:\n"
         "- Same tool + same args 2x = STUCK. Switch approach immediately.\n"
         "- edit_file MUST be preceded by read_file in the same batch.\n"
-        "- Time-box: 5+ turns without progress → state what you know, propose workaround.\n"
-        "- Context grows stale — trust write_scratchpad and plan over old tool results.\n\n"
+        "- Time-box: 5+ turns without progress -> state what you know, propose workaround.\n"
+        "- Context grows stale -- trust write_scratchpad and plan over old tool results.\n\n"
         "EFFICIENCY:\n"
         "- Batch ALL independent tool calls in ONE response (parallel execution).\n"
         "- Update write_scratchpad every 3 turns.\n"
@@ -983,7 +983,7 @@ def _compress_stale_tool_results(messages: list[dict]) -> None:
 
     Uses the content-aware compression from ``memory_prune`` (same
     algorithm used during persistence), so tool results are compressed
-    consistently throughout the turn loop — not just on save.
+    consistently throughout the turn loop -- not just on save.
 
     Only tool results outside the *keep_recent* window are compressed;
     recent results stay intact for the model to reference.
@@ -999,7 +999,7 @@ def _inject_failure_pattern_warnings(
     """Inject failure pattern warnings for an assistant message's tool calls.
 
     Called between API call and tool execution so warnings target the
-    CURRENT turn's tool choices.  (M7: deduplicated — removed the
+    CURRENT turn's tool choices.  (M7: deduplicated -- removed the
     pre-API-call variant that re-warned about the previous turn's
     tool_calls that had already been warned post-API.)
     """
@@ -1067,7 +1067,7 @@ def _inject_self_critique(messages: list[dict], *, turn_count: int) -> None:
                     hint = tool_hints.get(first_name, f"STOP retrying {first_name}. It has failed {_CONSECUTIVE_FAILURE_THRESHOLD}+ times. Switch approach.")
                     messages.append({
                         "role": "user",
-                        "content": f"⚠️ {hint}",
+                        "content": f"WARNING: {hint}",
                         "_transient": True,
                     })
                     return  # Don't also inject the general self-critique
@@ -1099,7 +1099,7 @@ def _inject_self_critique(messages: list[dict], *, turn_count: int) -> None:
                                 except (json.JSONDecodeError, TypeError):
                                     pass
                                 break
-            if len(recent_results) >= 30:  # Scan last 30 tool results (was 10 — P6 fix)
+            if len(recent_results) >= 30:  # Scan last 30 tool results (was 10 -- P6 fix)
                 break
 
         if recent_results:
@@ -1237,7 +1237,7 @@ def _inject_confidence_web_search_nudge(
     nudge = ""
     if max_consecutive_misses >= _CONFIDENCE_NO_RESULT_THRESHOLD and not found_any_result:
         nudge = (
-            f"\u26a0\ufe0f CONFIDENCE CHECK: Your last {max_consecutive_misses} codebase "
+            f"WARNING: CONFIDENCE CHECK: Your last {max_consecutive_misses} codebase "
             f"searches returned no results. Your knowledge confidence appears LOW "
             f"(\u22643/10). Before searching further locally, use "
             f"web_search to look up documentation for the relevant library, API, "
@@ -1245,14 +1245,14 @@ def _inject_confidence_web_search_nudge(
         )
     elif max_consecutive_failures >= _CONFIDENCE_FAILURE_THRESHOLD:
         nudge = (
-            f"\u26a0\ufe0f CONFIDENCE CHECK: Your last {max_consecutive_failures} "
+            f"WARNING: CONFIDENCE CHECK: Your last {max_consecutive_failures} "
             f"tool calls failed. Your approach may be based on incorrect assumptions. "
             f"Consider web_search to verify the correct API, syntax, or pattern "
             f"before retrying."
         )
     elif total_read_only_turns >= 6:
         nudge = (
-            f"\u26a0\ufe0f CONFIDENCE CHECK: You've spent {total_read_only_turns} "
+            f"WARNING: CONFIDENCE CHECK: You've spent {total_read_only_turns} "
             f"turns reading code without writing. If you're unsure how to proceed, "
             f"use web_search to find the relevant documentation or examples."
         )
@@ -1267,7 +1267,7 @@ def _inject_confidence_web_search_nudge(
 
 
 def _inject_strategy_hint(messages: list[dict]) -> None:
-    """#5 Auto tool strategy hints — suggest optimal search tool.
+    """#5 Auto tool strategy hints -- suggest optimal search tool.
 
     Also detects when the agent is using search_files for symbol-like
     patterns (single CamelCase/snake_case identifiers) and nudges
@@ -1313,7 +1313,7 @@ def _inject_strategy_hint(messages: list[dict]) -> None:
                             ):
                                 text_patterns_seen += 1
             if text_patterns_seen >= 2:
-                hint = "[Hint: You've been using search_files for patterns that look like symbol names. Try find_symbol — it's ~10x faster and gives exact line numbers.]"
+                hint = "[Hint: You've been using search_files for patterns that look like symbol names. Try find_symbol -- it's ~10x faster and gives exact line numbers.]"
 
         if hint:
             # Track injected hints in a set for O(1) dedup
@@ -1510,11 +1510,11 @@ def _inject_context(
 
     Delegates to smaller helpers for one-time and per-turn injections.
     """
-    # Compaction must run FIRST — before injecting new context messages —
+    # Compaction must run FIRST -- before injecting new context messages --
     # so fresh context isn't immediately pruned.
     _compact_if_needed(messages)
 
-    # Build knowledge graph at startup (one-time, lazy — no-op if already built)
+    # Build knowledge graph at startup (one-time, lazy -- no-op if already built)
     workspace = read_gate.workspace_root if read_gate else ""
     if workspace and turn_count == 1:
         try:
@@ -1639,7 +1639,7 @@ def _compact_if_needed(messages: list[dict]) -> None:
     messages.extend(kept)
 
     _log.info(
-        "Compacted conversation: %d → %d messages (%d pruned)",
+        "Compacted conversation: %d -> %d messages (%d pruned)",
         len(system_msgs) + len(conversation),
         len(messages),
         len(pruned),

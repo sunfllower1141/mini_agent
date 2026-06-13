@@ -2,7 +2,7 @@
 """Metrics collection for the Agent Evaluation Harness.
 
 Instruments the agent loop via existing callbacks (on_tool_start,
-on_tool_end) — no changes to core modules required.
+on_tool_end) -- no changes to core modules required.
 
 New in this revision:
     - Per-tool wall time tracking (start/end timestamps, deltas)
@@ -104,14 +104,14 @@ class MetricsCollector:
         else:
             self.tool_failures += 1
 
-        # Compute latency — match to most recent un-matched start
+        # Compute latency -- match to most recent un-matched start
         # In parallel batches, we pair in order (FIFO of start times)
         if self._start_times:
             idx = min(self._start_times.keys())
             t0 = self._start_times.pop(idx)
             elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
-            # Fallback — use summary to extract tool name
+            # Fallback -- use summary to extract tool name
             name = getattr(self, '_last_tool_name', None)
             if name:
                 self.tool_wall_ms[name].append(elapsed_ms)
@@ -128,7 +128,7 @@ class MetricsCollector:
     # ---- turn tracking ----
 
     def mark_turn(self) -> None:
-        """Mark the start of a new agent turn (LLM → tools → LLM cycle)."""
+        """Mark the start of a new agent turn (LLM -> tools -> LLM cycle)."""
         self.turn_count += 1
         self._current_batch_size = 0
 

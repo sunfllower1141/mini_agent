@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-tools package — tool definitions, execution, and structured results for mini_agent.
+tools package -- tool definitions, execution, and structured results for mini_agent.
 
 Every tool execution returns a ToolResult (never a raw exception).
 All read and write paths route through the safety gates.
@@ -12,14 +12,14 @@ Adding a new tool requires:
     3. An entry in ``TOOLS`` (the API schema sent to the LLM).
 
 Submodules:
-    file_ops    — read_file, write_file, edit_file, list_directory, file_info,
+    file_ops    -- read_file, write_file, edit_file, list_directory, file_info,
                   write_scratchpad, diff, restore_file, plan, plan_status
-    shell_ops   — run_shell, task_status, search_files, run_tests, verify, git
-    search_ops  — find_symbol, find_usages, semantic_search, web_search, recall_turn
-    agent_ops   — spawn_agent, agent_status, collect_agent, collect_any,
+    shell_ops   -- run_shell, task_status, search_files, run_tests, verify, git
+    search_ops  -- find_symbol, find_usages, semantic_search, web_search, recall_turn
+    agent_ops   -- spawn_agent, agent_status, collect_agent, collect_any,
                   agent_message, agent_read, agent_handoff, agent_inbox,
                   agent_subscribe, agent_extend, agent_cancel
-    lsp         — lsp_definition, lsp_references, lsp_hover, lsp_diagnostics
+    lsp         -- lsp_definition, lsp_references, lsp_hover, lsp_diagnostics
 
 """
 
@@ -37,7 +37,7 @@ from logging_setup import get_logger, log_tool_failure, log_tool_success, log_er
 
 _log = get_logger("tools")
 
-# Hardcoded core schema for remember — always present even if schema.py is missing
+# Hardcoded core schema for remember -- always present even if schema.py is missing
 # Bootstrap guard: if the canonical "remember" schema is missing from schema.py
 # (e.g. corrupted install), insert a minimal fallback so the tool still works.
 if not any(td["function"]["name"] == "remember" for td in TOOLS):
@@ -59,7 +59,7 @@ if not any(td["function"]["name"] == "remember" for td in TOOLS):
     })
 
 # ---------------------------------------------------------------------------
-# TOOL_SCHEMA_MAP — O(1) name→schema lookup for execute_tool() validation
+# TOOL_SCHEMA_MAP -- O(1) name->schema lookup for execute_tool() validation
 # ---------------------------------------------------------------------------
 
 # Lazily-built dict mirroring TOOLS for O(1) lookup.  Invalidated when
@@ -85,7 +85,7 @@ def _get_tool_schema(name: str) -> dict | None:
 # ---------------------------------------------------------------------------
 # Structured tool result (extracted to tools/result.py)
 # ---------------------------------------------------------------------------
-from tools.result import ToolResult  # noqa: E402, F401 — re-exported for backward compat
+from tools.result import ToolResult  # noqa: E402, F401 -- re-exported for backward compat
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +99,7 @@ _TOOL_SUMMARIES: dict[str, callable] = {}
 _DISPATCH_SIGNATURES: dict[str, bool] = {}
 
 # ---------------------------------------------------------------------------
-# Agent context — extracted to tools/context.py (re-exported for backward compat)
+# Agent context -- extracted to tools/context.py (re-exported for backward compat)
 # ---------------------------------------------------------------------------
 from tools.context import (  # noqa: E402, F401
     AgentContext,
@@ -121,14 +121,14 @@ _TOOL_CACHE: dict[str, "ToolResult"] = {}
 _TOOL_CACHE_MAX_SIZE = 256
 _TOOL_CACHE_PATH_MAP: dict[str, set[str]] = {}  # file path -> set of cache keys
 
-# Files modified by write/edit — used by verify
+# Files modified by write/edit -- used by verify
 _MODIFIED_FILES: set[str] = set()
 _MODIFIED_FILES_LOCK = threading.Lock()
 
 _TASK_REGISTRY: dict[str, subprocess.Popen] = {}  # background shell task registry
 
 # ---------------------------------------------------------------------------
-# File reservation system — extracted to tools/reservations.py
+# File reservation system -- extracted to tools/reservations.py
 # ---------------------------------------------------------------------------
 from tools.reservations import (  # noqa: E402, F401
     reserve_file,
@@ -137,7 +137,7 @@ from tools.reservations import (  # noqa: E402, F401
 )
 
 # Sub-agent runtime registry (lazy init in config.init_session)
-_AGENT_RUNTIME = None  # AgentRuntime — set by init_session
+_AGENT_RUNTIME = None  # AgentRuntime -- set by init_session
 _CACHEABLE = frozenset({
     "read_file", "file_info", "list_directory",
     "search_files", "find_symbol", "semantic_search", "web_search",
@@ -219,7 +219,7 @@ _TOOL_SUMMARIES["write_session_handoff"] = (
     lambda args: "write_session_handoff()"
 )
 
-# ── use_skill gate: lazy tool loading ──
+# -- use_skill gate: lazy tool loading --
 from tools.skills import USE_SKILL_SCHEMA, _use_skill  # noqa: E402
 
 _TOOL_DISPATCH["use_skill"] = _use_skill
@@ -237,7 +237,7 @@ def clear_tool_cache() -> None:
     _FILE_CACHE eviction).  The in-memory _TOOL_CACHE dict is kept for
     intra-turn deduplication within a single execute_tool call.
     """
-    pass  # session-level cache — invalidation is write-driven, not turn-driven
+    pass  # session-level cache -- invalidation is write-driven, not turn-driven
 
 
 def _repair_json(raw: str) -> tuple[object, bool]:
@@ -249,7 +249,7 @@ def _repair_json(raw: str) -> tuple[object, bool]:
 
     Repairs attempted (in order, each retried independently, then combinations):
     1. Trailing commas before ``]`` or ``}``
-    2. Single-quoted strings → double quotes
+    2. Single-quoted strings -> double quotes
     3. Unquoted object keys
     4. 1+2, 1+3, 2+3, 1+2+3 (combinations)
     """
@@ -298,7 +298,7 @@ def _repair_json(raw: str) -> tuple[object, bool]:
     if not raw.strip().startswith('['):
         fix3 = _fix_unquoted_keys(raw)
 
-    # Combinations — apply fixes in sequence on copies
+    # Combinations -- apply fixes in sequence on copies
     def _apply_combo(base: str, *indices: int) -> str:
         s = base
         for i in indices:
@@ -349,7 +349,7 @@ from tools.error_hints import (  # noqa: E402, F401
 # Module-level cancel event so tool functions (e.g. _run_shell) can
 # detect cancellation and stop blocking on subprocess I/O.  Set by
 # execute_tool() before dispatching; cleared after the thread completes.
-# This is NOT a ContextVar — it's shared across all threads on purpose.
+# This is NOT a ContextVar -- it's shared across all threads on purpose.
 _CURRENT_CANCEL_EVENT: threading.Event | None = None
 
 def execute_tool(
@@ -484,7 +484,7 @@ def execute_tool(
         if cancel_event is not None:
             # Poll with short intervals so the user can cancel during streaming.
             # A single t.join(timeout=120) blocks the SSE parsing loop and makes
-            # the UI appear hung — especially on Windows where the first open()
+            # the UI appear hung -- especially on Windows where the first open()
             # call in a new thread can be delayed by antivirus filter drivers.
             _poll_interval = 0.1  # 100 ms
             _deadline = _time.monotonic() + _TOOL_TIMEOUT
@@ -502,7 +502,7 @@ def execute_tool(
                         _cleanup_all_procs()
                     except Exception:
                         pass
-                    # Don't return yet — give the thread a brief grace period
+                    # Don't return yet -- give the thread a brief grace period
                     # to finish (50 ms).  We can't kill Python threads safely.
                     t.join(timeout=0.05)
                     break
@@ -518,7 +518,7 @@ def execute_tool(
     finally:
         _CURRENT_CANCEL_EVENT = _prev_cancel
     if t.is_alive():
-        # Thread still running after timeout — it's stuck.
+        # Thread still running after timeout -- it's stuck.
         # We cannot safely kill a Python thread, so return a timeout result.
         # The daemon thread will continue running but will be terminated
         # when the process exits.
@@ -544,9 +544,9 @@ def execute_tool(
     # --- console: success / failure status ---
     _turn = getattr(_TOOL_CONTEXT, '_turn_count', 0)
     if result.success:
-        _sys.stderr.write(f"[turn {_turn}] '{name}' ✓\n")
+        _sys.stderr.write(f"[turn {_turn}] '{name}' V\n")
     else:
-        _sys.stderr.write(f"[turn {_turn}] '{name}' ✗ — {result.content[:120]}\n")
+        _sys.stderr.write(f"[turn {_turn}] '{name}' X -- {result.content[:120]}\n")
     _sys.stderr.flush()
 
     # Normalize: every failed result gets a _build_error_hint so the LLM
@@ -577,7 +577,7 @@ def execute_tool(
                     pattern_store.record_success(name, args)
                 except Exception:
                     _log.warning("FailurePatternStore.record_success failed", exc_info=True)
-            # Clear in-memory counters on success — the agent recovered
+            # Clear in-memory counters on success -- the agent recovered
             _TOOL_CONTEXT.__dict__.pop("_failure_patterns", None)
 
     # --- Cache invalidation: invalidate cache entries for modified files ---
@@ -634,7 +634,7 @@ def tool_summary(tc: dict) -> str:
 
     summarize = _TOOL_SUMMARIES.get(name)
     if summarize is None:
-        return f"{name}(…)"
+        return f"{name}(...)"
     return summarize(args)
 
 
@@ -658,7 +658,7 @@ from tools.search_ops import build_symbol_index  # noqa: E402, F401
 from tools.mcp_client import get_mcp_manager, init_mcp_servers, shutdown_mcp  # noqa: E402, F401
 
 # ---------------------------------------------------------------------------
-# mcp_discover / mcp_call — MCP client tools
+# mcp_discover / mcp_call -- MCP client tools
 # ---------------------------------------------------------------------------
 
 
@@ -704,7 +704,7 @@ def _mcp_call_summary(args: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# atexit cleanup — tear down browser, LSP, MCP, background tasks on exit
+# atexit cleanup -- tear down browser, LSP, MCP, background tasks on exit
 # ---------------------------------------------------------------------------
 
 import atexit as _atexit

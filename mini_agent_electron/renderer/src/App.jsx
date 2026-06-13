@@ -17,18 +17,18 @@ import SettingsPanel from './components/SettingsPanel';
 const MAX_RENDERED_CHAT_LINES = 400;
 const MAX_RENDERED_TOOL_LINES = 400;
 
-// Theme registry — name, data-theme value, status-bar icon
+// Theme registry -- name, data-theme value, status-bar icon
 const THEMES = [
-  { name: 'Dark',         id: 'dark',         icon: '☾' },
-  { name: 'Light',        id: 'light',        icon: '☀' },
-  { name: 'Dracula',      id: 'dracula',      icon: '🧛' },
-  { name: 'Nord',         id: 'nord',         icon: '❄️' },
-  { name: 'Catppuccin',   id: 'catppuccin',   icon: '🐱' },
-  { name: 'Rosé Pine',    id: 'rose-pine',    icon: '🌹' },
-  { name: 'Gruvbox',      id: 'gruvbox',      icon: '🪵' },
-  { name: 'Solarized',    id: 'solarized',    icon: '☯️' },
-  { name: 'Tokyo Night',  id: 'tokyo-night',  icon: '🌆' },
-  { name: 'Monokai',      id: 'monokai',      icon: '🎨' },
+  { name: 'Dark',         id: 'dark',         icon: '[MOON]' },
+  { name: 'Light',        id: 'light',        icon: '?' },
+  { name: 'Dracula',      id: 'dracula',      icon: '?' },
+  { name: 'Nord',         id: 'nord',         icon: '?' },
+  { name: 'Catppuccin',   id: 'catppuccin',   icon: '?' },
+  { name: 'Rose Pine',    id: 'rose-pine',    icon: '?' },
+  { name: 'Gruvbox',      id: 'gruvbox',      icon: '?' },
+  { name: 'Solarized',    id: 'solarized',    icon: '?' },
+  { name: 'Tokyo Night',  id: 'tokyo-night',  icon: '?' },
+  { name: 'Monokai',      id: 'monokai',      icon: '?' },
 ];
 
 function setThemeDom(id) {
@@ -41,11 +41,11 @@ function setThemeDom(id) {
 // App
 // ---------------------------------------------------------------------------
 function AppShell() {
-  // Log state — arrays of { text, cls?, html?, icon? }
+  // Log state -- arrays of { text, cls?, html?, icon? }
   const [toolsLines, setToolsLines] = useState([]);
   const [chatLines, setChatLines] = useState([]);
 
-  // Sub-agent data — { [task_id]: { name, desc, toolCalls: [], thoughts: [], output: "", ok: null } }
+  // Sub-agent data -- { [task_id]: { name, desc, toolCalls: [], thoughts: [], output: "", ok: null } }
   const [subagentData, setSubagentData] = useState({});
 
   // Smooth streaming for thinking & chat
@@ -112,7 +112,7 @@ function AppShell() {
 
   const addToolLine = useCallback((line) => addLine(setToolsLines)(line), [addLine]);
 
-  // Status / init — fetched once on mount (empty deps to avoid re-render loop)
+  // Status / init -- fetched once on mount (empty deps to avoid re-render loop)
   useEffect(() => {
     const api = window.miniAgent;
     if (!api) return;
@@ -124,7 +124,7 @@ function AppShell() {
         return;
       }
       if (data.ready) {
-        // Backend came online — hide settings if it was showing
+        // Backend came online -- hide settings if it was showing
         setShowSettings(false);
       }
       if (data.model != null) setModelName(data.model);
@@ -395,7 +395,7 @@ function AppShell() {
       if (trimmed.startsWith('/theme')) {
         const arg = trimmed.replace('/theme', '').trim();
         if (arg) {
-          // `/theme <name>` — fuzzy match against theme id or name
+          // `/theme <name>` -- fuzzy match against theme id or name
           const match = THEMES.find((t) =>
             t.id.toLowerCase() === arg.toLowerCase() ||
             t.name.toLowerCase() === arg.toLowerCase()
@@ -404,7 +404,7 @@ function AppShell() {
             applyTheme(match.id);
           }
         } else {
-          // `/theme` with no arg — cycle
+          // `/theme` with no arg -- cycle
           cycleTheme();
         }
         setInputValue('');
@@ -439,7 +439,7 @@ function AppShell() {
 
     window.miniAgent.submit(text);
 
-    // Safety timeout — re-enable after 120s
+    // Safety timeout -- re-enable after 120s
     submitTimeoutRef.current = setTimeout(() => {
       setIsLive(false);
       setInputDisabled(false);
@@ -497,13 +497,13 @@ function AppShell() {
     // Session name in footer will update via backend:status event
   }, []);
 
-  // Settings saved handler — backend will send backend:status { ready: true }
+  // Settings saved handler -- backend will send backend:status { ready: true }
   // which triggers setShowSettings(false) in the onStatus listener
   const handleSettingsSaved = useCallback(() => {
     // Let the backend:status event handle hiding the panel
   }, []);
 
-  // Cancel handler — immediately reset UI, then tell backend
+  // Cancel handler -- immediately reset UI, then tell backend
   const handleCancel = useCallback(() => {
     window.miniAgent?.cancel();
     clearTimeout(submitTimeoutRef.current);
@@ -551,7 +551,7 @@ function AppShell() {
     <div id="app">
       {/* Header */}
       <div id="header" className="header">
-        <span className="dim"> mini_agent — </span>
+        <span className="dim"> mini_agent -- </span>
         <span id="header-model" className="text">{modelName}</span>
       </div>
 
@@ -629,10 +629,10 @@ function AppShell() {
       {/* Status bar */}
       <div id="status-bar" className="status-bar dim">
         <span id="git-status">
-          {gitBranch && `⎇ ${gitBranch}${gitDirty ? '*' : ''}`}
+          {gitBranch && `? ${gitBranch}${gitDirty ? '*' : ''}`}
         </span>
         {isLive && (
-          <span id="live-indicator" onClick={handleCancel} title="Cancel"> ●</span>
+          <span id="live-indicator" onClick={handleCancel} title="Cancel"> *</span>
         )}
         <span id="theme-toggle" onClick={() => setThemePickerOpen((p) => !p)} title={`Theme: ${themeEntry.name}`}>
           {themeEntry.icon}
@@ -647,16 +647,16 @@ function AppShell() {
               >
                 <span className="theme-icon">{t.icon}</span>
                 <span className="theme-name">{t.name}</span>
-                {t.id === theme && <span className="theme-check">✓</span>}
+                {t.id === theme && <span className="theme-check">V</span>}
               </div>
             ))}
           </div>
         )}
         {turnCountVal != null && (
-          <span id="turn-counter"> ↻ turn <span id="turn-count">{turnCountVal}</span></span>
+          <span id="turn-counter"> ? turn <span id="turn-count">{turnCountVal}</span></span>
         )}
         {tokenCountVal != null && (
-          <span id="token-counter"> ⊙ <span id="token-count">{tokenCountVal}</span> tok</span>
+          <span id="token-counter"> ? <span id="token-count">{tokenCountVal}</span> tok</span>
         )}
         <div className="status-right">
           {restoredCount != null && (
@@ -673,7 +673,7 @@ function AppShell() {
 
 
 // ---------------------------------------------------------------------------
-// Root export — wraps App in Error Boundary
+// Root export -- wraps App in Error Boundary
 // ---------------------------------------------------------------------------
 export default function App() {
   return (

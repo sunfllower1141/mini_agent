@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""session.py — session management for mini_agent.
+"""session.py -- session management for mini_agent.
 
 Session DBs are SQLite databases stored as .mini_agent_memory_session_<name>.db
 in the workspace root.  The default session uses .mini_agent_memory.db directly.

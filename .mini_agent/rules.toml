@@ -1,6 +1,6 @@
 # mini_agent File-Pattern Conditional Rules
 #
-# These rules are injected contextually — only when the agent is working with
+# These rules are injected contextually -- only when the agent is working with
 # files that match the glob pattern. Zero-token cost when not relevant.
 #
 # Format:
@@ -23,7 +23,7 @@ pattern = "tests/*.py"
 instruction = """
 When modifying test suite files:
 1. Run full test suite after changes: `python3 -m pytest tests/ -v`
-2. Keep tests fast — use mocking for I/O, no real network calls
+2. Keep tests fast -- use mocking for I/O, no real network calls
 3. Clean up tempdirs in tearDown
 """
 
@@ -34,7 +34,7 @@ When modifying core/ modules:
 1. Update STATE.txt to reflect architectural changes (new modules, removed abstractions)
 2. Run full test suite before considering work done
 3. Check impact on bootstrap.py (session startup) and llm.py (main agent loop)
-4. core/ modules are the critical path — favor small incremental edits over rewrites
+4. core/ modules are the critical path -- favor small incremental edits over rewrites
 """
 
 [rules.tool_module]
@@ -44,7 +44,7 @@ When adding or modifying tools:
 1. Register the tool in tools/schema.py (TOOLS list for LLM)
 2. Add dispatch handler in tools/__init__.py
 3. Return ToolResult dataclass from all tool implementations
-4. Write tests — every new tool needs at least one test
+4. Write tests -- every new tool needs at least one test
 5. Use structured logging via logging_setup.get_logger()
 """
 
@@ -52,7 +52,7 @@ When adding or modifying tools:
 pattern = "memory/*.py"
 instruction = """
 When modifying memory/memory.py:
-1. MemoryStore is SQLite-backed — test with temp databases, not production
+1. MemoryStore is SQLite-backed -- test with temp databases, not production
 2. Message pruning logic affects all sessions; add tests for edge cases
 3. Tool result compression should preserve key fields (content, path, success)
 """
@@ -61,7 +61,7 @@ When modifying memory/memory.py:
 pattern = "core/config.py"
 instruction = """
 When modifying config.py:
-1. All config fields need defaults — never add required fields without a fallback
+1. All config fields need defaults -- never add required fields without a fallback
 2. TOML keys use snake_case matching Python attribute names
 3. Test with MiniConfig() default construction and from_toml_file() parsing
 4. Document new fields in README.md
@@ -71,9 +71,9 @@ When modifying config.py:
 pattern = "{STATE.txt,HANDOFF.md,CHANGELOG.md}"
 instruction = """
 When updating project tracking files:
-1. STATE.txt — update Module Map and Active Decisions sections
-2. HANDOFF.md — write at session end (changes, pending, modified files)
-3. CHANGELOG.md — log significant changes with date and reasoning
+1. STATE.txt -- update Module Map and Active Decisions sections
+2. HANDOFF.md -- write at session end (changes, pending, modified files)
+3. CHANGELOG.md -- log significant changes with date and reasoning
 """
 
 [rules.electron_app]

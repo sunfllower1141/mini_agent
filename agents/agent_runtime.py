@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-agent_runtime.py — thread-safe sub-agent registry and result type.
+agent_runtime.py -- thread-safe sub-agent registry and result type.
 
 Separated from sub_agent.py and tools/__init__.py to avoid circular imports.
 Both modules import from here; this module imports from nothing in the project.
@@ -166,8 +166,8 @@ class AgentRuntime:
         self.abandoned: set[str] = set()     # zombie tasks whose store_result() is a no-op
         self._seen_completions: set[str] = set()  # task_ids already surfaced to parent
         # Inter-agent communication
-        self.inboxes: dict[str, list] = {}          # task_id → list of AgentMessage
-        self.subscriptions: dict[str, set[str]] = {} # task_id → set of message types
+        self.inboxes: dict[str, list] = {}          # task_id -> list of AgentMessage
+        self.subscriptions: dict[str, set[str]] = {} # task_id -> set of message types
         # Auto-snapshot cache: each sub-agent's latest turn status, updated automatically
         # by the sub-agent loop every turn. The parent can read these via agent_status
         # to see what a running sub-agent is doing without waiting for a heartbeat.
@@ -185,7 +185,7 @@ class AgentRuntime:
             self.cancel(tid)
         if stale:
             import sys
-            print(f"  🧹 Cleaned up {len(stale)} stale agent(s) from previous session", file=sys.stderr, flush=True)
+            print(f"  [BROOM] Cleaned up {len(stale)} stale agent(s) from previous session", file=sys.stderr, flush=True)
 
     # ---- spawn ----
 
@@ -202,7 +202,7 @@ class AgentRuntime:
     def store_result(self, task_id: str, result: SubAgentResult) -> None:
         with self._lock:
             if task_id in self.abandoned:
-                # Zombie thread finally finished after being abandoned —
+                # Zombie thread finally finished after being abandoned --
                 # discard its result to avoid corrupting state.
                 import sys
                 print(
@@ -285,7 +285,7 @@ class AgentRuntime:
     def mark_abandoned(self, task_id: str) -> None:
         """Mark a task as abandoned so its store_result() is a no-op.
 
-        Used after collect_agent times out and the thread can't be joined —
+        Used after collect_agent times out and the thread can't be joined --
         the zombie thread will eventually call store_result(), which must be
         ignored to avoid corrupting runtime state.
         """
@@ -377,7 +377,7 @@ class AgentRuntime:
         periodically during streaming so the orchestrator can see live
         progress (thought content + token count + timestamp for deltas).
 
-        Thread-safe — acquires _lock briefly to write the dict.
+        Thread-safe -- acquires _lock briefly to write the dict.
         """
         import time as _time
         snap = {

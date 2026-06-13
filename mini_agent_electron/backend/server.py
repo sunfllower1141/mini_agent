@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-server.py — JSON-lines backend server for the mini_agent Electron app.
+server.py -- JSON-lines backend server for the mini_agent Electron app.
 
 Communicates with the Electron main process via stdin/stdout using
 JSON-lines protocol. Each line is a complete JSON object.
 
-Protocol (Electron → Python):
+Protocol (Electron -> Python):
   {"type": "submit",    "text": "user message"}
   {"type": "command",   "command": "/clear"}
   {"type": "cancel"}
   {"type": "get_status"}
   {"type": "shutdown"}
 
-Protocol (Python → Electron):
+Protocol (Python -> Electron):
   {"type": "ready",     "model": "...", "workspace": "...", ...}
   {"type": "token",     "text": "..."}
   {"type": "thinking_start"}
@@ -34,7 +34,7 @@ import threading
 
 # ---------------------------------------------------------------------------
 # Windows: force UTF-8 for all I/O.  Without this, Python defaults to the
-# system codepage (cp1252) and Unicode characters like → (U+2192) or ☾ (U+263E)
+# system codepage (cp1252) and Unicode characters like -> (U+2192) or [MOON] (U+263E)
 # raise 'charmap' codec can't encode errors when written to stdout/stderr.
 # PYTHONUTF8=1 is the simplest fix (Python 3.7+) and also makes subprocess
 # calls inherit UTF-8 encoding when text=True is used.
@@ -161,7 +161,7 @@ class StreamCallbacks:
 
 
 # ---------------------------------------------------------------------------
-# Agent runner — runs in a background thread so the main thread can accept
+# Agent runner -- runs in a background thread so the main thread can accept
 # cancel messages and new input while a turn is in progress.
 # ---------------------------------------------------------------------------
 
@@ -175,7 +175,7 @@ class AgentRunner:
         # operations (symbol index, LSP) inside init_session so the
         # backend doesn't hang at startup.
         if _is_remote_workspace(workspace):
-            print(f"[server] Remote workspace detected: {workspace} — using local DB and skipping index scan",
+            print(f"[server] Remote workspace detected: {workspace} -- using local DB and skipping index scan",
                   file=sys.stderr, flush=True)
 
         cli = parse_args()
@@ -198,8 +198,8 @@ class AgentRunner:
         self._callbacks = StreamCallbacks()
 
         # Sub-agent auto-report tracking:
-        #   _pending_subagents  – set of task_ids spawned during the current turn.
-        #   _auto_report_flag   – prevents double-queuing a synthesis prompt.
+        #   _pending_subagents  - set of task_ids spawned during the current turn.
+        #   _auto_report_flag   - prevents double-queuing a synthesis prompt.
         # Reset at the start of each turn in _run_turn.
         self._pending_subagents: set[str] = set()
         self._auto_report_flag: bool = False
@@ -514,17 +514,17 @@ class AgentRunner:
 
         if cmd == "/test-svg":
             lines = [
-                "✅ SVG icon test — check-circle",
-                "❌ SVG icon test — x-circle",
-                "⚠️ SVG icon test — warning",
-                "💡 SVG icon test — lightbulb",
-                "📁 SVG icon test — folder",
-                "🔧 SVG icon test — wrench",
-                "🚀 SVG icon test — rocket",
-                "⭐ SVG icon test — star",
-                "🐛 SVG icon test — bug",
-                "🔥 SVG icon test — fire",
-                "💥 SVG icon test — burst",
+                "[OK] SVG icon test -- check-circle",
+                "[FAIL] SVG icon test -- x-circle",
+                "WARNING: SVG icon test -- warning",
+                "[IDEA] SVG icon test -- lightbulb",
+                "[DIR] SVG icon test -- folder",
+                "[WRENCH] SVG icon test -- wrench",
+                "? SVG icon test -- rocket",
+                "(*) SVG icon test -- star",
+                "? SVG icon test -- bug",
+                "? SVG icon test -- fire",
+                "? SVG icon test -- burst",
             ]
             send_msg({
                 "type": "response",
@@ -594,7 +594,7 @@ class AgentRunner:
                 send_msg({"type": "response", "lines": ["Usage: /workspace <path>"]})
                 return
 
-            # Resolve the path — os.path.abspath may hang on stale network mounts.
+            # Resolve the path -- os.path.abspath may hang on stale network mounts.
             # Use a short timeout to avoid blocking the entire backend.
             ok_abspath, new_workspace = _try_with_timeout(
                 lambda: os.path.abspath(new_path),
@@ -637,7 +637,7 @@ class AgentRunner:
                 send_msg({"type": "error", "message": f"Timeout initializing workspace: {new_workspace}. "
                                                        "The remote share may be too slow. "
                                                        "Try a local workspace instead."})
-                # Roll back — keep using old config
+                # Roll back -- keep using old config
                 self.memory = None  # will be recreated below
                 return
 
@@ -667,7 +667,7 @@ class AgentRunner:
 
 
 # ---------------------------------------------------------------------------
-# Main — JSON-lines event loop
+# Main -- JSON-lines event loop
 # ---------------------------------------------------------------------------
 
 def main() -> None:
@@ -684,7 +684,7 @@ def main() -> None:
     while True:
         msg = read_msg()
         if msg is None:
-            # EOF — Electron closed stdin
+            # EOF -- Electron closed stdin
             break
 
         msg_type = msg.get("type", "")
@@ -753,7 +753,7 @@ def main() -> None:
             else:
                 ok, msg_text = delete_session(runner.workspace, name)
                 if ok and name == getattr(runner, '_session_name', None):
-                    # Deleted the current session — switch to default
+                    # Deleted the current session -- switch to default
                     from core.config import switch_session
                     sd = switch_session(runner.workspace, "default", runner.memory, runner.config)
                     runner.memory = sd["memory"]

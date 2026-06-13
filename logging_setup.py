@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-logging_setup.py — centralized structured logging for mini_agent.
+logging_setup.py -- centralized structured logging for mini_agent.
 
 Provides a single ``AgentLogger`` that writes JSON-lines to a rotating log
 file and text to stderr.  Also maintains in-memory error counters so the
@@ -14,9 +14,9 @@ Usage:
     log.error("Unrecoverable", exc_info=True)
 
 Log files:
-    ~/.mini_agent/logs/agent.log        — all events (rotating, 5×10MB)
-    ~/.mini_agent/logs/api_error.log    — API-level errors (HTTP, timeout)
-    ~/.mini_agent/logs/error_traces.log — full tracebacks for crashes
+    ~/.mini_agent/logs/agent.log        -- all events (rotating, 5x10MB)
+    ~/.mini_agent/logs/api_error.log    -- API-level errors (HTTP, timeout)
+    ~/.mini_agent/logs/error_traces.log -- full tracebacks for crashes
 """
 
 from __future__ import annotations
@@ -183,7 +183,7 @@ def _setup_root_logger() -> None:
     stderr_handler.setLevel(logging.WARNING)
     stderr_handler.setFormatter(
         logging.Formatter(
-            "  ⚠ [%(name)s] %(levelname)s: %(message)s",
+            "  WARNING: [%(name)s] %(levelname)s: %(message)s",
         )
     )
     root.addHandler(stderr_handler)
@@ -295,7 +295,7 @@ def log_tool_failure(
 
 
 def log_tool_success(tool_name: str, turn: int = 0) -> None:
-    """Log a successful tool call (debug level — not noisy in stderr)."""
+    """Log a successful tool call (debug level -- not noisy in stderr)."""
     logger = get_logger("tools")
     logger.debug(
         "Tool success | tool=%s", tool_name,

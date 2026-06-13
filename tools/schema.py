@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-schema.py — API tool schemas sent to the LLM.
+schema.py -- API tool schemas sent to the LLM.
 
 Each entry defines a function that the model can call.
 Adding a new tool requires an entry here plus a @_register implementation.
@@ -80,7 +80,7 @@ TOOLS = [
                     },
                     "detail": {
                         "type": "string",
-                        "description": "The learning itself — what to remember, the pattern, workaround, or convention."
+                        "description": "The learning itself -- what to remember, the pattern, workaround, or convention."
                     },
                     "category": {
                         "type": "string",
@@ -95,7 +95,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "memory_core",
-            "description": "Manage your persistent core memory (frozen snapshot injected at session start). The agent's durable memory of facts, preferences, conventions, and environment notes. Changes persist to disk immediately but appear in the system prompt NEXT session. Use 'read' to see current snapshot, 'add' to append, 'replace' to rewrite entirely, 'remove' to delete by line number. Hard-capped at ~2,500 chars — when full, consolidate (merge similar entries, remove stale ones) before adding. Example: memory_core(action='add', content='Python uses ruff for linting')",
+            "description": "Manage your persistent core memory (frozen snapshot injected at session start). The agent's durable memory of facts, preferences, conventions, and environment notes. Changes persist to disk immediately but appear in the system prompt NEXT session. Use 'read' to see current snapshot, 'add' to append, 'replace' to rewrite entirely, 'remove' to delete by line number. Hard-capped at ~2,500 chars -- when full, consolidate (merge similar entries, remove stale ones) before adding. Example: memory_core(action='add', content='Python uses ruff for linting')",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -226,7 +226,7 @@ TOOLS = [
                     "paths": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Optional: list of file paths to apply the same old\u2192new edit to (batch edit). When set, 'path' is ignored."
+                        "description": "Optional: list of file paths to apply the same old->new edit to (batch edit). When set, 'path' is ignored."
                     },
                     "old_string": {
                         "type": "string",
@@ -394,7 +394,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "semantic_search",
-            "description": "Search code by meaning using embeddings. Finds code chunks semantically similar to the query, even if they don't share keywords. Good for finding related functionality, similar patterns, or code that 'feels like' something. Indexes files live — no pre-indexing needed. Returns top 10 matches.\n\n⚠️ PERFORMANCE NOTE: The embedding model is preloaded at session startup in a background thread (~9s, ~80MB RAM) so it's typically ready before you need it. If you call semantic_search very early in a session you may see a brief \"still loading\" message while the background thread finishes. Still, prefer find_symbol (instant, indexed) or search_files (instant, grep) for exact name/text queries. Use semantic_search only when you don't know the function/variable name and grep won't work — e.g. 'find code that validates user input' or 'locate retry logic patterns'.",
+            "description": "Search code by meaning using embeddings. Finds code chunks semantically similar to the query, even if they don't share keywords. Good for finding related functionality, similar patterns, or code that 'feels like' something. Indexes files live -- no pre-indexing needed. Returns top 10 matches.\n\nWARNING: PERFORMANCE NOTE: The embedding model is preloaded at session startup in a background thread (~9s, ~80MB RAM) so it's typically ready before you need it. If you call semantic_search very early in a session you may see a brief \"still loading\" message while the background thread finishes. Still, prefer find_symbol (instant, indexed) or search_files (instant, grep) for exact name/text queries. Use semantic_search only when you don't know the function/variable name and grep won't work -- e.g. 'find code that validates user input' or 'locate retry logic patterns'.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -503,7 +503,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "write_scratchpad",
-            "description": "Write content to the agent's scratchpad — a persistent working note that survives across turns. Tracks plan, progress, decisions, things tried, and open questions. Shown at start of each turn. Overwrites previous content.",
+            "description": "Write content to the agent's scratchpad -- a persistent working note that survives across turns. Tracks plan, progress, decisions, things tried, and open questions. Shown at start of each turn. Overwrites previous content.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -668,7 +668,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "spawn_agent",
-            "description": "Spawn one or more sub-agents to work on tasks in background threads. Returns a task_id immediately — the parent does NOT block. Use agent_status to poll or collect_agent to block later when you need the result. For multiple tasks, pass 'tasks' (list) instead of 'task' to spawn them all in one call. Sub-agents share your workspace and tools but have their own context. Max 10 concurrent sub-agents, 25 turns each (extendable to 35). Set 'synchronous'=true to block until completion and return the result directly (agent-as-tool pattern).",
+            "description": "Spawn one or more sub-agents to work on tasks in background threads. Returns a task_id immediately -- the parent does NOT block. Use agent_status to poll or collect_agent to block later when you need the result. For multiple tasks, pass 'tasks' (list) instead of 'task' to spawn them all in one call. Sub-agents share your workspace and tools but have their own context. Max 10 concurrent sub-agents, 25 turns each (extendable to 35). Set 'synchronous'=true to block until completion and return the result directly (agent-as-tool pattern).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -851,7 +851,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "agent_handoff",
-            "description": "Produce a typed structured result and route it to subscribed agents. Use this for handoffs between agents — one agent finishes work and hands structured output to another. If 'target' is set, delivers only to that task_id (bypassing subscriptions).",
+            "description": "Produce a typed structured result and route it to subscribed agents. Use this for handoffs between agents -- one agent finishes work and hands structured output to another. If 'target' is set, delivers only to that task_id (bypassing subscriptions).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1189,7 +1189,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "wait_for_agent",
-            "description": "Block until any sub-agent from the given list completes, or timeout expires. Uses exponential backoff sleep (1s→2s→4s…→30s) to minimize token burn while waiting. Returns immediately if any agent has already completed. Use this instead of repeated collect_any calls to save on LLM cost.",
+            "description": "Block until any sub-agent from the given list completes, or timeout expires. Uses exponential backoff sleep (1s->2s->4s...->30s) to minimize token burn while waiting. Returns immediately if any agent has already completed. Use this instead of repeated collect_any calls to save on LLM cost.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1211,7 +1211,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "diagnose_failures",
-            "description": "Read the last test run output from memory store, parse for FAILED lines, extract test function names and file paths, read the relevant source files, and return a structured failure summary with code snippets. No parameters needed — reads automatically from the persisted test output.",
+            "description": "Read the last test run output from memory store, parse for FAILED lines, extract test function names and file paths, read the relevant source files, and return a structured failure summary with code snippets. No parameters needed -- reads automatically from the persisted test output.",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -1236,7 +1236,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "open_url",
-            "description": "Open the user's default browser to the given URL. Opens in a new tab and returns immediately — does not wait for the page to load. For programmatic browser interaction, use the browser_* tools instead.",
+            "description": "Open the user's default browser to the given URL. Opens in a new tab and returns immediately -- does not wait for the page to load. For programmatic browser interaction, use the browser_* tools instead.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1270,7 +1270,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "browser_snapshot",
-            "description": "Capture the accessibility tree of the current browser page. Returns a structured text representation of interactive elements (roles, names, states) — much more compact and LLM-friendly than raw HTML or a screenshot. Use this to understand what's on the page before clicking or typing.",
+            "description": "Capture the accessibility tree of the current browser page. Returns a structured text representation of interactive elements (roles, names, states) -- much more compact and LLM-friendly than raw HTML or a screenshot. Use this to understand what's on the page before clicking or typing.",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -1386,7 +1386,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "desktop_snapshot",
-            "description": "Capture the accessibility tree of the frontmost desktop window. Returns a structured text representation of interactive elements (roles, names, states) — much more compact and LLM-friendly than a screenshot. Use this to understand what's on screen before clicking or typing in native desktop apps. On macOS, requires Accessibility permission (System Settings → Privacy → Accessibility → enable Terminal). On Windows, requires: pip install uiautomation.",
+            "description": "Capture the accessibility tree of the frontmost desktop window. Returns a structured text representation of interactive elements (roles, names, states) -- much more compact and LLM-friendly than a screenshot. Use this to understand what's on screen before clicking or typing in native desktop apps. On macOS, requires Accessibility permission (System Settings -> Privacy -> Accessibility -> enable Terminal). On Windows, requires: pip install uiautomation.",
             "parameters": {
                 "type": "object",
                 "properties": {},

@@ -1,4 +1,4 @@
-# mini_agent — Windows 11 Installation Guide
+# mini_agent -- Windows 11 Installation Guide
 
 This guide covers a clean install of mini_agent on **Windows 11** (also works for Windows 10, 22H2+).
 
@@ -20,25 +20,25 @@ The script checks prerequisites, creates a virtual environment, installs all dep
 
 | Tool | Required | Version | Install |
 |------|----------|---------|---------|
-| **Python** | ✅ Required | 3.10 – 3.13 | [python.org](https://www.python.org/downloads/) |
-| **Node.js** | ✅ Required | 22+ (LTS) | [nodejs.org](https://nodejs.org/) |
-| **npm** | ✅ Required | 9+ | Bundled with Node.js |
-| **ripgrep (rg)** | ⚠️ Recommended | any | `winget install BurntSushi.ripgrep.MSVC` |
-| **git** | ⚠️ Recommended | any | `winget install Git.Git` |
-| **Visual C++ Redist** | ⚠️ Recommended | 2015+ | [vc_redist.x64.exe](https://aka.ms/vs/17/release/vc_redist.x64.exe) |
+| **Python** | [OK] Required | 3.10 - 3.13 | [python.org](https://www.python.org/downloads/) |
+| **Node.js** | [OK] Required | 22+ (LTS) | [nodejs.org](https://nodejs.org/) |
+| **npm** | [OK] Required | 9+ | Bundled with Node.js |
+| **ripgrep (rg)** | WARNING: Recommended | any | `winget install BurntSushi.ripgrep.MSVC` |
+| **git** | WARNING: Recommended | any | `winget install Git.Git` |
+| **Visual C++ Redist** | WARNING: Recommended | 2015+ | [vc_redist.x64.exe](https://aka.ms/vs/17/release/vc_redist.x64.exe) |
 
 ---
 
-### Python (IMPORTANT — read this!)
+### Python (IMPORTANT -- read this!)
 
 **Do NOT use the Microsoft Store Python.** It's sandboxed and causes permission issues. Install from [python.org](https://www.python.org/downloads/).
 
 During installation:
-1. ✅ Check **"Add Python to PATH"**
-2. ✅ Click **"Disable path length limit"** (if shown)
+1. [OK] Check **"Add Python to PATH"**
+2. [OK] Click **"Disable path length limit"** (if shown)
 
 After install, **disable the Store stub** so `python` always points to the real install:
-- Open **Settings → Apps → Advanced app settings → App execution aliases**
+- Open **Settings -> Apps -> Advanced app settings -> App execution aliases**
 - Turn **OFF** both `python.exe` and `python3.exe`
 
 Verify:
@@ -49,7 +49,7 @@ Should show `Python 3.12.x` (NOT a Microsoft Store path). If it opens the Store,
 
 ### Node.js
 
-Install the **LTS** version from [nodejs.org](https://nodejs.org/). Electron 42 requires Node ≥ 22.
+Install the **LTS** version from [nodejs.org](https://nodejs.org/). Electron 42 requires Node >= 22.
 
 Verify:
 ```bat
@@ -63,7 +63,7 @@ npm --version    # should be 10.x
 winget install BurntSushi.ripgrep.MSVC
 ```
 
-Without ripgrep, file search falls back to slower methods — it won't block anything, just run slower.
+Without ripgrep, file search falls back to slower methods -- it won't block anything, just run slower.
 
 ### Git (recommended)
 
@@ -109,7 +109,7 @@ pip install -r requirements.txt
 ```
 
 This installs ~25 packages including:
-- **sentence-transformers** (pulls PyTorch ~2GB — may take a few minutes on first install)
+- **sentence-transformers** (pulls PyTorch ~2GB -- may take a few minutes on first install)
 - **playwright** (headless browser driver)
 - **python-lsp-server** (Python language server)
 - **pytest** + **pytest-timeout** (test runner)
@@ -160,7 +160,7 @@ Builds the React frontend to `mini_agent_electron\renderer\dist\`.
 Create a `.env` file in the repo root (or set environment variables):
 
 ```env
-# Required — at least one:
+# Required -- at least one:
 DEEPSEEK_API_KEY=sk-your-key-here
 # CLAUDE_API_KEY=sk-ant-...
 # XAI_API_KEY=xai-...
@@ -187,7 +187,7 @@ npm start
 ```
 
 On first launch:
-- **Windows Defender Firewall** may prompt you to allow Node.js network access. Click **"Allow"** — the app needs this to communicate with the AI provider's API.
+- **Windows Defender Firewall** may prompt you to allow Node.js network access. Click **"Allow"** -- the app needs this to communicate with the AI provider's API.
 - The app auto-builds the renderer if `npm run build` wasn't run.
 
 ### Keyboard Shortcuts
@@ -220,14 +220,14 @@ This runs 1,000+ tests. Add `-q` for quieter output, or `-v` for verbose.
 ### "python" opens the Microsoft Store
 
 Disable App Execution Aliases:
-- Settings → Apps → Advanced app settings → App execution aliases
+- Settings -> Apps -> Advanced app settings -> App execution aliases
 - Turn OFF `python.exe` and `python3.exe`
 
 ### "The process cannot access the file because it is being used by another process"
 
 Windows Defender real-time scanning is blocking file reads. Add exclusion:
-- Settings → Privacy & Security → Virus & threat protection
-- Manage settings → Exclusions → Add folder → `C:\path\to\mini_agent`
+- Settings -> Privacy & Security -> Virus & threat protection
+- Manage settings -> Exclusions -> Add folder -> `C:\path\to\mini_agent`
 
 ### Electron window shows a white screen
 
@@ -286,7 +286,7 @@ cd C:\mini_agent
 ```
 
 Or enable long paths (requires admin):
-- Group Policy → Computer Configuration → Administrative Templates → System → Filesystem
+- Group Policy -> Computer Configuration -> Administrative Templates -> System -> Filesystem
 - Enable "Enable Win32 long paths"
 
 ---

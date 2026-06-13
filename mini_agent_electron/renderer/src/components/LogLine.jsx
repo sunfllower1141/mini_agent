@@ -13,7 +13,7 @@ const markdownComponents = {
 };
 
 /**
- * A single log line — supports plain text, markdown,
+ * A single log line -- supports plain text, markdown,
  * and structured tool-name rendering.
  *
  * Security: We NEVER use dangerouslySetInnerHTML for LLM-generated content.
@@ -30,7 +30,7 @@ function escapeHtml(text) {
 }
 
 const LogLine = memo(function LogLine({ line }) {
-  // React component — render directly
+  // React component -- render directly
   if (line.component) {
     return <div className={line.cls || ''}>{line.component}</div>;
   }
@@ -45,7 +45,7 @@ const LogLine = memo(function LogLine({ line }) {
     );
   }
 
-  // Markdown rendering (NO dangerouslySetInnerHTML — LLM output is sanitised)
+  // Markdown rendering (NO dangerouslySetInnerHTML -- LLM output is sanitised)
   if (line.markdown) {
     return (
       <div className={`md-line ${line.cls || ''}`} style={{ whiteSpace: 'normal' }}>
@@ -62,7 +62,7 @@ const LogLine = memo(function LogLine({ line }) {
     );
   }
 
-  // Plain text — HTML-escaped
+  // Plain text -- HTML-escaped
   return <div className={line.cls || ''}>{escapeHtml(line.text)}</div>;
 });
 

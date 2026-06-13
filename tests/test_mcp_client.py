@@ -46,7 +46,7 @@ send({"jsonrpc": "2.0", "id": req["id"], "result": {
 }})
 
 # Initialized notification
-read_msg()  # initialized — no response needed
+read_msg()  # initialized -- no response needed
 
 # Main loop
 while True:

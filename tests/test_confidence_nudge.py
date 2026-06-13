@@ -200,15 +200,15 @@ class TestConfidenceWebSearchNudge(unittest.TestCase):
             _assistant_msg([_call("c3", "find_usages", '{"name":"c"}')]),
             _tool_msg("c3", success=True, content="not found"),
         ]
-        # First call at turn 10 — should nudge
+        # First call at turn 10 -- should nudge
         nudge1 = self._assert_nudge(messages, turn_count=10)
         self.assertIsNotNone(nudge1)
 
-        # Second call at turn 11 — within 4-turn cooldown, should NOT nudge
+        # Second call at turn 11 -- within 4-turn cooldown, should NOT nudge
         nudge2 = self._assert_nudge(messages, turn_count=11)
         self.assertIsNone(nudge2)
 
-        # Third call at turn 15 — 5 turns later, cooldown expired, should nudge again
+        # Third call at turn 15 -- 5 turns later, cooldown expired, should nudge again
         nudge3 = self._assert_nudge(messages, turn_count=15)
         self.assertIsNotNone(nudge3)
 

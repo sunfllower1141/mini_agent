@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-lsp.py — Lightweight LSP (Language Server Protocol) client over stdio.
+lsp.py -- Lightweight LSP (Language Server Protocol) client over stdio.
 
 Manages stdio subprocess connections to language servers (pylsp for Python),
 sends initialize/initialized, and exposes textDocument/definition,
@@ -43,7 +43,7 @@ class LspConnectionError(Exception):
 # Language detection
 # ---------------------------------------------------------------------------
 
-# Map file extension → (language_id, server_command, server_args)
+# Map file extension -> (language_id, server_command, server_args)
 _LANGUAGE_CONFIG: dict[str, tuple[str, str, list[str]]] = {
     ".py": ("python", "pylsp", []),
     ".pyi": ("python", "pylsp", []),
@@ -74,7 +74,7 @@ def _uri_from_path(file_path: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# LspConnection — one per language server
+# LspConnection -- one per language server
 # ---------------------------------------------------------------------------
 
 class LspConnection:
@@ -164,7 +164,7 @@ class LspConnection:
             proc.wait(timeout=5)
         except (OSError, subprocess.TimeoutExpired):
             try:
-                # Kill entire process group — critical for Node-based
+                # Kill entire process group -- critical for Node-based
                 # servers (typescript-language-server) that spawn child
                 # processes like tsserver.  proc.kill() alone leaves
                 # orphans that accumulate and cause system thrashing.
@@ -185,7 +185,7 @@ class LspConnection:
         work with pipes on Windows).
         """
         if self._stdout_queue is not None:
-            # Windows — background thread feeds the queue
+            # Windows -- background thread feeds the queue
             try:
                 data = self._stdout_queue.get(timeout=timeout)
                 if data is None:
@@ -200,7 +200,7 @@ class LspConnection:
                     f"LSP server '{self.language_id}' timed out waiting for response"
                 )
         else:
-            # Unix — select + readline
+            # Unix -- select + readline
             import select
             ready, _, _ = select.select([self.process.stdout], [], [], timeout)
             if not ready:
@@ -327,7 +327,7 @@ class LspConnection:
                     return response.get("result", {})
                 elif resp_id is None and "method" in response:
                     self._handle_notification(response)
-                # else: response for a different concurrent request — ignore
+                # else: response for a different concurrent request -- ignore
 
     def _drain_notifications(self) -> None:
         """Read any pending server notifications from stdout.
@@ -346,7 +346,7 @@ class LspConnection:
             try:
                 raw_line = self._os_readline(0.05)
             except LspConnectionError:
-                break  # timeout or EOF — no more notifications
+                break  # timeout or EOF -- no more notifications
             raw = raw_line.decode("utf-8")
             if not raw:
                 self._connected = False
@@ -551,7 +551,7 @@ class LspConnection:
                 start = range_info.get("start", {})
                 prefix = (
                     f"Lines {start.get('line', '?')}:{start.get('character', '?')} "
-                    f"— "
+                    f"-- "
                 )
             return ToolResult(success=True, content=f"{prefix}{text}")
         except LspRpcError as exc:
@@ -610,7 +610,7 @@ class LspConnection:
 
 
 # ---------------------------------------------------------------------------
-# LspClientManager — orchestrates all LSP connections
+# LspClientManager -- orchestrates all LSP connections
 # ---------------------------------------------------------------------------
 
 class LspClientManager:
@@ -746,7 +746,7 @@ def shutdown_lsp() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Tool implementations — registered via @_register in __init__.py
+# Tool implementations -- registered via @_register in __init__.py
 # ---------------------------------------------------------------------------
 
 @_register("lsp_definition")

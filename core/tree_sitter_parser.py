@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-tree_sitter_parser.py — Multi-language source parsing via tree-sitter.
+tree_sitter_parser.py -- Multi-language source parsing via tree-sitter.
 
 Provides fast, error-tolerant symbol extraction for Python, JavaScript,
 and TypeScript.  Falls back to regex/AST when tree-sitter is not installed.
@@ -192,7 +192,7 @@ def _extract_with_tree_sitter(
     imports: list[dict] = []
 
     # Determine current function context for call attribution
-    # Walk the tree to build a line→function mapping
+    # Walk the tree to build a line->function mapping
     line_to_func: dict[int, str] = {}
 
     for node, tag in captures:

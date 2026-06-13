@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""error_hints.py — heuristic error hints and failure-pattern learning for mini_agent.
+"""error_hints.py -- heuristic error hints and failure-pattern learning for mini_agent.
 
 Provides:
-  - _ERROR_HINTS        — heuristic hint table for common tool failures
-  - _build_error_hint   — build a self-correction hint for LLM on tool failure
-  - _fingerprint_error  — extract a stable error fingerprint from a tool result
-  - _FAILURE_PATTERNS   — recovery strategies keyed by (tool_name, fingerprint)
-  - _learn_from_failure — detect repeated failures, escalate, inject recovery hints
+  - _ERROR_HINTS        -- heuristic hint table for common tool failures
+  - _build_error_hint   -- build a self-correction hint for LLM on tool failure
+  - _fingerprint_error  -- extract a stable error fingerprint from a tool result
+  - _FAILURE_PATTERNS   -- recovery strategies keyed by (tool_name, fingerprint)
+  - _learn_from_failure -- detect repeated failures, escalate, inject recovery hints
 """
 
 from __future__ import annotations
@@ -37,11 +37,11 @@ _ERROR_HINTS: dict[str, list[tuple[str, str]]] = {
     ],
     "write_file": [
         ("blocked", "Write blocked by safety layer. Use a path inside the workspace or enable unrestricted mode."),
-        ("outside workspace", "Write blocked — path is outside the workspace. Try a path inside the workspace root."),
+        ("outside workspace", "Write blocked -- path is outside the workspace. Try a path inside the workspace root."),
     ],
     "edit_file": [
         ("blocked", "Edit blocked by safety layer. Use a path inside the workspace or enable unrestricted mode."),
-        ("outside workspace", "Edit blocked — path is outside the workspace. Try a path inside the workspace root."),
+        ("outside workspace", "Edit blocked -- path is outside the workspace. Try a path inside the workspace root."),
     ],
     "run_shell": [
         ("not found", "Command not found. Check that it is installed and on your PATH."),
@@ -204,8 +204,8 @@ def _learn_from_failure(name: str, result: "ToolResult | None") -> None:
     Dual-store rationale: writes to both ``project_knowledge`` (injected at
     session start via build_startup_context, human-reviewable) and
     ``failure_patterns`` (structured per-turn matching via
-    FailurePatternStore).  Both serve different consumers — startup context
-    vs. real-time tool guidance — so the duplication is intentional.
+    FailurePatternStore).  Both serve different consumers -- startup context
+    vs. real-time tool guidance -- so the duplication is intentional.
     """
     if result is None:
         return

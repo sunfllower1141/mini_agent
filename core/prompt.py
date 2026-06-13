@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-prompt.py — system prompt for mini_agent.
+prompt.py -- system prompt for mini_agent.
 
 Kept in its own module so it can evolve independently of the orchestrator
 and execution logic.
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 def build_system_prompt(config: "AgentConfig") -> str:
     """Build the immutable system prompt.
 
-    Returns ONLY the static behavioural prompt + provider note — no dynamic
+    Returns ONLY the static behavioural prompt + provider note -- no dynamic
     content (date, OS, workspace, rules, git).  This makes the system message
     unchanged across sessions, allowing DeepSeek's prefix-based disk cache to
     achieve cross-session cache hits on the ~2,000 token static prefix.
@@ -30,7 +30,7 @@ def build_system_prompt(config: "AgentConfig") -> str:
     provider_notes: dict[str, str] = {
         "deepseek": (
             "\n\nNote: running on DeepSeek. DeepSeek is prone to tool-call loops in long "
-            "contexts — if you call the same tool with the same arguments twice, switch "
+            "contexts -- if you call the same tool with the same arguments twice, switch "
             "approaches immediately."
         ),
         "claude": (
@@ -84,9 +84,9 @@ def build_session_header(config: "AgentConfig") -> str:
     safety_lines.append(f"  approve_write_ops = {config.approve_write_ops}")
 
     header = (
-        "[SESSION METADATA — injected once at session start]\n"
+        "[SESSION METADATA -- injected once at session start]\n"
         "\n"
-        "══════════════════════════════════════════════════════════\n"
+        "==========================================================\n"
         f"  DATE        : {date_str}\n"
         f"  OS          : {os_str}\n"
         f"  SHELL       : {shell}\n"
@@ -94,7 +94,7 @@ def build_session_header(config: "AgentConfig") -> str:
         f"  WORKSPACE   : {workspace}\n"
         f"  SAFETY FLAGS:\n"
         + "\n".join(safety_lines) +
-        "\n══════════════════════════════════════════════════════════"
+        "\n=========================================================="
     )
 
     parts = [header]
@@ -156,7 +156,7 @@ def build_memory_snapshot(core_memory_content: str) -> str:
     """Build the frozen core memory snapshot injected at session start.
 
     This is a single bounded text blob (default 2,500 chars) that serves as
-    the agent's persistent memory — durable facts, preferences, conventions,
+    the agent's persistent memory -- durable facts, preferences, conventions,
     environment notes, and learned corrections.
 
     The snapshot is frozen for the entire session (never changes mid-session)
@@ -171,7 +171,7 @@ def build_memory_snapshot(core_memory_content: str) -> str:
         return ""
 
     return (
-        "[CORE MEMORY — frozen snapshot loaded at session start]\n"
+        "[CORE MEMORY -- frozen snapshot loaded at session start]\n"
         "The following is your persistent memory. It survives across sessions.\n"
         "It does NOT change during this session. Use the memory_core tool to\n"
         "add, replace, or remove entries (changes appear next session).\n"
@@ -182,7 +182,7 @@ def build_memory_snapshot(core_memory_content: str) -> str:
     )
 
 
-# Public immutable system prompt — the ONLY content in the system message.
+# Public immutable system prompt -- the ONLY content in the system message.
 # Because it never changes, DeepSeek's prefix-based disk cache can reuse the
 # KV-cache across every session (hours to days).  All dynamic content (date,
 # OS, workspace, rules, git status) is injected as user messages instead.
@@ -191,13 +191,13 @@ STATIC_PROMPT = _STATIC_PROMPT = (
     "Electron desktop UI.  You operate on a workspace directory using the tools provided by "
     "the runtime.  Key modules:\n"
     "\n"
-    "  prompt.py  — this system prompt (edit to change personality/rules)\n"
-    "  config.py  — AgentConfig, TOML loading, startup bootstrap\n"
-    "  llm.py     — turn orchestration (run_agent_turn), tool piping\n"
-    "  api.py     — LLM API calls, message cache\n"
-    "  memory.py  — SQLite conversation persistence + pruning\n"
-    "  safety.py  — workspace read / write gates\n"
-    "  README.md  — architecture decisions and current state (consult before major changes)\n"
+    "  prompt.py  -- this system prompt (edit to change personality/rules)\n"
+    "  config.py  -- AgentConfig, TOML loading, startup bootstrap\n"
+    "  llm.py     -- turn orchestration (run_agent_turn), tool piping\n"
+    "  api.py     -- LLM API calls, message cache\n"
+    "  memory.py  -- SQLite conversation persistence + pruning\n"
+    "  safety.py  -- workspace read / write gates\n"
+    "  README.md  -- architecture decisions and current state (consult before major changes)\n"
     "\n"
     "When asked about yourself or this project, use find_symbol / read_file to consult "
     "the relevant module rather than guessing.\n"
@@ -217,7 +217,7 @@ STATIC_PROMPT = _STATIC_PROMPT = (
     "    7-8:  You're fairly sure, but should verify if consequences are high.\n"
     "    9-10: You know this well. Answer directly.\n"
     "- If you've spent 2+ turns reading code without making progress, your\n"
-    "  confidence in the local solution is low \u2192 web_search for documentation.\n"
+    "  confidence in the local solution is low -> web_search for documentation.\n"
     "- Codebase-first rule: for local repo questions, search the codebase before\n"
     "  reaching for the web. But if codebase search misses, web_search promptly.\n"
     "\n"
@@ -226,7 +226,7 @@ STATIC_PROMPT = _STATIC_PROMPT = (
     "knowledge, or current information not in your training data. Also useful\n"
     "when you're stuck (3+ consecutive tool failures) or the user asks about\n"
     "something outside the codebase. Preference: when confidence is < 7/10,\n"
-    "web_search BEFORE giving an answer \u2014 not after.\n"
+    "web_search BEFORE giving an answer -- not after.\n"
     "\n"
     "Behavior:\n"
     "- Be direct and concise. Prefer normal answers when no tool is needed.\n"
@@ -236,7 +236,7 @@ STATIC_PROMPT = _STATIC_PROMPT = (
     "  before launching into a full investigation. Don't guess.\n"
     "- For codebase reviews: start with README.md, check .mini_agent.rules,\n"
     "  then target the most-changed files from recent git history.\n"
-    "- State your scope upfront: 'I'll review X, Y, Z — does that match?'\n"
+    "- State your scope upfront: 'I'll review X, Y, Z -- does that match?'\n"
     "- Don't read every file. Use find_symbol, search_files, and git log\n"
     "  to triage before diving deep.\n"
     "\n"
@@ -244,7 +244,7 @@ STATIC_PROMPT = _STATIC_PROMPT = (
     "- Same tool + same args 2x = STUCK. Switch approach immediately.\n"
     "- Long commands (>10s): background=True. Poll task_status once.\n"
     "- edit_file MUST be preceded by read_file in same batch.\n"
-    "- Time-box: 5+ turns without progress → state what you know, propose workaround.\n"
+    "- Time-box: 5+ turns without progress -> state what you know, propose workaround.\n"
     "- Update write_scratchpad every 3 turns.\n"
     "- Context grows stale: rely on scratchpad and plan, not old tool results.\n"
     "\n"
@@ -295,7 +295,7 @@ STATIC_PROMPT = _STATIC_PROMPT = (
     "\n"
     "Session handoff (IMPORTANT): before signing off, call write_session_handoff()\n"
     "so the next session has context about what you changed and what's pending.\n"
-    "It auto-generates from git diff — just pass pending='...' if you have open items.\n"
+    "It auto-generates from git diff -- just pass pending='...' if you have open items.\n"
 )
 
 # ---------------------------------------------------------------------------
@@ -307,7 +307,7 @@ def build_startup_context(
 ) -> str:
     """Generate a one-shot system message describing the workspace at startup.
 
-    Saves the agent discovery turns — no need to list_directory / read STATE.txt
+    Saves the agent discovery turns -- no need to list_directory / read STATE.txt
     before getting to work.
 
     If *knowledge* is provided (list of {summary, category, detail} dicts from
@@ -318,7 +318,7 @@ def build_startup_context(
     from core.config import TREE_TRUNCATION_LINES, GIT_LOG_COUNT, GIT_LOG_TIMEOUT
 
     parts: list[str] = []
-    parts.append("[WORKSPACE CONTEXT — injected once at session start]")
+    parts.append("[WORKSPACE CONTEXT -- injected once at session start]")
 
     # 1. File tree (skip hidden dirs, __pycache__, .git, venv, node_modules)
     SKIP = {".git", "__pycache__", ".venv", "venv", "node_modules", ".mypy_cache",
@@ -344,7 +344,7 @@ def build_startup_context(
     parts.append("```\n" + "\n".join(tree_lines) + "\n```")
 
     # 2. Codebase structure map (symbol-level: classes, functions, imports)
-    #    Generated via AST/regex — compact ~2K token map so the agent
+    #    Generated via AST/regex -- compact ~2K token map so the agent
     #    knows what lives where without exploratory tool calls.
     from core.codebase_map import build_codebase_map
     codebase_map = build_codebase_map(workspace)

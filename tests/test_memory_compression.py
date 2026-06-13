@@ -210,8 +210,9 @@ class TestCompressDefault(unittest.TestCase):
         lines = ["x" * 600, "b", "c", "d", "e", "f", "g"]
         result = _compress_default(lines)
         # First line should be truncated at _COMPRESSION_MAX_FIRST_LINE
+        # + 3 for "..." (3 chars) after truncation
         self.assertLessEqual(
-            len(result.split("\n")[0]), _COMPRESSION_MAX_FIRST_LINE + 1)
+            len(result.split("\n")[0]), _COMPRESSION_MAX_FIRST_LINE + 3)
 
 
 class TestCompressRunShell(unittest.TestCase):

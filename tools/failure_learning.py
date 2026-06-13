@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-failure_learning.py — self-learning system for mini_agent.
+failure_learning.py -- self-learning system for mini_agent.
 
 Implements three self-learning capabilities inspired by recent research:
   A. Structured Failure Pattern Database (MPR/VIGIL-inspired)
@@ -16,14 +16,14 @@ Implements three self-learning capabilities inspired by recent research:
      and smart context injection filtered by relevance.
 
 Table: failure_patterns (added to memory.py schema)
-  - tool_name: str       — which tool failed
-  - error_fingerprint: str — stable error category (e.g. 'not found', 'whitespace')
-  - args_signature: str  — normalized args pattern for matching
-  - fix_strategy: str    — what fixed it (or general advice if never fixed)
-  - success_count: int   — times this fix worked
-  - failure_count: int   — total times this pattern occurred
-  - last_seen: str       — ISO timestamp
-  - created_at: str      — ISO timestamp
+  - tool_name: str       -- which tool failed
+  - error_fingerprint: str -- stable error category (e.g. 'not found', 'whitespace')
+  - args_signature: str  -- normalized args pattern for matching
+  - fix_strategy: str    -- what fixed it (or general advice if never fixed)
+  - success_count: int   -- times this fix worked
+  - failure_count: int   -- total times this pattern occurred
+  - last_seen: str       -- ISO timestamp
+  - created_at: str      -- ISO timestamp
 """
 
 from __future__ import annotations
@@ -176,7 +176,7 @@ def _normalize_args(name: str, args: dict) -> str:
 def _args_similarity(sig1: str, sig2: str) -> float:
     """Compute rough similarity between two args signatures.
 
-    Returns 0.0–1.0 where 1.0 = identical, ~0.5 = share tool name context.
+    Returns 0.0-1.0 where 1.0 = identical, ~0.5 = share tool name context.
     Used to find relevant patterns for a pending tool call.
     """
     if not sig1 or not sig2:
@@ -207,7 +207,7 @@ def _args_similarity(sig1: str, sig2: str) -> float:
 
 
 # ---------------------------------------------------------------------------
-# FailurePatternStore — persists and retrieves failure patterns
+# FailurePatternStore -- persists and retrieves failure patterns
 # ---------------------------------------------------------------------------
 
 class FailurePatternStore:
@@ -243,7 +243,7 @@ class FailurePatternStore:
             except sqlite3.Error:
                 warnings.warn("Failed to init failure_patterns table", stacklevel=2)
             finally:
-                # Don't close — shared via get_shared_conn()
+                # Don't close -- shared via get_shared_conn()
                 self._conn = None
 
     def record_failure(
@@ -362,7 +362,7 @@ class FailurePatternStore:
         """Return failure patterns relevant to a pending tool call.
 
         Filters by confidence >= threshold and sorts by relevance
-        (args similarity × confidence).
+        (args similarity x confidence).
         """
         args_sig = _normalize_args(tool_name, args or {})
 
@@ -427,7 +427,7 @@ class FailurePatternStore:
                 return None
 
     def _compute_confidence(self, success_count: int, failure_count: int) -> float:
-        """Compute a confidence score (0.0–1.0) for a pattern's existence.
+        """Compute a confidence score (0.0-1.0) for a pattern's existence.
 
         Confidence increases with total observations (more data = more certain
         this is a real pattern).  Starts at ~0.65 for a single observation
@@ -441,10 +441,10 @@ class FailurePatternStore:
         if total == 0:
             return 0.0
 
-        # Base: sample-size confidence (0.3–1.0 as observations grow)
+        # Base: sample-size confidence (0.3-1.0 as observations grow)
         base = 0.3 + 0.5 * (1.0 - 1.0 / (total + 1.0))
 
-        # Fix-quality bonus (0.0–0.2 extra if fix strategy works)
+        # Fix-quality bonus (0.0-0.2 extra if fix strategy works)
         if total > 0:
             fix_bonus = 0.2 * (success_count / total)
         else:
@@ -563,7 +563,7 @@ class SelfCritique:
         from tools import ToolResult as TR
 
         lines = [
-            "⚠️ SELF-CRITIQUE: Multiple tool failures detected this turn.",
+            "WARNING: SELF-CRITIQUE: Multiple tool failures detected this turn.",
             "Stop and diagnose before retrying:",
         ]
         for name, result in failures:
@@ -587,7 +587,7 @@ class SelfCritique:
 
         names = [n for n, _ in failures]
         lines = [
-            f"⚠️ SELF-CRITIQUE: Tool failures for {consecutive} consecutive turns.",
+            f"WARNING: SELF-CRITIQUE: Tool failures for {consecutive} consecutive turns.",
             f"Failing tools: {', '.join(names)}",
             "",
             "This pattern suggests a systematic issue. Consider:",
@@ -694,13 +694,13 @@ def build_self_learning_context(
                 fp = p["error_fingerprint"]
                 fix = p["fix_strategy"] or "no known fix yet"
                 warnings_parts.append(
-                    f"  ⚠️ {name}: pattern '{fp}' has failed {p['failure_count']}x "
+                    f"  WARNING: {name}: pattern '{fp}' has failed {p['failure_count']}x "
                     f"(confidence: {confidence_pct}%). Fix: {fix}"
                 )
 
     if warnings_parts:
         return (
-            "🛡️ FAILURE PATTERN WARNINGS (learned from past sessions):\n"
+            "? FAILURE PATTERN WARNINGS (learned from past sessions):\n"
             + "\n".join(warnings_parts)
             + "\n\nConsider these before making the same call. "
             "Read the file first, check paths, try a different approach."
@@ -711,7 +711,7 @@ def build_self_learning_context(
 
 
 # ---------------------------------------------------------------------------
-# MistakeNotebook — MNL-lite: batch-cluster failures, distill generalized fixes
+# MistakeNotebook -- MNL-lite: batch-cluster failures, distill generalized fixes
 # ---------------------------------------------------------------------------
 
 # Minimum cluster size (shared fingerprint across different args) to create
@@ -764,7 +764,7 @@ class MistakeNotebook:
     Uses an "accept-if-improves" rule: entries are only injected when
     their confidence exceeds _NOTEBOOK_ACCEPTANCE_CONFIDENCE.
 
-    Inspired by: MNL (Mistake Notebook Learning) — batch-clustered
+    Inspired by: MNL (Mistake Notebook Learning) -- batch-clustered
     mistake abstraction with structured notebooks.
     """
 
@@ -795,7 +795,7 @@ class MistakeNotebook:
             except sqlite3.Error:
                 warnings.warn("Failed to init mistake_notebook table", stacklevel=2)
             finally:
-                # Don't close — shared via get_shared_conn()
+                # Don't close -- shared via get_shared_conn()
                 self._conn = None
 
     # ------------------------------------------------------------------
@@ -1097,7 +1097,7 @@ class MistakeNotebook:
 
 
 # ---------------------------------------------------------------------------
-# Step-level experience retrieval — dynamic project_knowledge injection
+# Step-level experience retrieval -- dynamic project_knowledge injection
 # ---------------------------------------------------------------------------
 
 # Maximum knowledge entries to inject per turn

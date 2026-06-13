@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-test_safety.py — tests for the file-read and file-write safety layers.
+test_safety.py -- tests for the file-read and file-write safety layers.
 """
 
 import os
@@ -193,7 +193,7 @@ class TestWriteSafetyGate(unittest.TestCase):
     # --- overwrite protection tests ---
 
     def test_overwrite_allowed_by_default(self):
-        # Overwrite check removed from safety layer — let file operations handle it.
+        # Overwrite check removed from safety layer -- let file operations handle it.
         existing = self._touch("existing.txt")
         result = self.gate.check(existing)
         self.assertTrue(result.allowed)
@@ -217,7 +217,7 @@ class TestWriteSafetyGate(unittest.TestCase):
     def test_result_is_structured_not_exception(self):
         path = os.path.join(tempfile.gettempdir(), "bad.txt")
         result = self.gate.check(path)
-        # Should not raise — always returns a result
+        # Should not raise -- always returns a result
         self.assertIsInstance(result, WriteSafetyResult)
         self.assertIsInstance(result.allowed, bool)
         self.assertIsInstance(result.reason, str)
@@ -242,7 +242,7 @@ class TestWriteSafetyGate(unittest.TestCase):
         self.assertTrue(result.allowed)
 
     def test_empty_filename_allowed_if_workspace(self):
-        # An empty path resolves to the workspace root (cwd) — may or may not
+        # An empty path resolves to the workspace root (cwd) -- may or may not
         # be the workspace root. We just verify no crash.
         result = self.gate.check("")
         # Just check structured result returned, no exception

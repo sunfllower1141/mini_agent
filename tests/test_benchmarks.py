@@ -9,7 +9,7 @@ Run with:
     python -m pytest test_benchmarks.py -v --compare    # compare against stored baseline
 
 Each benchmark measures wall-clock time (perf_counter) and optional memory
-delta (tracemalloc) on realistic payloads — not micro-timings on trivial data.
+delta (tracemalloc) on realistic payloads -- not micro-timings on trivial data.
 
 Baselines are stored in .benchmark_baseline.json in the workspace root.
 When --compare is passed, results are diffed against the stored baseline
@@ -170,7 +170,7 @@ def measure(
 def _make_messages(count: int, with_tools: bool = True) -> list[dict]:
     """Generate a realistic conversation with *count* messages.
 
-    Each "turn" is: user → assistant(tool_calls) → tool → assistant.
+    Each "turn" is: user -> assistant(tool_calls) -> tool -> assistant.
     """
     msgs: list[dict] = []
     for i in range(1, count + 1, 4):
@@ -328,7 +328,7 @@ class TestBenchmarkMemoryPruning:
         check_regression(r.name, r.wall_sec, r.mem_kb)
 
     def test_prune_token_limited(self):
-        """Prune by token budget (harder path — iterates trim loop)."""
+        """Prune by token budget (harder path -- iterates trim loop)."""
         from memory.memory import _prune_by_tokens, _estimate_tokens
 
         msgs = _make_messages(1000)
@@ -426,7 +426,7 @@ class TestBenchmarkCircuitBreaker:
     """Benchmark circuit breaker key computation and trip detection."""
 
     def test_tool_call_key_throughput(self):
-        """_tool_call_key is called on every tool call — measure throughput."""
+        """_tool_call_key is called on every tool call -- measure throughput."""
         from core.llm import _tool_call_key
 
         calls = [
@@ -482,12 +482,12 @@ class TestBenchmarkCircuitBreaker:
     def test_deque_pop_vs_list_pop(self):
         """Verify deque.popleft() is O(1) vs list.pop(0) which is O(n).
 
-        This isn't a subjective benchmark — it's an objective complexity
+        This isn't a subjective benchmark -- it's an objective complexity
         assertion that backs the FEATURES.md performance claim.
         """
         from collections import deque
 
-        # list.pop(0) — O(n) due to shifting
+        # list.pop(0) -- O(n) due to shifting
         lst = list(range(10000))
 
         def _list_pop():
@@ -495,7 +495,7 @@ class TestBenchmarkCircuitBreaker:
             for _ in range(1000):
                 l.pop(0)
 
-        # deque.popleft() — O(1)
+        # deque.popleft() -- O(1)
         dq = deque(range(10000))
 
         def _deque_pop():
@@ -507,14 +507,14 @@ class TestBenchmarkCircuitBreaker:
         deque_result = measure("deque_popleft_1000_from_10000", _deque_pop, iterations=5)
 
         # deque should be at least 8x faster for this workload
-        # (on fast machines the absolute times are tiny — ~1ms vs ~0.1ms —
+        # (on fast machines the absolute times are tiny -- ~1ms vs ~0.1ms --
         #  so measurement noise can compress the ratio.  1000 pops from
         #  10000 items on any modern CPU will always show deque's O(1)
         #  advantage over list's O(n).)
         if list_result.wall_sec > 0:
             ratio = list_result.wall_sec / max(deque_result.wall_sec, 0.000001)
             assert ratio > 8.0, (
-                f"deque popleft() is only {ratio:.1f}x faster than list.pop(0) — "
+                f"deque popleft() is only {ratio:.1f}x faster than list.pop(0) -- "
                 f"expected >10x for 1000 pops from 10000 items. "
                 f"list: {list_result.wall_sec:.6f}s, deque: {deque_result.wall_sec:.6f}s"
             )
@@ -602,7 +602,7 @@ class TestBenchmarkPipeShortCircuit:
         """_extract_pipe_deps should be near-instant for calls without _pipe."""
         from core.llm import _extract_pipe_deps
 
-        # Calls without _pipe — should short-circuit on string check.
+        # Calls without _pipe -- should short-circuit on string check.
         # _extract_pipe_deps takes the full remaining list.
         calls_no_pipe = [
             {
@@ -630,7 +630,7 @@ class TestBenchmarkPipeShortCircuit:
         )
         check_regression(result_no_pipe.name, result_no_pipe.wall_sec)
 
-        # Calls with _pipe — must parse JSON
+        # Calls with _pipe -- must parse JSON
         calls_with_pipe = [
             {
                 "function": {
@@ -662,7 +662,7 @@ class TestBenchmarkPipeShortCircuit:
         # (string check skips JSON parse when no _pipe present) is verified
         # by correctness: no-pipe path never hits json.loads in the loop.
         # We track both timings for regression detection but don't assert
-        # a specific ratio — at 500 calls the overhead difference is
+        # a specific ratio -- at 500 calls the overhead difference is
         # within measurement noise. Stress at 5000+ would show the gap.
         check_regression(result_with_pipe.name, result_with_pipe.wall_sec)
 
@@ -688,9 +688,9 @@ class TestBenchmarkSemanticSearch:
         so._sem_preload()
         elapsed = _time.perf_counter() - t0
 
-        # Must return in under 100ms — the load happens in a daemon thread
+        # Must return in under 100ms -- the load happens in a daemon thread
         assert elapsed < 0.5, (
-            f"_sem_preload() blocked for {elapsed:.2f}s — expected <0.1s "
+            f"_sem_preload() blocked for {elapsed:.2f}s -- expected <0.1s "
             f"(non-blocking background load)"
         )
 
@@ -711,7 +711,7 @@ class TestBenchmarkSemanticSearch:
         from tools.search_ops import _sem_get_model
         import tools.search_ops as so
 
-        # Force cold start — clear preload state safely
+        # Force cold start -- clear preload state safely
         so._reset_semantic_state()
 
         import time as _time
@@ -734,7 +734,7 @@ class TestBenchmarkSemanticSearch:
         # Start preload in background
         so._sem_preload()
 
-        # Call _sem_get_model — should wait for the preload, not re-load
+        # Call _sem_get_model -- should wait for the preload, not re-load
         t0 = _time.perf_counter()
         model = so._sem_get_model()
         elapsed = _time.perf_counter() - t0
@@ -836,7 +836,7 @@ def test_store_baseline(request):
     if not _should_baseline():
         pytest.skip("Use --baseline to (re)store baseline")
 
-    # This test is a no-op — baselines are collected during the run
+    # This test is a no-op -- baselines are collected during the run
     # via the check_regression helper.  Real implementation would use
     # pytest hooks to capture all BenchmarkResult instances.
     pass

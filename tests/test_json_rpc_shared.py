@@ -83,7 +83,7 @@ class TestDrainStderr(unittest.TestCase):
 
     def test_drain_prevents_deadlock(self) -> None:
         """Writing enough stderr to fill the pipe buffer does not deadlock."""
-        # Write ~128KB to stderr — more than the default pipe buffer
+        # Write ~128KB to stderr -- more than the default pipe buffer
         proc = subprocess.Popen(
             [sys.executable, "-c", "import sys; sys.stderr.write('x' * 200000); sys.stderr.flush()"],
             stdout=subprocess.PIPE,

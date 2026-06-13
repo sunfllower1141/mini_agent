@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""test_retry.py — dedicated tests for retry.py"""
+"""test_retry.py -- dedicated tests for retry.py"""
 
 import threading
 import unittest
@@ -172,7 +172,7 @@ class TestRetryableStatusCodes(unittest.TestCase):
         self.assertEqual(mock_post.call_count, 2)
 
     def test_400_is_not_retried(self):
-        """400 Bad Request is NOT retryable — returns immediately."""
+        """400 Bad Request is NOT retryable -- returns immediately."""
         resp_400 = self._make_resp(400)
         mock_post = MagicMock(return_value=resp_400)
         with patch.object(requests, "post", mock_post):
@@ -208,7 +208,7 @@ class TestCancelDuringNetworkErrorDelay(unittest.TestCase):
                 cancel_event=cancel,
             )
         self.assertIsNone(result)
-        # Only one attempt — cancelled during first retry delay
+        # Only one attempt -- cancelled during first retry delay
         self.assertEqual(mock_post.call_count, 1)
 
 
@@ -230,7 +230,7 @@ class TestExhaustedRetries(unittest.TestCase):
                     "http://api.example.com",
                     json={"messages": []},
                 )
-        # Returns the last response — caller checks result.ok
+        # Returns the last response -- caller checks result.ok
         self.assertIs(result, retry_resp)
         self.assertFalse(result.ok)
         self.assertEqual(result.status_code, 503)

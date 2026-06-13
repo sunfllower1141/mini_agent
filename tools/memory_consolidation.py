@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-memory_consolidation.py — post-turn background memory consolidation.
+memory_consolidation.py -- post-turn background memory consolidation.
 
 Runs after each agent turn: extracts durable facts from the conversation
 using a cheap model call and updates core memory via the memory_core tool.
@@ -119,7 +119,7 @@ def _get_api_base(config: Any) -> str:
     # config.api_url is the canonical attribute (set from TOML / env / provider defaults)
     url = getattr(config, "api_url", "") or getattr(config, "api_base", "")
     if url:
-        # Strip /chat/completions suffix if present — the caller appends it.
+        # Strip /chat/completions suffix if present -- the caller appends it.
         # config.api_url is the full endpoint (used directly by api.py),
         # but _extract_facts constructs the URL by appending to the base.
         if url.endswith("/chat/completions"):
@@ -141,7 +141,7 @@ def _get_api_base(config: Any) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Consolidation prompt — minimal tokens, extracts only durable facts
+# Consolidation prompt -- minimal tokens, extracts only durable facts
 # ---------------------------------------------------------------------------
 
 _CONSOLIDATION_SYSTEM_PROMPT = """\

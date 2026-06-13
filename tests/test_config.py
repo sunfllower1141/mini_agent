@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-test_config.py — tests for the AgentConfig configuration layer.
+test_config.py -- tests for the AgentConfig configuration layer.
 """
 
 import os
@@ -54,7 +54,7 @@ class TestAgentConfigDefaults(unittest.TestCase):
 
     def test_defaults_are_set(self):
         config = AgentConfig.load(self.workspace)
-        # No API keys set → falls back to Ollama (reachable via Tailscale)
+        # No API keys set -> falls back to Ollama (reachable via Tailscale)
         self.assertEqual(config.api_provider, "ollama")
         self.assertEqual(config.model, OLLAMA_DEFAULT_MODEL)
         self.assertEqual(config.api_key, DEFAULT_API_KEY)
@@ -98,11 +98,11 @@ class TestAgentConfigTOML(unittest.TestCase):
         config = AgentConfig.load(self.workspace)
         self.assertEqual(config.model, "custom-model")
         self.assertTrue(config.allow_overwrites)
-        # No API keys → falls back to Ollama URL
+        # No API keys -> falls back to Ollama URL
         self.assertEqual(config.api_url, OLLAMA_DEFAULT_API_URL)
 
     def test_missing_toml_does_not_crash(self):
-        # No config file written — falls back to Ollama (no API keys)
+        # No config file written -- falls back to Ollama (no API keys)
         config = AgentConfig.load(self.workspace)
         self.assertEqual(config.model, OLLAMA_DEFAULT_MODEL)
 
@@ -125,7 +125,7 @@ class TestAgentConfigTOML(unittest.TestCase):
         self._write_toml("""[agent]\nmodel = 123\nallow_overwrites = "not a bool"\n""")
         with patch("sys.stderr") as mock_stderr:
             config = AgentConfig.load(self.workspace)
-        # model should stay default (wrong type) — falls back to Ollama
+        # model should stay default (wrong type) -- falls back to Ollama
         self.assertEqual(config.model, OLLAMA_DEFAULT_MODEL)
         # allow_overwrites should stay default (wrong type)
         self.assertFalse(config.allow_overwrites)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-config.py — project-level configuration for mini_agent.
+config.py -- project-level configuration for mini_agent.
 
 Looks for ``.mini_agent.toml`` in the workspace root and merges settings
 with env vars and CLI flags.  Priority: CLI > env var > config file > default.
@@ -59,7 +59,7 @@ PROVIDER_DEFAULTS: dict[str, ProviderDefaults] = {
         context_window=1_000_000,  # V4-Pro native context length
         fallback_providers=("claude",),  # fall back to Claude on DeepSeek outage
         # V4-Pro promo pricing (75% off through 2026-05-31):
-        # list $1.74 / $0.0145 / $3.48  →  promo $0.435 / $0.003625 / $0.87
+        # list $1.74 / $0.0145 / $3.48  ->  promo $0.435 / $0.003625 / $0.87
         input_price=0.435,          # $0.435 / 1M input tokens (cache miss)
         cache_hit_price=0.003625,   # $0.003625 / 1M input tokens (cache hit)
         output_price=0.87,          # $0.87 / 1M output tokens
@@ -150,7 +150,7 @@ ENV_XAI_MODEL        = "XAI_MODEL"
 ENV_OLLAMA_MODEL     = "OLLAMA_MODEL"
 ENV_OLLAMA_API_URL   = "OLLAMA_API_URL"
 ENV_OLLAMA_API_KEY   = "OLLAMA_API_KEY"
-ENV_API_PROVIDER     = "API_PROVIDER"  # "deepseek", "claude", "xai", or "ollama" — overrides auto-detection
+ENV_API_PROVIDER     = "API_PROVIDER"  # "deepseek", "claude", "xai", or "ollama" -- overrides auto-detection
 ENV_AGENT_WORKSPACE  = "AGENT_WORKSPACE"
 ENV_EXA_API_KEY      = "EXA_API_KEY"
 ENV_OPENAI_API_KEY   = "OPENAI_API_KEY"
@@ -203,7 +203,7 @@ class AgentConfig:
     openai_api_key: str = DEFAULT_OPENAI_API_KEY
     approve_write_ops: bool = False
     unrestricted: bool = False
-    frontend: str = "terminal"  # "terminal", "electron" — injected into system prompt
+    frontend: str = "terminal"  # "terminal", "electron" -- injected into system prompt
     mcp_servers: dict = field(default_factory=dict)  # {name: {command: [...], env: {...}}}
 
     # ------------------------------------------------------------------
@@ -288,7 +288,7 @@ def _apply_toml(config: AgentConfig, data: dict) -> None:
         expected = _TOML_SCHEMA[key]
 
         # Use type() identity check for int and bool to prevent
-        # isinstance(True, int) == True from silently converting bool→int.
+        # isinstance(True, int) == True from silently converting bool->int.
         if expected in (int, bool):
             type_ok = type(value) is expected
         else:
@@ -297,7 +297,7 @@ def _apply_toml(config: AgentConfig, data: dict) -> None:
         if not type_ok:
             print(
                 f"Warning: .mini_agent.toml key '{key}' expected {expected.__name__}, "
-                f"got {type(value).__name__} — skipping",
+                f"got {type(value).__name__} -- skipping",
                 file=sys.stderr,
             )
             continue
@@ -365,21 +365,21 @@ def _load_dotenv(workspace: str) -> None:
         pass
 
 
-# Provider → env var name for API key lookup.
+# Provider -> env var name for API key lookup.
 _PROVIDER_KEY_ENV: dict[str, str] = {
     "deepseek": ENV_DEEPSEEK_API_KEY,
     "claude": ENV_CLAUDE_API_KEY,
     "xai": ENV_XAI_API_KEY,
     "ollama": ENV_OLLAMA_API_KEY,
 }
-# Provider → env var name for API URL override.
+# Provider -> env var name for API URL override.
 _PROVIDER_URL_ENV: dict[str, str] = {
     "deepseek": ENV_DEEPSEEK_API_URL,
     "claude": ENV_CLAUDE_API_URL,
     "xai": ENV_XAI_API_URL,
     "ollama": ENV_OLLAMA_API_URL,
 }
-# Provider → env var name for model override.
+# Provider -> env var name for model override.
 _PROVIDER_MODEL_ENV: dict[str, str] = {
     "claude": ENV_CLAUDE_MODEL,
     "xai": ENV_XAI_MODEL,
@@ -415,7 +415,7 @@ def _apply_env_overrides(config: AgentConfig) -> None:
     # --- apply provider-specific defaults on switch ---
     # NOTE: uses equality against deepseek defaults to detect "not yet
     # overridden".  A TOML value equal to a deepseek default will be
-    # overwritten — this is a known limitation (rare in practice).
+    # overwritten -- this is a known limitation (rare in practice).
     provider = config.api_provider
     defaults = PROVIDER_DEFAULTS.get(provider)
     if defaults is not None:

@@ -1,8 +1,8 @@
 """
-semantic_cache.py — semantic response cache for mini_agent.
+semantic_cache.py -- semantic response cache for mini_agent.
 
 Caches LLM responses keyed by the semantic embedding of the last user
-message.  When a new query has cosine similarity ≥ threshold to a cached
+message.  When a new query has cosine similarity >= threshold to a cached
 query, the cached response is returned directly, bypassing the LLM API
 call entirely.
 
@@ -29,7 +29,7 @@ _log = get_logger("semantic_cache")
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_SIMILARITY_THRESHOLD: float = 0.92  # cosine similarity ≥ this → cache hit
+DEFAULT_SIMILARITY_THRESHOLD: float = 0.92  # cosine similarity >= this -> cache hit
 MAX_ENTRIES: int = 128                       # max cache entries (LRU eviction)
 DEFAULT_TTL_SECONDS: int = 3600              # 1 hour TTL
 MIN_QUERY_LENGTH: int = 10                   # don't cache queries shorter than this
@@ -121,7 +121,7 @@ class SemanticCache:
                 self._misses += 1
                 return None, 0.0
 
-            # Cosine similarity: (N, D) @ (D,) → (N,)
+            # Cosine similarity: (N, D) @ (D,) -> (N,)
             # embeddings are already L2-normalized by SentenceTransformer
             similarities = np.dot(self._embeddings, embedding)
             best_idx = int(np.argmax(similarities))
@@ -167,7 +167,7 @@ class SemanticCache:
         if len(query_text) < MIN_QUERY_LENGTH:
             return
         if response.get("tool_calls"):
-            # Don't cache tool-call responses — they depend on tool results
+            # Don't cache tool-call responses -- they depend on tool results
             # which change the conversation state and can't be cached.
             return
 

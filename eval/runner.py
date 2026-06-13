@@ -3,7 +3,7 @@
 
 Provides run_task(), run_suite(), load_tasks(), and the CLI entry point
 (``python -m eval.runner``).  Instruments the agent loop via existing
-callbacks — zero changes to core modules.
+callbacks -- zero changes to core modules.
 """
 
 import json
@@ -486,12 +486,12 @@ def _cli() -> None:
     print(f"{'='*60}")
 
     for r in report.per_task:
-        status = "\u2713" if r.success else ("\u2717" if not r.error else "!")
+        status = "V" if r.success else ("X" if not r.error else "!")
         print(f"\n  [{status}] {r.task_id}  ({r.turns_used} turns, {r.tokens_consumed} tokens)")
         if r.error:
             print(f"       Error: {r.error}")
         for c in r.checks:
-            mark = "\u2713" if c.passed else "\u2717"
+            mark = "V" if c.passed else "X"
             print(f"       [{mark}] {c.check_type}: {c.detail}")
 
     # Save report

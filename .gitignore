@@ -38,6 +38,10 @@ reports/
 error_traces.log
 mini_agent_electron/electron-dist/
 
+# Node modules
+node_modules/
+package-lock.json
+
 # Temp / scratch files
 _*.py
 _*.bat

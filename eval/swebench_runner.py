@@ -656,7 +656,7 @@ def _cli() -> None:
 
     parser = argparse.ArgumentParser(
         prog="python -m eval.swebench_runner",
-        description="SWE-bench Runner for mini_agent — generate predictions for official evaluation",
+        description="SWE-bench Runner for mini_agent -- generate predictions for official evaluation",
     )
     parser.add_argument(
         "--dataset",

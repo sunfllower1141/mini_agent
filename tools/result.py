@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""result.py — structured tool result for mini_agent.
+"""result.py -- structured tool result for mini_agent.
 
 Every tool execution returns a ToolResult (never a raw exception).
 """
@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 @dataclass
 class ToolResult:
-    """Structured result from a tool execution — never a raw exception.
+    """Structured result from a tool execution -- never a raw exception.
 
     *hint* is an optional short diagnostic shown to the LLM to help it
     self-correct on malformed calls (invalid JSON, unknown parameters,

@@ -1,4 +1,4 @@
-"""Tests for tools/skills.py — lazy tool loading via skill gates."""
+"""Tests for tools/skills.py -- lazy tool loading via skill gates."""
 
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ class TestActivateSkill(unittest.TestCase):
         self.assertEqual(len(skills._active_skills), 2)
 
     def test_whitespace_name_not_recognized(self):
-        # activate_skill does NOT strip whitespace — the name must match exactly
+        # activate_skill does NOT strip whitespace -- the name must match exactly
         ok, msg = skills.activate_skill("  git  ")
         self.assertFalse(ok)
         self.assertIn("Unknown skill", msg)
@@ -180,7 +180,7 @@ class TestGetActiveToolNames(unittest.TestCase):
 
 
 class TestGetActiveTools(unittest.TestCase):
-    """Tests for get_active_tools() — filters TOOLS list."""
+    """Tests for get_active_tools() -- filters TOOLS list."""
 
     def setUp(self):
         skills.reset_skills()
@@ -211,7 +211,7 @@ class TestGetActiveTools(unittest.TestCase):
 
 
 class TestUseSkillImpl(unittest.TestCase):
-    """Tests for _use_skill() — the use_skill tool implementation."""
+    """Tests for _use_skill() -- the use_skill tool implementation."""
 
     def setUp(self):
         skills.reset_skills()

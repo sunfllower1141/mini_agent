@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-desktop_ops.py — Desktop UI automation via OS accessibility APIs.
+desktop_ops.py -- Desktop UI automation via OS accessibility APIs.
 
 Cross-platform desktop interaction for agentic tools:
 - macOS:     AXUIElement (Accessibility API) via atomacos or JXA/osascript
@@ -10,16 +10,16 @@ Cross-platform desktop interaction for agentic tools:
 Architecture
 ------------
 Two-tier routing:
-  Tier 1 — MCP bridge: connects to a desktop MCP server if configured
+  Tier 1 -- MCP bridge: connects to a desktop MCP server if configured
            (e.g. macos-use, win32-mcp-server, native-devtools-mcp)
-  Tier 2 — Native Python: uses platform bindings directly as fallback
+  Tier 2 -- Native Python: uses platform bindings directly as fallback
 
 Tools:
-    desktop_snapshot  — capture the accessibility tree of the frontmost window
-    desktop_click     — click a UI element by role + name
-    desktop_type      — type text into a focused field
-    desktop_find      — find UI elements matching a text/role query
-    desktop_screenshot — capture a screenshot of the current screen (native,
+    desktop_snapshot  -- capture the accessibility tree of the frontmost window
+    desktop_click     -- click a UI element by role + name
+    desktop_type      -- type text into a focused field
+    desktop_find      -- find UI elements matching a text/role query
+    desktop_screenshot -- capture a screenshot of the current screen (native,
                         no browser required)
 """
 
@@ -149,7 +149,7 @@ Install one of these (easiest first):
   brew install macos-use
 
 After installing, you must grant Accessibility permission:
-  System Settings → Privacy & Security → Accessibility → enable Terminal
+  System Settings -> Privacy & Security -> Accessibility -> enable Terminal
 """.strip(),
 
     "Windows": """
@@ -256,7 +256,7 @@ def _atomacos_getattr(element, attr: str, default=None):
     t = threading.Thread(target=_get, daemon=True)
     t.start()
     if not done.wait(timeout=_ATOMACOS_OP_TIMEOUT):
-        # Timed out — abandon thread, return default
+        # Timed out -- abandon thread, return default
         return default
     if exc is not None:
         raise exc
@@ -760,7 +760,7 @@ def _timestamp() -> str:
 def _truncate(text: str, max_len: int) -> str:
     if len(text) <= max_len:
         return text
-    return text[:max_len] + f"\n… (truncated, {len(text)} chars total)"
+    return text[:max_len] + f"\n... (truncated, {len(text)} chars total)"
 
 
 # ---------------------------------------------------------------------------
@@ -806,12 +806,12 @@ def _desktop_snapshot(args: dict, _wg: WriteSafetyGate,
     """Capture the accessibility tree of the frontmost window.
 
     Returns a structured text representation of interactive elements
-    (roles, names, states) — much more compact and LLM-friendly than
+    (roles, names, states) -- much more compact and LLM-friendly than
     a screenshot. Use this to understand what's on screen before
     clicking or typing.
 
-    On macOS: requires Accessibility permission (System Settings →
-    Privacy & Security → Accessibility → enable Terminal).
+    On macOS: requires Accessibility permission (System Settings ->
+    Privacy & Security -> Accessibility -> enable Terminal).
 
     On Windows: works out of the box with uiautomation installed.
     """
@@ -1020,7 +1020,7 @@ def _desktop_screenshot(args: dict, _wg: WriteSafetyGate,
                         _rg: ReadSafetyGate) -> ToolResult:
     """Capture a screenshot of the current screen (not browser).
 
-    Unlike browser_screenshot, this captures the native desktop —
+    Unlike browser_screenshot, this captures the native desktop --
     any open application, the menubar, dock, taskbar, etc.
 
     Saves to a temp directory. Use read_image to view it,

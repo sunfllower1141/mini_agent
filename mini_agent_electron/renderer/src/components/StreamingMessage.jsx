@@ -5,9 +5,9 @@ import remarkGfm from 'remark-gfm';
 /**
  * Renders streaming text with markdown.  ReactMarkdown is expensive, so we
  * throttle re-parses to ~80ms intervals.  Key insight: we ALWAYS render
- * ReactMarkdown — we just update the text fed to it at a lower rate.
+ * ReactMarkdown -- we just update the text fed to it at a lower rate.
  * Toggling between <pre> and ReactMarkdown causes visible flicker because
- * the DOM structure changes (block → inline reflow).
+ * the DOM structure changes (block -> inline reflow).
  *
  * The markdown view lags up to 80ms behind the incoming text, which is
  * imperceptible.  When streaming stops, a final flush catches it up.
@@ -42,7 +42,7 @@ const StreamingMessage = memo(function StreamingMessage({ text }) {
     }
 
     return () => {
-      // Don't clear the timer here — we want the deferred update to fire.
+      // Don't clear the timer here -- we want the deferred update to fire.
       // The timer cleans itself up.
     };
   }, [text]);

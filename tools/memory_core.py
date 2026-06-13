@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-memory_core.py — Hermes-style bounded persistent core memory tool.
+memory_core.py -- Hermes-style bounded persistent core memory tool.
 
-The agent uses this to manage its core memory — a bounded (~2,500 char)
+The agent uses this to manage its core memory -- a bounded (~2,500 char)
 snapshot injected frozen at session start.  Changes persist immediately
 but appear in the system prompt NEXT session.
 """
@@ -18,13 +18,13 @@ def _memory_core(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolR
     """Manage persistent core memory (frozen snapshot injected at session start).
 
     Actions:
-        add     — append a line/entry to core memory
-        replace — replace the entire core memory content (when you need to
+        add     -- append a line/entry to core memory
+        replace -- replace the entire core memory content (when you need to
                   restructure or consolidate). Use this after reading the
                   current snapshot if you need to merge, dedup, or compress.
-        remove  — remove an entry by line number (1-indexed). The agent should
+        remove  -- remove an entry by line number (1-indexed). The agent should
                   read the current snapshot first to identify the line number.
-        read    — read the current core memory content
+        read    -- read the current core memory content
 
     Core memory is hard-capped at ~2,500 chars. When full, **consolidate**
     (merge similar entries, remove stale ones) before adding more.
@@ -56,7 +56,7 @@ def _memory_core(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolR
             if current:
                 bar_len = 50
                 filled = min(len(current) * bar_len // max(char_limit, 1), bar_len)
-                bar = "\u2588" * filled + "\u2591" * (bar_len - filled)
+                bar = "#" * filled + "." * (bar_len - filled)
                 pct = min(len(current) * 100 // max(char_limit, 1), 100)
                 return ToolResult(
                     success=True,
@@ -247,7 +247,7 @@ def _memory_core_fallback(
                 c = row[0]
                 cl = row[1]
                 bar_filled = min(len(c) * 50 // max(cl, 1), 50)
-                bar = "\u2588" * bar_filled + "\u2591" * (50 - bar_filled)
+                bar = "#" * bar_filled + "." * (50 - bar_filled)
                 result = ToolResult(
                     success=True,
                     content=(

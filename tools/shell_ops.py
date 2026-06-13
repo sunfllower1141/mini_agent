@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-shell_ops.py — shell, search, test, and git tools for mini_agent.
+shell_ops.py -- shell, search, test, and git tools for mini_agent.
 
 Tools: run_shell, task_status, search_files, run_tests, verify, git
 """
@@ -192,12 +192,12 @@ def _parse_pytest_output(raw_output: str, exit_code: int = 0) -> tuple[str, bool
 # Patterns for dangerous commands that should warn or block
 _DANGEROUS_COMMANDS: list[tuple[str, str]] = [
     # (regex pattern, explanation)
-    (r"\brm\s+-rf\b", "rm -rf: recursive force delete — will permanently remove files"),
+    (r"\brm\s+-rf\b", "rm -rf: recursive force delete -- will permanently remove files"),
     (r"\bgit\s+push\s+.*--force\b", "git push --force: overwrites remote history"),
     (r"\bgit\s+push\s+.*-f\b", "git push -f: overwrites remote history"),
     (r"\bsudo\b", "sudo: requires elevated privileges"),
     (r"\bchmod\s+777\b", "chmod 777: makes files world-writable (security risk)"),
-    (r"\bdd\s+if=", "dd: raw disk write — can destroy data"),
+    (r"\bdd\s+if=", "dd: raw disk write -- can destroy data"),
     (r"\bmkfs\.", "mkfs: creates filesystems (destroys existing data)"),
     (r">\s*/dev/sd[a-z]", "redirect to /dev/sd*: raw disk write"),
     (r"\bformat\s+[A-Z]:\\?", "format drive: destroys all data on the drive"),
@@ -209,12 +209,12 @@ def _check_dangerous_command(command: str, force: bool) -> str | None:
         if re.search(pattern, command, re.IGNORECASE):
             if force:
                 return (
-                    f"\u26a0\ufe0f DANGEROUS COMMAND: {explanation}\n"
+                    f"WARNING: DANGEROUS COMMAND: {explanation}\n"
                     f"The 'force=True' flag was set, so this command WILL execute."
                 )
             else:
                 return (
-                    f"\u26a0\ufe0f DANGEROUS COMMAND BLOCKED: {explanation}\n"
+                    f"WARNING: DANGEROUS COMMAND BLOCKED: {explanation}\n"
                     f"This command was NOT executed. If you are absolutely sure, "
                     f"set force=True to bypass this safety check."
                 )
@@ -351,7 +351,7 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
             popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
 
         # Always use shell=True: cmd.exe on Windows, /bin/sh on Unix.
-        # No bash wrapping — it creates a fragile cmd→bash→command chain
+        # No bash wrapping -- it creates a fragile cmd->bash->command chain
         # and can cause process explosions when quoting is mishandled.
         proc = subprocess.Popen(
             command, shell=True,
@@ -426,7 +426,7 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
                             pass
                         t_out.join(timeout=0.1)
                     else:
-                        # Normal completion or timeout — join t_err briefly
+                        # Normal completion or timeout -- join t_err briefly
                         t_err.join(timeout=5)
                 finally:
                     timer.cancel()
@@ -495,19 +495,19 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
             lines_out = stdout.split("\n")
             if len(lines_out) > 500:
                 stdout = "\n".join(lines_out[:500])
-                stdout += f"\n\u2026 (truncated at 500 lines \u2014 {len(lines_out)} total. "
+                stdout += f"\n... (truncated at 500 lines -- {len(lines_out)} total. "
                 stdout += "Use read_file with offset/limit for the full log if needed.)"
             parts.append(f"stdout:\n{stdout}")
         elif proc.returncode == 0 and not stderr:
             # ACI upgrade: explicit empty-output message (SWE-agent pattern).
-            # Silence is ambiguous \u2014 the model needs to know the command ran OK.
+            # Silence is ambiguous -- the model needs to know the command ran OK.
             parts.append("Command completed successfully (no output).")
         if stderr:
             err_output = stderr.rstrip()
             err_lines = err_output.split("\n")
             if len(err_lines) > 100:
                 err_output = "\n".join(err_lines[:100])
-                err_output += f"\n\u2026 (stderr truncated at 100 lines \u2014 {len(err_lines)} total)"
+                err_output += f"\n... (stderr truncated at 100 lines -- {len(err_lines)} total)"
             parts.append(f"stderr:\n{err_output}")
         content_out = "\n".join(parts)
         if _danger_prefix:
@@ -528,7 +528,7 @@ def _run_shell_summary(args: dict) -> str:
     cmd = args.get("command", "?")
     preview = cmd[:80]
     if len(cmd) > 80:
-        preview += "…"
+        preview += "..."
     force = args.get("force", False)
     if force:
         return f"run_shell[force] ({preview})"
@@ -552,14 +552,14 @@ _BINARY_EXTS = {".pyc", ".pyo", ".so", ".o", ".a", ".dylib", ".dll",
                 ".ttf", ".otf", ".woff", ".woff2", ".eot",
                 ".db", ".sqlite", ".sqlite3", ".mdb",
                 ".exe", ".bin", ".dat", ".pkl", ".pickle",
-                # SQLite auxiliary files — os.path.splitext splits on last dot
+                # SQLite auxiliary files -- os.path.splitext splits on last dot
                 "-wal", "-shm", "-journal",
                 # Coverage / profiling binary files
                 ".coverage",
                 ".prof", ".gcda", ".gcno",
                 # macOS resource forks
                 ".rsrc",
-                # No extension — catches files like .DS_Store, .coverage (no dot variant)
+                # No extension -- catches files like .DS_Store, .coverage (no dot variant)
                 ".ds_store"}
 
 
@@ -574,10 +574,10 @@ def _is_binary_file(filepath: str) -> bool:
     try:
         with open(filepath, "rb") as f:
             chunk = f.read(512)
-        # Null byte in first 512 bytes → binary (covers SQLite, ELF, Mach-O, etc.)
+        # Null byte in first 512 bytes -> binary (covers SQLite, ELF, Mach-O, etc.)
         return b"\x00" in chunk
     except (OSError, PermissionError):
-        return True  # Can't read → treat as binary, skip it
+        return True  # Can't read -> treat as binary, skip it
 
 
 _SEARCH_MAX_RESULTS = 200
@@ -648,7 +648,7 @@ def _search_with_rg(root_dir: str, pattern: str, use_regex: bool, ignore_case: b
             lines = lines[offset:]
         output = "\n".join(lines[:_SEARCH_MAX_RESULTS])
         if len(lines) > _SEARCH_MAX_RESULTS:
-            output += f"\n\u2026 (showing first {_SEARCH_MAX_RESULTS} results. "
+            output += f"\n... (showing first {_SEARCH_MAX_RESULTS} results. "
             output += "There may be more matches. Narrow your search with a more specific "
             output += "pattern, a subdirectory path, or use find_symbol for symbol lookups.)"
         return ToolResult(success=True, content=output)
@@ -718,7 +718,7 @@ def _search_files(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolR
                     continue
                 file_count += 1
                 if file_count % 500 == 0:
-                    # Periodic yield — prevents long-running searches from
+                    # Periodic yield -- prevents long-running searches from
                     # appearing hung, but the walk always completes.
                     pass
                 fpath = os.path.join(root, fname)
@@ -751,7 +751,7 @@ def _search_files(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolR
         return ToolResult(success=True, content=msg)
     output = "\n".join(results)
     if len(results) >= _SEARCH_MAX_RESULTS:
-        output += f"\n… (capped at {_SEARCH_MAX_RESULTS} results)"
+        output += f"\n... (capped at {_SEARCH_MAX_RESULTS} results)"
     return ToolResult(success=True, content=output)
 
 
@@ -854,7 +854,7 @@ def _run_tests_summary(args: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# verify — lint + run tests for recently modified files
+# verify -- lint + run tests for recently modified files
 # ---------------------------------------------------------------------------
 
 @_register("verify")
@@ -1199,7 +1199,7 @@ def _git_summary(args: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# diagnose_failures — parse last test output and summarize failures
+# diagnose_failures -- parse last test output and summarize failures
 # ---------------------------------------------------------------------------
 
 _FAILED_LINE_RE = re.compile(r"FAILED\s+(.+?\.py)::(.+?)(?:\s+-|\s*$)")
@@ -1215,7 +1215,7 @@ def _diagnose_failures(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> 
         return ToolResult(success=False, content="diagnose_failures is restricted to the orchestrator. Sub-agents must not run tests.")
     import os as _os
 
-    # Build MemoryStore path — same default used by _persist_test_output
+    # Build MemoryStore path -- same default used by _persist_test_output
     db_path = _os.path.join(rg.workspace_root, ".mini_agent_memory.db")
     try:
         from memory.memory import MemoryStore
@@ -1261,7 +1261,7 @@ def _diagnose_failures(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> 
             })
 
     if not failures:
-        # No FAILED lines — check if there's useful output at all
+        # No FAILED lines -- check if there's useful output at all
         if summary_line:
             return ToolResult(success=True, content=f"No FAILED lines parsed. Summary: {summary_line}")
         return ToolResult(success=True, content="No FAILED lines found in test output.")
@@ -1368,10 +1368,10 @@ def _kill_process_tree_windows(proc):
     """Kill the process tree rooted at *proc* as aggressively as possible.
 
     Tries three approaches in order:
-    1. ``taskkill /F /T`` — kills the whole tree including children.
-    2. ``proc.kill()`` — TerminateProcess (parent only, but may cause
+    1. ``taskkill /F /T`` -- kills the whole tree including children.
+    2. ``proc.kill()`` -- TerminateProcess (parent only, but may cause
       children to exit when pipes break).
-    3. ``taskkill`` with just /F (no /T) — last resort.
+    3. ``taskkill`` with just /F (no /T) -- last resort.
 
     Timeouts are short (4 s for taskkill) to avoid this function itself
     hanging and leaking processes.

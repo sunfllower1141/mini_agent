@@ -38,7 +38,7 @@ class TestSummarizePruned(unittest.TestCase):
         summary = _summarize_pruned(pruned)
         # Should contain truncated version, not full 200 chars
         self.assertNotIn(long_msg, summary)
-        self.assertIn("\u2026", summary)
+        self.assertIn("...", summary)
 
     def test_only_last_3_user_turns_shown(self):
         pruned = [
@@ -186,7 +186,7 @@ class TestSummarizePruned(unittest.TestCase):
         ]
         summary = _summarize_pruned(pruned)
         # The full very long path should be truncated
-        self.assertIn("\u2026", summary)
+        self.assertIn("...", summary)
         self.assertNotIn(very_long_path, summary)
 
     def test_opening_line_present(self):
@@ -318,7 +318,7 @@ class TestMemoryStoreTokenAccounting(unittest.TestCase):
             msgs.append(_msg("assistant", f"reply number {i} " + "padding " * 20))
         store.save(msgs)
         loaded = store.load()
-        # Should have pruned — check that loaded < saved
+        # Should have pruned -- check that loaded < saved
         self.assertLess(len(loaded), len(msgs))
         self.assertGreater(store.token_count, 0)
 

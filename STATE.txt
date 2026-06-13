@@ -1,19 +1,5 @@
 # mini_agent Architecture State
-# Last updated: 2026-06-12 (retry timeout: use config constants, connect 10→30s)
-#                empty-output messages, dangerous command detection, search overflow hints,
-#                tool result size budget, prompt rules, stronger post-edit verification)
-# Last updated: 2026-06-11 (Windows: requirements.txt refresh, WINDOWS_INSTALL.md, run_shell summary fix)
-# Last updated: 2026-06-11 (diagnostics: stderr logging in warmup, execute_tool, _run_shell)
-# Last updated: 2026-06-11 (fix: HF_HUB_DISABLE_SYMLINKS_WARNING + encode warmup in daemon thread)
-# Last updated: 2026-06-11 (fix: HF Hub warmup encode + sys.executable subprocess warmup)
-# Last updated: 2026-06-11 (fix: first tool call hang — daemon-thread subprocess warmup + preload reorder)
-# Last updated: 2026-06-11 (fix: first tool call 7.8s hang — GIL contention from _sem_preload)
-# Last updated: 2026-06-11 (Windows: fix bash quoting bug, _read_file_direct on Windows)
-# Last updated: 2026-06-06 (context engineering: codebase_map + compaction)
-# Last updated: 2026-06-06 (electron: fix hang on exit — app.quit() on window-all-closed)
-# Last updated: 2026-06-06 (self-audit wiring: knowledge_graph + git blame + tree-sitter + post-edit verification)
-# Last updated: 2026-06-05 (tools & memory audit — save() decomposed, AgentContext extracted,
-#   orphan stripping unified in memory_prune, dead code removed)
+# Last updated: 2026-06-13 (ASCII-only cleanup: all 134 .py files, 1000 tests pass)
 #
 # This file is the agent's map of the codebase. Update it after every
 # completed change. The agent reads this at session start for context.
@@ -21,89 +7,89 @@
 ## Module Map
 
 ### Core Orchestration
-- `core/bootstrap.py` — entry point, session init, workspace setup
-- `core/llm.py` — main agent loop: turn management, tool dispatch, API calls (825 lines)
-- `core/codebase_map.py` — structural codebase map: AST-based symbol extraction,
+- `core/bootstrap.py` -- entry point, session init, workspace setup
+- `core/llm.py` -- main agent loop: turn management, tool dispatch, API calls (825 lines)
+- `core/codebase_map.py` -- structural codebase map: AST-based symbol extraction,
   module grouping, import graph. Injected into startup context for zero-cost
   codebase orientation. (new 2026-06-06)
-- `core/context_inject.py` — per-turn context injection (handoff, state, tasks, scratchpad, git diff,
+- `core/context_inject.py` -- per-turn context injection (handoff, state, tasks, scratchpad, git diff,
   orchestration, progress checks, circuit breaker, conversation compaction, edit risk briefing, pattern rules) (1250 lines)
-- `core/prompt.py` — system prompt assembly, startup context (file tree, codebase map, git log)
-- `core/config.py` — TOML config loading, provider settings (718 lines)
-- `core/tree_sitter_parser.py` — multi-language (Python/JS/TS) source parsing via tree-sitter
+- `core/prompt.py` -- system prompt assembly, startup context (file tree, codebase map, git log)
+- `core/config.py` -- TOML config loading, provider settings (718 lines)
+- `core/tree_sitter_parser.py` -- multi-language (Python/JS/TS) source parsing via tree-sitter
   with regex/AST fallback. Extracts defs, calls, and imports for codebase_map and knowledge_graph.
-- `core/knowledge_graph.py` — entity-relationship graph (calls, imports, inherits, defines) with
+- `core/knowledge_graph.py` -- entity-relationship graph (calls, imports, inherits, defines) with
   BFS shortest-path, subgraph, and caller-finding queries. Wired into self-audit injections.
 
 ### Sub-Agent System
-- `agents/agent_runtime.py` — sub-agent runtime, broadcast inbox, turn budgets
-- `agents/sub_agent.py` — sub-agent task delegation and result collection (806 lines)
+- `agents/agent_runtime.py` -- sub-agent runtime, broadcast inbox, turn budgets
+- `agents/sub_agent.py` -- sub-agent task delegation and result collection (806 lines)
 
 ### API & Communication
-- `api.py` — OpenAI/Anthropic API client abstraction; imports orphan stripping from memory_prune
-- `stream.py` — streaming response handling
-- `retry.py` — retry logic with exponential backoff; timeout defaults imported from config.py (HTTP_CONNECT_TIMEOUT=30s, HTTP_READ_TIMEOUT=120s)
+- `api.py` -- OpenAI/Anthropic API client abstraction; imports orphan stripping from memory_prune
+- `stream.py` -- streaming response handling
+- `retry.py` -- retry logic with exponential backoff; timeout defaults imported from config.py (HTTP_CONNECT_TIMEOUT=30s, HTTP_READ_TIMEOUT=120s)
 
 ### Memory & Knowledge
-- `memory/memory.py` — SQLite-backed memory store, scratchpad, learnings, handoff.
+- `memory/memory.py` -- SQLite-backed memory store, scratchpad, learnings, handoff.
   save() decomposed into _prepare_messages(), _write_messages(), _maybe_vacuum().
-- `memory/memory_prune.py` — message pruning, content-aware compression, conversation
+- `memory/memory_prune.py` -- message pruning, content-aware compression, conversation
   summarization, and canonical orphaned-tool-message stripping (moved from api.py).
   Dead _summarize_pruned_llm removed.
-- `memory/session.py` — session lifecycle and persistence
-- `interject.py` — user interjection polling
-- `logging_setup.py` — structured logging
+- `memory/session.py` -- session lifecycle and persistence
+- `interject.py` -- user interjection polling
+- `logging_setup.py` -- structured logging
 
 ### Safety & Security
-- `core/safety.py` — read/write safety gates, workspace boundaries
+- `core/safety.py` -- read/write safety gates, workspace boundaries
 
 ### Tools (tools/ directory)
-- `tools/__init__.py` — tool dispatch, execute_tool, register/summarize decorators (~540 lines;
+- `tools/__init__.py` -- tool dispatch, execute_tool, register/summarize decorators (~540 lines;
   AgentContext and file reservations extracted to dedicated modules)
-- `tools/context.py` — AgentContext, _ContextProxy, _TOOL_CONTEXT, set_context (extracted from __init__)
-- `tools/reservations.py` — file reservation system for sub-agent write collision prevention (extracted from __init__)
-- `tools/result.py` — ToolResult dataclass
-- `tools/schema.py` — tool JSON schema definitions (1559 lines)
-- `tools/skills.py` — lazy tool loading via skill gates (11 core tools, 11 skill groups)
-- `tools/error_hints.py` — error hint generation and failure fingerprinting
-- `tools/file_ops.py` — read_file, write_file, edit_file, list_directory, file_info (1157 lines)
-- `tools/shell_ops.py` — run_shell, search_files, run_tests, verify, git (1145 lines)
-- `tools/search_ops.py` — find_symbol, find_usages, semantic_search, web_search (980 lines)
-- `tools/agent_ops.py` — sub-agent lifecycle tools: spawn, collect, extend, cancel (1274 lines)
-- `tools/agent_messages.py` — sub-agent typed messaging inbox/read (614 lines)
-- `tools/agent_patterns.py` — parallel orchestration patterns: fan_out, pipeline, barrier (932 lines)
-- `tools/agent_todos.py` — per-agent todo tracking
-- `tools/failure_learning.py` — failure pattern store, self-critique, project knowledge (1260 lines)
-- `tools/tool_graph.py` — tool transition graph for sequencing hints and anti-pattern detection
-- `tools/lsp.py` — language server protocol tools (851 lines)
-- `tools/desktop_ops.py` — desktop automation tools (1064 lines)
-- `tools/macos_ops.py` — macOS-specific tools (972 lines)
-- `tools/browser_ops.py` — Playwright/Puppeteer browser automation
-- `tools/_json_rpc_shared.py` — shared drain_stderr() utility for LSP and MCP clients
-- `tools/mcp_client.py` — MCP (Model Context Protocol) client
+- `tools/context.py` -- AgentContext, _ContextProxy, _TOOL_CONTEXT, set_context (extracted from __init__)
+- `tools/reservations.py` -- file reservation system for sub-agent write collision prevention (extracted from __init__)
+- `tools/result.py` -- ToolResult dataclass
+- `tools/schema.py` -- tool JSON schema definitions (1559 lines)
+- `tools/skills.py` -- lazy tool loading via skill gates (11 core tools, 11 skill groups)
+- `tools/error_hints.py` -- error hint generation and failure fingerprinting
+- `tools/file_ops.py` -- read_file, write_file, edit_file, list_directory, file_info (1157 lines)
+- `tools/shell_ops.py` -- run_shell, search_files, run_tests, verify, git (1145 lines)
+- `tools/search_ops.py` -- find_symbol, find_usages, semantic_search, web_search (980 lines)
+- `tools/agent_ops.py` -- sub-agent lifecycle tools: spawn, collect, extend, cancel (1274 lines)
+- `tools/agent_messages.py` -- sub-agent typed messaging inbox/read (614 lines)
+- `tools/agent_patterns.py` -- parallel orchestration patterns: fan_out, pipeline, barrier (932 lines)
+- `tools/agent_todos.py` -- per-agent todo tracking
+- `tools/failure_learning.py` -- failure pattern store, self-critique, project knowledge (1260 lines)
+- `tools/tool_graph.py` -- tool transition graph for sequencing hints and anti-pattern detection
+- `tools/lsp.py` -- language server protocol tools (851 lines)
+- `tools/desktop_ops.py` -- desktop automation tools (1064 lines)
+- `tools/macos_ops.py` -- macOS-specific tools (972 lines)
+- `tools/browser_ops.py` -- Playwright/Puppeteer browser automation
+- `tools/_json_rpc_shared.py` -- shared drain_stderr() utility for LSP and MCP clients
+- `tools/mcp_client.py` -- MCP (Model Context Protocol) client
 
 ### Electron Desktop App
-- `mini_agent_electron/` — Electron-based desktop wrapper
+- `mini_agent_electron/` -- Electron-based desktop wrapper
 
 ### Tests
-- `tests/test_memory.py` — memory store tests
-- `tests/test_tools.py` — tool execution tests
-- `tests/test_resilience.py` — orphan stripping and message cleaning tests
-- `tests/test_memory_internals.py` — _clean_messages, migration, export tests
-- `tests/test_api.py` — API client and message cleaning tests
-- `conftest.py` — shared test fixtures
-- `eval/` — evaluation harness
+- `tests/test_memory.py` -- memory store tests
+- `tests/test_tools.py` -- tool execution tests
+- `tests/test_resilience.py` -- orphan stripping and message cleaning tests
+- `tests/test_memory_internals.py` -- _clean_messages, migration, export tests
+- `tests/test_api.py` -- API client and message cleaning tests
+- `conftest.py` -- shared test fixtures
+- `eval/` -- evaluation harness
 
 ### Config Files
-- `.mini_agent.toml` — runtime config (API keys, model, provider)
-- `.mini_agent.rules` — agent behavioral rules
-- `.mini_agent_index.json` — workspace file index
+- `.mini_agent.toml` -- runtime config (API keys, model, provider)
+- `.mini_agent.rules` -- agent behavioral rules
+- `.mini_agent_index.json` -- workspace file index
 
 ### Tracking Files (self-modification audit)
-- `STATE.txt` — this file, architecture map
-- `TASKS.md` — task-to-file mapping index (orient yourself when starting new work)
-- `HANDOFF.md` — session-to-session continuity
-- `CHANGELOG.md` — structured change audit trail
+- `STATE.txt` -- this file, architecture map
+- `TASKS.md` -- task-to-file mapping index (orient yourself when starting new work)
+- `HANDOFF.md` -- session-to-session continuity
+- `CHANGELOG.md` -- structured change audit trail
 
 ## Active Decisions
 
@@ -131,7 +117,7 @@
    removes individual orphans; ``truncate=True`` for persistence truncates at the first
    incomplete sequence. Backward-compat aliases kept in api.py.
 9. **Content-aware compression everywhere**: ``context_inject._compress_stale_tool_results``
-   delegates to ``memory_prune._compress_tool_results`` — per-tool-type compression with
+   delegates to ``memory_prune._compress_tool_results`` -- per-tool-type compression with
    knowledge of request parameters (offset/limit for read_file, match patterns for search_files).
 10. **Cache caps**: ``_clean_messages_cache`` capped at 16 entries.
     Prevents unbounded growth from stale message-list entries.
@@ -191,7 +177,7 @@
 
 23. **Windows subprocess hardening (2026-06-11)**: On Windows, ``proc.communicate()`` and
     ``proc.wait()`` can hang forever in kernel I/O (antivirus hooks, filter drivers).
-    ``tools/shell_ops.py`` now provides ``_communicate_windows()`` — a shared helper that
+    ``tools/shell_ops.py`` now provides ``_communicate_windows()`` -- a shared helper that
     uses read threads (``_stream_reader``) + ``threading.Timer`` watchdog calling
     ``taskkill /F /T`` to kill the process tree when a timeout fires. Used by
     ``_run_shell``, ``_run_tests``, and ``_verify``.
@@ -234,7 +220,7 @@
     The warmup runs during startup (before the first user prompt) so the delay
     is invisible to the user.
 
-## Active Decisions (New — ACI Upgrades 2026-06-11)
+## Active Decisions (New -- ACI Upgrades 2026-06-11)
 
 28. **Read-before-edit enforcement (ACI upgrade)**: ``tools/file_ops.py``: ``write_file``
     and ``_apply_single_edit`` now reject writes/edits to .py files that haven't been
@@ -261,7 +247,7 @@
 32. **Search result overflow hint**: ``tools/shell_ops.py``: when search_files results
     hit the 200-result cap, the hint now says ``"There may be more matches. Narrow
     your search with a more specific pattern, a subdirectory path, or use find_symbol
-    for symbol lookups."`` — guiding the model toward precision (SWE-agent pattern).
+    for symbol lookups."`` -- guiding the model toward precision (SWE-agent pattern).
 
 33. **Per-result size budget**: ``memory/memory_prune.py``: ``_TOOL_RESULT_MAX_CHARS``
     (8000) now hard-truncates any individual tool result exceeding this size during
@@ -289,16 +275,16 @@
     nagging. Constants: ``_CONFIDENCE_NO_RESULT_THRESHOLD=3``,
     ``_CONFIDENCE_FAILURE_THRESHOLD=2``, ``_CONFIDENCE_NUDGE_COOLDOWN_TURNS=4``.
     Tested in ``tests/test_confidence_nudge.py`` (15 tests).
-    Bug fixes applied: (a) UnboundLocalError on malformed tool result JSON — ``data`` now
+    Bug fixes applied: (a) UnboundLocalError on malformed tool result JSON -- ``data`` now
     initialized before try/except. (b) ``break`` on productive turn killed failure/miss
-    counting for earlier messages — replaced with ``_stopped_read_only`` flag.
+    counting for earlier messages -- replaced with ``_stopped_read_only`` flag.
 
 39. **Semantic response cache (2026-06-12)**: ``tools/semantic_cache.py``: new module
     implementing an in-memory semantic cache using the shared ``all-MiniLM-L6-v2``
     SentenceTransformer model (zero additional memory footprint). Caches non-tool-call
     LLM responses keyed by cosine similarity (threshold: 0.92) of the last user
     message embedding. Bounded to 128 entries with 1-hour TTL. Integrated into
-    ``call_llm()`` in ``api.py`` — cache lookup before API call, storage after
+    ``call_llm()`` in ``api.py`` -- cache lookup before API call, storage after
     successful plain-text response. Stats tracked on ``_TOOL_CONTEXT._semantic_cache_stats``.
     Cleared on session reset. Industry consensus: 15-25% cost reduction with zero
     quality risk.
@@ -317,11 +303,11 @@
     previously hardcoded ``timeout=(10, 120)`` while ``config.py`` defined
     ``HTTP_CONNECT_TIMEOUT=30`` and ``HTTP_READ_TIMEOUT=120`` as unused constants.
     Now imports and uses ``(HTTP_CONNECT_TIMEOUT, HTTP_READ_TIMEOUT)``, increasing
-    connect timeout from 10s → 30s. Same values as ``bootstrap.py``'s session-level
+    connect timeout from 10s -> 30s. Same values as ``bootstrap.py``'s session-level
     timeout, so timeouts stay consistent whether or not a Session is passed.
 
 ## Known Issues
-- `_json_rpc_shared.py` — shared drain_stderr() utility used by lsp.py and mcp_client.py
+- `_json_rpc_shared.py` -- shared drain_stderr() utility used by lsp.py and mcp_client.py
 - No semantic search across past sessions (current recall is session-only)
 - Core packages (`core/`, `agents/`, `memory/`) use lazy `__getattr__` in `__init__.py` to
   break circular imports. Adding new public symbols requires updating the `__getattr__` chain.

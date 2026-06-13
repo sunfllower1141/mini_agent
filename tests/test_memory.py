@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-test_memory.py — tests for the conversation memory persistence layer (SQLite).
+test_memory.py -- tests for the conversation memory persistence layer (SQLite).
 """
 
 import json
@@ -159,7 +159,7 @@ class TestMemoryStore(unittest.TestCase):
         loaded = self.store.load()
         self.assertTrue(len(loaded) >= 1)
 
-    # ── test_output table ─────────────────────────────────────────────
+    # -- test_output table ---------------------------------------------
 
     def test_test_output_get_empty_by_default(self):
         result = self.store.get_test_output()
@@ -185,14 +185,14 @@ class TestPruning(unittest.TestCase):
     """Verify that old messages are trimmed to stay within max_messages."""
 
     def _make_turn(self, n: int) -> list[dict]:
-        """Build a complete turn: user → assistant."""
+        """Build a complete turn: user -> assistant."""
         return [
             {"role": "user", "content": f"q{n}"},
             {"role": "assistant", "content": f"a{n}"},
         ]
 
     def _make_tool_turn(self, n: int) -> list[dict]:
-        """Build a tool-call turn: user → assistant(tool_calls) → tool."""
+        """Build a tool-call turn: user -> assistant(tool_calls) -> tool."""
         return [
             {"role": "user", "content": f"run{n}"},
             {
@@ -263,7 +263,7 @@ class TestPruning(unittest.TestCase):
             msgs = self._make_turn(1) + self._make_turn(2) + self._make_turn(3)
             store.save(msgs)
             loaded = store.load()
-            # 2 kept + optional 1 summary injection = ≤3
+            # 2 kept + optional 1 summary injection = <=3
             self.assertLessEqual(len(loaded), 3)
             # The kept messages should include the most recent turn
             contents = [m["content"] for m in loaded]

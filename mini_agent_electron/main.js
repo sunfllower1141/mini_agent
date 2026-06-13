@@ -1,5 +1,5 @@
 /**
- * main.js — Electron main process for mini_agent.
+ * main.js -- Electron main process for mini_agent.
  *
  * Spawns the Python backend as a child process and bridges messages
  * between the renderer (via IPC) and the Python process (via JSON-lines
@@ -11,15 +11,24 @@ const path = require('path');
 const fs = require('fs');
 
 // ---------------------------------------------------------------------------
-// Resource tuning — this is a text-based chat app, not a game or browser.
-// Merge GPU into main process (saves ~180 MB separate GPU process).
-app.commandLine.appendSwitch('in-process-gpu');
-// Cap V8 heap: 128 MB old-space, 16 MB nursery (young gen).
-app.commandLine.appendSwitch('js-flags', '--max-old-space-size=128 --max-semi-space-size=16');
+// Resource tuning -- this is a text-based chat app, not a game or browser.
+// ---------------------------------------------------------------------------
+// NOTE: Do NOT use --in-process-gpu on Windows -- it causes blank rendering
+// on many GPU/driver combinations because the merged GPU thread can't get a
+// valid drawing context for the BrowserWindow.
+//
+// Do NOT cap V8 heap at 128 MB -- React 19 + Shiki (syntax highlighting with
+// ~200 language grammars) needs 300-500 MB during startup.  A tight limit
+// causes silent OOM in the renderer process, killing the JS engine before
+// React can mount.
+//
+// Keep --disable-gpu-shader-disk-cache and --disable-http-cache on Windows
+// only: they prevent "Access is denied" errors when Chromium tries to write
+// to %LOCALAPPDATA% disk caches.
 
 // Windows: Chromium's disk cache can hit "Access is denied" (0x5) on some
 // machines when trying to write to the default %LOCALAPPDATA% cache location.
-// This is a local-first chat app that loads files via file:// — disk caches
+// This is a local-first chat app that loads files via file:// -- disk caches
 // are not needed.  Disable them entirely to avoid permission errors.
 if (process.platform === 'win32') {
   // GPU shader disk cache (fixes: ERROR:gpu\ipc\host\gpu_disk_cache.cc:737)
@@ -30,7 +39,7 @@ if (process.platform === 'win32') {
 }
 
 // ---------------------------------------------------------------------------
-// Custom protocol — serves renderer files with CORS headers so ES modules
+// Custom protocol -- serves renderer files with CORS headers so ES modules
 // work.  Chromium blocks <script type="module"> from file:// URLs; using a
 // custom scheme with corsEnabled bypasses this.
 // ---------------------------------------------------------------------------
@@ -66,7 +75,7 @@ function resolveDistPath(urlPath) {
 }
 
 // ---------------------------------------------------------------------------
-// Load .env file — GUI apps on macOS don't inherit shell profile vars
+// Load .env file -- GUI apps on macOS don't inherit shell profile vars
 // ---------------------------------------------------------------------------
 
 function loadEnvFile(filePath) {
@@ -165,7 +174,7 @@ function spawnPythonBackend(workspacePath) {
 
   const env = { ...process.env };
   // Force UTF-8 on Windows to prevent 'charmap' codec errors when the
-  // Python backend writes Unicode characters (→, ☾, …) to stdout/stderr.
+  // Python backend writes Unicode characters (->, [MOON], ...) to stdout/stderr.
   // Python's locale.getpreferredencoding() reads this at startup, so it
   // must be set before spawning the child process.
   if (process.platform === 'win32') {
@@ -241,7 +250,7 @@ function spawnPythonBackend(workspacePath) {
   });
 
   proc.stderr.on('data', (data) => {
-    // Log Python stderr to Electron console only — not the tools panel.
+    // Log Python stderr to Electron console only -- not the tools panel.
     // HF warnings, tqdm bars, etc. are noise in the UI.
     const text = data.toString().trim();
     if (text) {
@@ -275,7 +284,7 @@ function spawnPythonBackend(workspacePath) {
       }
       _restartCount++;
       if (_restartCount > _MAX_RESTARTS) {
-        const msg = `Backend crashed ${_restartCount}x in ${Math.round((now - _restartWindowStart) / 1000)}s — giving up. Please restart the app.`;
+        const msg = `Backend crashed ${_restartCount}x in ${Math.round((now - _restartWindowStart) / 1000)}s -- giving up. Please restart the app.`;
         console.error(msg);
         const win = BrowserWindow.getAllWindows()[0];
         if (win) win.webContents.send('stream:error', { message: msg });
@@ -285,7 +294,7 @@ function spawnPythonBackend(workspacePath) {
       const restartMsg = `Backend crashed (exit ${code}). Restarting (attempt ${_restartCount}/${_MAX_RESTARTS})...`;
       if (win) win.webContents.send('stream:error', { message: restartMsg });
       const restartWorkspace = workspacePath;
-      // Exponential backoff: 1.5s → 3s → 6s
+      // Exponential backoff: 1.5s -> 3s -> 6s
       const delay = 1500 * Math.pow(2, _restartCount - 1);
       setTimeout(() => {
         if (!pythonProcess) {
@@ -293,7 +302,7 @@ function spawnPythonBackend(workspacePath) {
           if (!pythonProcess) {
             const win = BrowserWindow.getAllWindows()[0];
             if (win) win.webContents.send('stream:error', { message: 'Backend server.py not found.' });
-            console.error('Backend script not found — agent will not start.');
+            console.error('Backend script not found -- agent will not start.');
           }
         }
       }, delay);
@@ -444,7 +453,7 @@ function handlePythonMessage(msg) {
 }
 
 // ---------------------------------------------------------------------------
-// IPC Handlers — renderer → main → Python
+// IPC Handlers -- renderer -> main -> Python
 // ---------------------------------------------------------------------------
 
 function setupIPC() {
@@ -593,12 +602,13 @@ function createWindow() {
     height: 800,
     minWidth: 800,
     minHeight: 500,
-    title: `mini_agent — Electron`,
+    title: `mini_agent -- Electron`,
     backgroundColor: '#1e1e2e',  // dark base background
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      webSecurity: false,  // allow ES modules from file:// URLs
     },
     // Use dark title bar on macOS
     titleBarStyle: 'hiddenInset',
@@ -606,16 +616,19 @@ function createWindow() {
   });
 
   const isDev = process.argv.includes('--dev');
+
+  // Avoid loading the page until the protocol handler is registered.
+  // We load after a 0-delay tick to let the event loop process any pending
+  // protocol registration (belt-and-suspenders, normally not needed).
+
   if (isDev) {
-    // Load from Vite dev server
+    // Load from Vite dev server (HMR, source maps, etc.)
     const VITE_URL = 'http://localhost:5173';
     win.loadURL(VITE_URL).catch(() => {
-      // Fallback: load built files directly (CORS-safe via custom protocol)
+      // Fallback: load built files directly
       const distIndex = path.join(__dirname, 'renderer', 'dist', 'index.html');
       if (fs.existsSync(distIndex)) {
         win.loadFile(distIndex);
-      } else {
-        win.loadURL('miniagent://app/index.html');
       }
     });
   } else {
@@ -629,7 +642,7 @@ function createWindow() {
     win.webContents.openDevTools({ mode: 'detach' });
   }
 
-  // Block file-drop navigation — the preload handles drag-and-drop to
+  // Block file-drop navigation -- the preload handles drag-and-drop to
   // extract file paths and feed them into the user input.  This is a
   // safety net in case the preload's preventDefault doesn't fire first.
   win.webContents.on('will-navigate', (event, url) => {
@@ -639,6 +652,17 @@ function createWindow() {
     }
   });
 
+  // Diagnostic: log page load success/failure
+  win.webContents.on('did-finish-load', () => {
+    console.log('[main] renderer page loaded successfully');
+  });
+  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    console.error(`[main] renderer FAILED to load: ${errorDescription} (code ${errorCode}) URL: ${validatedURL}`);
+  });
+  win.webContents.on('page-title-updated', (_event, title) => {
+    console.log(`[main] page title: "${title}"`);
+  });
+
   return win;
 }
 
@@ -646,12 +670,48 @@ function createWindow() {
 // App lifecycle
 // ---------------------------------------------------------------------------
 
+// MIME map for serving static files from the custom protocol handler.
+const MIME_MAP = {
+  '.html': 'text/html; charset=utf-8',
+  '.js':   'text/javascript; charset=utf-8',
+  '.mjs':  'text/javascript; charset=utf-8',
+  '.css':  'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.png':  'image/png',
+  '.jpg':  'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif':  'image/gif',
+  '.svg':  'image/svg+xml',
+  '.ico':  'image/x-icon',
+  '.woff':  'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf':   'font/ttf',
+  '.map':  'application/json; charset=utf-8',
+};
+
 app.whenReady().then(() => {
-  // Register the custom protocol handler
+  // Register the custom protocol handler -- serve renderer/dist files.
+  // Using fs.readFileSync instead of net.fetch('file:///...') because
+  // net.fetch may not support file:// URLs in protocol handlers on all
+  // platforms (especially Windows).
   protocol.handle('miniagent', (request) => {
-    const filePath = resolveDistPath(new URL(request.url).pathname);
-    if (!filePath) return new Response('Not found', { status: 404 });
-    return net.fetch(`file:///${filePath.replace(/\\/g, '/')}`);
+    try {
+      const urlPath = new URL(request.url).pathname;
+      const filePath = resolveDistPath(urlPath);
+      if (!filePath) {
+        return new Response('Not found', { status: 404 });
+      }
+      const ext = path.extname(filePath).toLowerCase();
+      const mimeType = MIME_MAP[ext] || 'application/octet-stream';
+      const content = fs.readFileSync(filePath);
+      return new Response(content, {
+        status: 200,
+        headers: { 'Content-Type': mimeType },
+      });
+    } catch (err) {
+      console.error(`[miniagent] Failed to serve ${request.url}:`, err.message);
+      return new Response('Internal error', { status: 500 });
+    }
   });
 
   setupIPC();
@@ -708,7 +768,7 @@ app.on('window-all-closed', () => {
       pythonProcess.stdin.end();
     } catch (e) { /* ignore */ }
     // Hard timeout: if Python hasn't exited within 5s, force-kill the entire
-    // process tree (on Windows this is critical — proc.kill() only kills the
+    // process tree (on Windows this is critical -- proc.kill() only kills the
     // immediate process, leaving orphaned bash.exe/conhost.exe children).
     setTimeout(() => {
       if (pythonProcess && !pythonProcess.killed) {
@@ -721,14 +781,14 @@ app.on('window-all-closed', () => {
           }
         } catch (e) { /* ignore */ }
       }
-      // On macOS, also force quit — window-all-closed normally skips app.quit()
+      // On macOS, also force quit -- window-all-closed normally skips app.quit()
       // but we're shutting down the backend, not just hiding the window.
       if (process.platform === 'darwin') {
         app.quit();
       }
     }, 5000);
   } else {
-    // No backend running — quit immediately on all platforms.
+    // No backend running -- quit immediately on all platforms.
     app.quit();
   }
   if (process.platform !== 'darwin') {

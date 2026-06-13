@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-agent_todos.py — task tracking and scratchpad tools for mini_agent.
+agent_todos.py -- task tracking and scratchpad tools for mini_agent.
 
 Tools: todo_write, todo_read, plan, plan_status, write_scratchpad
 
@@ -135,12 +135,12 @@ def _write_scratchpad_summary(args: dict) -> str:
     content = args.get("content", "")
     preview = content[:60].replace("\n", " ")
     if len(content) > 60:
-        preview += "\u2026"
-    return f"write_scratchpad(\u2026{len(content)} chars \u2192 \"{preview}\")"
+        preview += "..."
+    return f"write_scratchpad(...{len(content)} chars -> \"{preview}\")"
 
 
 # ---------------------------------------------------------------------------
-# plan / plan_status tools — structured task tracking
+# plan / plan_status tools -- structured task tracking
 # ---------------------------------------------------------------------------
 
 
@@ -176,7 +176,7 @@ def _plan(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
 @_summarize("plan")
 def _plan_summary(args: dict) -> str:
     steps = args.get("steps", [])
-    return f"plan({len(steps)} steps: {steps[0][:40] if steps else '?'}\u2026)"
+    return f"plan({len(steps)} steps: {steps[0][:40] if steps else '?'}...)"
 
 
 @_register("plan_status")
@@ -190,7 +190,7 @@ def _plan_status(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolR
         return ToolResult(success=True, content="No active plan.")
 
     if step is not None:
-        idx = step - 1  # 1-indexed → 0-indexed
+        idx = step - 1  # 1-indexed -> 0-indexed
         if idx < 0 or idx >= len(steps):
             return ToolResult(
                 success=False,
@@ -209,7 +209,7 @@ def _plan_status(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolR
 
     lines = [f"Plan ({len(done)}/{len(steps)} complete):"]
     for i, s in enumerate(steps, 1):
-        mark = "\u2713" if (i - 1) in done else "\u25cb"
+        mark = "V" if (i - 1) in done else "o"
         lines.append(f"  [{mark}] {i}. {s}")
     all_done = len(done) == len(steps)
     if all_done:

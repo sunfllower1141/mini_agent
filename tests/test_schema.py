@@ -1,4 +1,4 @@
-"""Tests for tools/schema.py — tool schema structure and invariants."""
+"""Tests for tools/schema.py -- tool schema structure and invariants."""
 
 from __future__ import annotations
 

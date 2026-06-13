@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""test_agent_patterns.py — tests for multi-agent coordination pattern helpers."""
+"""test_agent_patterns.py -- tests for multi-agent coordination pattern helpers."""
 
 import pytest
 import threading
@@ -79,7 +79,7 @@ class TestFanOut:
         from tools.agent_patterns import fan_out
 
         runtime = MagicMock(spec=AgentRuntime)
-        # Set active_count at the max — fan_out should spawn zero new agents
+        # Set active_count at the max -- fan_out should spawn zero new agents
         runtime.active_count = 10
         runtime._condition = threading.Condition()
 
@@ -177,7 +177,7 @@ class TestFanIn:
         runtime = MagicMock(spec=AgentRuntime)
         runtime._condition = threading.Condition()
 
-        complete_ev = Event()  # never set — simulates a stuck task
+        complete_ev = Event()  # never set -- simulates a stuck task
 
         def _get_status(tid):
             if complete_ev.is_set():
@@ -226,7 +226,7 @@ class TestPipeline:
         assert result.success
 
     def test_early_failure_stops_pipeline(self):
-        """A failed stage returns immediately — subsequent stages never spawn."""
+        """A failed stage returns immediately -- subsequent stages never spawn."""
         from tools.agent_patterns import pipeline
 
         runtime = MagicMock(spec=AgentRuntime)
@@ -317,7 +317,7 @@ class TestBarrier:
         runtime = MagicMock(spec=AgentRuntime)
         runtime._condition = threading.Condition()
 
-        b_arrived = Event()  # never set — simulates agent "b" never arriving
+        b_arrived = Event()  # never set -- simulates agent "b" never arriving
 
         def _get_inbox(tid):
             if tid == "a":
@@ -343,7 +343,7 @@ class TestBarrier:
         runtime = MagicMock(spec=AgentRuntime)
         runtime._condition = threading.Condition()
 
-        correct_name = Event()  # never set — simulates wrong barrier name
+        correct_name = Event()  # never set -- simulates wrong barrier name
 
         def _get_inbox(tid):
             if correct_name.is_set():

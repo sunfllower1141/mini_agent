@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-test_tools.py — tests for tool implementations and tool_summary display.
+test_tools.py -- tests for tool implementations and tool_summary display.
 """
 
 import json
@@ -74,13 +74,13 @@ class TestRunShell(unittest.TestCase):
     # --- shell guard ---
 
     def test_rm_rf_no_longer_blocked(self):
-        """Safety guards removed — rm runs (may fail on perms but not blocked)."""
+        """Safety guards removed -- rm runs (may fail on perms but not blocked)."""
         tc = _make_tool_call("run_shell", command="rm -rf /etc")
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertNotIn("blocked by safety guard", result.content)
 
     def test_fork_bomb_no_longer_blocked(self):
-        """Safety guards removed — fork bomb runs (shell rejects syntax anyway)."""
+        """Safety guards removed -- fork bomb runs (shell rejects syntax anyway)."""
         tc = _make_tool_call("run_shell", command=":(){ :|:& };:")
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertNotIn("blocked by safety guard", result.content)
@@ -187,7 +187,7 @@ class TestSearchFiles(unittest.TestCase):
         self.assertTrue(result.success)
         match_lines = [l for l in result.content.split("\n") if "big.txt:" in l]
         self.assertEqual(len(match_lines), 60)
-        # 60 is below 200 cap — no truncation message
+        # 60 is below 200 cap -- no truncation message
         self.assertNotIn("capped at", result.content)
 
     def test_default_path_is_dot(self):
@@ -397,7 +397,7 @@ class TestToolSummary(unittest.TestCase):
     def test_write_file_long_content_truncated(self):
         tc = _make_tool_call("write_file", path="x", content="a" * 100)
         s = tool_summary(tc)
-        self.assertIn("…", s)
+        self.assertIn("...", s)
         self.assertLess(len(s), 150)
 
     def test_edit_file_summary(self):
@@ -423,7 +423,7 @@ class TestToolSummary(unittest.TestCase):
     def test_run_shell_long_command_truncated(self):
         tc = _make_tool_call("run_shell", command="x" * 100)
         s = tool_summary(tc)
-        self.assertIn("…", s)
+        self.assertIn("...", s)
 
     def test_search_files_summary(self):
         tc = _make_tool_call("search_files", pattern="TODO", path="src")
@@ -442,7 +442,7 @@ class TestToolSummary(unittest.TestCase):
         tc = _make_tool_call("nonexistent_tool", foo="bar")
         s = tool_summary(tc)
         self.assertIn("nonexistent_tool", s)
-        self.assertIn("…", s)
+        self.assertIn("...", s)
 
     def test_summary_handles_bad_json(self):
         tc = {
@@ -469,7 +469,7 @@ class TestRunTests(unittest.TestCase):
         # Reset sub-agent depth in case another test leaked it (daemon threads)
         _TOOL_CONTEXT._agent_depth = 0
         # Create a minimal test file so pytest has something to discover.
-        # Must not use "tests" or "eval" dir names — run_tests now ignores
+        # Must not use "tests" or "eval" dir names -- run_tests now ignores
         # those to skip eval harness and subdirectory test fixtures.
         test_dir = os.path.join(self.workspace, "dummy_tests")
         os.makedirs(test_dir)
@@ -639,7 +639,7 @@ class TestSemanticSearch(unittest.TestCase):
     def test_finds_file_io_chunks(self, mock_model):
         import numpy as np
         mock = mock_model.return_value
-        # "writing files to disk" → similar to storage.py (0.95), not auth.py (0.3)
+        # "writing files to disk" -> similar to storage.py (0.95), not auth.py (0.3)
         mock.encode.side_effect = lambda texts, **kw: np.array([
             [1.0, 0.0] if "save_file" in t else [1.0, 0.0] if "writing" in t else [0.0, 1.0]
             for t in texts
@@ -723,7 +723,7 @@ class TestToolCache(unittest.TestCase):
         self.assertTrue(r1.success)
         self.assertTrue(r2.success)
         # Cache is now session-level (write-driven), so clear_tool_cache()
-        # is a no-op — results persist across turns until a write happens.
+        # is a no-op -- results persist across turns until a write happens.
         self.assertIs(r1, r2)
 
     def test_write_tools_are_not_cached(self):
@@ -856,7 +856,7 @@ class TestErrorHints(unittest.TestCase):
         self.assertIn("read_file", result.content.lower())
 
     def test_destructive_guard_removed(self):
-        """Safety guards removed — rm runs directly without force flag needed."""
+        """Safety guards removed -- rm runs directly without force flag needed."""
         tc = _make_tool_call("run_shell", command="rm -rf /tmp/nonexistent")
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertNotIn("blocked by safety guard", result.content)
@@ -888,7 +888,7 @@ class TestErrorHints(unittest.TestCase):
         lines = []
         result = execute_tool(tc, self.write_gate, self.read_gate, on_output=lines.append)
         self.assertTrue(result.success)
-        # Windows echo may include trailing spaces — strip for comparison
+        # Windows echo may include trailing spaces -- strip for comparison
         stripped = [l.strip() for l in lines]
         self.assertIn("line1", stripped)
         self.assertIn("line2", stripped)
@@ -1051,7 +1051,7 @@ class TestSearchFilesFilePath(unittest.TestCase):
     def test_file_path_invalid_returns_error(self):
         tc = _make_tool_call("search_files", pattern="x", file_path="/no/such/file.txt")
         result = execute_tool(tc, self.write_gate, self.read_gate)
-        # Should fail or succeed with "No matches" — depends on safety gate
+        # Should fail or succeed with "No matches" -- depends on safety gate
         # The point is it doesn't crash
         self.assertIsNotNone(result)
 
@@ -1167,7 +1167,7 @@ class TestRecallTurn(unittest.TestCase):
         from tools import _TOOL_CONTEXT
         # Seed the turn history so recall_turn has data to return
         _TOOL_CONTEXT._turn_history = {
-            1: "Assistant: wrote file\na.txt\n  Tool: write_file({...})\n  Result: ✓ OK",
+            1: "Assistant: wrote file\na.txt\n  Tool: write_file({...})\n  Result: V OK",
             2: "Assistant: all done",
         }
 

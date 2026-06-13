@@ -1,7 +1,7 @@
 import { useRef, useEffect } from 'react';
 
 /**
- * SubAgentsPane — displays active sub-agents in a stacked layout.
+ * SubAgentsPane -- displays active sub-agents in a stacked layout.
  *
  * Each sub-agent gets a section split into 3 horizontal rows:
  *   Top:    Tool calls (what tools the sub-agent used)
@@ -34,7 +34,7 @@ function SubAgentSection({ agent }) {
     if (el) requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
   }, [agent.toolCalls]);
 
-  const statusIcon = agent.ok === true ? '✓' : agent.ok === false ? '✗' : '●';
+  const statusIcon = agent.ok === true ? 'V' : agent.ok === false ? 'X' : '*';
   const statusCls = agent.ok === true ? 'subagent-ok' : agent.ok === false ? 'subagent-err' : 'subagent-active';
 
   return (

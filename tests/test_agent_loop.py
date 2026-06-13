@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-test_agent_loop.py — integration tests for the full agent turn pipeline.
+test_agent_loop.py -- integration tests for the full agent turn pipeline.
 
 Mocks the DeepSeek API to verify that tool calls are executed, results are
 appended, text responses are handled correctly, and API retry works.
@@ -55,7 +55,7 @@ from conftest import make_gates as _gates
 # ---------------------------------------------------------------------------
 
 class TestAgentTurnPipeline(unittest.TestCase):
-    """Simulate full turns: API → tool execution → response."""
+    """Simulate full turns: API -> tool execution -> response."""
 
     def setUp(self):
         self.workspace = tempfile.mkdtemp()
@@ -170,7 +170,7 @@ class TestAgentTurnPipeline(unittest.TestCase):
 
     @patch("api.requests.post")
     def test_turn_without_tools(self, mock_post):
-        """API returns plain text — no tool execution needed."""
+        """API returns plain text -- no tool execution needed."""
         call_response = MagicMock()
         call_response.ok = True
         call_response.json.return_value = _make_api_response(
@@ -264,7 +264,7 @@ class TestAgentTurnPipeline(unittest.TestCase):
 
             for tc in msg1["tool_calls"]:
                 result = execute_tool(tc, self.write_gate, self.read_gate)
-                # Safety gates are now unrestricted — writes outside workspace succeed
+                # Safety gates are now unrestricted -- writes outside workspace succeed
                 # but the file may not be created depending on tool implementation
                 self.assertIsInstance(result, ToolResult)
         finally:
@@ -373,7 +373,7 @@ class TestRunAgentTurn(unittest.TestCase):
 
     @patch("api.requests.post")
     def test_text_only_response(self, mock_post):
-        """No tool calls — returns text message directly."""
+        """No tool calls -- returns text message directly."""
         mock_post.return_value.ok = True
         mock_post.return_value.json.return_value = _make_api_response(
             content="Hello!"
@@ -502,7 +502,7 @@ class TestRunAgentTurn(unittest.TestCase):
     @patch("api.requests.post")
     def test_max_turns_cap(self, mock_post):
         """Returns last assistant message when max_turns is exceeded."""
-        # Each call returns a tool call — never a plain text response
+        # Each call returns a tool call -- never a plain text response
         responses = []
         for i in range(5):
             responses.append(_mock_response(tool_calls=[
@@ -579,7 +579,7 @@ def _mock_response(content: str = "", tool_calls=None) -> MagicMock:
 # ---------------------------------------------------------------------------
 
 class TestRealAgentLoop(unittest.TestCase):
-    """Exercise run_agent_turn end-to-end with mocked API — not abstract."""
+    """Exercise run_agent_turn end-to-end with mocked API -- not abstract."""
 
     def setUp(self):
         self.workspace = tempfile.mkdtemp()

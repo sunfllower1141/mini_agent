@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-macos_ops.py — Intensive macOS API integrations for the desktop agent.
+macos_ops.py -- Intensive macOS API integrations for the desktop agent.
 
 Tools:
-    desktop_apps        — List running applications (name, PID, bundle ID, active)
-    desktop_launch      — Launch an app by name or bundle ID
-    desktop_quit        — Quit an app by name or PID
-    desktop_focus       — Bring an app window to the foreground
-    desktop_clipboard   — Read or write the system clipboard
-    desktop_windows     — List all visible windows across applications
-    desktop_system_info — CPU, memory, disk, battery, thermal, uptime
-    desktop_key         — Press a key combination (e.g. "cmd+c", "cmd+tab")
-    desktop_open        — Open a file, folder, or URL in the default app
-    desktop_reveal      — Reveal a file in Finder
-    desktop_notify      — Post a system notification
+    desktop_apps        -- List running applications (name, PID, bundle ID, active)
+    desktop_launch      -- Launch an app by name or bundle ID
+    desktop_quit        -- Quit an app by name or PID
+    desktop_focus       -- Bring an app window to the foreground
+    desktop_clipboard   -- Read or write the system clipboard
+    desktop_windows     -- List all visible windows across applications
+    desktop_system_info -- CPU, memory, disk, battery, thermal, uptime
+    desktop_key         -- Press a key combination (e.g. "cmd+c", "cmd+tab")
+    desktop_open        -- Open a file, folder, or URL in the default app
+    desktop_reveal      -- Reveal a file in Finder
+    desktop_notify      -- Post a system notification
 
 All tools degrade gracefully on non-macOS platforms with clear messages.
 Most use pyobjc (AppKit / Quartz / Foundation) which is bundled with
@@ -24,7 +24,7 @@ Safety gate note: the registered tool wrappers accept WriteSafetyGate
 and ReadSafetyGate but do not use them.  These tools operate on the
 host desktop (clipboard, keyboard simulation, app lifecycle) which is
 inherently outside the workspace sandbox.  The agent is trusted to use
-them responsibly — they are gated behind the 'desktop' skill group.
+them responsibly -- they are gated behind the 'desktop' skill group.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ from tools import _register, _summarize, ToolResult
 
 PLATFORM = platform.system()
 
-# ── Lazy pyobjc imports (module-level, imported once on first use) ──
+# -- Lazy pyobjc imports (module-level, imported once on first use) --
 _AppKit_NSWorkspace = None
 
 
@@ -89,7 +89,7 @@ def _get_nsprocessinfo():
     return _Foundation_NSProcessInfo
 
 
-# ── Robust AppleScript string escaping ──
+# -- Robust AppleScript string escaping --
 def _escape_applescript_string(s: str) -> str:
     """Escape a string for embedding in an AppleScript double-quoted string literal.
 
@@ -117,9 +117,9 @@ def _escape_applescript_string(s: str) -> str:
     return "".join(result)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 # Helpers
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 
 def _mac_only() -> ToolResult:
     """Return a standard error when called on non-macOS."""
@@ -160,9 +160,9 @@ def _run_command(cmd: list[str], timeout: float = 10.0) -> tuple[bool, str, str]
         return False, "", str(exc)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# desktop_apps — list running applications
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
+# desktop_apps -- list running applications
+# ===========================================================================
 
 def _macos_list_apps() -> ToolResult:
     """List running applications via NSWorkspace."""
@@ -174,8 +174,8 @@ def _macos_list_apps() -> ToolResult:
         for app in apps:
             name = app.localizedName() or "(unnamed)"
             pid = app.processIdentifier()
-            bundle = app.bundleIdentifier() or "—"
-            active = "◉" if app.isActive() else " "
+            bundle = app.bundleIdentifier() or "--"
+            active = "?" if app.isActive() else " "
             lines.append(f"  {active} PID={pid:6d}  {name[:40]:40s}  {bundle}")
 
         return ToolResult(
@@ -203,9 +203,9 @@ def _fallback_apps_via_ps() -> ToolResult:
     )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# desktop_launch — launch an application
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
+# desktop_launch -- launch an application
+# ===========================================================================
 
 def _macos_launch_app(name: str) -> ToolResult:
     """Launch an app by name or bundle ID."""
@@ -245,9 +245,9 @@ def _macos_launch_app(name: str) -> ToolResult:
         return ToolResult(success=False, content=f"Launch failed: {exc}")
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# desktop_quit — quit an application
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
+# desktop_quit -- quit an application
+# ===========================================================================
 
 def _macos_quit_app(name_or_pid: str) -> ToolResult:
     """Quit an app by name or PID.
@@ -287,7 +287,7 @@ def _macos_quit_app(name_or_pid: str) -> ToolResult:
     if ok:
         return ToolResult(success=True, content=f"Quit '{name_or_pid}'.")
 
-    # Force quit via pkill (exact name match only — no -f)
+    # Force quit via pkill (exact name match only -- no -f)
     ok2, stdout2, stderr2 = _run_command(
         ["pkill", "-x", name_or_pid],
         timeout=5.0,
@@ -298,13 +298,13 @@ def _macos_quit_app(name_or_pid: str) -> ToolResult:
     return ToolResult(
         success=False,
         content=f"Could not quit '{name_or_pid}'. App not responding.",
-        hint="The app may be frozen. Try Force Quit (⌘⌥⎋) or 'kill -9' on its PID.",
+        hint="The app may be frozen. Try Force Quit (???) or 'kill -9' on its PID.",
     )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# desktop_focus — bring an app to the foreground
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
+# desktop_focus -- bring an app to the foreground
+# ===========================================================================
 
 def _macos_focus_app(name: str) -> ToolResult:
     """Bring an app to the foreground."""
@@ -331,9 +331,9 @@ def _macos_focus_app(name: str) -> ToolResult:
     )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# desktop_clipboard — read or write the system clipboard
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
+# desktop_clipboard -- read or write the system clipboard
+# ===========================================================================
 
 def _macos_clipboard(action: str, text: str = "") -> ToolResult:
     """Read or write the system clipboard."""
@@ -395,9 +395,9 @@ def _clipboard_via_osascript(action: str, text: str = "") -> ToolResult:
     return ToolResult(success=False, content=f"Unknown action: '{action}'.")
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# desktop_windows — list all visible windows across all apps
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
+# desktop_windows -- list all visible windows across all apps
+# ===========================================================================
 
 def _macos_list_windows() -> ToolResult:
     """List all visible windows via CGWindowList."""
@@ -443,9 +443,9 @@ def _macos_list_windows() -> ToolResult:
         return ToolResult(success=False, content=f"Window list failed: {exc}")
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# desktop_system_info — CPU, memory, disk, battery, thermal, uptime
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
+# desktop_system_info -- CPU, memory, disk, battery, thermal, uptime
+# ===========================================================================
 
 def _macos_system_info() -> ToolResult:
     """Gather system metrics from multiple sources.
@@ -465,7 +465,7 @@ def _macos_system_info() -> ToolResult:
         lines.append(f"Physical Memory:  {pi.physicalMemory() // (1024**3)} GB")
         lines.append(f"System Uptime:    {_format_uptime(pi.systemUptime())}")
     except ImportError:
-        # Fallback via sysctl — run in parallel with other commands below
+        # Fallback via sysctl -- run in parallel with other commands below
         pass
 
     # Run all subprocess calls in parallel (disk, battery, thermal, load, memory)
@@ -558,9 +558,9 @@ def _format_uptime(seconds: float) -> str:
     return " ".join(parts)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# desktop_key — press a key combination
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
+# desktop_key -- press a key combination
+# ===========================================================================
 
 # Keycode map for special keys (macOS virtual key codes)
 _KEYCODE_MAP: dict[str, int] = {
@@ -623,7 +623,7 @@ def _macos_press_keys(combo: str) -> ToolResult:
     # Get keycode
     keycode = _KEYCODE_MAP.get(key_name)
     if keycode is None:
-        # Single character → look up from virtual key code tables
+        # Single character -> look up from virtual key code tables
         if len(key_name) == 1:
             # For letters A-Z: kVK_ANSI_A = 0x00, kVK_ANSI_Z = 0x06
             if "a" <= key_name.lower() <= "z":
@@ -744,9 +744,9 @@ def _press_keys_via_osascript(combo: str) -> ToolResult:
     return ToolResult(success=False, content=f"Key press failed: {output}")
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# desktop_open — open a file, folder, or URL in the default application
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
+# desktop_open -- open a file, folder, or URL in the default application
+# ===========================================================================
 
 def _macos_open(target: str) -> ToolResult:
     """Open a file, folder, or URL."""
@@ -763,9 +763,9 @@ def _macos_open(target: str) -> ToolResult:
     )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# desktop_reveal — reveal a file in Finder
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
+# desktop_reveal -- reveal a file in Finder
+# ===========================================================================
 
 def _macos_reveal(path: str) -> ToolResult:
     """Reveal a file in Finder."""
@@ -783,9 +783,9 @@ def _macos_reveal(path: str) -> ToolResult:
     return ToolResult(success=False, content=f"Failed to reveal: {stderr}")
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# desktop_notify — post a system notification
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
+# desktop_notify -- post a system notification
+# ===========================================================================
 
 def _macos_notify(title: str, message: str = "", sound: bool = False) -> ToolResult:
     """Post a macOS notification."""
@@ -805,9 +805,9 @@ def _macos_notify(title: str, message: str = "", sound: bool = False) -> ToolRes
     return ToolResult(success=False, content=f"Notification failed: {output}")
 
 
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 # Tool registrations
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 
 @_register("desktop_apps")
 def _desktop_apps(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
@@ -922,9 +922,9 @@ def _desktop_notify(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> To
     return _macos_notify(title, message, sound)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 # Summaries
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 
 @_summarize("desktop_apps")
 def _desktop_apps_summary(args: dict) -> str:

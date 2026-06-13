@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-reservations.py — file reservation system to prevent sub-agent write collisions.
+reservations.py -- file reservation system to prevent sub-agent write collisions.
 
 Extracted from tools/__init__.py to keep the dispatch module focused.
 """
@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import threading
 
-# File reservation system — prevents sub-agent write collisions
-# Maps file_path (relative to workspace) → task_id of owning agent
+# File reservation system -- prevents sub-agent write collisions
+# Maps file_path (relative to workspace) -> task_id of owning agent
 _FILE_RESERVATIONS: dict[str, str] = {}
 _FILE_RESERVATIONS_LOCK = threading.Lock()
 

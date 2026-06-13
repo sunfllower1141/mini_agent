@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-file_ops.py — file/directory tools for mini_agent.
+file_ops.py -- file/directory tools for mini_agent.
 
 Tools: read_file, write_file, edit_file, list_directory, file_info
 """
@@ -111,7 +111,7 @@ def _read_file_windows_worker(
 def _read_file_direct(
     resolved: str, offset: int, limit: int, line_numbers: bool,
 ) -> ToolResult:
-    """Direct file read — used on Unix and as fallback on Windows."""
+    """Direct file read -- used on Unix and as fallback on Windows."""
     try:
         with open(resolved, "r", encoding="utf-8", errors="replace") as f:
             collected: list[str] = []
@@ -143,7 +143,7 @@ def _read_file_direct(
         truncated = "\n".join(collected[:limit])
         msg = (
             f"{truncated}\n"
-            f"… (truncated at {limit} lines — {lines_after_offset} total in selection. "
+            f"... (truncated at {limit} lines -- {lines_after_offset} total in selection. "
             f"Use a higher limit or offset to see more.)"
         )
         return ToolResult(success=True, content=msg)
@@ -154,23 +154,23 @@ def _read_file_direct(
 # Unicode & quote normalization maps (used by edit_file matching)
 # ---------------------------------------------------------------------------
 
-# Curly/smart quotes → ASCII straight quotes
+# Curly/smart quotes -> ASCII straight quotes
 _QUOTE_NORMALIZE_MAP: dict[int, int | None] = {
     0x2018: ord("'"),   # ' left single
     0x2019: ord("'"),   # ' right single
-    0x201A: ord("'"),   # ‚ single low-9
-    0x201B: ord("'"),   # ‛ single high-reversed
+    0x201A: ord("'"),   # , single low-9
+    0x201B: ord("'"),   # ' single high-reversed
     0x201C: ord('"'),   # " left double
     0x201D: ord('"'),   # " right double
-    0x201E: ord('"'),   # „ double low-9
-    0x201F: ord('"'),   # ‟ double high-reversed
-    0x2039: ord("'"),   # ‹ single left-pointing angle
-    0x203A: ord("'"),   # › single right-pointing angle
-    0x00AB: ord('"'),   # « left-pointing double angle
-    0x00BB: ord('"'),   # » right-pointing double angle
+    0x201E: ord('"'),   # ,, double low-9
+    0x201F: ord('"'),   # " double high-reversed
+    0x2039: ord("'"),   # < single left-pointing angle
+    0x203A: ord("'"),   # > single right-pointing angle
+    0x00AB: ord('"'),   # << left-pointing double angle
+    0x00BB: ord('"'),   # >> right-pointing double angle
 }
 
-# Unicode whitespace → ASCII space (or None = remove)
+# Unicode whitespace -> ASCII space (or None = remove)
 _UNICODE_WHITESPACE_MAP: dict[int, int | None] = {
     0x00A0: ord(" "),   # non-breaking space
     0x2002: ord(" "),   # en space
@@ -182,12 +182,12 @@ _UNICODE_WHITESPACE_MAP: dict[int, int | None] = {
     0x202F: ord(" "),   # narrow non-breaking space
     0x205F: ord(" "),   # medium mathematical space
     0x3000: ord(" "),   # ideographic space
-    0x00AD: None,       # soft hyphen → remove
-    0x200B: None,       # zero-width space → remove
-    0x200C: None,       # zero-width non-joiner → remove
-    0x200D: None,       # zero-width joiner → remove
-    0xFEFF: None,       # BOM / zero-width no-break space → remove
-    0x2060: None,       # word joiner → remove
+    0x00AD: None,       # soft hyphen -> remove
+    0x200B: None,       # zero-width space -> remove
+    0x200C: None,       # zero-width non-joiner -> remove
+    0x200D: None,       # zero-width joiner -> remove
+    0xFEFF: None,       # BOM / zero-width no-break space -> remove
+    0x2060: None,       # word joiner -> remove
 }
 
 # Build fast translation tables (Python str.translate)
@@ -207,7 +207,7 @@ def _canonicalize_for_match(s: str) -> str:
     return _normalize_quotes(_normalize_unicode_whitespace(s))
 
 # ---------------------------------------------------------------------------
-# Read-before-edit tracking — set of resolved_path values that have been
+# Read-before-edit tracking -- set of resolved_path values that have been
 # read_file'd during this session.  Edit/replace operations check this to
 # ensure the model has seen the current file content.
 # ---------------------------------------------------------------------------
@@ -247,7 +247,7 @@ def _validate_python_syntax(content: str, filepath: str) -> str | None:
 for _cp, _replacement in _QUOTE_NORMALIZE_MAP.items():
     _QUOTE_TRANS_TABLE[_cp] = _replacement
 
-# Unicode ws table: map cp → replacement (or delete if None via str.maketrans)
+# Unicode ws table: map cp -> replacement (or delete if None via str.maketrans)
 # str.translate with a dict can map to None to delete characters
 _UNICODE_WS_TRANS_TABLE.update({cp: repl for cp, repl in _UNICODE_WHITESPACE_MAP.items() if repl is not None})
 # Zero-width chars: map to None to delete
@@ -257,12 +257,12 @@ for _cp, _repl in _UNICODE_WHITESPACE_MAP.items():
 
 
 # ---------------------------------------------------------------------------
-# Session undo — backs up files before modification
+# Session undo -- backs up files before modification
 # ---------------------------------------------------------------------------
 
 _BACKUPS: dict[str, str] = {}  # resolved_path -> backup path
 
-# Cross-turn file content cache — avoids re-reading files whose mtime hasn't changed.
+# Cross-turn file content cache -- avoids re-reading files whose mtime hasn't changed.
 # Key: resolved path (str), Value: (content: str, mtime: float)
 # Capped at _FILE_CACHE_MAX entries; oldest entries are evicted (LRU via insertion order).
 _FILE_CACHE: dict[str, tuple[str, float]] = {}
@@ -270,8 +270,8 @@ _FILE_CACHE_MAX = 50
 
 
 # ---------------------------------------------------------------------------
-# Auto plan advancement — after a successful write/edit, check if any
-# incomplete plan step’s keywords appear in the file path or edit content,
+# Auto plan advancement -- after a successful write/edit, check if any
+# incomplete plan step's keywords appear in the file path or edit content,
 # and auto-complete it.
 # ---------------------------------------------------------------------------
 
@@ -327,7 +327,7 @@ def _backup_before_write(resolved_path: str) -> None:
 
 # Default maximum lines returned by read_file when no limit is given.
 _DEFAULT_READ_LINES = 300
-# Absolute maximum (safety cap) — never return more than this.
+# Absolute maximum (safety cap) -- never return more than this.
 _ABSOLUTE_MAX_LINES = 1000
 
 
@@ -376,8 +376,8 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
     full_content = result.content
 
     # Cache full file content for cross-turn reuse (only when reading from offset 0
-    # AND the read was not truncated — avoid caching partial content).
-    if offset == 0 and "… (truncated at " not in full_content:
+    # AND the read was not truncated -- avoid caching partial content).
+    if offset == 0 and "... (truncated at " not in full_content:
         try:
             current_mtime = os.path.getmtime(resolved)
             # Evict oldest entry if at capacity
@@ -428,7 +428,7 @@ def _write_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
                 f"before writing. This prevents accidental overwrites of recent changes."
             ),
         )
-    # File reservation check — prevent sub-agent collisions
+    # File reservation check -- prevent sub-agent collisions
     agent_id = getattr(_current_agent_id, "task_id", None)
     if agent_id is not None:
         from tools import reserve_file
@@ -459,7 +459,7 @@ def _write_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
             return ToolResult(
                 success=False,
                 content=(
-                    f"Syntax validation failed — file NOT written to prevent broken code.\n"
+                    f"Syntax validation failed -- file NOT written to prevent broken code.\n"
                     f"{syntax_error}"
                 ),
             )
@@ -476,7 +476,7 @@ def _write_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
         if path.endswith(".py"):
             from tools.search_ops import _reindex_file
             _reindex_file(safety_result.resolved_path, wg.workspace_root)
-        # Auto plan advancement (file path only — full content is too noisy)
+        # Auto plan advancement (file path only -- full content is too noisy)
         _auto_advance_plan(safety_result.resolved_path)
         return ToolResult(
             success=True,
@@ -496,8 +496,8 @@ def _write_file_summary(args: dict) -> str:
     content = args.get("content", "")
     preview = content[:60].replace("\n", "\\n")
     if len(content) > 60:
-        preview += "…"
-    return f"write_file({path}, {len(content)}B → \"{preview}\")"
+        preview += "..."
+    return f"write_file({path}, {len(content)}B -> \"{preview}\")"
 
 
 # ---------------------------------------------------------------------------
@@ -508,7 +508,7 @@ _EditResult = tuple[str, ToolResult]  # (path, result)
 
 
 def _normalize_line(s: str) -> str:
-    """Collapse whitespace: Unicode ws→space, tabs→spaces, strip, collapse multiple spaces."""
+    """Collapse whitespace: Unicode ws->space, tabs->spaces, strip, collapse multiple spaces."""
     s = _normalize_unicode_whitespace(s)
     return ' '.join(s.replace('\t', '    ').split())
 
@@ -563,16 +563,16 @@ def _fuzzy_find(content: str, search: str) -> tuple[int, int] | None:
     """Cascading 5-pass match for edit_file.
 
     1. Exact substring match.
-    2. Quote-normalized match (curly→straight quotes).
+    2. Quote-normalized match (curly->straight quotes).
     3. Trailing-whitespace-tolerant.
     4. Indentation-tolerant (full strip).
-    5. Normalized-content fuzzy match (Unicode ws→space, tabs→spaces, collapsed whitespace)
-       with confidence scoring (requires ≥95% normalized line matches).
+    5. Normalized-content fuzzy match (Unicode ws->space, tabs->spaces, collapsed whitespace)
+       with confidence scoring (requires >=95% normalized line matches).
     """
     if not search or not content:
         return None
 
-    # -- Line-ending normalization: CRLF → LF -------
+    # -- Line-ending normalization: CRLF -> LF -------
     content_lf = content.replace('\r\n', '\n').replace('\r', '\n')
     search_lf = search.replace('\r\n', '\n').replace('\r', '\n')
 
@@ -589,7 +589,7 @@ def _fuzzy_find(content: str, search: str) -> tuple[int, int] | None:
     if not search_lines:
         return None
 
-    # Pass 2: quote normalization — try matching after normalizing curly quotes
+    # Pass 2: quote normalization -- try matching after normalizing curly quotes
     result = _quote_normalized_match(content_lf, search_lf, content)
     if result is not None:
         return result
@@ -601,7 +601,7 @@ def _fuzzy_find(content: str, search: str) -> tuple[int, int] | None:
             return _map_lf_region_to_original(content, result[0], result[1])
 
     # Pass 5: normalize whitespace on every line, then try to match
-    # with confidence scoring (≥95% threshold)
+    # with confidence scoring (>=95% threshold)
     return _fuzzy_find_closest(content_lf, search_lines, content_lines, content)
 
 
@@ -622,7 +622,7 @@ def _map_lf_offset_to_original(
             orig_pos += 1
             lf_pos += 1
     start = orig_pos
-    # Now find end — search_len chars in LF space
+    # Now find end -- search_len chars in LF space
     remaining = len(search)
     while remaining > 0 and orig_pos < len(original):
         if original[orig_pos] == '\r':
@@ -656,7 +656,7 @@ def _quote_normalized_match(
     idx = norm_content.find(norm_search)
     if idx != -1:
         # Map the normalized offset back through the LF content to original
-        # Since quote normalization doesn't change string length (1 cp → 1 byte
+        # Since quote normalization doesn't change string length (1 cp -> 1 byte
         # in these cases), the offsets are the same as LF offsets.
         return _map_lf_offset_to_original(original, search_lf, idx)
     return None
@@ -669,10 +669,10 @@ def _preserve_indentation(
 
     Captures the leading whitespace of each line in the matched file region
     and applies the same indentation *relative changes* to the new_string lines.
-    If old_str has N lines with indentation I₁…Iₙ and new_str has M lines with
-    indentation J₁…Jₘ, then for each new line k at position k in the new block:
-      - if k < N: apply (Jₖ - Iₖ) offset relative to file's Iₖ
-      - if k >= N: apply (Jₙ₋₁ - Iₙ₋₁) offset relative to file's last I
+    If old_str has N lines with indentation I?...I? and new_str has M lines with
+    indentation J?...J?, then for each new line k at position k in the new block:
+      - if k < N: apply (J? - I?) offset relative to file's I?
+      - if k >= N: apply (J??? - I???) offset relative to file's last I
 
     This handles the common case where the model outputs refactored code with
     spaces instead of tabs (or vice versa) and we want to match the file's style.
@@ -702,7 +702,7 @@ def _preserve_indentation(
         if k < len(old_indents) and k < len(file_indents):
             old_ws = old_indents[k]
             file_ws = file_indents[k]
-            # Compute the relative indentation change from old→new
+            # Compute the relative indentation change from old->new
             if old_ws:
                 # New wanted more/less indentation relative to old baseline
                 if new_ws.startswith(old_ws):
@@ -732,7 +732,7 @@ def _preserve_indentation(
                 else:
                     result_lines.append(file_ws + new_content)
         elif k < len(new_indents):
-            # Extra lines beyond old: use last old→file diff
+            # Extra lines beyond old: use last old->file diff
             last_idx = len(old_indents) - 1
             if last_idx >= 0 and last_idx < len(file_indents):
                 old_last = old_indents[last_idx]
@@ -779,9 +779,9 @@ def _fuzzy_find_closest(
     """Pass 5: normalize all whitespace on every line, sliding-window match.
 
     Normalizes both search and content lines by collapsing whitespace
-    (Unicode ws→space, tabs→spaces, strip, collapse multiple spaces).
-    Requires a unique match — if multiple windows match, returns None.
-    Also enforces a confidence threshold: the best match must have ≥95% of
+    (Unicode ws->space, tabs->spaces, strip, collapse multiple spaces).
+    Requires a unique match -- if multiple windows match, returns None.
+    Also enforces a confidence threshold: the best match must have >=95% of
     normalized lines matching exactly.  If below threshold, returns None
     so the caller can report the near-miss with a score.
 
@@ -807,7 +807,7 @@ def _fuzzy_find_closest(
             match_start = None  # reset ambiguity
         if norm_window == norm_search:
             if match_start is not None:
-                return None  # ambiguous — multiple exact normalized matches
+                return None  # ambiguous -- multiple exact normalized matches
             match_start = i
 
     # If we have a unique exact normalized match, use it regardless of score
@@ -820,12 +820,12 @@ def _fuzzy_find_closest(
             end_byte -= 1
         return _map_lf_region_to_original(original, start_byte, end_byte)
 
-    # No exact normalized match — check confidence threshold
+    # No exact normalized match -- check confidence threshold
     confidence = best_score / n_search if n_search > 0 else 0.0
     if confidence < confidence_threshold:
         return None  # below threshold, let caller report near-miss
 
-    # Above threshold but not exact — use best match
+    # Above threshold but not exact -- use best match
     # (this handles near-perfect matches with minor whitespace differences)
     start_byte = sum(len(line) + 1 for line in content_lines[:best_idx])
     end_byte = start_byte + sum(
@@ -874,7 +874,7 @@ def _apply_single_edit(
             success=False,
             content=f"Edit blocked by safety layer: {safety_result.reason}",
         ))
-    # File reservation check — prevent sub-agent collisions
+    # File reservation check -- prevent sub-agent collisions
     agent_id = getattr(_current_agent_id, "task_id", None)
     if agent_id is not None:
         from tools import reserve_file
@@ -916,7 +916,7 @@ def _apply_single_edit(
             best_match = _find_closest_lines(_content_lines, _old_lines)
             hint = (
                 f"Edit failed: old_string not found in '{resolved}'.\n"
-                f"Hint: The string must match exactly — check whitespace, indentation, "
+                f"Hint: The string must match exactly -- check whitespace, indentation, "
                 f"and line endings. Try read_file first to verify the exact text."
             )
             if best_match:
@@ -954,7 +954,7 @@ def _apply_single_edit(
                             detail=f"File: {resolved}. Could not find exact match for old_string.",
                         )
                 except Exception as exc:
-                    print(f"  ⚠ backup skipped: {exc}", file=sys.stderr, flush=True)
+                    print(f"  WARNING: backup skipped: {exc}", file=sys.stderr, flush=True)
             return (path, ToolResult(success=False, content=hint))
 
         if count == -1:
@@ -988,14 +988,14 @@ def _apply_single_edit(
             try:
                 compile(original, resolved, "exec")
             except SyntaxError:
-                pass  # Existing content isn't valid Python — skip gate
+                pass  # Existing content isn't valid Python -- skip gate
             else:
                 syntax_error = _validate_python_syntax(updated, resolved)
         if syntax_error:
             return (path, ToolResult(
                 success=False,
                 content=(
-                    f"Syntax validation failed — edit NOT applied to prevent broken code.\n"
+                    f"Syntax validation failed -- edit NOT applied to prevent broken code.\n"
                     f"{syntax_error}\n"
                     f"Revert your edit and fix the syntax issue. The file is unchanged."
                 ),
@@ -1013,7 +1013,7 @@ def _apply_single_edit(
             from tools.search_ops import _reindex_file
             _reindex_file(resolved, wg.workspace_root)
 
-        # Auto plan advancement (file path only — old string is too noisy)
+        # Auto plan advancement (file path only -- old string is too noisy)
         _auto_advance_plan(resolved)
 
         added = updated.count("\n") - original.count("\n")
@@ -1042,7 +1042,7 @@ def _edit_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResu
     paths = args.get("paths", None)
 
     if paths is not None:
-        # Batch edit: apply same old→new to all paths
+        # Batch edit: apply same old->new to all paths
         if not isinstance(paths, list) or not paths:
             return ToolResult(
                 success=False,
@@ -1082,7 +1082,7 @@ def _edit_file_summary(args: dict) -> str:
     old = args.get("old_string", "")
     old_preview = old[:40].replace("\n", "\\n")
     if len(old) > 40:
-        old_preview += "…"
+        old_preview += "..."
     preview_flag = args.get("preview", False)
     suffix = " [preview]" if preview_flag else ""
     return f"edit_file({path}, \"{old_preview}\"){suffix}"

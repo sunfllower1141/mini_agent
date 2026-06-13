@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-test_fetch_url.py — tests for the fetch_url tool (_fetch_url in tools.search_ops).
+test_fetch_url.py -- tests for the fetch_url tool (_fetch_url in tools.search_ops).
 """
 
 import unittest

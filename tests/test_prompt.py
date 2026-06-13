@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Tests for prompt.py — system prompt builder and session header.
+"""Tests for prompt.py -- system prompt builder and session header.
 
 Refactored for the immutable system prompt design:
-- build_system_prompt() → static behavioral rules + provider note only
-- build_session_header() → dynamic metadata (date, OS, workspace, safety flags, etc.)
+- build_system_prompt() -> static behavioral rules + provider note only
+- build_session_header() -> dynamic metadata (date, OS, workspace, safety flags, etc.)
 """
 
 import os
@@ -89,7 +89,7 @@ class TestBuildSystemPrompt(unittest.TestCase):
     def test_prompt_length_within_limit(self):
         prompt = build_system_prompt(self._config())
         length = len(prompt)
-        # Static prompt is ~3,900 chars — allow some headroom for provider notes
+        # Static prompt is ~3,900 chars -- allow some headroom for provider notes
         self.assertLess(length, 8000,
                         f"Prompt is {length} chars (expected ~3900)")
         self.assertGreater(length, 2000,

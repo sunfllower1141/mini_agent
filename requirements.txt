@@ -26,18 +26,18 @@ pytest-timeout>=2.0      # prevents hanging tests (critical on Windows)
 # ------------------------------------------------
 # System dependencies (NOT pip-installable):
 #
-#   ripgrep (rg) — fast search, used by search_files
+#   ripgrep (rg) -- fast search, used by search_files
 #     Windows: winget install BurntSushi.ripgrep.MSVC
 #     Or download from: https://github.com/BurntSushi/ripgrep/releases
 #
-#   Node.js v22+ — for Electron desktop app
+#   Node.js v22+ -- for Electron desktop app
 #     Windows: https://nodejs.org (LTS)
 #
-#   git — for git tools, branch detection
+#   git -- for git tools, branch detection
 #     Windows: winget install Git.Git
 #     Or download from: https://git-scm.com/download/win
 #
-#   Python 3.10+ — from python.org (NOT the Microsoft Store stub)
+#   Python 3.10+ -- from python.org (NOT the Microsoft Store stub)
 #     Windows: https://www.python.org/downloads/
 #     Check "Add Python to PATH" during install.
 #     Disable App Execution Aliases for python.exe in Windows Settings.

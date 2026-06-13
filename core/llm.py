@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-llm.py — Agent turn orchestration for mini_agent.
+llm.py -- Agent turn orchestration for mini_agent.
 
 Provides ``run_agent_turn()`` orchestrator, circuit breaker,
 tool piping (Kahn's algorithm), and turn-summary persistence.
@@ -43,7 +43,7 @@ TURN_SUMMARY_ASSISTANT_PREVIEW = 200  # max chars for assistant content in summa
 TURN_SUMMARY_RESULT_PREVIEW = 150     # max chars for tool result content in summary
 TURN_HISTORY_MAX_ENTRIES = 200        # cap on _turn_history entries
 
-# Orchestration / context injection — constants now in context_inject.py
+# Orchestration / context injection -- constants now in context_inject.py
 # (imported below after the circuit breaker section)
 
 # ---------------------------------------------------------------------------
@@ -51,7 +51,7 @@ TURN_HISTORY_MAX_ENTRIES = 200        # cap on _turn_history entries
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# Circuit breaker — guards against repeated identical tool calls
+# Circuit breaker -- guards against repeated identical tool calls
 # ---------------------------------------------------------------------------
 # _CIRCUIT_WINDOW and _CIRCUIT_THRESHOLD defined in context_inject.py
 # (single source of truth, shared with the circuit breaker implementation).
@@ -59,7 +59,7 @@ from .context_inject import _CIRCUIT_WINDOW, _CIRCUIT_THRESHOLD
 
 
 # ---------------------------------------------------------------------------
-# Shared agent loop — used by both terminal REPL and TUI
+# Shared agent loop -- used by both terminal REPL and TUI
 # ---------------------------------------------------------------------------
 
 def _save_turn_summary(
@@ -80,10 +80,10 @@ def _save_turn_summary(
             fn = tc.get("function", {})
             parts.append(f"  Tool: {fn.get('name', '?')}({str(fn.get('arguments', ''))[:100]})")
     for tc, result in deferred_results:
-        ok = "✓" if result.success else "✗"
+        ok = "V" if result.success else "X"
         summary = result.content[:TURN_SUMMARY_RESULT_PREVIEW].replace("\n", " ")
         if len(result.content) > TURN_SUMMARY_RESULT_PREVIEW:
-            summary += "…"
+            summary += "..."
         parts.append(f"  Result: {ok} {summary}")
     _TOOL_CONTEXT._turn_history[turn] = "\n".join(parts)
     # Cap to last TURN_HISTORY_MAX_ENTRIES entries to prevent unbounded memory growth
@@ -101,7 +101,7 @@ def _save_turn_summary(
 _READ_ONLY_NUDGE_THRESHOLD: int = 3  # turns of pure reads before nudge
 
 # ---------------------------------------------------------------------------
-# Context injection — imported from context_inject.py
+# Context injection -- imported from context_inject.py
 # (extracted to keep the orchestrator focused on the main loop).
 # ---------------------------------------------------------------------------
 
@@ -410,7 +410,7 @@ def _execute_tools(
     # --- Piping: topological sort into execution groups ---
     groups = _build_execution_groups(remaining, pipe_deps)
     if groups is None:
-        # Cycle detected — fall back to sequential execution
+        # Cycle detected -- fall back to sequential execution
         if on_tool_start is not None:
             for tc in remaining:
                 on_tool_start(tool_summary(tc))
@@ -477,7 +477,7 @@ def _api_call_phase(
     """Call the LLM, handling streaming tool execution during the call.
 
     Returns ``(msg, deferred_stream_results, executed_tool_indices)``.
-    The caller must check *cancel_event* after this returns — the returned
+    The caller must check *cancel_event* after this returns -- the returned
     *msg* may be stale if cancellation was requested.
     """
     executed_tool_indices: set[int] = set()
@@ -507,7 +507,7 @@ def _api_call_phase(
             _sys_otr.stderr.flush()
             executed_tool_indices.add(idx)
         except Exception as _exc:
-            # NEVER leave a tool_call_id orphaned — a failure result
+            # NEVER leave a tool_call_id orphaned -- a failure result
             # must be appended so the next API call doesn't get a 400
             # "insufficient tool messages following tool_calls" error.
             from tools import ToolResult as TR
@@ -627,7 +627,7 @@ def run_agent_turn(
     session: requests.Session | None = None,
     memory_store: Any = None,
 ) -> dict | None:
-    """Run one full agent turn — possibly multiple API calls if tools are used.
+    """Run one full agent turn -- possibly multiple API calls if tools are used.
 
     Calls the LLM, executes any tool calls, feeds results back, and repeats
     until the model returns a plain text response or the turn is cancelled.
@@ -647,7 +647,7 @@ def run_agent_turn(
     agent on track and let it decide whether to continue or wrap up.
     """
     # One-time injection flags are reset in bootstrap.init_session() once per
-    # session, NOT here — resetting them per turn would cause HANDOFF.md,
+    # session, NOT here -- resetting them per turn would cause HANDOFF.md,
     # STATE.txt, scratchpad, and git diff to be re-injected on every user
     # message, wasting thousands of tokens.
 
@@ -655,7 +655,7 @@ def run_agent_turn(
     _TOOL_CONTEXT._provider = config.api_provider
 
     # One-time cleanup / cache invalidation
-    # Note: clear_api_cache is intentionally NOT called here — the incremental
+    # Note: clear_api_cache is intentionally NOT called here -- the incremental
     # message-cleaning cache in api.py survives across turns since the same
     # messages list is mutated. Clearing it every turn defeats the optimization.
     clear_tool_cache()
@@ -704,9 +704,9 @@ def run_agent_turn(
             if "_usage" in msg:
                 total_usage = _accumulate_usage(total_usage, msg)
 
-            # Plain text response — turn is finished
+            # Plain text response -- turn is finished
             if not msg.get("tool_calls"):
-                # Safety net: model returned empty tool_calls with no content —
+                # Safety net: model returned empty tool_calls with no content --
                 # it's choking on a big task. Inject a recovery nudge and retry.
                 content = (msg.get("content") or "").strip()
                 if not content:
@@ -720,7 +720,7 @@ def run_agent_turn(
                     messages.append({"role": "user", "content": recovery})
                     continue  # retry the turn loop
 
-                # Return the result directly — no Flash→Pro handoff.
+                # Return the result directly -- no Flash->Pro handoff.
                 if total_usage:
                     msg["_total_usage"] = total_usage
                 if turn_count > 1:
@@ -733,8 +733,8 @@ def run_agent_turn(
 
             # ----- phase 3: tool execution -----
             # Failure pattern warnings are injected inside
-            # _tool_execution_phase → _inject_pre_execution_context()
-            # (not here — avoids double injection).
+            # _tool_execution_phase -> _inject_pre_execution_context()
+            # (not here -- avoids double injection).
             continue_loop = _tool_execution_phase(
                 msg, messages, deferred_stream_results, executed_tool_indices,
                 write_gate, read_gate, turn_count,
@@ -747,7 +747,7 @@ def run_agent_turn(
                 tool_keys_lock=tool_keys_lock,
             )
             # _tool_execution_phase returns False when all tools were
-            # already streamed — just continue the loop.
+            # already streamed -- just continue the loop.
 
             # Background consolidation: extract durable facts after turn
             _run_consolidation(messages, config)
@@ -772,7 +772,7 @@ def run_agent_turn(
         if turn_count >= max_turns - 3 and turn_count < max_turns + 10:
             max_turns += 10
 
-        # Exceeded max_turns — return last assistant message (still has tool_calls)
+        # Exceeded max_turns -- return last assistant message (still has tool_calls)
         if 'msg' not in locals():
             return None  # max_turns was 0, no API call made
         if total_usage:
@@ -845,7 +845,7 @@ def _run_consolidation(messages: list[dict], config: Any) -> None:
     """Kick off background memory consolidation after a turn completes.
 
     Uses a cheap model to extract durable facts and update core memory.
-    Non-blocking: runs in a daemon thread. Best-effort — never crashes
+    Non-blocking: runs in a daemon thread. Best-effort -- never crashes
     the main loop.
     """
     try:

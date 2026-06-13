@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""bootstrap.py — agent session initialization for mini_agent.
+"""bootstrap.py -- agent session initialization for mini_agent.
 
 Extracted from config.py to keep the config module focused on
 configuration loading.  This module ties together config, safety,
@@ -27,7 +27,7 @@ from memory.memory import MemoryStore
 from .prompt import build_system_prompt, build_startup_context, build_session_header, build_memory_snapshot
 from agents.agent_runtime import AgentRuntime
 
-# MCP tool schemas — injected into TOOLS lazily when config.mcp_servers is non-empty.
+# MCP tool schemas -- injected into TOOLS lazily when config.mcp_servers is non-empty.
 _MCP_SCHEMAS = [
     {
         "type": "function",
@@ -78,7 +78,7 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     Returns dict with keys: config, write_gate, read_gate, memory,
     messages, session.
     """
-    # Suppress HF Hub warnings EARLY — before any huggingface_hub import.
+    # Suppress HF Hub warnings EARLY -- before any huggingface_hub import.
     # The sentence-transformers model is cached locally; the "unauthenticated
     # requests" warning is pure noise in the Electron stderr log and can
     # cause the first tool call to appear hung while the warning writes to
@@ -170,7 +170,7 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     except Exception:
         pass  # best-effort; never block startup on warmup failure
 
-    # Warmup: thread I/O — execute_tool() dispatches every tool call in a
+    # Warmup: thread I/O -- execute_tool() dispatches every tool call in a
     # fresh daemon thread.  Some Windows filter drivers (antivirus, DLP,
     # backup agents) associate I/O operations with thread context, so the
     # first CreateFile in a *new thread* can still be delayed even after the
@@ -214,7 +214,7 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
                             capture_output=True, timeout=10)
                 except Exception:
                     pass
-                # Also warm sys.executable (python.exe) — tool calls like
+                # Also warm sys.executable (python.exe) -- tool calls like
                 # read_file spawn "python -m tools._worker" subprocesses.
                 # The first CreateProcess for a new executable can trigger
                 # separate antivirus scanning even after cmd.exe is warm.
@@ -249,7 +249,7 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
         _tw.start()
         _thr_warmup_done.wait(timeout=30)
 
-    # Reset skill gates — start each session with core tools only
+    # Reset skill gates -- start each session with core tools only
     reset_skills()
 
     # Initialize multi-agent runtime
@@ -274,11 +274,11 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     if not remote:
         build_symbol_index(workspace)
     else:
-        print(f"  ⚠ Remote workspace detected ({workspace}) — skipping symbol index scan",
+        print(f"  WARNING: Remote workspace detected ({workspace}) -- skipping symbol index scan",
               file=sys.stderr)
 
     # Initialize LSP (pylsp) with workspace root so LSP tools work.
-    # Skip on remote workspaces — LSP scanning over SMB can hang.
+    # Skip on remote workspaces -- LSP scanning over SMB can hang.
     from tools.lsp import set_lsp_root, shutdown_lsp as _shutdown_lsp
     if not remote:
         set_lsp_root(workspace)
@@ -295,7 +295,7 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
             if not any(td["function"]["name"] == "mcp_discover" for td in TOOLS):
                 TOOLS.extend(_MCP_SCHEMAS)
         except Exception:
-            pass  # MCP servers are optional — tolerate startup failures
+            pass  # MCP servers are optional -- tolerate startup failures
 
     # Wait for the embedding model preload to finish (started above).
     # On a cold cache (first run), SentenceTransformer downloads ~90 MB from
@@ -318,7 +318,7 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
             pass  # best-effort; model is optional
 
     # Auto-init .mini_agent.rules and .mini_agent.toml if they don't exist yet.
-    # Skip on remote workspaces — os.path.isfile() can hang on stale SMB mounts.
+    # Skip on remote workspaces -- os.path.isfile() can hang on stale SMB mounts.
     if not remote:
         rules_path = os.path.join(workspace, ".mini_agent.rules")
         if not os.path.isfile(rules_path):
@@ -326,9 +326,9 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
                 from tools.file_ops import _init_rules
                 result = _init_rules({}, None, read_gate)
                 if result.success:
-                    print(f"  ✨ Auto-init: {result.content[:120]}", file=sys.stderr)
+                    print(f"  (*) Auto-init: {result.content[:120]}", file=sys.stderr)
             except OSError as exc:
-                print(f"  ⚠ Auto-init skipped: {exc}", file=sys.stderr)
+                print(f"  WARNING: Auto-init skipped: {exc}", file=sys.stderr)
 
     saved = memory.load()
     # Prune loaded conversation to avoid massive first-turn payload
@@ -377,8 +377,8 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     session.mount("https://", _requests.adapters.HTTPAdapter(
         pool_connections=HTTP_POOL_CONNECTIONS, pool_maxsize=HTTP_POOL_MAXSIZE))
 
-    # Combined exit handler — runs in correct order: summary capture → LSP
-    # shutdown → HTTP session close.  Wrapped in broad try/except so no
+    # Combined exit handler -- runs in correct order: summary capture -> LSP
+    # shutdown -> HTTP session close.  Wrapped in broad try/except so no
     # single failure blocks the rest or prints tracebacks during interpreter
     # teardown (when stderr may already be closed).
     def _cleanup_on_exit() -> None:

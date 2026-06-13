@@ -3,7 +3,7 @@
 Benchmark tests for mini_agent.
 
 These tests run the agent against the eval task suite and (optionally)
-SWE-bench tasks. They are excluded from the default test run — use
+SWE-bench tasks. They are excluded from the default test run -- use
 ``--run-benchmarks`` to include them:
 
     python -m pytest test_benchmarks.py --run-benchmarks -v
@@ -256,7 +256,7 @@ def test_swebench_lite(request, task):
     print(f"Result: {_summarize_result(result)}")
 
     if result.error:
-        # Don't fail the whole parametrized suite on one error —
+        # Don't fail the whole parametrized suite on one error --
         # record it as a warning and continue
         pytest.fail(f"SWE-bench task {task.instance_id} errored: {result.error}")
 

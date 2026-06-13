@@ -1,6 +1,6 @@
 /**
- * Rounded frame wrapper for panels — uses CSS border-radius styling.
- * (The old ASCII border characters ╭─╮ / ╰─╯ were hidden by CSS and
+ * Rounded frame wrapper for panels -- uses CSS border-radius styling.
+ * (The old ASCII border characters ?-? / ?-? were hidden by CSS and
  *  are now removed entirely.)
  */
 export default function RoundedFrame({ id, title, children, className }) {

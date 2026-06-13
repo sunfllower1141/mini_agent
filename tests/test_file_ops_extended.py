@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-test_file_ops_extended.py — comprehensive tests for tools not yet covered.
+test_file_ops_extended.py -- comprehensive tests for tools not yet covered.
 
 Tests: list_directory, diff, restore_file, plan/plan_status,
        task_status, find_usages, verify, recall_turn, write_scratchpad.
@@ -72,7 +72,7 @@ class TestListDirectory(unittest.TestCase):
         try:
             tc = _make_tool_call("list_directory", path=outside)
             result = execute_tool(tc, self.write_gate, self.read_gate)
-            # Safety gates are now unrestricted — listing outside workspace succeeds
+            # Safety gates are now unrestricted -- listing outside workspace succeeds
             self.assertTrue(result.success)
         finally:
             import shutil
@@ -238,7 +238,7 @@ class TestRestoreFile(unittest.TestCase):
         self.assertIn("No backup available", result.content)
 
     def test_restore_then_restore_again_fails(self):
-        """After restoring once, the backup is consumed — second restore fails."""
+        """After restoring once, the backup is consumed -- second restore fails."""
         path = self._write("twice.txt", "original")
         execute_tool(
             _make_tool_call("write_file", path=path, content="modified"),
@@ -261,7 +261,7 @@ class TestRestoreFile(unittest.TestCase):
         try:
             tc = _make_tool_call("restore_file", path=os.path.join(outside, "x.txt"))
             result = execute_tool(tc, self.write_gate, self.read_gate)
-            # Safety gates are now unrestricted — restore is attempted but fails
+            # Safety gates are now unrestricted -- restore is attempted but fails
             # because there's no session backup for a file outside the workspace
             self.assertIsInstance(result, ToolResult)
         finally:
@@ -343,9 +343,9 @@ class TestPlan(unittest.TestCase):
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertTrue(result.success)
         self.assertIn("Plan (0/3 complete)", result.content)
-        self.assertIn("[○] 1. A", result.content)
-        self.assertIn("[○] 2. B", result.content)
-        self.assertIn("[○] 3. C", result.content)
+        self.assertIn("[o] 1. A", result.content)
+        self.assertIn("[o] 2. B", result.content)
+        self.assertIn("[o] 3. C", result.content)
 
     def test_plan_status_mark_step_complete(self):
         execute_tool(
@@ -356,8 +356,8 @@ class TestPlan(unittest.TestCase):
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertTrue(result.success)
         self.assertIn("Plan (1/3 complete)", result.content)
-        self.assertIn("[✓] 1. A", result.content)
-        self.assertIn("[○] 2. B", result.content)
+        self.assertIn("[V] 1. A", result.content)
+        self.assertIn("[o] 2. B", result.content)
 
     def test_plan_status_all_steps_complete(self):
         execute_tool(
@@ -429,7 +429,7 @@ class TestPlan(unittest.TestCase):
             self.write_gate, self.read_gate,
         )
         execute_tool(_make_tool_call("plan_status", step=1), self.write_gate, self.read_gate)
-        # Mark step 1 again — should succeed without error
+        # Mark step 1 again -- should succeed without error
         result = execute_tool(_make_tool_call("plan_status", step=1), self.write_gate, self.read_gate)
         self.assertTrue(result.success)
         self.assertEqual(_TOOL_CONTEXT._plan_done, {0})
@@ -548,7 +548,7 @@ class TestSessionStatsCache(unittest.TestCase):
         self.assertNotIn("Cost:", result.content)
 
     def test_cache_hits_only_shows_100_pct_and_savings(self):
-        """All cached input → 100% hit rate, cost savings shown."""
+        """All cached input -> 100% hit rate, cost savings shown."""
         _TOOL_CONTEXT._cache_stats = {
             "hits": 50_000, "misses": 0, "calls": 3,
             "input_tokens": 50_000, "output_tokens": 10_000,
@@ -566,7 +566,7 @@ class TestSessionStatsCache(unittest.TestCase):
         # Savings: $0.0063
 
     def test_cache_misses_only_shows_0_pct_no_savings(self):
-        """All cache misses → 0% hit rate, cost line but no savings."""
+        """All cache misses -> 0% hit rate, cost line but no savings."""
         _TOOL_CONTEXT._cache_stats = {
             "hits": 0, "misses": 30_000, "calls": 2,
             "input_tokens": 30_000, "output_tokens": 5_000,
@@ -583,7 +583,7 @@ class TestSessionStatsCache(unittest.TestCase):
         self.assertIn("Cost:", result.content)
 
     def test_mixed_cache_shows_partial_hit_rate_and_savings(self):
-        """Mixed hits/misses → correct hit rate, proportional savings."""
+        """Mixed hits/misses -> correct hit rate, proportional savings."""
         _TOOL_CONTEXT._cache_stats = {
             "hits": 20_000, "misses": 10_000, "calls": 4,
             "input_tokens": 30_000, "output_tokens": 8_000,
@@ -598,7 +598,7 @@ class TestSessionStatsCache(unittest.TestCase):
         self.assertIn("saved $", result.content)
 
     def test_unknown_provider_skips_cost_line(self):
-        """Provider with no pricing → no Cost line."""
+        """Provider with no pricing -> no Cost line."""
         _TOOL_CONTEXT._provider = "ollama"  # ollama has 0.0 pricing
         _TOOL_CONTEXT._cache_stats = {
             "hits": 5_000, "misses": 5_000, "calls": 1,
@@ -611,7 +611,7 @@ class TestSessionStatsCache(unittest.TestCase):
         self.assertNotIn("Cost:", result.content)
 
     def test_no_cache_stats_no_api_calls_no_cost(self):
-        """Empty _cache_stats with calls=0 → API/cache lines suppressed."""
+        """Empty _cache_stats with calls=0 -> API/cache lines suppressed."""
         _TOOL_CONTEXT._cache_stats = {
             "hits": 0, "misses": 0, "calls": 0,
             "input_tokens": 0, "output_tokens": 0,

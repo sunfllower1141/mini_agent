@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-test_integration.py — end-to-end integration tests for the multi-agent subsystem.
+test_integration.py -- end-to-end integration tests for the multi-agent subsystem.
 
 Uses real spawn/collect/status tool dispatches.  Sub-agents run in real
 background threads but the LLM is mocked so no API calls are made.
 
 Covers:
-  1. Full spawn → file work → collect → verify disk flow
+  1. Full spawn -> file work -> collect -> verify disk flow
   2. Fan-out pattern with multiple agents + collect_any
   3. Agent handoff with typed messages
   4. Agent inbox / subscribe routing
@@ -113,7 +113,7 @@ def _tearDown_context(runtime, tmp_dir):
 
 
 # ---------------------------------------------------------------------------
-# 1. Full spawn → file work → collect → verify disk
+# 1. Full spawn -> file work -> collect -> verify disk
 # ---------------------------------------------------------------------------
 
 class TestFullSpawnCollectVerify(unittest.TestCase):
@@ -523,7 +523,7 @@ class TestParentPolling(unittest.TestCase):
             status1 = status_dispatch({"task_id": task_id}, wg, rg)
             self.assertTrue(status1.success)
 
-            # Collect — blocks until done
+            # Collect -- blocks until done
             collect = _TOOL_DISPATCH["collect_agent"]
             collected = collect({"task_id": task_id}, wg, rg)
             self.assertTrue(collected.success)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Comprehensive SSE stream parsing tests — edge cases, malformed input, comments, etc.
+"""Comprehensive SSE stream parsing tests -- edge cases, malformed input, comments, etc.
 
 Runs alongside the existing ``test_parse_stream.py`` (which covers the basics).
 Uses pytest-style plain functions for brevity.
@@ -175,7 +175,7 @@ def test_done_with_leading_space():
     # First line is NOT stripped *before* the [DONE] check (the code does
     # data_str.strip() == "[DONE]"), so ' [DONE] ' actually IS recognized.
     # The check is `data_str.strip() == "[DONE]"` which handles whitespace.
-    # So both lines above match — stream stops at first one, content = "".
+    # So both lines above match -- stream stops at first one, content = "".
     assert msg["content"] == ""
 
 
@@ -243,7 +243,7 @@ def test_choices_is_not_a_list():
         "data: [DONE]",
     ]
     msg = _parse_stream(_sse_response(lines))
-    # Accessing "choices"[0] on a string gets the first char — might crash
+    # Accessing "choices"[0] on a string gets the first char -- might crash
     # but shouldn't because the catch-all `except Exception` saves us
     assert msg["content"] == "after"
 
@@ -396,7 +396,7 @@ def test_on_tool_ready_fires_only_once_per_index():
                 "function": {"arguments": '{"x": 1}'},
             }]
         }}]}),
-        # This chunk appends more arguments — would create invalid JSON
+        # This chunk appends more arguments -- would create invalid JSON
         # but is ignored because the index already fired.
         _data({"choices": [{"delta": {
             "tool_calls": [{
@@ -416,7 +416,7 @@ def test_on_tool_ready_fires_only_once_per_index():
 # ---------------------------------------------------------------------------
 
 def test_reasoning_without_content():
-    """Only reasoning, no content — no THINKING_END emitted."""
+    """Only reasoning, no content -- no THINKING_END emitted."""
     lines = [
         _data({"choices": [{"delta": {"reasoning_content": "just thinking"}}]}),
         "data: [DONE]",
@@ -616,7 +616,7 @@ def test_fired_indices_not_present_when_none_fired():
 # ---------------------------------------------------------------------------
 
 def test_on_token_none_default_does_not_crash():
-    """No on_token — function uses print; must not crash."""
+    """No on_token -- function uses print; must not crash."""
     lines = [
         _data({"choices": [{"delta": {"content": "stdout"}}]}),
         "data: [DONE]",

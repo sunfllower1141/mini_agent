@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-skills.py — Lazy tool loading via skill gates.
+skills.py -- Lazy tool loading via skill gates.
 
 Instead of loading all 55 tools into the prompt every turn, the model starts
 with a core set (~10 tools) and calls ``use_skill("name")`` to unlock more.
@@ -11,7 +11,7 @@ This reduces prompt bloat by ~6x for simple tasks and keeps local models
 Architecture
 ------------
 - ``CORE_TOOLS``: always visible, always loaded
-- ``SKILLS``: dict of skill_name → list of tool names
+- ``SKILLS``: dict of skill_name -> list of tool names
 - ``_active_skills``: set of activated skill names (cleared each session)
 - ``get_active_tools()``: returns core tool schemas + schemas from active skills
 - ``activate_skill(name)``: called by the use_skill tool implementation
@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from tools import ToolResult
 
-# ── Skill definitions ───────────────────────────────────────────────────────
+# -- Skill definitions -------------------------------------------------------
 
 CORE_TOOLS: list[str] = [
     "read_file",
@@ -40,7 +40,7 @@ CORE_TOOLS: list[str] = [
     "memory_core",
     "session_search",
     "use_skill",
-    # Extended core — fundamental for all sessions
+    # Extended core -- fundamental for all sessions
     "web_search",
     "todo_write",
     "todo_read",
@@ -130,7 +130,7 @@ SKILLS: dict[str, list[str]] = {
 
 }
 
-# ── Runtime state ───────────────────────────────────────────────────────────
+# -- Runtime state -----------------------------------------------------------
 
 _active_skills: set[str] = set()
 
@@ -189,7 +189,7 @@ def get_active_tools() -> list[dict]:
     """Return the list of tool schemas currently available to the model.
 
     Filters the global TOOLS list to only include core + active skill tools.
-    Slow path: builds a name→schema lookup once per call.
+    Slow path: builds a name->schema lookup once per call.
     """
     from tools.schema import TOOLS
 
@@ -197,7 +197,7 @@ def get_active_tools() -> list[dict]:
     return [td for td in TOOLS if td["function"]["name"] in active_names]
 
 
-# ── use_skill tool schema ───────────────────────────────────────────────────
+# -- use_skill tool schema ---------------------------------------------------
 
 USE_SKILL_SCHEMA: dict = {
     "type": "function",
@@ -225,7 +225,7 @@ USE_SKILL_SCHEMA: dict = {
 }
 
 
-# ── use_skill tool implementation ───────────────────────────────────────────
+# -- use_skill tool implementation -------------------------------------------
 
 def _use_skill(args: dict, _wg: object = None, _rg: object = None) -> "ToolResult":
     """Activate a skill group, unlocking its tools for the next turn."""

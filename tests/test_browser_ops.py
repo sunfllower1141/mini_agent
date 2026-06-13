@@ -2,12 +2,12 @@
 """Tests for tools/browser_ops.py.
 
 Covers all 6 browser tools:
-    open_url           — unit tests with mocked webbrowser.open
-    browser_navigate   — integration with real Playwright (localhost server)
-    browser_snapshot   — integration with real Playwright
-    browser_click      — integration with real Playwright
-    browser_type       — integration with real Playwright
-    browser_screenshot — integration with real Playwright
+    open_url           -- unit tests with mocked webbrowser.open
+    browser_navigate   -- integration with real Playwright (localhost server)
+    browser_snapshot   -- integration with real Playwright
+    browser_click      -- integration with real Playwright
+    browser_type       -- integration with real Playwright
+    browser_screenshot -- integration with real Playwright
 
 Also tests error paths: missing args, bad URLs, Playwright-not-installed.
 """
@@ -27,7 +27,7 @@ import tools.browser_ops as bo
 
 
 # ---------------------------------------------------------------------------
-# Helpers — local HTTP server for integration tests
+# Helpers -- local HTTP server for integration tests
 # ---------------------------------------------------------------------------
 
 HTML_PAGE = """<!DOCTYPE html>
@@ -102,7 +102,7 @@ def test_server():
 # ---------------------------------------------------------------------------
 
 class TestOpenUrl:
-    """Unit tests for open_url — uses mock for webbrowser.open."""
+    """Unit tests for open_url -- uses mock for webbrowser.open."""
 
     def test_missing_url(self):
         result = bo._open_url({}, None, None)
@@ -140,10 +140,10 @@ class TestOpenUrl:
 
 
 # ---------------------------------------------------------------------------
-# browser_navigate tests (integration — real Playwright)
+# browser_navigate tests (integration -- real Playwright)
 # ---------------------------------------------------------------------------
 
-pytestmark = pytest.mark.skip(reason="Integration test — run tests/browser_validation.py instead")
+pytestmark = pytest.mark.skip(reason="Integration test -- run tests/browser_validation.py instead")
 
 
 @pytest.mark.integration
@@ -181,7 +181,7 @@ class TestBrowserNavigate:
 
 
 # ---------------------------------------------------------------------------
-# browser_snapshot tests (integration — real Playwright)
+# browser_snapshot tests (integration -- real Playwright)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.integration
@@ -209,7 +209,7 @@ class TestBrowserSnapshot:
 
 
 # ---------------------------------------------------------------------------
-# browser_click tests (integration — real Playwright)
+# browser_click tests (integration -- real Playwright)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.integration
@@ -256,7 +256,7 @@ class TestBrowserClick:
 
 
 # ---------------------------------------------------------------------------
-# browser_type tests (integration — real Playwright)
+# browser_type tests (integration -- real Playwright)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.integration
@@ -289,7 +289,7 @@ class TestBrowserType:
 
 
 # ---------------------------------------------------------------------------
-# browser_screenshot tests (integration — real Playwright)
+# browser_screenshot tests (integration -- real Playwright)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.integration

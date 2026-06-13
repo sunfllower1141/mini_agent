@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Smoke tests that verify the agent can actually boot without crashing.
 
-These tests run the full startup path — init_session, build_system_prompt,
-build_startup_context, and tool dispatch — in a real temp workspace.
+These tests run the full startup path -- init_session, build_system_prompt,
+build_startup_context, and tool dispatch -- in a real temp workspace.
 Catches AttributeErrors, ImportErrors, and missing tool handlers that
 unit tests in isolation miss.
 """
@@ -171,7 +171,7 @@ class TestProjectKnowledgeMethods(unittest.TestCase):
         self.assertIsNone(result, "Empty DB should return None, not crash")
 
     def test_knowledge_roundtrip(self):
-        """add_knowledge → get_top_knowledge should return the entry."""
+        """add_knowledge -> get_top_knowledge should return the entry."""
         from memory.memory import MemoryStore
 
         db_path = os.path.join(self.tmp, ".mini_agent_memory.db")

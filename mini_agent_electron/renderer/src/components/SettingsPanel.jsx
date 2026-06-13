@@ -1,5 +1,5 @@
 /**
- * SettingsPanel.jsx — First-run API key configuration.
+ * SettingsPanel.jsx -- First-run API key configuration.
  *
  * Shows when no LLM API key is detected.  User picks a provider and
  * enters their key, which is saved to ~/.mini_agent_env and the backend
@@ -54,7 +54,7 @@ export default function SettingsPanel({ onSaved }) {
     <div id="settings-overlay">
       <div id="settings-panel">
         <div id="settings-header">
-          <span className="settings-title">mini_agent — Setup</span>
+          <span className="settings-title">mini_agent -- Setup</span>
           <span className="settings-subtitle dim">
             Enter your API key to get started
           </span>
@@ -78,7 +78,7 @@ export default function SettingsPanel({ onSaved }) {
             </div>
           </div>
 
-          {/* API key input — hidden for Ollama */}
+          {/* API key input -- hidden for Ollama */}
           {needsKey && (
             <div className="settings-field">
               <label className="settings-label" htmlFor="api-key-input">
@@ -111,7 +111,7 @@ export default function SettingsPanel({ onSaved }) {
 
           {provider === 'ollama' && (
             <div className="settings-ollama-note dim">
-              Ollama connects locally — no API key needed.
+              Ollama connects locally -- no API key needed.
               Make sure the Ollama server is running.
             </div>
           )}

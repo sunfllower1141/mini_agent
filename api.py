@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-api.py — LLM API communication for mini_agent.
+api.py -- LLM API communication for mini_agent.
 
 Provides ``call_llm()`` for non-streaming and streaming API
 requests, with provider dispatch for DeepSeek and Claude (via
@@ -8,7 +8,7 @@ Anthropic's OpenAI-compatible endpoint).  Extracted from llm.py
 to break the circular dependency chain:
 llm.py -> tools -> agent_ops -> sub_agent -> llm.py.
 
-Both ``llm.py`` and ``sub_agent.py`` import from here — no cycle.
+Both ``llm.py`` and ``sub_agent.py`` import from here -- no cycle.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ from tools.semantic_cache import get_semantic_cache
 from logging_setup import log_api_error
 
 # ---------------------------------------------------------------------------
-# API rate limiter — prevents thundering-herd when N sub-agents share one key
+# API rate limiter -- prevents thundering-herd when N sub-agents share one key
 # ---------------------------------------------------------------------------
 # All LLM API calls (parent + sub-agents) funnel through this semaphore.
 # Default is 2 concurrent calls; set SUB_AGENT_MAX_CONCURRENT_CALLS env var
@@ -65,14 +65,14 @@ def truncate_content(content: str, max_len: int = 300) -> str:
     """Truncate a string to *max_len* chars, appending '...' if truncated."""
     if len(content) <= max_len:
         return content
-    return content[:max_len] + "\u2026"
+    return content[:max_len] + "..."
 
 
 def format_tool_detail(result: "ToolResult", max_len: int = 300) -> str:
     """Format a ToolResult's content for display, truncated to *max_len*."""
     detail = result.content[:max_len]
     if len(result.content) > max_len:
-        detail += "\u2026"
+        detail += "..."
     return detail
 
 
@@ -114,7 +114,7 @@ def _clean_message(msg: dict, index: int, provider: str = "deepseek") -> dict | 
     return m2
 
 
-# _strip_orphaned_tool_messages moved to memory/memory_prune.py — canonical
+# _strip_orphaned_tool_messages moved to memory/memory_prune.py -- canonical
 # single source of truth.  Backward-compatible aliases kept here.
 from memory.memory_prune import _strip_orphaned_tool_messages  # noqa: E402
 
@@ -241,7 +241,7 @@ def call_llm(
             cached_len, cached_provider, clean_messages, cached_fp = 0, provider, [], 0
 
         if cached_len >= current_len:
-            # Same list, no new messages — reuse cache as-is
+            # Same list, no new messages -- reuse cache as-is
             pass
         else:
             # Clean any new messages beyond the cached length
@@ -265,7 +265,7 @@ def call_llm(
 
     # --- Semantic cache check (Layer 1: bypass API entirely on similar query) ---
     # Only check cache for non-streaming, non-cancelled calls.
-    # Extract last user message ONCE — used for both cache lookup and storage.
+    # Extract last user message ONCE -- used for both cache lookup and storage.
     _last_user_text = ""
     for m in reversed(messages):
         if m.get("role") == "user" and not m.get("_transient"):
@@ -539,7 +539,7 @@ def _check_cache_degradation() -> str | None:
         if ratio < _DEGRADE_RATIO_THRESHOLD or recent_rate < _DEGRADE_ABSOLUTE_THRESHOLD:
             _TOOL_CONTEXT._cache_alert_last_turn = current_turn
             return (
-                f"\u26a0\ufe0f Cache hit rate dropped to {recent_rate:.0f}% "
+                f"WARNING: Cache hit rate dropped to {recent_rate:.0f}% "
                 f"(was {baseline_rate:.0f}% avg). "
                 f"Session may restart cheaply."
             )

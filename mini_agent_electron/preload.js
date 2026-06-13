@@ -1,5 +1,5 @@
 /**
- * preload.js — Context bridge for mini_agent Electron app.
+ * preload.js -- Context bridge for mini_agent Electron app.
  *
  * Exposes a safe `miniAgent` API to the renderer via contextBridge.
  * All Python communication goes through IPC to the main process.
@@ -76,7 +76,7 @@ contextBridge.exposeInMainWorld('miniAgent', {
     const handler = (e) => {
       const frame = inputFrame();
       if (frame) frame.classList.remove('drag-over');
-      // Must preventDefault BEFORE reading paths — Electron's default
+      // Must preventDefault BEFORE reading paths -- Electron's default
       // is to navigate to / open the dropped file.
       e.preventDefault();
       e.stopPropagation();
@@ -94,7 +94,7 @@ contextBridge.exposeInMainWorld('miniAgent', {
     const dragOver = (e) => {
       const files = e.dataTransfer?.files;
       if (!files || files.length === 0) return;
-      // Always prevent default for file drags — do NOT gate on file.path,
+      // Always prevent default for file drags -- do NOT gate on file.path,
       // because file.path may only be populated on drop, not dragover.
       e.preventDefault();
       e.stopPropagation();

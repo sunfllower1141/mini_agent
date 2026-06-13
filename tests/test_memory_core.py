@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-test_memory_core.py — tests for persistent memory: core memory, session search,
+test_memory_core.py -- tests for persistent memory: core memory, session search,
 and background consolidation.
 """
 

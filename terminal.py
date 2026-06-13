@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-terminal.py — ANSI colour helpers for mini_agent output.
+terminal.py -- ANSI colour helpers for mini_agent output.
 
 Colours are automatically disabled when stderr is not a TTY or the user
 passes ``--no-color``.
@@ -20,7 +20,7 @@ def _enable_windows_ansi() -> None:
 
     On Windows 10 version 1511+, the console host supports ANSI natively
     but it must be explicitly enabled via ``SetConsoleMode``.  This is a
-    one-shot — call it at import time and forget about it.
+    one-shot -- call it at import time and forget about it.
     """
     global _WINDOWS_ANSI_ENABLED
     if _WINDOWS_ANSI_ENABLED or os.name != "nt":
@@ -74,7 +74,7 @@ def format_table(headers: list[str], rows: list[list[str]]) -> str:
 
     Example:
         format_table(["Col", "Desc"], [["a", "first"], ["b", "second"]])
-        →
+        ->
         | Col | Desc   |
         |-----|--------|
         | a   | first  |

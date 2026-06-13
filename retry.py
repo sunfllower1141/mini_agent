@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-retry.py — HTTP retry logic for mini_agent.
+retry.py -- HTTP retry logic for mini_agent.
 
 Provides ``_request_with_retry()`` with exponential backoff on transient
 failures (429, 5xx).  Used by ``api.py::call_deepseek()``.
@@ -48,7 +48,7 @@ def _request_with_retry(
     on 429 / 5xx status codes.  Non-retryable errors raise immediately.
 
     *session* is a requests.Session for connection reuse, or the requests
-    module itself (for testability — tests patch requests.post).
+    module itself (for testability -- tests patch requests.post).
     *timeout* is the (connect, read) timeout tuple passed to requests.post.
     """
     post = session.post if hasattr(session, "post") and callable(session.post) else requests.post
@@ -61,13 +61,13 @@ def _request_with_retry(
             r = post(*args, stream=stream, timeout=timeout, **kwargs)
             if r.ok or r.status_code not in _RETRYABLE_STATUSES:
                 return r
-            # Transient error — retry
+            # Transient error -- retry
             if attempt < _MAX_RETRIES:
                 r.close()  # close connection before retry
                 delay = _jittered_delay(attempt)
                 if not _TESTING:
                     print(
-                        f"  ⚠ API {r.status_code}, retrying in {delay:.1f}s "
+                        f"  WARNING: API {r.status_code}, retrying in {delay:.1f}s "
                         f"(attempt {attempt + 1}/{_MAX_RETRIES})",
                         file=sys.stderr, flush=True,
                     )
@@ -75,14 +75,14 @@ def _request_with_retry(
                     return None  # cancelled during wait
             else:
                 _retry_log.warning("Retries exhausted (%d): %s %s", _MAX_RETRIES, r.status_code, r.text[:200])
-                return r  # exhausted retries — return last response (caller checks r.ok)
+                return r  # exhausted retries -- return last response (caller checks r.ok)
         except requests.RequestException as exc:
             last_exc = exc
             if attempt < _MAX_RETRIES:
                 delay = _jittered_delay(attempt)
                 if not _TESTING:
                     print(
-                        f"  ⚠ network error ({exc}), retrying in {delay:.1f}s "
+                        f"  WARNING: network error ({exc}), retrying in {delay:.1f}s "
                         f"(attempt {attempt + 1}/{_MAX_RETRIES})",
                         file=sys.stderr, flush=True,
                     )

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for logging_setup.py — structured error logging, counters, and formatters."""
+"""Tests for logging_setup.py -- structured error logging, counters, and formatters."""
 
 from __future__ import annotations
 
@@ -627,7 +627,7 @@ class TestGetLogger(unittest.TestCase):
         # Root should have handlers
         self.assertTrue(root.hasHandlers())
         # Child may not have handlers directly but inherits
-        # (depends on handler setup — just check it's a logger)
+        # (depends on handler setup -- just check it's a logger)
         self.assertIsInstance(child, logging.Logger)
 
     def test_logger_propagate_false(self):
@@ -638,11 +638,11 @@ class TestGetLogger(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# 9. End-to-end: full error → log pipeline
+# 9. End-to-end: full error -> log pipeline
 # ---------------------------------------------------------------------------
 
 class TestEndToEndErrorPipeline(unittest.TestCase):
-    """Integration-style test: tool failure → counter + log entry."""
+    """Integration-style test: tool failure -> counter + log entry."""
 
     def setUp(self):
         global _ERROR_COUNTERS
@@ -655,7 +655,7 @@ class TestEndToEndErrorPipeline(unittest.TestCase):
             _ERROR_COUNTERS.clear()
 
     def test_failure_pipeline(self):
-        """Simulate a real failure flow: fingerprint → counter → log."""
+        """Simulate a real failure flow: fingerprint -> counter -> log."""
         logger = get_logger("tools")
         buf = _capture_log_output(logger)
         try:

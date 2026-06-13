@@ -1,9 +1,9 @@
 /* ==========================================================================
-   style.css — themeable styles for mini_agent Electron
+   style.css -- themeable styles for mini_agent Electron
    ========================================================================== */
 
 /* ---------------------------------------------------------------------------
-   CSS Variables — two themes: dark (default) + light
+   CSS Variables -- two themes: dark (default) + light
    --------------------------------------------------------------------------- */
 :root {
   --font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Cascadia Code',
@@ -53,7 +53,7 @@
   --overlay:        #f6f6f6;
 }
 
-/* ── Dracula ─────────────────────────────────────────────────────────────── */
+/* -- Dracula --------------------------------------------------------------- */
 [data-theme="dracula"] {
   --bg:             #282a36;
   --bg-rgb:         40, 42, 54;
@@ -73,7 +73,7 @@
   --overlay:        #21222c;
 }
 
-/* ── Nord ────────────────────────────────────────────────────────────────── */
+/* -- Nord ------------------------------------------------------------------ */
 [data-theme="nord"] {
   --bg:             #2e3440;
   --bg-rgb:         46, 52, 64;
@@ -93,7 +93,7 @@
   --overlay:        #2e3440;
 }
 
-/* ── Catppuccin Mocha ───────────────────────────────────────────────────── */
+/* -- Catppuccin Mocha ----------------------------------------------------- */
 [data-theme="catppuccin"] {
   --bg:             #1e1e2e;
   --bg-rgb:         30, 30, 46;
@@ -113,7 +113,7 @@
   --overlay:        #1e1e2e;
 }
 
-/* ── Rosé Pine ───────────────────────────────────────────────────────────── */
+/* -- Rose Pine ------------------------------------------------------------- */
 [data-theme="rose-pine"] {
   --bg:             #191724;
   --bg-rgb:         25, 23, 36;
@@ -133,7 +133,7 @@
   --overlay:        #191724;
 }
 
-/* ── Gruvbox Dark ────────────────────────────────────────────────────────── */
+/* -- Gruvbox Dark ---------------------------------------------------------- */
 [data-theme="gruvbox"] {
   --bg:             #282828;
   --bg-rgb:         40, 40, 40;
@@ -153,7 +153,7 @@
   --overlay:        #282828;
 }
 
-/* ── Solarized Dark ──────────────────────────────────────────────────────── */
+/* -- Solarized Dark -------------------------------------------------------- */
 [data-theme="solarized"] {
   --bg:             #002b36;
   --bg-rgb:         0, 43, 54;
@@ -173,7 +173,7 @@
   --overlay:        #002b36;
 }
 
-/* ── Tokyo Night ─────────────────────────────────────────────────────────── */
+/* -- Tokyo Night ----------------------------------------------------------- */
 [data-theme="tokyo-night"] {
   --bg:             #1a1b26;
   --bg-rgb:         26, 27, 38;
@@ -193,7 +193,7 @@
   --overlay:        #1a1b26;
 }
 
-/* ── Monokai ─────────────────────────────────────────────────────────────── */
+/* -- Monokai --------------------------------------------------------------- */
 [data-theme="monokai"] {
   --bg:             #272822;
   --bg-rgb:         39, 40, 34;
@@ -317,7 +317,7 @@ html, body {
 }
 
 /* ---------------------------------------------------------------------------
-   Rounded frames — hide the ASCII border cruft, use CSS borders instead
+   Rounded frames -- hide the ASCII border cruft, use CSS borders instead
    --------------------------------------------------------------------------- */
 .rounded-frame {
   display: flex;
@@ -383,7 +383,7 @@ html, body {
 .log::-webkit-scrollbar-thumb:hover { background: var(--dim); }
 
 /* ---------------------------------------------------------------------------
-   Agent Tree — 2D tree visualization
+   Agent Tree -- 2D tree visualization
    --------------------------------------------------------------------------- */
 .agent-tree-container {
   flex: 1;
@@ -407,7 +407,7 @@ html, body {
   min-height: 0;
 }
 
-/* ── React Flow custom node cards ─────────────────────────── */
+/* -- React Flow custom node cards --------------------------- */
 .agent-rf-node {
   display: flex;
   align-items: center;
@@ -425,7 +425,7 @@ html, body {
   position: relative;
 }
 
-/* React Flow handles — theme-aware */
+/* React Flow handles -- theme-aware */
 .agent-rf-node .react-flow__handle {
   width: 8px;
   height: 8px;
@@ -492,7 +492,7 @@ html, body {
   text-align: right;
 }
 
-/* React Flow controls theming — higher-specificity selectors avoid !important */
+/* React Flow controls theming -- higher-specificity selectors avoid !important */
 #agent-tree-panel .react-flow__controls {
   background: var(--bg);
   border: 1px solid var(--border);
@@ -540,7 +540,7 @@ html, body {
   font-size: 12px;
 }
 
-/* ─── Tooltip ─────────────────────────────────────────────────── */
+/* --- Tooltip --------------------------------------------------- */
 .agent-tree-tooltip {
   position: absolute;
   z-index: 50;
@@ -929,7 +929,7 @@ html, body {
 .msg-thinking { color: var(--thinking); }
 .msg-agent-pending { min-height: 1em; }
 
-/* Code blocks — unified styling (Shiki + plain) */
+/* Code blocks -- unified styling (Shiki + plain) */
 .code-block {
   margin: 0.5em 0;
   padding: 0.75em 1em;
@@ -973,7 +973,7 @@ html, body {
 
 /* Plain tool output */
 .tool-out { margin: 2px 0 4px 0; font-size: 0.82em; overflow-x: auto; white-space: pre-wrap; }
-/* Shiki output wrapper — ensure the pre inside renders correctly */
+/* Shiki output wrapper -- ensure the pre inside renders correctly */
 .shiki-wrapper {
   overflow-x: auto;
 }
@@ -1147,7 +1147,7 @@ html, body {
   50% { opacity: 0.4; }
 }
 
-/* Sub-agent thought streaming — each new chunk fades + slides up */
+/* Sub-agent thought streaming -- each new chunk fades + slides up */
 @keyframes thoughtPop {
   from { opacity: 0; transform: translateY(4px); filter: blur(1px); }
   to   { opacity: 1; transform: translateY(0);    filter: blur(0); }
@@ -1156,7 +1156,7 @@ html, body {
 .thought-chunk {
   animation: thoughtPop 0.35s ease-out;
 }
-/* Only the last chunk gets the pop — earlier ones are static */
+/* Only the last chunk gets the pop -- earlier ones are static */
 .thought-chunk:not(:last-child) {
   animation: none;
 }
@@ -1172,7 +1172,7 @@ html, body {
 ::selection { background: var(--accent); color: var(--bg); }
 
 /* ---------------------------------------------------------------------------
-   Shiki syntax highlighter — inherit tool-pane background, no boxes
+   Shiki syntax highlighter -- inherit tool-pane background, no boxes
    --------------------------------------------------------------------------- */
 .shiki {
   background: transparent !important;
@@ -1182,13 +1182,13 @@ html, body {
   background: transparent !important;
 }
 
-/* Wrapper around all Shiki-highlighted blocks — ensure nothing sneaks through */
+/* Wrapper around all Shiki-highlighted blocks -- ensure nothing sneaks through */
 .shiki-block {
   background: transparent !important;
 }
 
 /* ==========================================================================
-   Settings Panel — First-run API key configuration overlay
+   Settings Panel -- First-run API key configuration overlay
    ========================================================================== */
 
 #settings-overlay {

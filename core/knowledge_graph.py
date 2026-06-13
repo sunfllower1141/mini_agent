@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-knowledge_graph.py — Entity-relationship graph for codebase understanding.
+knowledge_graph.py -- Entity-relationship graph for codebase understanding.
 
 Builds a typed graph from symbol definitions, calls, and imports.
 Exposes query tools: find_related (neighborhood), trace_path (shortest path).
@@ -45,7 +45,7 @@ class Entity:
 # Graph store
 # ---------------------------------------------------------------------------
 
-_GRAPH: dict[str, Entity] = {}       # name → Entity
+_GRAPH: dict[str, Entity] = {}       # name -> Entity
 _GRAPH_BUILT = False
 _GRAPH_LOCK = threading.Lock()
 _GRAPH_WORKSPACE: str = ""

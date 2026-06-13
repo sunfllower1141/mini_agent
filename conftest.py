@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""conftest.py — pytest configuration and shared test helpers for mini_agent.
+"""conftest.py -- pytest configuration and shared test helpers for mini_agent.
 
 - Excludes benchmark tests by default (use --run-benchmarks to include).
 - Orders benchmarks last when included to minimize cross-test hangs.
