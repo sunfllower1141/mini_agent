@@ -1,19 +1,19 @@
 # Session Handoff
 # Auto-generated at session end. Read at next session start for continuity.
 
-## Last Session: 2026-06-14 06:29 UTC
+## Last Session: 2026-06-14 07:00 UTC
 
 ### What I Changed
-(no git changes detected)
+- **tools/shell_ops.py**: Added diagnostic hints for `python -c` commands that produce no output:
+  - When `#` appears in a `python -c` command: warns that `#` comments out the rest of the line, suggests `;` separators
+  - When compound statement keywords (`if`, `try:`, `for`, `while`, `with`, `def`, `class`) appear: warns they can't follow `;` in `-c`, suggests multi-line scripts
+  - Fixed detection: `"python" in command` instead of `command.startswith("python")` to handle `cd /d ... && python` prefixes
 
 ### What's Pending
-(none recorded)
-
-### Plan Progress
-Plan (3/3 complete):
-  [V] 1. Add tests for Skill dataclass, frontmatter parser, disk discovery, skill_view, skill_list, get_active_skill_content
-  [V] 2. Run broader test suite to verify no regressions
-  [V] 3. Update STATE.txt, CHANGELOG.md, HANDOFF.md
+- The compound-statement hint triggers on `if`/`for` inside comprehensions too (false positive) — cosmetic, low priority
+- 4 test failures in test_agent_self_tracking.py are pre-existing (README.md is Windows-focused, missing self-mod sections)
 
 ### Modified Files
-(none tracked)
+- tools/shell_ops.py (+7 lines: diagnostic hints for python -c no-output)
+- STATE.txt (updated timestamp)
+- HANDOFF.md (this file)

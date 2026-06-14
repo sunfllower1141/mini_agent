@@ -2,6 +2,13 @@
 
 Self-modification audit trail -- what the agent changed and why.
 
+## 2026-06-14 -- python -c Diagnostic Hints
+### Changed
+- **tools/shell_ops.py**: Added two diagnostic hints for `python -c` no-output commands:
+  1. `#` comment detection — warns `#` eats rest of line, suggests `;` separators
+  2. Compound statement detection — warns `if/try/for/while/with/def/class` can't follow `;`
+- Fixed detection to use `"python" in command` instead of `command.startswith("python")`
+
 ## 2026-06-14 -- Hermes-Style Skill Architecture
 ### Added
 - **skills/ directory** with 10 SKILL.md files (git, test, lsp, web, agents, search, tasks, image, desktop, bootstrap)

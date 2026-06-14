@@ -503,7 +503,14 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
         elif proc.returncode == 0 and not stderr:
             # ACI upgrade: explicit empty-output message (SWE-agent pattern).
             # Silence is ambiguous -- the model needs to know the command ran OK.
-            parts.append("Command completed successfully (no output).")
+            hint = "Command completed successfully (no output)."
+            # Detect likely no-op patterns in python -c commands
+            if "python" in command and " -c " in command:
+                if "#" in command:
+                    hint += " Hint: '#' in python -c comments out the rest of the line. Use ';' separators instead of comments, or use a multi-line script."
+                elif any(kw in command for kw in (" if ", " try:", " for ", " while ", " with ", " def ", " class ")):
+                    hint += " Hint: Compound statements (if/try/for/while/with/def/class) cannot follow ';' in python -c. Use newlines in a script instead."
+            parts.append(hint)
         if stderr:
             err_output = stderr.rstrip()
             err_lines = err_output.split("\n")

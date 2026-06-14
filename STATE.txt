@@ -1,5 +1,5 @@
 # mini_agent Architecture State
-# Last updated: 2026-06-14 (fix: backend:response handler silently dropped all response messages)
+# Last updated: 2026-06-14 (fix: python -c diagnostic hints for # comments and compound statements)
 #
 # This file is the agent's map of the codebase. Update it after every
 # completed change. The agent reads this at session start for context.
