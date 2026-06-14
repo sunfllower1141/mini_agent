@@ -20,7 +20,7 @@ const DeferredMarkdown = memo(function DeferredMarkdown({ text, markdown = true 
 
   if (!text || !text.trim()) return null;
 
-  // Plain pre mode — used for thinking blocks
+  // Plain pre mode -- used for thinking blocks
   if (!markdown) {
     return (
       <pre style={{ whiteSpace: 'pre-wrap', margin: 0, fontFamily: 'inherit', fontSize: 'inherit' }}>

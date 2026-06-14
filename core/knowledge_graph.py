@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-knowledge_graph.py — Entity-relationship graph for codebase understanding.
+knowledge_graph.py -- Entity-relationship graph for codebase understanding.
 
 Builds a typed graph from symbol definitions, calls, and imports.
 Exposes query tools: find_related (neighborhood), trace_path (shortest path).
@@ -45,13 +45,17 @@ class Entity:
 # Graph store
 # ---------------------------------------------------------------------------
 
-_GRAPH: dict[str, Entity] = {}       # name → Entity
+_GRAPH: dict[str, Entity] = {}       # name -> Entity
 _GRAPH_BUILT = False
 _GRAPH_LOCK = threading.Lock()
 _GRAPH_WORKSPACE: str = ""
 
 # Directories to skip
-from core.constants import SKIP_DIRS  # noqa: E402 — shared skip-dir set
+_SKIP_DIRS: set[str] = {
+    ".git", "__pycache__", ".venv", "venv", "node_modules",
+    ".mypy_cache", ".pytest_cache", ".ruff_cache", "dist", "build",
+    ".tox", ".eggs",
+}
 
 # Names we skip in call edges
 _SKIP_CALL_NAMES: frozenset[str] = frozenset({
@@ -100,7 +104,7 @@ def build_knowledge_graph(root: str) -> None:
 
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames
-                       if d not in SKIP_DIRS and not d.startswith(".")]
+                       if d not in _SKIP_DIRS and not d.startswith(".")]
         for fname in filenames:
             ext = os.path.splitext(fname)[1].lower()
             if ext not in (".py", ".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs"):

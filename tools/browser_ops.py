@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-browser_ops.py — browser interaction tools for mini_agent.
+browser_ops.py -- browser interaction tools for mini_agent.
 
 Tools:
-    open_url            — open the user's default browser to a URL
-    browser_navigate    — navigate a headless Playwright page
-    browser_snapshot    — capture the accessibility tree (LLM-friendly structured view)
-    browser_click       — click an element by role + name
-    browser_type        — type text into an input field
-    browser_screenshot  — capture a full-page PNG screenshot
+    open_url            -- open the user's default browser to a URL
+    browser_navigate    -- navigate a headless Playwright page
+    browser_snapshot    -- capture the accessibility tree (LLM-friendly structured view)
+    browser_click       -- click an element by role + name
+    browser_type        -- type text into an input field
+    browser_screenshot  -- capture a full-page PNG screenshot
 
 Playwright is loaded lazily so the module imports even when
 playwright is not installed.  Tools that need Playwright return
@@ -17,18 +17,15 @@ a clear error message if it's missing.
 
 from __future__ import annotations
 
-import logging
 import os
 import threading
 import webbrowser as _webbrowser
-
-_log = logging.getLogger(__name__)
 
 from core.safety import ReadSafetyGate, WriteSafetyGate
 from tools import _register, _summarize, ToolResult
 
 # ---------------------------------------------------------------------------
-# Playwright lazy singleton — THREAD-AWARE
+# Playwright lazy singleton -- THREAD-AWARE
 #
 # The tool dispatch runs every tool call in a *new* daemon thread.
 # Playwright's sync API (greenlet-based) ties its internal event-loop
@@ -105,10 +102,10 @@ def _get_page():
     if _PAGE is not None and _BROWSER_THREAD_ID == current_tid:
         if _page_alive(_PAGE):
             return _PAGE
-        # Alive check failed — browser crashed within same thread
+        # Alive check failed -- browser crashed within same thread
         _force_reset_browser_globals()
     elif _PAGE is not None:
-        # Different thread — stale singleton, force reset
+        # Different thread -- stale singleton, force reset
         _force_reset_browser_globals()
 
     # Create fresh browser on this thread
@@ -141,7 +138,7 @@ def _close_browser():
         try:
             _PLAYWRIGHT_INSTANCE.__exit__(None, None, None)
         except Exception:
-            _log.debug("_close_browser: Playwright exit failed", exc_info=True)
+            pass
         _PLAYWRIGHT_INSTANCE = None
     _PAGE = None
     _BROWSER_THREAD_ID = None
@@ -153,18 +150,18 @@ def _close_browser():
             loop.stop()
         loop.close()
     except Exception:
-        _log.debug("_close_browser: event loop shutdown failed", exc_info=True)
+        pass
 
 
 # ---------------------------------------------------------------------------
-# open_url — trivial, no deps beyond stdlib webbrowser
+# open_url -- trivial, no deps beyond stdlib webbrowser
 # ---------------------------------------------------------------------------
 
 @_register("open_url")
 def _open_url(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
     """Open the user's default browser to the given URL.
 
-    Opens in a new tab.  Returns immediately — does not wait for the
+    Opens in a new tab.  Returns immediately -- does not wait for the
     page to load or report any browser state.  For programmatic
     browser interaction, use the browser_* tools instead.
     """
@@ -177,13 +174,13 @@ def _open_url(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResul
                           content="URL must start with http:// or https://")
 
     try:
-        opened = _webbrowser.open(url, new=2)  # new=2 → new tab if possible
+        opened = _webbrowser.open(url, new=2)  # new=2 -> new tab if possible
         if opened:
             return ToolResult(success=True,
                               content=f"Opened {url} in default browser.")
         else:
             return ToolResult(success=False,
-                              content=f"Browser failed to open {url} — "
+                              content=f"Browser failed to open {url} -- "
                                       "no suitable browser found.")
     except Exception as exc:
         return ToolResult(success=False, content=f"Failed to open {url}: {exc}")
@@ -192,12 +189,12 @@ def _open_url(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResul
 @_summarize("open_url")
 def _open_url_summary(args: dict) -> str:
     url = args.get("url", "?")
-    preview = url[:60] + ("…" if len(url) > 60 else "")
+    preview = url[:60] + ("..." if len(url) > 60 else "")
     return f"open_url({preview})"
 
 
 # ---------------------------------------------------------------------------
-# browser_navigate — headless Playwright
+# browser_navigate -- headless Playwright
 # ---------------------------------------------------------------------------
 
 @_register("browser_navigate")
@@ -236,7 +233,7 @@ def _browser_navigate_summary(args: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# browser_snapshot — accessibility tree (LLM-friendly)
+# browser_snapshot -- accessibility tree (LLM-friendly)
 # ---------------------------------------------------------------------------
 
 @_register("browser_snapshot")
@@ -245,7 +242,7 @@ def _browser_snapshot(args: dict, _wg: WriteSafetyGate,
     """Capture a structured view of the current page's interactive elements.
 
     Returns a text listing of buttons, links, inputs, and other
-    interactive elements — their roles, accessible names, and states.
+    interactive elements -- their roles, accessible names, and states.
     This is much more compact and LLM-friendly than raw HTML or a screenshot.
 
     The LLM can use the snapshot to decide which element to click,
@@ -261,10 +258,10 @@ def _browser_snapshot(args: dict, _wg: WriteSafetyGate,
                 return ToolResult(success=True,
                                   content=f"(page text)\n{body_text[:4000]}")
             return ToolResult(success=True,
-                              content="(empty page — no interactive elements)")
+                              content="(empty page -- no interactive elements)")
         text = _format_interactive_elements(elements)
         if len(text) > 8000:
-            text = text[:8000] + "\n… (truncated)"
+            text = text[:8000] + "\n... (truncated)"
         return ToolResult(success=True, content=text)
     except Exception as exc:
         return ToolResult(success=False,
@@ -361,7 +358,7 @@ def _format_interactive_elements(elements: list[dict]) -> str:
         if typ and typ != "text":
             parts.append(f"type={typ}")
         if href:
-            parts.append(f"→ {href}")
+            parts.append(f"-> {href}")
         if checked:
             parts.append(f"[{checked}]")
         if disabled:
@@ -378,7 +375,7 @@ def _browser_snapshot_summary(args: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# browser_click — click by role + name
+# browser_click -- click by role + name
 # ---------------------------------------------------------------------------
 
 @_register("browser_click")
@@ -423,7 +420,7 @@ def _browser_click_summary(args: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# browser_type — type text into an input
+# browser_type -- type text into an input
 # ---------------------------------------------------------------------------
 
 @_register("browser_type")
@@ -466,7 +463,7 @@ def _browser_type_summary(args: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# browser_screenshot — PNG capture
+# browser_screenshot -- PNG capture
 # ---------------------------------------------------------------------------
 
 @_register("browser_screenshot")
@@ -484,7 +481,7 @@ def _browser_screenshot(args: dict, wg: WriteSafetyGate,
     path = args.get("path", "browser_screenshot.png")
     full_page = args.get("full_page", True)
 
-    # Safety check — must be within workspace
+    # Safety check -- must be within workspace
     if wg is not None:
         safety_result = wg.check(path)
         if not safety_result.allowed:

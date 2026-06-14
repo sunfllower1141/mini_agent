@@ -269,14 +269,14 @@ class TestLearnFromFailure(unittest.TestCase):
             _learn_from_failure("edit_file", result_a1)
         self.assertEqual(result_a1.hint, "")
 
-        # Different fingerprint: whitespace — count=1, no hint
+        # Different fingerprint: whitespace -- count=1, no hint
         result_b1 = self._make_result(success=False, content=content_b)
         with patch.object(_TOOL_CONTEXT, '_memory_store', None):
             _learn_from_failure("edit_file", result_b1)
         self.assertEqual(result_b1.hint, "",
                          "Different fingerprint should start at count=1")
 
-        # Second whitespace failure — now gets a hint
+        # Second whitespace failure -- now gets a hint
         result_b2 = self._make_result(success=False, content=content_b)
         with patch.object(_TOOL_CONTEXT, '_memory_store', None):
             _learn_from_failure("edit_file", result_b2)
@@ -292,7 +292,7 @@ class TestLearnFromFailure(unittest.TestCase):
         # First call
         with patch.object(_TOOL_CONTEXT, '_memory_store', None):
             _learn_from_failure("edit_file", result)
-        # Second call — but empty content for edit_file falls through
+        # Second call -- but empty content for edit_file falls through
         # all if/elif branches, so fingerprint is empty string (content[:60])
         result2 = self._make_result(success=False, content="")
         with patch.object(_TOOL_CONTEXT, '_memory_store', None):

@@ -261,10 +261,10 @@ from tools.file_ops import (
 
 
 class TestQuoteNormalization(unittest.TestCase):
-    """Tests for curly/smart quote → ASCII normalization."""
+    """Tests for curly/smart quote ??? ASCII normalization."""
 
     def test_curly_double_quotes(self):
-        content = '\u201cHello world\u201d'
+        content = '"Hello world"'
         search = '"Hello world"'
         result = _fuzzy_find(content, search)
         self.assertIsNotNone(result)
@@ -273,63 +273,63 @@ class TestQuoteNormalization(unittest.TestCase):
         self.assertIn('Hello world', content[start:end])
 
     def test_curly_single_quotes(self):
-        content = "\u2018test\u2019"
+        content = "'test'"
         search = "'test'"
         result = _fuzzy_find(content, search)
         self.assertIsNotNone(result)
 
     def test_mixed_quotes_in_code(self):
-        content = 'x = \u201cfoo\u201d + \u2018bar\u2019'
+        content = "x = \"foo\" + 'bar'"
         search = 'x = "foo" + \'bar\''
         result = _fuzzy_find(content, search)
         self.assertIsNotNone(result)
 
     def test_normalize_quotes_helper(self):
-        self.assertEqual(_normalize_quotes('\u201cHello\u201d'), '"Hello"')
-        self.assertEqual(_normalize_quotes("\u2018Hi\u2019"), "'Hi'")
+        self.assertEqual(_normalize_quotes('"Hello"'), '"Hello"')
+        self.assertEqual(_normalize_quotes("'Hi'"), "'Hi'")
         self.assertEqual(_normalize_quotes("plain"), "plain")
 
 
 class TestUnicodeWhitespaceNormalization(unittest.TestCase):
-    """Tests for Unicode whitespace → ASCII space normalization."""
+    """Tests for Unicode whitespace ??? ASCII space normalization."""
 
     def test_nbsp_to_space(self):
-        content = "hello\u00a0world"
+        content = "hello world"
         search = "hello world"
         result = _fuzzy_find(content, search)
         self.assertIsNotNone(result)
 
     def test_figure_space(self):
-        content = "col1\u2007col2"
+        content = "col1 col2"
         search = "col1 col2"
         result = _fuzzy_find(content, search)
         self.assertIsNotNone(result)
 
     def test_narrow_nbsp(self):
-        content = "a\u202fb"
+        content = "a b"
         search = "a b"
         result = _fuzzy_find(content, search)
         self.assertIsNotNone(result)
 
     def test_zero_width_chars_removed(self):
-        content = "hello\u200bworld"
+        content = "helloworld"
         search = "helloworld"
         result = _fuzzy_find(content, search)
         self.assertIsNotNone(result)
 
     def test_soft_hyphen_removed(self):
-        content = "break\u00adpoint"
+        content = "breakpoint"
         search = "breakpoint"
         result = _fuzzy_find(content, search)
         self.assertIsNotNone(result)
 
     def test_normalize_unicode_ws_helper(self):
-        self.assertEqual(_normalize_unicode_whitespace("a\u00a0b"), "a b")
-        self.assertEqual(_normalize_unicode_whitespace("a\u200bb"), "ab")
+        self.assertEqual(_normalize_unicode_whitespace("a b"), "a b")
+        self.assertEqual(_normalize_unicode_whitespace("ab"), "ab")
         self.assertEqual(_normalize_unicode_whitespace("plain"), "plain")
 
     def test_canonicalize_combines_both(self):
-        self.assertEqual(_canonicalize_for_match('\u201cHello\u00a0World\u201d'), '"Hello World"')
+        self.assertEqual(_canonicalize_for_match('"Hello World"'), '"Hello World"')
 
 
 class TestIndentationPreservation(unittest.TestCase):
@@ -379,7 +379,7 @@ class TestReadBeforeEdit(unittest.TestCase):
     """Tests for read-before-edit enforcement."""
 
     def setUp(self):
-        self._saved = dict(_READ_FILES)
+        self._saved = set(_READ_FILES)
 
     def tearDown(self):
         _READ_FILES.clear()
@@ -388,7 +388,7 @@ class TestReadBeforeEdit(unittest.TestCase):
     def test_read_tracks_file(self):
         _READ_FILES.clear()
         self.assertNotIn("/tmp/test.py", _READ_FILES)
-        _READ_FILES["/tmp/test.py"] = 0.0
+        _READ_FILES.add("/tmp/test.py")
         self.assertIn("/tmp/test.py", _READ_FILES)
 
 

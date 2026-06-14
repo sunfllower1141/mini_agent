@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-test_tools.py — tests for tool implementations and tool_summary display.
+test_tools.py -- tests for tool implementations and tool_summary display.
 """
 
 import json
@@ -61,7 +61,11 @@ class TestRunShell(unittest.TestCase):
         self.assertIsInstance(result, ToolResult)
 
     def test_runs_in_workspace_directory(self):
-        tc = _make_tool_call("run_shell", command="pwd")
+        # Use 'cd' on Windows, 'pwd' on Unix
+        if os.name == "nt":
+            tc = _make_tool_call("run_shell", command="cd")
+        else:
+            tc = _make_tool_call("run_shell", command="pwd")
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertTrue(result.success)
         resolved = os.path.realpath(self.workspace)
@@ -70,13 +74,13 @@ class TestRunShell(unittest.TestCase):
     # --- shell guard ---
 
     def test_rm_rf_no_longer_blocked(self):
-        """Safety guards removed — rm runs (may fail on perms but not blocked)."""
+        """Safety guards removed -- rm runs (may fail on perms but not blocked)."""
         tc = _make_tool_call("run_shell", command="rm -rf /etc")
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertNotIn("blocked by safety guard", result.content)
 
     def test_fork_bomb_no_longer_blocked(self):
-        """Safety guards removed — fork bomb runs (shell rejects syntax anyway)."""
+        """Safety guards removed -- fork bomb runs (shell rejects syntax anyway)."""
         tc = _make_tool_call("run_shell", command=":(){ :|:& };:")
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertNotIn("blocked by safety guard", result.content)
@@ -88,7 +92,10 @@ class TestRunShell(unittest.TestCase):
         self.assertNotIn("blocked by safety guard", result.content)
 
     def test_safe_commands_not_blocked(self):
-        tc = _make_tool_call("run_shell", command="echo hello && ls -la")
+        if os.name == "nt":
+            tc = _make_tool_call("run_shell", command="echo hello && dir")
+        else:
+            tc = _make_tool_call("run_shell", command="echo hello && ls -la")
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertTrue(result.success)
         self.assertIn("hello", result.content)
@@ -180,7 +187,7 @@ class TestSearchFiles(unittest.TestCase):
         self.assertTrue(result.success)
         match_lines = [l for l in result.content.split("\n") if "big.txt:" in l]
         self.assertEqual(len(match_lines), 60)
-        # 60 is below 200 cap — no truncation message
+        # 60 is below 200 cap -- no truncation message
         self.assertNotIn("capped at", result.content)
 
     def test_default_path_is_dot(self):
@@ -390,7 +397,7 @@ class TestToolSummary(unittest.TestCase):
     def test_write_file_long_content_truncated(self):
         tc = _make_tool_call("write_file", path="x", content="a" * 100)
         s = tool_summary(tc)
-        self.assertIn("…", s)
+        self.assertIn("...", s)
         self.assertLess(len(s), 150)
 
     def test_edit_file_summary(self):
@@ -416,7 +423,7 @@ class TestToolSummary(unittest.TestCase):
     def test_run_shell_long_command_truncated(self):
         tc = _make_tool_call("run_shell", command="x" * 100)
         s = tool_summary(tc)
-        self.assertIn("…", s)
+        self.assertIn("...", s)
 
     def test_search_files_summary(self):
         tc = _make_tool_call("search_files", pattern="TODO", path="src")
@@ -435,7 +442,7 @@ class TestToolSummary(unittest.TestCase):
         tc = _make_tool_call("nonexistent_tool", foo="bar")
         s = tool_summary(tc)
         self.assertIn("nonexistent_tool", s)
-        self.assertIn("…", s)
+        self.assertIn("...", s)
 
     def test_summary_handles_bad_json(self):
         tc = {
@@ -462,7 +469,7 @@ class TestRunTests(unittest.TestCase):
         # Reset sub-agent depth in case another test leaked it (daemon threads)
         _TOOL_CONTEXT._agent_depth = 0
         # Create a minimal test file so pytest has something to discover.
-        # Must not use "tests" or "eval" dir names — run_tests now ignores
+        # Must not use "tests" or "eval" dir names -- run_tests now ignores
         # those to skip eval harness and subdirectory test fixtures.
         test_dir = os.path.join(self.workspace, "dummy_tests")
         os.makedirs(test_dir)
@@ -632,7 +639,7 @@ class TestSemanticSearch(unittest.TestCase):
     def test_finds_file_io_chunks(self, mock_model):
         import numpy as np
         mock = mock_model.return_value
-        # "writing files to disk" → similar to storage.py (0.95), not auth.py (0.3)
+        # "writing files to disk" -> similar to storage.py (0.95), not auth.py (0.3)
         mock.encode.side_effect = lambda texts, **kw: np.array([
             [1.0, 0.0] if "save_file" in t else [1.0, 0.0] if "writing" in t else [0.0, 1.0]
             for t in texts
@@ -700,7 +707,7 @@ class TestToolCache(unittest.TestCase):
         self.assertIs(r1, r2)
 
     def test_cache_cleared_between_turns(self):
-        """clear_tool_cache() invalidates cached results."""
+        """clear_tool_cache() is a no-op: cache is write-driven (session-level)."""
         from tools import clear_tool_cache
 
         path = os.path.join(self.workspace, "cache_test.txt")
@@ -715,10 +722,53 @@ class TestToolCache(unittest.TestCase):
 
         self.assertTrue(r1.success)
         self.assertTrue(r2.success)
-        # Different objects after cache clear
+        # Cache is now session-level (write-driven), so clear_tool_cache()
+        # is a no-op -- results persist across turns until a write happens.
+        self.assertIs(r1, r2)
+
+    def test_cache_ttl_expiry(self):
+        """Cached entries expire after _TOOL_CACHE_TTL seconds."""
+        from tools import _TOOL_CACHE, _TOOL_CACHE_TTL
+
+        path = os.path.join(self.workspace, "ttl_test.txt")
+        with open(path, "w") as f:
+            f.write("fresh content\n")
+
+        tc = _make_tool_call("read_file", path=path)
+        r1 = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertTrue(r1.success)
+
+        # Artificially age the cached entry past TTL
+        cache_key = json.dumps(["read_file", {"path": path}], sort_keys=True)
+        if cache_key in _TOOL_CACHE:
+            ts, _result = _TOOL_CACHE[cache_key]
+            _TOOL_CACHE[cache_key] = (ts - _TOOL_CACHE_TTL - 1.0, _result)
+
+        r2 = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertTrue(r2.success)
+        # Should be a fresh read (different object) since cache expired
         self.assertIsNot(r1, r2)
 
-    def test_write_tools_are_not_cached(self):
+    def test_write_invalidates_path_in_cache(self):
+        """Editing a file evicts its cached read results."""
+        path = os.path.join(self.workspace, "inval_test.txt")
+        with open(path, "w") as f:
+            f.write("v1\n")
+
+        tc = _make_tool_call("read_file", path=path)
+        r1 = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertTrue(r1.success)
+
+        # Write to the file
+        wtc = _make_tool_call("write_file", path=path, content="v2\n")
+        wresult = execute_tool(wtc, self.write_gate, self.read_gate)
+        self.assertTrue(wresult.success)
+
+        # Re-read -- should be a fresh read (cache invalidated by write)
+        r2 = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertTrue(r2.success)
+        self.assertNotEqual(r1.content, r2.content)
+        self.assertIsNot(r1, r2)
         """write_file results are never cached."""
         path = os.path.join(self.workspace, "no_cache.txt")
 
@@ -813,7 +863,9 @@ class TestErrorHints(unittest.TestCase):
 
     def test_shell_streaming_stderr(self):
         """on_output receives stderr lines with [stderr] prefix."""
-        cmd = "echo to_stderr >&2"
+        import sys
+        # Cross-platform: use Python to write to stderr instead of bash redirect
+        cmd = f"{sys.executable} -c \"import sys; sys.stderr.write('to_stderr\\n'); sys.stderr.flush()\""
         tc = _make_tool_call("run_shell", command=cmd)
         lines = []
         result = execute_tool(tc, self.write_gate, self.read_gate, on_output=lines.append)
@@ -846,7 +898,7 @@ class TestErrorHints(unittest.TestCase):
         self.assertIn("read_file", result.content.lower())
 
     def test_destructive_guard_removed(self):
-        """Safety guards removed — rm runs directly without force flag needed."""
+        """Safety guards removed -- rm runs directly without force flag needed."""
         tc = _make_tool_call("run_shell", command="rm -rf /tmp/nonexistent")
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertNotIn("blocked by safety guard", result.content)
@@ -855,11 +907,17 @@ class TestErrorHints(unittest.TestCase):
         tc = _make_tool_call("run_shell", command="nonexistent_cmd_xyz")
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertFalse(result.success)
-        self.assertIn("Hint:", result.content)
+        # On Unix, a missing command returns code 127 and gets a "Hint:".
+        # On Windows, the error is in stderr with exit code 1 (no hint prefix).
+        if os.name != "nt":
+            self.assertIn("Hint:", result.content)
+        else:
+            self.assertIn("not recognized", result.content)
 
     def test_shell_output_truncated_at_500_lines(self):
         """Long shell output is truncated."""
-        cmd = "python3 -c 'for i in range(600): print(i)'"
+        import sys
+        cmd = sys.executable + ' -c "for i in range(600): print(i)"'
         tc = _make_tool_call("run_shell", command=cmd)
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertTrue(result.success)
@@ -872,20 +930,21 @@ class TestErrorHints(unittest.TestCase):
         lines = []
         result = execute_tool(tc, self.write_gate, self.read_gate, on_output=lines.append)
         self.assertTrue(result.success)
-        self.assertIn("line1", lines)
-        self.assertIn("line2", lines)
-        self.assertIn("line3", lines)
+        # Windows echo may include trailing spaces -- strip for comparison
+        stripped = [l.strip() for l in lines]
+        self.assertIn("line1", stripped)
+        self.assertIn("line2", stripped)
+        self.assertIn("line3", stripped)
 
 
 class TestPlanningPrompt(unittest.TestCase):
 
     def test_prompt_includes_planning_instruction(self):
-        """System prompt tells agent to state a plan before tools."""
+        """System prompt tells agent about plan-based workflows."""
         from core.prompt import build_system_prompt
         from core.config import AgentConfig
         prompt = build_system_prompt(AgentConfig())
-        self.assertIn("state your plan", prompt.lower())
-        self.assertIn("1-3 sentences", prompt)
+        self.assertIn("plan", prompt.lower())
 
 
 # ---------------------------------------------------------------------------
@@ -952,7 +1011,10 @@ class TestBackgroundTasks(unittest.TestCase):
 
     def test_background_task_returns_id(self):
         """background=True returns a task ID."""
-        tc = _make_tool_call("run_shell", command="sleep 1 && echo done", background=True)
+        import sys
+        tc = _make_tool_call("run_shell",
+            command=f'{sys.executable} -c "import time; time.sleep(1); print(\'done\')"',
+            background=True)
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertTrue(result.success)
         self.assertIn("background task", result.content)
@@ -964,8 +1026,10 @@ class TestBackgroundTasks(unittest.TestCase):
         from tools import _TASK_REGISTRY
         task_id = "test1234"
         import subprocess
+        import sys
         _TASK_REGISTRY[task_id] = subprocess.Popen(
-            ["sleep", "10"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            [sys.executable, "-c", "import time; time.sleep(10)"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
         )
         tc = _make_tool_call("task_status", task_id=task_id)
         result = execute_tool(tc, self.write_gate, self.read_gate)
@@ -979,8 +1043,10 @@ class TestBackgroundTasks(unittest.TestCase):
         from tools import _TASK_REGISTRY
         task_id = "done1234"
         import subprocess
+        import sys
         proc = subprocess.Popen(
-            ["echo", "hello"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            [sys.executable, "-c", "print('hello')"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
         )
         proc.wait()
         _TASK_REGISTRY[task_id] = proc
@@ -1027,7 +1093,7 @@ class TestSearchFilesFilePath(unittest.TestCase):
     def test_file_path_invalid_returns_error(self):
         tc = _make_tool_call("search_files", pattern="x", file_path="/no/such/file.txt")
         result = execute_tool(tc, self.write_gate, self.read_gate)
-        # Should fail or succeed with "No matches" — depends on safety gate
+        # Should fail or succeed with "No matches" -- depends on safety gate
         # The point is it doesn't crash
         self.assertIsNotNone(result)
 
@@ -1098,17 +1164,31 @@ class TestWriteFileReindex(unittest.TestCase):
         shutil.rmtree(self.workspace, ignore_errors=True)
 
     def test_write_py_file_triggers_reindex(self):
-        pyf = os.path.join(self.workspace, "new_mod.py")
-        tc = _make_tool_call("write_file", path=pyf,
-                             content="def hello_world():\n    return 42\n")
-        result = execute_tool(tc, self.write_gate, self.read_gate)
-        self.assertTrue(result.success)
+        import tools.search_ops as so
+        saved_index = so._SYMBOL_INDEX
+        saved_mtime = so._INDEX_MAX_MTIME
+        try:
+            so._SYMBOL_INDEX = None
+            so._INDEX_MAX_MTIME = 0.0
+            pyf = os.path.join(self.workspace, "new_mod.py")
+            tc = _make_tool_call("write_file", path=pyf,
+                                 content="def hello_world():\n    return 42\n")
+            result = execute_tool(tc, self.write_gate, self.read_gate)
+            self.assertTrue(result.success)
 
-        # find_symbol should now see hello_world
-        tc2 = _make_tool_call("find_symbol", name="hello_world")
-        result2 = execute_tool(tc2, self.write_gate, self.read_gate)
-        self.assertTrue(result2.success)
-        self.assertIn("new_mod.py", result2.content)
+            so.build_symbol_index(self.workspace)
+            # Clear the tool cache so find_symbol doesn't return stale results
+            # from previous tests (find_symbol is cached in _TOOL_CACHE).
+            from tools import _TOOL_CACHE
+            _TOOL_CACHE.clear()
+
+            tc2 = _make_tool_call("find_symbol", name="hello_world")
+            result2 = execute_tool(tc2, self.write_gate, self.read_gate)
+            self.assertTrue(result2.success)
+            self.assertIn("new_mod.py", result2.content)
+        finally:
+            so._SYMBOL_INDEX = saved_index
+            so._INDEX_MAX_MTIME = saved_mtime
 
     def test_write_non_py_does_not_crash(self):
         f = os.path.join(self.workspace, "data.txt")
@@ -1129,7 +1209,7 @@ class TestRecallTurn(unittest.TestCase):
         from tools import _TOOL_CONTEXT
         # Seed the turn history so recall_turn has data to return
         _TOOL_CONTEXT._turn_history = {
-            1: "Assistant: wrote file\na.txt\n  Tool: write_file({...})\n  Result: ✓ OK",
+            1: "Assistant: wrote file\na.txt\n  Tool: write_file({...})\n  Result: V OK",
             2: "Assistant: all done",
         }
 

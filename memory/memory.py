@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-memory.py — persistent conversation memory for mini_agent (SQLite backend).
+memory.py -- persistent conversation memory for mini_agent (SQLite backend).
 
 Stores messages as rows in a local SQLite database.  Provides the same API
 as the old JSON-backed MemoryStore so the orchestrator is unchanged.
 
 Memory management (in order, applied on every save):
-    1. Compress old tool results — keep only the first line for results
+    1. Compress old tool results -- keep only the first line for results
        more than N messages ago.
-    2. Token-aware pruning — drop oldest turns until under max_tokens
+    2. Token-aware pruning -- drop oldest turns until under max_tokens
        (preserving tool-call sequences and turn boundaries).
-    3. Conversation summarization — when pruning removes messages, a
+    3. Conversation summarization -- when pruning removes messages, a
        synthetic "Earlier context" summary is injected so the agent
        retains awareness of what happened even when details are gone.
 
@@ -34,28 +34,10 @@ _mem_log = get_logger("memory")
 # Multiple components (MemoryStore, FailurePatternStore, ToolGraph,
 # MistakeNotebook) all hit the same SQLite database.  Each had its own
 # sqlite3.Connection, which meant up to 4 concurrent connections
-# competing for the same write lock → "database is locked" under load.
+# competing for the same write lock -> "database is locked" under load.
 # A single shared connection per db_path eliminates this lock contention.
 _conn_cache: dict[str, sqlite3.Connection] = {}
 _conn_cache_lock = threading.Lock()
-
-# --- shutdown guard: prevent writes during interpreter teardown ---
-# Set by bootstrap._cleanup_on_exit before closing connections.
-# error_hints.py and similar persistence code check this to avoid
-# cascading "no such table" / "disk I/O error" noise on exit.
-_SHUTTING_DOWN: bool = False
-
-
-def mark_shutting_down() -> None:
-    """Signal that the agent is shutting down — stop all persistence writes."""
-    global _SHUTTING_DOWN
-    _SHUTTING_DOWN = True
-
-
-def is_shutting_down() -> bool:
-    """Check if agent is in shutdown — callers should skip persistence writes."""
-    return _SHUTTING_DOWN
-
 
 # --- sqlite3 error escalation: track consecutive errors ---
 _consecutive_sqlite_errors: int = 0
@@ -67,7 +49,7 @@ def _on_sqlite_error(operation: str) -> None:
     _consecutive_sqlite_errors += 1
     _mem_log.warning("sqlite3 error in %s (consecutive=%d)", operation, _consecutive_sqlite_errors)
     if _consecutive_sqlite_errors >= _CONSECUTIVE_ERROR_THRESHOLD:
-        _mem_log.error("sqlite3 error escalation: %d consecutive errors — memory persistence may be degraded", 
+        _mem_log.error("sqlite3 error escalation: %d consecutive errors -- memory persistence may be degraded", 
                        _consecutive_sqlite_errors)
 
 def _reset_sqlite_errors() -> None:
@@ -93,7 +75,7 @@ def get_shared_conn(db_path: str) -> sqlite3.Connection:
     with _conn_cache_lock:
         conn = _conn_cache.get(db_path)
         if conn is not None:
-            # Ping — if the connection died (e.g. forked subprocess),
+            # Ping -- if the connection died (e.g. forked subprocess),
             # recreate it.
             try:
                 conn.execute("SELECT 1")
@@ -122,7 +104,7 @@ def get_shared_conn(db_path: str) -> sqlite3.Connection:
                 return conn
             except sqlite3.OperationalError:
                 _mem_log.warning(
-                    "WAL mode failed for %s — trying DELETE journal mode", db_path,
+                    "WAL mode failed for %s -- trying DELETE journal mode", db_path,
                 )
                 try:
                     conn.close()
@@ -203,7 +185,7 @@ _PRUNE_OVERAGE_BUFFER = 1.15
 _PRUNE_COOLDOWN = 3  # saves to skip before pruning again
 
 # VACUUM interval: run VACUUM every N saves regardless of freelist count.
-# This matters now that we do fewer full rewrites — the freelist may not
+# This matters now that we do fewer full rewrites -- the freelist may not
 # bloat rapidly but periodic compaction is still healthy.
 _VACUUM_INTERVAL = 50
 
@@ -219,14 +201,15 @@ _SAVE_MAX_RETRIES = 3
 _SAVE_RETRY_DELAY = 0.25  # seconds, multiplied by attempt number
 
 # ---------------------------------------------------------------------------
-# Pruning / compression / summarization — imported from memory_prune.py
+# Pruning / compression / summarization -- imported from memory_prune.py
 # (extracted to keep MemoryStore focused on persistence).
 # ---------------------------------------------------------------------------
 
-from .memory_prune import (  # noqa: F401 — re-exported for backward compatibility
+from .memory_prune import (  # noqa: F401 -- re-exported for backward compatibility
     _CHARS_PER_TOKEN,
     _MIN_TOKEN_ESTIMATE,
     _COMPRESSION_KEEP_RECENT,
+    _COMPRESSION_GENTLE_RECENT,
     _COMPRESSION_MAX_LINES,
     _COMPRESSION_MAX_FIRST_LINE,
     _SUMMARY_PREVIEW_LENGTH,
@@ -300,13 +283,14 @@ class MemoryStore:
         self._skip_load: bool = False  # set True to skip loading knowledge/summaries (used by switch_session)
         self._save_count: int = 0  # monotonic save counter for periodic VACUUM
         self._prune_cooldown: int = 0  # saves remaining before next pruning allowed
+        self.last_prune_summary: str = ""  # surfaced to UI so the user sees what was pruned
 
-        # Detect remote filesystems early — if the workspace is on a network
+        # Detect remote filesystems early -- if the workspace is on a network
         # mount, pre-emptively switch to a local path so that downstream
         # consumers (FailurePatternStore, etc.) also use the correct path.
         if _is_remote_fs(self._db_path):
             self._db_path = _local_db_path(self._db_path)
-            _mem_log.info("remote filesystem detected — using local database: %s", self._db_path)
+            _mem_log.info("remote filesystem detected -- using local database: %s", self._db_path)
 
         # Migrate from old paths if needed
         _migrate_old_paths(filepath, self._db_path)
@@ -327,7 +311,7 @@ class MemoryStore:
             )
             # Ensure a row always exists
             conn.execute("INSERT OR IGNORE INTO scratchpad (id, content) VALUES (1, '')")
-            # Plan state table — persists plan steps across sessions
+            # Plan state table -- persists plan steps across sessions
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS plan_state ("
                 "id INTEGER PRIMARY KEY CHECK (id = 1),"
@@ -336,7 +320,7 @@ class MemoryStore:
                 ")"
             )
             conn.execute("INSERT OR IGNORE INTO plan_state (id, steps_json, done_json) VALUES (1, '[]', '[]')")
-            # Test output table — persisted so agent can read failures without re-running
+            # Test output table -- persisted so agent can read failures without re-running
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS test_output ("
                 "id INTEGER PRIMARY KEY CHECK (id = 1),"
@@ -344,7 +328,7 @@ class MemoryStore:
                 ")"
             )
             conn.execute("INSERT OR IGNORE INTO test_output (id, output) VALUES (1, '')")
-            # Project knowledge table — persists across sessions within a workspace
+            # Project knowledge table -- persists across sessions within a workspace
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS project_knowledge ("
                 "id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -357,7 +341,63 @@ class MemoryStore:
                 "updated_at TEXT NOT NULL DEFAULT (datetime('now'))"
                 ")"
             )
-            # Failure patterns table — self-learning from tool failures (MPR/VIGIL-inspired)
+            # Core memory -- bounded snapshot injected frozen at session start.
+            # Model-agnostic persistent memory that the agent itself curates.
+            # Hard-capped by CHAR limit (not lines): the bound forces consolidation.
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS core_memory ("
+                "id INTEGER PRIMARY KEY CHECK (id = 1),"
+                "content TEXT NOT NULL DEFAULT '',"
+                "char_limit INTEGER NOT NULL DEFAULT 2500"
+                ")"
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO core_memory (id, content, char_limit)"
+                " VALUES (1, '', 2500)"
+            )
+            # FTS5 full-text search index over saved messages (session search).
+            # The delete trigger uses DELETE FROM fts WHERE rowid=old.id instead
+            # of the standard INSERT INTO fts(messages_fts, ...) VALUES('delete', ...)
+            # because the latter causes "SQL logic error" on some SQLite builds
+            # (e.g. 3.53.1 on Windows).
+            #
+            # Migration: drop old triggers + FTS table in case they used the
+            # broken 'delete' INSERT pattern from v1.0.x.
+            conn.execute("DROP TRIGGER IF EXISTS messages_fts_insert")
+            conn.execute("DROP TRIGGER IF EXISTS messages_fts_delete")
+            conn.execute("DROP TRIGGER IF EXISTS messages_fts_update")
+            conn.execute("DROP TABLE IF EXISTS messages_fts")
+            conn.execute(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts"
+                " USING fts5(content, tokenize='unicode61 remove_diacritics 2')"
+            )
+            conn.execute(
+                "INSERT INTO messages_fts(rowid, content)"
+                " SELECT id, content FROM messages"
+            )
+            conn.execute(
+                "CREATE TRIGGER IF NOT EXISTS messages_fts_insert"
+                " AFTER INSERT ON messages"
+                " BEGIN"
+                "  INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);"
+                " END"
+            )
+            conn.execute(
+                "CREATE TRIGGER IF NOT EXISTS messages_fts_delete"
+                " AFTER DELETE ON messages"
+                " BEGIN"
+                "  DELETE FROM messages_fts WHERE rowid = old.id;"
+                " END"
+            )
+            conn.execute(
+                "CREATE TRIGGER IF NOT EXISTS messages_fts_update"
+                " AFTER UPDATE ON messages"
+                " BEGIN"
+                "  DELETE FROM messages_fts WHERE rowid = old.id;"
+                "  INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);"
+                " END"
+            )
+            # Failure patterns table -- self-learning from tool failures (MPR/VIGIL-inspired)
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS failure_patterns ("
                 "id              INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -388,7 +428,7 @@ class MemoryStore:
                 stacklevel=2,
             )
         finally:
-            # Don't close — the connection is shared via get_shared_conn()
+            # Don't close -- the connection is shared via get_shared_conn()
             # and other components use it too.  Just release our local ref.
             self._conn = None
 
@@ -406,7 +446,7 @@ class MemoryStore:
 
         Uses the module-level connection cache so that all components
         (MemoryStore, FailurePatternStore, ToolGraph, MistakeNotebook)
-        share a single connection per database file — no more lock
+        share a single connection per database file -- no more lock
         contention between separate connections.
         """
         conn = get_shared_conn(self._db_path)
@@ -481,19 +521,6 @@ class MemoryStore:
         """Store a project-level learning that persists across sessions."""
         try:
             conn = self._get_conn()
-            # Lazy-create table in case connection fell back to a bare DB
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS project_knowledge ("
-                "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-                "category TEXT NOT NULL DEFAULT 'general',"
-                "summary TEXT NOT NULL,"
-                "detail TEXT NOT NULL DEFAULT '',"
-                "importance INTEGER NOT NULL DEFAULT 1,"
-                "hits INTEGER NOT NULL DEFAULT 0,"
-                "created_at TEXT NOT NULL DEFAULT (datetime('now')),"
-                "updated_at TEXT NOT NULL DEFAULT (datetime('now'))"
-                ")"
-            )
             conn.execute(
                 "INSERT INTO project_knowledge (category, summary, detail, importance)"
                 " VALUES (?, ?, ?, ?)",
@@ -729,7 +756,7 @@ class MemoryStore:
             done_set = set(plan_done or [])
             plan_lines = [f"Plan ({len(done_set)}/{len(plan_steps)} complete):"]
             for i, s in enumerate(plan_steps, 1):
-                mark = "✓" if (i - 1) in done_set else "○"
+                mark = "V" if (i - 1) in done_set else "o"
                 plan_lines.append(f"  [{mark}] {i}. {s}")
             plan_text = "\n".join(plan_lines) + "\n"
 
@@ -757,21 +784,6 @@ class MemoryStore:
         """Store a session summary for next startup injection."""
         try:
             conn = self._get_conn()
-            # Ensure the project_knowledge table exists — the connection may
-            # have silently fallen back to a different DB file (see
-            # _write_messages for detailed rationale).
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS project_knowledge ("
-                "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-                "category TEXT NOT NULL DEFAULT 'general',"
-                "summary TEXT NOT NULL,"
-                "detail TEXT NOT NULL DEFAULT '',"
-                "importance INTEGER NOT NULL DEFAULT 1,"
-                "hits INTEGER NOT NULL DEFAULT 0,"
-                "created_at TEXT NOT NULL DEFAULT (datetime('now')),"
-                "updated_at TEXT NOT NULL DEFAULT (datetime('now'))"
-                ")"
-            )
             conn.execute(
                 "DELETE FROM project_knowledge WHERE category = 'session_summary'"
             )
@@ -788,18 +800,6 @@ class MemoryStore:
         """Return the most recent session summary, or None."""
         try:
             conn = self._get_conn()
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS project_knowledge ("
-                "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-                "category TEXT NOT NULL DEFAULT 'general',"
-                "summary TEXT NOT NULL,"
-                "detail TEXT NOT NULL DEFAULT '',"
-                "importance INTEGER NOT NULL DEFAULT 1,"
-                "hits INTEGER NOT NULL DEFAULT 0,"
-                "created_at TEXT NOT NULL DEFAULT (datetime('now')),"
-                "updated_at TEXT NOT NULL DEFAULT (datetime('now'))"
-                ")"
-            )
             row = conn.execute(
                 "SELECT summary, detail FROM project_knowledge"
                 " WHERE category = 'session_summary'"
@@ -813,7 +813,124 @@ class MemoryStore:
             return None
 
     # ------------------------------------------------------------------
-    # save() helpers — split from the main method (was ~100 lines).
+    # Core memory -- bounded snapshot (Hermes-style MEMORY.md / USER.md)
+    # ------------------------------------------------------------------
+    # Frozen-at-load pattern: content is loaded once at session start and
+    # never changes mid-session. Writes hit disk immediately but don't
+    # appear in the prompt until next session. Hard char limit forces the
+    # agent to consolidate rather than accumulate infinitely.
+
+    CORE_MEMORY_DEFAULT_CHAR_LIMIT: int = 2500
+
+    def get_core_memory(self) -> str:
+        """Return the core memory content as a string (for injection at session start)."""
+        try:
+            conn = self._get_conn()
+            row = conn.execute(
+                "SELECT content FROM core_memory WHERE id = 1"
+            ).fetchone()
+            if row:
+                return row[0]
+            return ""
+        except sqlite3.Error:
+            warnings.warn("Failed to read core memory", stacklevel=2)
+            return ""
+
+    def get_core_memory_info(self) -> dict:
+        """Return core memory content, char_limit, and current length."""
+        try:
+            conn = self._get_conn()
+            row = conn.execute(
+                "SELECT content, char_limit FROM core_memory WHERE id = 1"
+            ).fetchone()
+            if row:
+                return {"content": row[0], "char_limit": row[1], "length": len(row[0])}
+            return {"content": "", "char_limit": self.CORE_MEMORY_DEFAULT_CHAR_LIMIT, "length": 0}
+        except sqlite3.Error:
+            warnings.warn("Failed to read core memory", stacklevel=2)
+            return {"content": "", "char_limit": self.CORE_MEMORY_DEFAULT_CHAR_LIMIT, "length": 0}
+
+    def write_core_memory(self, content: str) -> dict:
+        """Write/update core memory content.
+
+        Returns {'ok': bool, 'message': str, 'remaining': int (chars free)}.
+        Enforces char_limit -- returns ok=False if content exceeds limit.
+        """
+        try:
+            conn = self._get_conn()
+            row = conn.execute(
+                "SELECT char_limit FROM core_memory WHERE id = 1"
+            ).fetchone()
+            char_limit = row[0] if row else self.CORE_MEMORY_DEFAULT_CHAR_LIMIT
+            content_len = len(content)
+
+            if content_len > char_limit:
+                return {
+                    "ok": False,
+                    "message": (
+                        f"Core memory content ({content_len} chars) exceeds "
+                        f"limit of {char_limit} chars. Consolidate by merging "
+                        f"or removing entries (e.g., combine 3 related facts "
+                        f"into one line, remove stale paths, move procedures "
+                        f"to project_knowledge). Try again with shorter content."
+                    ),
+                    "remaining": 0,
+                    "char_limit": char_limit,
+                }
+
+            conn.execute(
+                "UPDATE core_memory SET content = ? WHERE id = 1",
+                (content,),
+            )
+            conn.commit()
+            remaining = char_limit - content_len
+            return {
+                "ok": True,
+                "message": (
+                    f"Core memory updated ({content_len} chars). "
+                    f"{remaining} chars remaining."
+                ),
+                "remaining": remaining,
+                "char_limit": char_limit,
+            }
+        except sqlite3.Error:
+            warnings.warn("Failed to write core memory", stacklevel=2)
+            return {"ok": False, "message": "Database error writing core memory.", "remaining": 0, "char_limit": 0}
+
+    # ------------------------------------------------------------------
+    # Session search -- FTS5 full-text search across all saved messages
+    # ------------------------------------------------------------------
+
+    def search_messages(
+        self, query: str, limit: int = 10,
+    ) -> list[dict]:
+        """Full-text search across all saved messages.
+
+        Uses FTS5 with unicode61 tokenizer. Returns list of
+        {rowid, content, rank} dicts ordered by relevance.
+        """
+        try:
+            conn = self._get_conn()
+            # Escape special FTS5 characters
+            safe_query = query.replace('"', '""')
+            rows = conn.execute(
+                "SELECT rowid, content, rank"
+                " FROM messages_fts"
+                " WHERE messages_fts MATCH ?"
+                " ORDER BY rank"
+                " LIMIT ?",
+                (f'"{safe_query}"', limit),
+            ).fetchall()
+            return [
+                {"rowid": r[0], "content": r[1], "rank": r[2]}
+                for r in rows
+            ]
+        except sqlite3.Error:
+            warnings.warn("Failed to search messages", stacklevel=2)
+            return []
+
+    # ------------------------------------------------------------------
+    # save() helpers -- split from the main method (was ~100 lines).
     # ------------------------------------------------------------------
 
     def _prepare_messages(self, messages: list[dict]) -> tuple[list[dict], list[dict], bool]:
@@ -826,7 +943,10 @@ class MemoryStore:
         """
         _clear_message_caches()
         cleaned = _clean_messages(messages)
-        cleaned, compressed = _compress_tool_results(cleaned, keep_recent=_COMPRESSION_KEEP_RECENT)
+        cleaned, compressed = _compress_tool_results(
+            cleaned, keep_recent=_COMPRESSION_KEEP_RECENT,
+            gentle_recent=_COMPRESSION_GENTLE_RECENT,
+        )
 
         # Incremental token accounting: only count new messages since last save.
         new_start = min(self._last_saved_count, len(cleaned))
@@ -851,6 +971,7 @@ class MemoryStore:
                     summary_msg = {"role": "user", "content": summary}
                     kept.insert(0, summary_msg)
                     self._token_count += _estimate_tokens(summary_msg)
+                    self.last_prune_summary = summary
             self._prune_cooldown = _PRUNE_COOLDOWN
         else:
             pruned: list[dict] = []
@@ -871,12 +992,6 @@ class MemoryStore:
         for attempt in range(_SAVE_MAX_RETRIES):
             try:
                 conn = self._get_conn()
-                # Ensure the messages table exists — the connection may have
-                # silently fallen back to a different DB file that doesn't
-                # have all tables (e.g. after a disk I/O error on the
-                # workspace DB).  Follows the same lazy-creation pattern as
-                # get_scratchpad() / set_scratchpad().
-                conn.execute(_CREATE_TABLE)
                 conn.execute("BEGIN IMMEDIATE")
                 need_full_rewrite = (
                     bool(pruned) or compressed or len(kept) < self._last_saved_count
@@ -895,6 +1010,7 @@ class MemoryStore:
                             [(m["role"], json.dumps(m)) for m in new_msgs],
                         )
                 conn.commit()
+                _reset_sqlite_errors()
                 self._save_count += 1
                 self._maybe_cap_rows(conn)
                 self._maybe_vacuum(conn, after_full_rewrite=need_full_rewrite)
@@ -910,7 +1026,7 @@ class MemoryStore:
                 if attempt < _SAVE_MAX_RETRIES - 1:
                     import time
                     time.sleep(_SAVE_RETRY_DELAY * (attempt + 1))
-                    # Don't close — it's shared.  Just release our local ref
+                    # Don't close -- it's shared.  Just release our local ref
                     # so _get_conn() will revalidate from the cache.
                     self._conn = None
 
@@ -972,7 +1088,7 @@ class MemoryStore:
         trims oldest turns, compresses tool results, and injects a summary.
         Returns the (possibly reduced) message list.
 
-        Unlike ``save()``, this does NOT write to the SQLite database — it's
+        Unlike ``save()``, this does NOT write to the SQLite database -- it's
         purely an in-memory compaction.  Persistence is handled by ``save()``.
         """
         trigger = int(self._max_tokens * 0.70)
@@ -1000,6 +1116,7 @@ class MemoryStore:
                 if summary:
                     summary_msg = {"role": "user", "content": summary}
                     kept.insert(0, summary_msg)
+                    self.last_prune_summary = summary
 
             # Re-inject persisted project knowledge so key facts survive pruning
             knowledge = self.get_top_knowledge(limit=10)
@@ -1033,6 +1150,7 @@ class MemoryStore:
             conn.execute(_VACUUM)
         except (sqlite3.Error, OSError):
             try:
+                self.close()
                 os.remove(self._db_path)
             except FileNotFoundError:
                 pass
@@ -1256,8 +1374,8 @@ def _clean_messages(messages: list[dict]) -> list[dict]:
 def _migrate_old_paths(new_filepath: str, db_path: str) -> None:
     """Migrate from old naming schemes to the current db_path.
 
-    Old scheme: config said .json, _db_path appended .db → .json.db
-    New scheme: config says .db, _db_path uses it directly → .db
+    Old scheme: config said .json, _db_path appended .db -> .json.db
+    New scheme: config says .db, _db_path uses it directly -> .db
 
     Also migrates raw JSON files if present.
     """
@@ -1273,9 +1391,9 @@ def _migrate_old_paths(new_filepath: str, db_path: str) -> None:
                 os.rename(old_db, db_path)
                 return
             except OSError:
-                pass  # fall through — will start fresh
+                pass  # fall through -- will start fresh
 
-    # Old JSON file — migrate its contents
+    # Old JSON file -- migrate its contents
     if os.path.isfile(new_filepath):
         _migrate_json(new_filepath, db_path)
 
@@ -1315,7 +1433,7 @@ def _migrate_json(json_path: str, db_path: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Shared export helper — used by both terminal REPL and TUI
+# Shared export helper -- used by both terminal REPL and TUI
 # ---------------------------------------------------------------------------
 
 def export_conversation_markdown(messages: list[dict]) -> str:

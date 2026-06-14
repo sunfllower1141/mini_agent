@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""error_hints.py — heuristic error hints and failure-pattern learning for mini_agent.
+"""error_hints.py -- heuristic error hints and failure-pattern learning for mini_agent.
 
 Provides:
-  - _ERROR_HINTS        — heuristic hint table for common tool failures
-  - _build_error_hint   — build a self-correction hint for LLM on tool failure
-  - _fingerprint_error  — extract a stable error fingerprint from a tool result
-  - _FAILURE_PATTERNS   — recovery strategies keyed by (tool_name, fingerprint)
-  - _learn_from_failure — detect repeated failures, escalate, inject recovery hints
+  - _ERROR_HINTS        -- heuristic hint table for common tool failures
+  - _build_error_hint   -- build a self-correction hint for LLM on tool failure
+  - _fingerprint_error  -- extract a stable error fingerprint from a tool result
+  - _FAILURE_PATTERNS   -- recovery strategies keyed by (tool_name, fingerprint)
+  - _learn_from_failure -- detect repeated failures, escalate, inject recovery hints
 """
 
 from __future__ import annotations
@@ -37,11 +37,11 @@ _ERROR_HINTS: dict[str, list[tuple[str, str]]] = {
     ],
     "write_file": [
         ("blocked", "Write blocked by safety layer. Use a path inside the workspace or enable unrestricted mode."),
-        ("outside workspace", "Write blocked — path is outside the workspace. Try a path inside the workspace root."),
+        ("outside workspace", "Write blocked -- path is outside the workspace. Try a path inside the workspace root."),
     ],
     "edit_file": [
         ("blocked", "Edit blocked by safety layer. Use a path inside the workspace or enable unrestricted mode."),
-        ("outside workspace", "Edit blocked — path is outside the workspace. Try a path inside the workspace root."),
+        ("outside workspace", "Edit blocked -- path is outside the workspace. Try a path inside the workspace root."),
     ],
     "run_shell": [
         ("not found", "Command not found. Check that it is installed and on your PATH."),
@@ -112,10 +112,6 @@ def _fingerprint_error(name: str, content: str) -> str:
     """
     cl = content.lower()
     if name == "edit_file":
-        if "not been read" in cl or "read_file first" in cl or "read the file before" in cl:
-            return "read-before-edit"
-        if "modified after last read" in cl or "stored mtime" in cl or "stale" in cl:
-            return "stale"
         if "not found" in cl or "does not exist" in cl:
             return "not found"
         if "whitespace" in cl or "indentation" in cl or "tab" in cl or "trailing" in cl:
@@ -124,8 +120,6 @@ def _fingerprint_error(name: str, content: str) -> str:
             return "ambiguous"
         if "count" in cl or "invalid count" in cl:
             return "count"
-        if "blocked" in cl or "safety" in cl:
-            return "blocked"
     elif name == "write_file":
         if "blocked" in cl or "safety" in cl:
             return "blocked"
@@ -161,13 +155,10 @@ def _fingerprint_error(name: str, content: str) -> str:
 # Fingerprints come from _fingerprint_error() above.
 _FAILURE_PATTERNS: dict[str, dict[str, str]] = {
     "edit_file": {
-        "read-before-edit": "You must read the file with read_file BEFORE editing it. The system enforces this to ensure you have current content. Read the file first, then try the edit again.",
-        "stale": "The file was modified externally after your last read. Re-read with read_file to get the latest content before editing.",
         "not found": "The string must match exactly -- check whitespace, indentation, and line endings. Try read_file first to see the exact text.",
         "whitespace": "Whitespace mismatch. Try copying the exact text from read_file output, including all leading/trailing spaces.",
         "ambiguous": "Multiple matches found. Use a more specific old_string or set count=-1 to replace all.",
         "count": "Invalid count value. Use count=1 (first only) or count=-1 (all occurrences).",
-        "blocked": "Edit blocked by safety layer. Use a path inside the workspace or enable unrestricted mode.",
     },
     "write_file": {
         "blocked": "Use force=True to bypass overwrite protection, or write to a different path.",
@@ -213,8 +204,8 @@ def _learn_from_failure(name: str, result: "ToolResult | None") -> None:
     Dual-store rationale: writes to both ``project_knowledge`` (injected at
     session start via build_startup_context, human-reviewable) and
     ``failure_patterns`` (structured per-turn matching via
-    FailurePatternStore).  Both serve different consumers — startup context
-    vs. real-time tool guidance — so the duplication is intentional.
+    FailurePatternStore).  Both serve different consumers -- startup context
+    vs. real-time tool guidance -- so the duplication is intentional.
     """
     if result is None:
         return
@@ -256,15 +247,6 @@ def _learn_from_failure(name: str, result: "ToolResult | None") -> None:
             result.content = (result.content or "") + f"\n\n[Recovery hint] {generic}"
 
     # --- Persist to cross-session knowledge ---
-    # Guard: skip all persistence during interpreter shutdown to avoid
-    # cascading "no such table" / "disk I/O error" noise.
-    try:
-        from memory.memory import is_shutting_down
-        if is_shutting_down():
-            return
-    except ImportError:
-        pass
-
     try:
         memory = getattr(_TOOL_CONTEXT, "_memory_store", None)
         if memory is None:

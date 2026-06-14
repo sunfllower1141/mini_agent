@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-test_file_ops_extended.py — comprehensive tests for tools not yet covered.
+test_file_ops_extended.py -- comprehensive tests for tools not yet covered.
 
 Tests: list_directory, diff, restore_file, plan/plan_status,
        task_status, find_usages, verify, recall_turn, write_scratchpad.
@@ -72,7 +72,7 @@ class TestListDirectory(unittest.TestCase):
         try:
             tc = _make_tool_call("list_directory", path=outside)
             result = execute_tool(tc, self.write_gate, self.read_gate)
-            # Safety gates are now unrestricted — listing outside workspace succeeds
+            # Safety gates are now unrestricted -- listing outside workspace succeeds
             self.assertTrue(result.success)
         finally:
             import shutil
@@ -238,7 +238,7 @@ class TestRestoreFile(unittest.TestCase):
         self.assertIn("No backup available", result.content)
 
     def test_restore_then_restore_again_fails(self):
-        """After restoring once, the backup is consumed — second restore fails."""
+        """After restoring once, the backup is consumed -- second restore fails."""
         path = self._write("twice.txt", "original")
         execute_tool(
             _make_tool_call("write_file", path=path, content="modified"),
@@ -261,7 +261,7 @@ class TestRestoreFile(unittest.TestCase):
         try:
             tc = _make_tool_call("restore_file", path=os.path.join(outside, "x.txt"))
             result = execute_tool(tc, self.write_gate, self.read_gate)
-            # Safety gates are now unrestricted — restore is attempted but fails
+            # Safety gates are now unrestricted -- restore is attempted but fails
             # because there's no session backup for a file outside the workspace
             self.assertIsInstance(result, ToolResult)
         finally:
@@ -343,9 +343,9 @@ class TestPlan(unittest.TestCase):
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertTrue(result.success)
         self.assertIn("Plan (0/3 complete)", result.content)
-        self.assertIn("[○] 1. A", result.content)
-        self.assertIn("[○] 2. B", result.content)
-        self.assertIn("[○] 3. C", result.content)
+        self.assertIn("[o] 1. A", result.content)
+        self.assertIn("[o] 2. B", result.content)
+        self.assertIn("[o] 3. C", result.content)
 
     def test_plan_status_mark_step_complete(self):
         execute_tool(
@@ -356,8 +356,8 @@ class TestPlan(unittest.TestCase):
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertTrue(result.success)
         self.assertIn("Plan (1/3 complete)", result.content)
-        self.assertIn("[✓] 1. A", result.content)
-        self.assertIn("[○] 2. B", result.content)
+        self.assertIn("[V] 1. A", result.content)
+        self.assertIn("[o] 2. B", result.content)
 
     def test_plan_status_all_steps_complete(self):
         execute_tool(
@@ -429,7 +429,7 @@ class TestPlan(unittest.TestCase):
             self.write_gate, self.read_gate,
         )
         execute_tool(_make_tool_call("plan_status", step=1), self.write_gate, self.read_gate)
-        # Mark step 1 again — should succeed without error
+        # Mark step 1 again -- should succeed without error
         result = execute_tool(_make_tool_call("plan_status", step=1), self.write_gate, self.read_gate)
         self.assertTrue(result.success)
         self.assertEqual(_TOOL_CONTEXT._plan_done, {0})
@@ -510,6 +510,121 @@ class TestSessionStatsPlan(unittest.TestCase):
         self.assertIn("Plan:", result.content)
         self.assertIn("1/3", result.content)
 
+
+class TestSessionStatsCache(unittest.TestCase):
+    """Test cache hit/miss, input/output tokens, and cost saving in session_stats."""
+
+    def setUp(self):
+        self.workspace = tempfile.mkdtemp()
+        self.write_gate, self.read_gate = _gates(self.workspace)
+        # Clear any prior cache stats
+        if hasattr(_TOOL_CONTEXT, "_cache_stats"):
+            del _TOOL_CONTEXT._cache_stats
+        _TOOL_CONTEXT._turn_history = {1: "turn 1"}
+        _TOOL_CONTEXT._plan_steps = []
+        _TOOL_CONTEXT._plan_done = set()
+        _TOOL_CONTEXT._agent_runtime = None
+        _TOOL_CONTEXT._provider = "deepseek"
+
+    def tearDown(self):
+        import shutil
+        if hasattr(_TOOL_CONTEXT, "_cache_stats"):
+            del _TOOL_CONTEXT._cache_stats
+        _TOOL_CONTEXT._turn_history = {}
+        _TOOL_CONTEXT._plan_steps = []
+        _TOOL_CONTEXT._plan_done = set()
+        _TOOL_CONTEXT._agent_runtime = None
+        _TOOL_CONTEXT._provider = "deepseek"
+        shutil.rmtree(self.workspace, ignore_errors=True)
+
+    def test_no_cache_stats_shows_baseline_only(self):
+        """Without _cache_stats, session_stats shows turns/context/sub-agents only."""
+        tc = _make_tool_call("session_stats")
+        result = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertTrue(result.success)
+        self.assertIn("Turns used:", result.content)
+        self.assertNotIn("API calls:", result.content)
+        self.assertNotIn("Cache hit rate:", result.content)
+        self.assertNotIn("Cost:", result.content)
+
+    def test_cache_hits_only_shows_100_pct_and_savings(self):
+        """All cached input -> 100% hit rate, cost savings shown."""
+        _TOOL_CONTEXT._cache_stats = {
+            "hits": 50_000, "misses": 0, "calls": 3,
+            "input_tokens": 50_000, "output_tokens": 10_000,
+        }
+        tc = _make_tool_call("session_stats")
+        result = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertTrue(result.success)
+        self.assertIn("Cache hit rate: 100.0%", result.content)
+        self.assertIn("50,000 cached", result.content)
+        self.assertIn("input 50,000 tok", result.content)
+        self.assertIn("output 10,000 tok", result.content)
+        self.assertIn("saved $", result.content)
+        # Cost without cache: 50000 * 0.14/1M = $0.007
+        # With cache:       50000 * 0.014/1M = $0.0007
+        # Savings: $0.0063
+
+    def test_cache_misses_only_shows_0_pct_no_savings(self):
+        """All cache misses -> 0% hit rate, cost line but no savings."""
+        _TOOL_CONTEXT._cache_stats = {
+            "hits": 0, "misses": 30_000, "calls": 2,
+            "input_tokens": 30_000, "output_tokens": 5_000,
+        }
+        tc = _make_tool_call("session_stats")
+        result = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertTrue(result.success)
+        self.assertIn("Cache hit rate: 0.0%", result.content)
+        self.assertIn("0 cached", result.content)
+        self.assertIn("input 30,000 tok", result.content)
+        # No "saved" line because saved=0
+        self.assertNotIn("saved $", result.content)
+        # Cost line should still appear
+        self.assertIn("Cost:", result.content)
+
+    def test_mixed_cache_shows_partial_hit_rate_and_savings(self):
+        """Mixed hits/misses -> correct hit rate, proportional savings."""
+        _TOOL_CONTEXT._cache_stats = {
+            "hits": 20_000, "misses": 10_000, "calls": 4,
+            "input_tokens": 30_000, "output_tokens": 8_000,
+        }
+        tc = _make_tool_call("session_stats")
+        result = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertTrue(result.success)
+        # 20000 / 30000 = 66.666...%
+        self.assertIn("Cache hit rate: 66.7%", result.content)
+        self.assertIn("20,000 cached", result.content)
+        self.assertIn("30,000 tokens", result.content)
+        self.assertIn("saved $", result.content)
+
+    def test_unknown_provider_skips_cost_line(self):
+        """Provider with no pricing -> no Cost line."""
+        _TOOL_CONTEXT._provider = "ollama"  # ollama has 0.0 pricing
+        _TOOL_CONTEXT._cache_stats = {
+            "hits": 5_000, "misses": 5_000, "calls": 1,
+            "input_tokens": 10_000, "output_tokens": 2_000,
+        }
+        tc = _make_tool_call("session_stats")
+        result = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertTrue(result.success)
+        self.assertIn("Cache hit rate:", result.content)
+        self.assertNotIn("Cost:", result.content)
+
+    def test_no_cache_stats_no_api_calls_no_cost(self):
+        """Empty _cache_stats with calls=0 -> API/cache lines suppressed."""
+        _TOOL_CONTEXT._cache_stats = {
+            "hits": 0, "misses": 0, "calls": 0,
+            "input_tokens": 0, "output_tokens": 0,
+        }
+        tc = _make_tool_call("session_stats")
+        result = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertTrue(result.success)
+        self.assertIn("Turns used:", result.content)
+        self.assertNotIn("API calls:", result.content)
+        self.assertNotIn("Cache hit rate:", result.content)
+        self.assertNotIn("Cost:", result.content)
+
+
 class TestTaskStatus(unittest.TestCase):
 
     def setUp(self):
@@ -536,8 +651,9 @@ class TestTaskStatus(unittest.TestCase):
 
     def test_running_task(self):
         """A still-running background task reports 'still running'."""
+        import sys
         proc = subprocess.Popen(
-            ["sleep", "10"],
+            [sys.executable, "-c", "import time; time.sleep(10)"],
             cwd=self.workspace,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -554,8 +670,9 @@ class TestTaskStatus(unittest.TestCase):
 
     def test_completed_task(self):
         """A completed task reports its exit code."""
+        import sys
         proc = subprocess.Popen(
-            ["echo", "done"],
+            [sys.executable, "-c", "print('done')"],
             cwd=self.workspace,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -572,8 +689,9 @@ class TestTaskStatus(unittest.TestCase):
 
     def test_failed_task_reports_exit_code(self):
         """A task that exits non-zero still reports its status."""
+        import sys
         proc = subprocess.Popen(
-            ["sh", "-c", "exit 42"],
+            [sys.executable, "-c", "import sys; sys.exit(42)"],
             cwd=self.workspace,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

@@ -1,16 +1,63 @@
-# Python packages
-exa-py>=2.0
-sentence-transformers>=3.0
+# Python packages for mini_agent
+# ------------------------------------------------
+# Install: pip install -r requirements.txt
+# Tested on Python 3.12, Windows 11
+
+# Core runtime
 requests>=2.20
 tomli>=2.0; python_version < "3.11"
-textual>=1.0
-pyperclip
-numpy>=1.21
-prompt-toolkit>=3.0
-Pygments>=2.0
-playwright>=1.40
-python-lsp-server>=1.14
-flake8>=7.0
-pytest>=9.0
-# System dependencies (brew install / apt-get):
-#   ripgrep (rg) — fast search, used by search_files
+
+# Agent tools
+exa-py>=2.0              # Exa web search (optional, needs EXA_API_KEY)
+numpy>=1.21              # embedding similarity, semantic search
+sentence-transformers>=3.0  # semantic code search (~80MB model, downloads on first use)
+pyperclip                # clipboard access (macOS/Windows)
+textual>=1.0             # terminal UI
+prompt-toolkit>=3.0      # interactive input
+Pygments>=2.0            # syntax highlighting
+playwright>=1.40         # headless browser automation
+python-lsp-server>=1.14  # LSP support (pylsp)
+flake8>=7.0              # Python linting
+
+# Testing
+pytest>=9.0              # test runner
+pytest-timeout>=2.0      # prevents hanging tests (critical on Windows)
+
+# ------------------------------------------------
+# System dependencies (NOT pip-installable):
+#
+#   ripgrep (rg) -- fast search, used by search_files
+#     Windows: winget install BurntSushi.ripgrep.MSVC
+#     Or download from: https://github.com/BurntSushi/ripgrep/releases
+#
+#   Node.js v22+ -- for Electron desktop app
+#     Windows: https://nodejs.org (LTS)
+#
+#   git -- for git tools, branch detection
+#     Windows: winget install Git.Git
+#     Or download from: https://git-scm.com/download/win
+#
+#   Python 3.10+ -- from python.org (NOT the Microsoft Store stub)
+#     Windows: https://www.python.org/downloads/
+#     Check "Add Python to PATH" during install.
+#     Disable App Execution Aliases for python.exe in Windows Settings.
+#
+# ------------------------------------------------
+# Optional: SWE-bench evaluation
+#   pip install datasets    # for loading SWE-bench from HuggingFace
+#   pip install swebench    # for official Docker-based evaluation harness
+
+# ------------------------------------------------
+# Windows notes:
+#
+# - sentence-transformers pulls PyTorch (~2GB for cpu-only).
+#   If you're on a metered connection, consider installing torch manually first:
+#     pip install torch --index-url https://download.pytorch.org/whl/cpu
+#
+# - Playwright browsers are installed separately (handled by setup.bat):
+#     python -m playwright install chromium
+#
+# - Windows Defender real-time scanning can block file reads.
+#   Add your workspace folder to exclusion list if you see timeouts:
+#     Settings > Privacy & Security > Virus & threat protection >
+#     Manage settings > Exclusions > Add folder

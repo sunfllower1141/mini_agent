@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for tools/tool_graph.py — tool dependency and sequencing graph."""
+"""Tests for tools/tool_graph.py -- tool dependency and sequencing graph."""
 
 import os
 import tempfile
@@ -13,9 +13,11 @@ class TestToolGraph:
     def graph(self):
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             db_path = f.name
+        from memory.memory import _close_shared_conn
         tg = ToolGraph(db_path)
         tg.init_schema()
         yield tg
+        _close_shared_conn(db_path)
         os.unlink(db_path)
 
     def test_record_single_transition(self, graph):
@@ -77,7 +79,7 @@ class TestToolGraph:
         assert context is None
 
     def test_read_before_write_detection(self, graph):
-        # Agent about to edit without reading — use a tool not in _READ_TOOLS
+        # Agent about to edit without reading -- use a tool not in _READ_TOOLS
         pending = [{"function": {"name": "edit_file", "arguments": '{"path":"test.py"}'}}]
         recent = ["run_shell"]  # Not a read tool
         warning = graph.detect_read_before_write_gap(pending, recent)
@@ -98,7 +100,7 @@ class TestToolGraph:
 
     def test_no_reads_first_turn_ok(self, graph):
         pending = [{"function": {"name": "edit_file", "arguments": '{"path":"test.py"}'}}]
-        recent = []  # First turn — no history
+        recent = []  # First turn -- no history
         warning = graph.detect_read_before_write_gap(pending, recent)
         assert warning is None  # First turn is fine
 

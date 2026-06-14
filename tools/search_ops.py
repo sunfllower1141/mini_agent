@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-search_ops.py — semantic search and web search tools for mini_agent.
+search_ops.py -- semantic search and web search tools for mini_agent.
 
 Tools: find_symbol, find_usages, semantic_search, web_search
 """
@@ -13,7 +13,13 @@ import re as _re
 import threading
 from typing import Any
 
-_log = logging.getLogger(__name__)
+# Suppress HF Hub warnings about unauthenticated requests at module level.
+# SentenceTransformer loads models from HuggingFace Hub, which emits
+# "You are sending unauthenticated requests to the HF Hub" warnings
+# via X-HF-Warning response headers.  These are harmless for public
+# models (all-MiniLM-L6-v2 is public) but noisy at startup.
+os.environ.setdefault("HF_HUB_VERBOSITY", "error")
+logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
 
 from core.safety import ReadSafetyGate, WriteSafetyGate
 from tools import _register, _summarize, ToolResult, _TOOL_CONTEXT
@@ -21,10 +27,10 @@ from tools.shell_ops import _SKIP_DIRS
 
 
 # ---------------------------------------------------------------------------
-# symbol_index — fast workspace symbol lookup
+# symbol_index -- fast workspace symbol lookup
 # ---------------------------------------------------------------------------
 
-_SYMBOL_INDEX: dict[str, list[dict]] | None = None  # name → [{"path","line","kind"}, ...]
+_SYMBOL_INDEX: dict[str, list[dict]] | None = None  # name -> [{"path","line","kind"}, ...]
 _INDEX_MAX_MTIME: float = 0.0  # max mtime across all .py files from last build
 _INDEX_LAST_PERSIST: float = 0.0  # timestamp of last disk cache write (debounce)
 
@@ -69,9 +75,9 @@ def wait_background_index(timeout: float = 30.0) -> bool:
 
 
 def build_symbol_index(root: str) -> dict[str, list[dict]]:
-    """Scan workspace .py files for def/class lines.  Fast — no parsing, just regex.
+    """Scan workspace .py files for def/class lines.  Fast -- no parsing, just regex.
 
-    Also builds the reference index (_REF_INDEX) in the same pass — no
+    Also builds the reference index (_REF_INDEX) in the same pass -- no
     second file walk needed.  Both indices are cached in memory.
 
     Returns {name: [{"path":..., "line":..., "kind":"def"|"class"}, ...]}.
@@ -88,7 +94,7 @@ def build_symbol_index(root: str) -> dict[str, list[dict]]:
         if os.path.exists(cache_path):
             cache_mtime = os.path.getmtime(cache_path)
     except Exception:
-        _log.debug("_get_symbol_index: cache mtime check failed", exc_info=True)
+        pass
 
     # Fast path: if cache exists and we know no .py file is newer, return cached data
     if cache_mtime > 0.0 and _INDEX_MAX_MTIME > 0.0 and cache_mtime >= _INDEX_MAX_MTIME:
@@ -147,7 +153,7 @@ def build_symbol_index(root: str) -> dict[str, list[dict]]:
             except (OSError, PermissionError):
                 continue
 
-    # If cache was valid and no file was newer, return cached data — already handled
+    # If cache was valid and no file was newer, return cached data -- already handled
     # by the fast path at the top.  Fall through to use the freshly built index.
 
     # Track max mtime so next call can short-circuit the walk
@@ -186,7 +192,7 @@ def build_symbol_index(root: str) -> dict[str, list[dict]]:
             _json.dump({"symbols": symbol_idx, "references": ref_idx}, f)
         os.replace(tmp, cache_path)  # atomic rename
     except Exception:
-        _log.debug("_build_symbol_index: cache write failed", exc_info=True)
+        pass
 
     return symbol_idx
 
@@ -265,7 +271,7 @@ def _reindex_file(filepath: str, root: str) -> None:
             json.dump({"symbols": _SYMBOL_INDEX, "references": _REF_INDEX or {}}, f)
         os.replace(tmp, cache_path)  # atomic rename
     except Exception:
-        _log.debug("_persist_index: cache write failed", exc_info=True)
+        pass
 
 
 def _get_symbol_index(root: str) -> dict[str, list[dict]]:
@@ -290,7 +296,7 @@ def _find_symbol(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolRe
     if name in idx:
         matches = [(name, entries) for name, entries in [(name, idx[name])]]
     else:
-        # Substring search — case-insensitive
+        # Substring search -- case-insensitive
         matches = []
         pattern = _re.compile(_re.escape(name), _re.IGNORECASE)
         for key, entries in idx.items():
@@ -306,7 +312,7 @@ def _find_symbol(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolRe
     lines: list[str] = []
     for sym_name, entries in matches[:20]:
         for e in entries[:5]:
-            lines.append(f"  {e['kind']:5s}  {sym_name}  →  {e['path']}:{e['line']}")
+            lines.append(f"  {e['kind']:5s}  {sym_name}  ->  {e['path']}:{e['line']}")
 
     prefix = f"Found {sum(len(entries) for _, entries in matches)} location(s) for '{name}':"
     return ToolResult(success=True, content=prefix + "\n" + "\n".join(lines))
@@ -334,6 +340,7 @@ _SEM_CACHE_DIRTY = False  # set when store changes, cleared on disk write
 # --- Semantic persistence ---
 _SEM_CACHE_FILE = ".mini_agent_semantic.npz"
 _SEM_META_FILE = ".mini_agent_semantic_meta.json"
+_SEM_MODEL_NAME = "isuruwijesiri/all-MiniLM-L6-v2-code-search-512"
 
 
 def _sem_save_cache(root: str) -> None:
@@ -357,6 +364,9 @@ def _sem_save_cache(root: str) -> None:
 
         meta_path = os.path.join(root, _SEM_META_FILE)
         npz_path = os.path.join(root, _SEM_CACHE_FILE)
+
+        # Embed model name so cache auto-invalidates on model change
+        meta["_model"] = _SEM_MODEL_NAME
 
         # Write meta JSON
         tmp_meta = meta_path + ".tmp"
@@ -385,9 +395,12 @@ def _sem_load_cache(root: str) -> bool:
         return False
 
     try:
-        # Check cache freshness: all cached files must exist and have same mtime
+        # Check cache freshness: model must match and all cached files must exist
         with open(meta_path, "r", encoding="utf-8") as f:
             meta = json.load(f)
+        # Auto-invalidate if embedding model changed
+        if meta.get("_model", "") != _SEM_MODEL_NAME:
+            return False
         stale = False
         for fpath, info in meta.items():
             if not os.path.exists(fpath):
@@ -466,12 +479,12 @@ def _sem_preload() -> None:
 
     Call this at session startup so the model is ready (or nearly ready)
     by the time anyone calls semantic_search.  Safe to call multiple times
-    — subsequent calls are no-ops if the model is already loading or loaded.
+    -- subsequent calls are no-ops if the model is already loading or loaded.
 
-    The preload is non-blocking: _sem_get_model() will still block only if
+    The preload is non-blocking: _sem_get_model() will block only if
     the model hasn't finished loading yet.  But with typical app startup
-    (user typing first query, LLM thinking), the 8s load time hides
-    completely behind the initial turn.
+    (user typing first query, LLM thinking), the load completes behind
+    the initial turn.
     """
     global _SEM_PRELOAD_EVENT, _SEM_PRELOAD_THREAD, _SEM_MODEL
     with _SEM_PRELOAD_LOCK:
@@ -489,20 +502,10 @@ def _sem_preload() -> None:
     def _loader() -> None:
         global _SEM_MODEL
         try:
-            # Suppress huggingface_hub "unauthenticated requests" warning
-            # and tqdm progress bars during model load at startup.
-            import logging
-            logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
-            os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
             from sentence_transformers import SentenceTransformer
-            _SEM_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
-        except Exception as e:
-            import sys as _sys
-            _sys.stderr.write(
-                f"  ⚠ Embedding model preload failed ({e}). "
-                "semantic_search will try again on first use.\n"
-            )
-            _sys.stderr.flush()
+            _SEM_MODEL = SentenceTransformer(_SEM_MODEL_NAME)
+        except Exception:
+            pass  # model load failed -- _sem_get_model() will retry on demand
         finally:
             if event is not None:
                 event.set()
@@ -527,7 +530,7 @@ def _sem_get_model():
     # If a background preload is in progress, wait for it (with timeout)
     if _SEM_PRELOAD_EVENT is not None:
         import sys
-        print('  ⏳ Embedding model still loading (preloaded at startup)...',
+        print('  [WAIT] Embedding model still loading (preloaded at startup)...',
               file=sys.stderr, flush=True)
         if not _SEM_PRELOAD_EVENT.wait(timeout=_SEM_MODEL_TIMEOUT):
             raise TimeoutError(
@@ -536,18 +539,15 @@ def _sem_get_model():
             )
         if _SEM_MODEL is not None:
             return _SEM_MODEL
-        # Preload finished but model is None — load failed silently.
+        # Preload finished but model is None -- load failed silently.
         # Fall through to synchronous load below.
     # Fallback: synchronous load (preload was never called or failed)
     import sys
-    print('  ⏳ Loading embedding model (first use, ~9s)...',
+    print('  [WAIT] Loading embedding model...',
           file=sys.stderr, end='', flush=True)
     try:
-        import logging
-        logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
-        os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
         from sentence_transformers import SentenceTransformer
-        _SEM_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+        _SEM_MODEL = SentenceTransformer(_SEM_MODEL_NAME)
     except Exception as e:
         raise TimeoutError(
             f"Failed to load embedding model: {e}. "
@@ -766,7 +766,7 @@ def _sem_index(root: str) -> None:
     """Build/update in-memory index of .py files.
 
     Single os.walk pass: checks mtimes, indexes changed files for semantic
-    search, AND populates the symbol + reference indices \u2014 no separate
+    search, AND populates the symbol + reference indices -- no separate
     walk needed.  Returns immediately if no .py file mtimes have changed
     since the last build (fast no-op on repeated calls).
     """
@@ -857,7 +857,7 @@ def _sem_index(root: str) -> None:
                 embeddings = model.encode(texts, show_progress_bar=False)
             except (TimeoutError, OSError) as e:
                 import sys
-                print(f"  ⚠ semantic index: model load failed ({e}), "
+                print(f"  WARNING: semantic index: model load failed ({e}), "
                       "skipping semantic encoding. Symbol/reference index still built.",
                       file=sys.stderr, flush=True)
                 _SEMANTIC_STORE[fpath] = (mtime, [])
@@ -913,10 +913,12 @@ def _sem_index(root: str) -> None:
 
 @_register("semantic_search")
 def _semantic_search(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
-    """Hybrid semantic + keyword search with Reciprocal Rank Fusion.
+    """Hybrid semantic + keyword search with Weighted Reciprocal Rank Fusion.
 
-    Combines vector similarity (all-MiniLM-L6-v2) with BM25 keyword matching
-    for best-in-class retrieval. Supports .py, .js, .ts, .jsx, .tsx files.
+    Combines vector similarity (isuruwijesiri/all-MiniLM-L6-v2-code-search-512,
+    fine-tuned on CodeSearchNet) with BM25 keyword matching for best-in-class retrieval.
+    Weights auto-tuned by query type: identifier queries favor BM25, natural
+    language queries favor semantic. Supports .py, .js, .ts, .jsx, .tsx files.
     """
     query = args.get("query", "")
     if not query:
@@ -965,7 +967,7 @@ def _semantic_search(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> To
         for i, cid in enumerate(chunk_ids):
             bm25_scores[i] = _bm25_score(query_tokens, cid)
 
-    # --- Reciprocal Rank Fusion ---
+    # --- Weighted Reciprocal Rank Fusion ---
     # Get rankings from each method (descending by score)
     vec_rank = np.zeros(len(chunk_ids), dtype=np.float64)
     bm25_rank = np.zeros(len(chunk_ids), dtype=np.float64)
@@ -980,8 +982,25 @@ def _semantic_search(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> To
         for rank, idx in enumerate(bm25_order):
             bm25_rank[idx] = 1.0 / (60 + rank + 1)
 
-    # Fuse: equal weight to both methods
-    fused = vec_rank + bm25_rank
+    # Determine query type for adaptive weighting
+    # - Identifier queries (single symbol, camelCase/snake_case) → BM25 heavy
+    # - Natural language queries (multi-word, stopwords present) → semantic heavy
+    # - Default: semantic 0.6 / BM25 0.4 (research: embedding beats BM25 on nDCG)
+    _is_identifier = bool(
+        query and not any(c in query for c in " \t\n")  # single token
+        and not query[0].isupper()  # not a sentence
+    )
+    _has_nl_markers = bool(
+        query and (" " in query or len(query.split()) >= 2)
+    )
+    if _is_identifier and not _has_nl_markers:
+        w_sem, w_bm25 = 0.3, 0.7  # identifier → favor exact keyword match
+    elif _has_nl_markers:
+        w_sem, w_bm25 = 0.7, 0.3  # natural language → favor semantic understanding
+    else:
+        w_sem, w_bm25 = 0.6, 0.4  # balanced default (semantic-favored per benchmarks)
+
+    fused = w_sem * vec_rank + w_bm25 * bm25_rank
     top_indices = np.argsort(fused)[-15:][::-1]  # top 15
 
     # Filter to only results with any signal
@@ -1009,7 +1028,7 @@ def _semantic_search(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> To
         lines.append(f"score={fscore:.3f} [{tag_str}]  {fpath}:{start}-{end}")
         snippet = text[:200].replace("\n", "\\n")
         if len(text) > 200:
-            snippet += "…"
+            snippet += "..."
         lines.append(f"  {snippet}")
 
     return ToolResult(success=True, content="\n".join(lines))
@@ -1033,12 +1052,12 @@ def _semantic_search_bm25_only(query: str) -> ToolResult:
     results.sort(key=lambda x: x[0], reverse=True)
     if not results:
         return ToolResult(success=True, content="No matches found (BM25 only).")
-    lines: list[str] = ["(BM25 keyword search — embedding model unavailable)\n"]
+    lines: list[str] = ["(BM25 keyword search -- embedding model unavailable)\n"]
     for score, fpath, start, end, text in results[:10]:
         lines.append(f"score={score:.3f} [keyword]  {fpath}:{start}-{end}")
         snippet = text[:200].replace("\n", "\\n")
         if len(text) > 200:
-            snippet += "…"
+            snippet += "..."
         lines.append(f"  {snippet}")
     return ToolResult(success=True, content="\n".join(lines))
 
@@ -1048,7 +1067,7 @@ def _semantic_search_summary(args: dict) -> str:
     query = args.get("query", "?")
     preview = query[:60]
     if len(query) > 60:
-        preview += "…"
+        preview += "..."
     return f"semantic_search({preview})"
 
 
@@ -1140,7 +1159,7 @@ def _web_search_ddg(query: str, num: int = 5) -> ToolResult:
         if not results:
             return ToolResult(success=True, content="No results found (DuckDuckGo fallback).")
 
-        lines: list[str] = ["(via DuckDuckGo fallback — no Exa key configured)\n"]
+        lines: list[str] = ["(via DuckDuckGo fallback -- no Exa key configured)\n"]
         for i, r in enumerate(results, 1):
             lines.append(f"{i}. {r['title']}")
             lines.append(f"   {r['url']}")
@@ -1157,12 +1176,12 @@ def _web_search_summary(args: dict) -> str:
     query = args.get("query", "?")
     preview = query[:60]
     if len(query) > 60:
-        preview += "…"
+        preview += "..."
     return f"web_search({preview})"
 
 
 # ---------------------------------------------------------------------------
-# find_usages — cross-reference lookup
+# find_usages -- cross-reference lookup
 # ---------------------------------------------------------------------------
 
 # Reverse index: for each symbol name, all lines where it's referenced
@@ -1171,11 +1190,11 @@ _REF_INDEX: dict[str, list[dict]] | None = None
 
 
 # ---------------------------------------------------------------------------
-# Call graph — structured callers/callees via AST
+# Call graph -- structured callers/callees via AST
 # ---------------------------------------------------------------------------
 
-# call_graph: caller_name → [(callee_name, filepath, line), ...]
-# caller_graph: callee_name → [(caller_name, filepath, line), ...]
+# call_graph: caller_name -> [(callee_name, filepath, line), ...]
+# caller_graph: callee_name -> [(caller_name, filepath, line), ...]
 _CALL_GRAPH: dict[str, list[tuple[str, str, int]]] = {}
 _CALLER_GRAPH: dict[str, list[tuple[str, str, int]]] = {}
 _CALL_GRAPH_BUILT = False
@@ -1186,8 +1205,8 @@ def _build_call_graph(root: str) -> None:
     """Build call and caller graphs from AST analysis of all .py files.
 
     Extracts function/method calls within each def/class body and
-    populates _CALL_GRAPH (caller → callees) and _CALLER_GRAPH
-    (callee → callers). Called lazily on first find_callers/find_callees.
+    populates _CALL_GRAPH (caller -> callees) and _CALLER_GRAPH
+    (callee -> callers). Called lazily on first find_callers/find_callees.
     """
     global _CALL_GRAPH, _CALLER_GRAPH, _CALL_GRAPH_BUILT
     with _CALL_GRAPH_LOCK:
@@ -1282,10 +1301,10 @@ def _find_callers(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolR
     shown = matches[:30]
     lines: list[str] = [f"Found {len(matches)} caller(s) of '{name}':"]
     for callee_name, fpath, line in shown:
-        lines.append(f"  {callee_name}  →  {fpath}:{line}")
+        lines.append(f"  {callee_name}  ->  {fpath}:{line}")
 
     if len(matches) > 30:
-        lines.append(f"  … and {len(matches) - 30} more")
+        lines.append(f"  ... and {len(matches) - 30} more")
 
     return ToolResult(success=True, content="\n".join(lines))
 
@@ -1323,10 +1342,10 @@ def _find_callees(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolR
     shown = matches[:30]
     lines: list[str] = [f"Found {len(matches)} callee(s) of '{name}':"]
     for callee_name, fpath, line in shown:
-        lines.append(f"  {callee_name}  →  {fpath}:{line}")
+        lines.append(f"  {callee_name}  ->  {fpath}:{line}")
 
     if len(matches) > 30:
-        lines.append(f"  … and {len(matches) - 30} more")
+        lines.append(f"  ... and {len(matches) - 30} more")
 
     return ToolResult(success=True, content="\n".join(lines))
 
@@ -1341,7 +1360,7 @@ def _get_ref_index(root: str) -> dict[str, list[dict]]:
     """Return the reference index, building it lazily.
     
     Delegates to _get_symbol_index which builds both the symbol and
-    reference indices in a single workspace walk — no duplicate I/O.
+    reference indices in a single workspace walk -- no duplicate I/O.
     """
     global _REF_INDEX
     if _REF_INDEX is None:
@@ -1406,7 +1425,7 @@ def _find_usages(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolRe
             content=f"No usages found for '{name}' in workspace.",
         )
 
-    # Limit output — context is truncated to 60 chars to keep tool responses
+    # Limit output -- context is truncated to 60 chars to keep tool responses
     # lightweight. Full multi-line context makes sub-agents hit 400 errors.
     shown = matches[:30]
     lines: list[str] = [f"Found {len(matches)} usage(s) of '{name}':"]
@@ -1416,7 +1435,7 @@ def _find_usages(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolRe
         lines.append(f"  {ref['path']}:{ref['line']}  {ctx}")
 
     if len(matches) > 30:
-        lines.append(f"  … and {len(matches) - 30} more")
+        lines.append(f"  ... and {len(matches) - 30} more")
 
     return ToolResult(success=True, content="\n".join(lines))
 
@@ -1427,7 +1446,7 @@ def _find_usages_summary(args: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# recall_turn — retrieve a summary of a past turn
+# recall_turn -- retrieve a summary of a past turn
 # ---------------------------------------------------------------------------
 
 @_summarize("recall_turn")
@@ -1436,7 +1455,7 @@ def _recall_turn_summary(args: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Knowledge graph tools — entity-relationship queries
+# Knowledge graph tools -- entity-relationship queries
 # ---------------------------------------------------------------------------
 
 def _ensure_knowledge_graph(root: str) -> None:
@@ -1478,10 +1497,10 @@ def _find_related(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolR
     for kind, entries in sorted(by_kind.items()):
         lines.append(f"\n  [{kind}] ({len(entries)} edges):")
         for e in entries[:10]:
-            arrow = "→" if e["direction"] == "out" else "←"
+            arrow = "->" if e["direction"] == "out" else "<-"
             lines.append(f"    {arrow} {e['target']}  {e['file']}:{e['line']}")
         if len(entries) > 10:
-            lines.append(f"    … and {len(entries) - 10} more")
+            lines.append(f"    ... and {len(entries) - 10} more")
 
     return ToolResult(success=True, content="\n".join(lines))
 
@@ -1517,16 +1536,16 @@ def _trace_path(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolRes
 
     lines: list[str] = [f"Paths from '{from_name}' to '{to_name}':"]
     for i, path in enumerate(paths[:5], 1):
-        lines.append(f"  Path {i} ({len(path)-1} hops): {' → '.join(path)}")
+        lines.append(f"  Path {i} ({len(path)-1} hops): {' -> '.join(path)}")
     if len(paths) > 5:
-        lines.append(f"  … and {len(paths) - 5} more paths")
+        lines.append(f"  ... and {len(paths) - 5} more paths")
 
     return ToolResult(success=True, content="\n".join(lines))
 
 
 @_summarize("trace_path")
 def _trace_path_summary(args: dict) -> str:
-    return f"trace_path({args.get('from', '?')} → {args.get('to', '?')})"
+    return f"trace_path({args.get('from', '?')} -> {args.get('to', '?')})"
 
 
 @_register("get_subgraph")
@@ -1563,9 +1582,9 @@ def _get_subgraph(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolR
     for kind, edges in sorted(by_kind.items()):
         lines.append(f"\n  [{kind}] ({len(edges)} edges):")
         for e in edges[:8]:
-            lines.append(f"    {e['source']} → {e['target']}  {e['file']}:{e['line']}")
+            lines.append(f"    {e['source']} -> {e['target']}  {e['file']}:{e['line']}")
         if len(edges) > 8:
-            lines.append(f"    … and {len(edges) - 8} more")
+            lines.append(f"    ... and {len(edges) - 8} more")
 
     return ToolResult(success=True, content="\n".join(lines))
 

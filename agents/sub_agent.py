@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-sub_agent.py — sub-agent engine for mini_agent multi-agent support.
+sub_agent.py -- sub-agent engine for mini_agent multi-agent support.
 
 Provides:
-    SubAgentResult  — structured result from a completed sub-agent run
-    AgentRuntime    — thread-safe registry of running sub-agent tasks
-    run_sub_agent   — spawns an isolated agent loop in a background thread
+    SubAgentResult  -- structured result from a completed sub-agent run
+    AgentRuntime    -- thread-safe registry of running sub-agent tasks
+    run_sub_agent   -- spawns an isolated agent loop in a background thread
 
 A sub-agent gets its own message list, tool cache, and scratchpad.
 It shares the parent's workspace, safety gates, and API config.
@@ -43,87 +43,6 @@ _TURN_INTERVAL_COMM_NUDGE = 3        # turns between communication nudges
 
 
 # ---------------------------------------------------------------------------
-# Sub-agent helpers
-# ---------------------------------------------------------------------------
-
-
-def _write_sub_agent_report(
-    task_id: str,
-    task_preview: str,
-    result: "SubAgentResult",
-) -> "SubAgentResult":
-    """Write a sub-agent report to disk and return result with inline preview.
-
-    Writes to reports/<task_id>.md, rotates old reports/logs (keeps 20 each),
-    and replaces result.content with a smart preview that prioritizes
-    findings/markers over preamble.
-    """
-    import os as _os
-    _os.makedirs("reports", exist_ok=True)
-    _label = task_id
-    _path = f"reports/{_label}.md"
-    try:
-        with open(_path, "w", encoding="utf-8") as _f:
-            _f.write(f"# Sub-agent report: {_label}\n\n")
-            _f.write(f"**Task**: {task_preview}\n\n")
-            _f.write(f"**Success**: {result.success}\n")
-            _f.write(f"**Turns**: {result.turns_used}\n")
-            _f.write(f"**Tool calls**: {result.tool_calls_made}\n")
-            if result.error:
-                _f.write(f"**Error**: {result.error}\n\n")
-            _f.write(f"\n## Result\n\n{result.content}\n")
-            if result.scratchpad:
-                _f.write(f"\n## Scratchpad\n\n{result.scratchpad}\n")
-        # Auto-cleanup: keep only the most recent N reports by mtime
-        _MAX_REPORTS = 20
-        _report_dir = "reports"
-        try:
-            _all_reports = sorted(
-                [_os.path.join(_report_dir, f) for f in _os.listdir(_report_dir) if f.endswith(".md")],
-                key=_os.path.getmtime,
-            )
-            for _old in _all_reports[:-_MAX_REPORTS]:
-                _os.remove(_old)
-        except OSError:
-            pass
-        # Auto-cleanup: keep only the most recent N stderr logs by mtime
-        _MAX_LOGS = 20
-        _log_dir = "logs"
-        try:
-            _all_logs = sorted(
-                [_os.path.join(_log_dir, f) for f in _os.listdir(_log_dir) if f.endswith("_stderr.log")],
-                key=_os.path.getmtime,
-            )
-            for _old in _all_logs[:-_MAX_LOGS]:
-                _os.remove(_old)
-        except OSError:
-            pass
-        # Smart inline preview: prioritize findings/structured content over preamble
-        _content = result.content
-        _finding_markers = [
-            "## Findings", "## Issues", "| Severity |", "| File |",
-            "### \u274c CRITICAL", "### \u274c HIGH", "### \U0001f534", "### \U0001f7e1",
-            "**CRITICAL**", "**HIGH**", "| Priority |",
-        ]
-        _best_idx = len(_content)
-        for _marker in _finding_markers:
-            _idx = _content.find(_marker)
-            if _idx != -1 and _idx < _best_idx:
-                _best_idx = _idx
-        _preview_start = 0
-        if _best_idx < len(_content) and _best_idx > 0:
-            _preview_start = max(0, _best_idx - 50)
-            _preview = _content[_preview_start:_preview_start + 500]
-        else:
-            _preview = _content[:300]
-        _truncated = len(_content) > len(_preview) + _preview_start if _best_idx < len(_content) else len(_content) > 300
-        result.content = f"[report: {_path}] {'...' if _best_idx > 50 else ''}{_preview}{'...' if _truncated else ''}"
-    except OSError:
-        pass  # can't write report; return inline as fallback
-    return result
-
-
-# ---------------------------------------------------------------------------
 # Sub-agent loop (runs in a background thread)
 # ---------------------------------------------------------------------------
 
@@ -149,7 +68,7 @@ def run_sub_agent(
     - A fresh messages list (system prompt + task as user message)
     - Its own tool cache
     - Its own _MODIFIED_FILES tracking
-    - Its own scratchpad (in-memory only — no SQLite for sub-agents)
+    - Its own scratchpad (in-memory only -- no SQLite for sub-agents)
 
     Sub-agents CAN spawn further sub-agents up to *max_depth*.
     Current depth is *parent_depth* + 1.  Tools are blocked when at max_depth.
@@ -161,7 +80,7 @@ def run_sub_agent(
         execute_tool, _CACHEABLE, _TOOL_CONTEXT,
     )
 
-    # ── Plan isolation (step 1): save parent plan, give sub-agent clean slate ──
+    # -- Plan isolation (step 1): save parent plan, give sub-agent clean slate --
     _saved_plan_steps = getattr(_TOOL_CONTEXT, '_plan_steps', [])
     _saved_plan_done = getattr(_TOOL_CONTEXT, '_plan_done', set())
     _TOOL_CONTEXT._plan_steps = []
@@ -181,7 +100,7 @@ def run_sub_agent(
 
     # --- build messages for sub-agent ---
     # Sub-agents get a minimal system prompt: behavior rules + essential tools only.
-    # The full tool schema (50+ tools at ~15K tokens) is NOT sent — sub-agents
+    # The full tool schema (50+ tools at ~15K tokens) is NOT sent -- sub-agents
     # only need read_file, write_file, edit_file, search_files, find_symbol,
     # find_usages, list_directory, run_shell, and sub-agent coordination tools.
     # This saves ~15K tokens per sub-agent context.
@@ -208,7 +127,7 @@ def run_sub_agent(
             "role": "system",
             "content": (
                 f"You are at depth {current_depth}/{max_depth}. "
-                "You CANNOT spawn further sub-agents — you are a leaf worker. "
+                "You CANNOT spawn further sub-agents -- you are a leaf worker. "
                 "Complete your task directly."
             ),
         })
@@ -273,11 +192,75 @@ def run_sub_agent(
     import json
     import requests
 
-    # ── Helper: write sub-agent report to file (step 4) ──
+    # -- Helper: write sub-agent report to file (step 4) --
     def _write_report(result: SubAgentResult) -> SubAgentResult:
-        return _write_sub_agent_report(task_id, task[:200], result)
+        import os as _os
+        _os.makedirs("reports", exist_ok=True)
+        _label = task_id  # unique per sub-agent
+        _path = f"reports/{_label}.md"
+        try:
+            with open(_path, "w", encoding="utf-8") as _f:
+                _f.write(f"# Sub-agent report: {_label}\n\n")
+                _f.write(f"**Task**: {task[:200]}\n\n")
+                _f.write(f"**Success**: {result.success}\n")
+                _f.write(f"**Turns**: {result.turns_used}\n")
+                _f.write(f"**Tool calls**: {result.tool_calls_made}\n")
+                if result.error:
+                    _f.write(f"**Error**: {result.error}\n\n")
+                _f.write(f"\n## Result\n\n{result.content}\n")
+                if result.scratchpad:
+                    _f.write(f"\n## Scratchpad\n\n{result.scratchpad}\n")
+            # Auto-cleanup: keep only the most recent N reports by mtime
+            _MAX_REPORTS = 20
+            _report_dir = "reports"
+            try:
+                _all_reports = sorted(
+                    [_os.path.join(_report_dir, f) for f in _os.listdir(_report_dir) if f.endswith(".md")],
+                    key=_os.path.getmtime,
+                )
+                for _old in _all_reports[:-_MAX_REPORTS]:
+                    _os.remove(_old)
+            except OSError:
+                pass  # best-effort cleanup
+            # Auto-cleanup: keep only the most recent N stderr logs by mtime
+            _MAX_LOGS = 20
+            _log_dir = "logs"
+            try:
+                _all_logs = sorted(
+                    [_os.path.join(_log_dir, f) for f in _os.listdir(_log_dir) if f.endswith("_stderr.log")],
+                    key=_os.path.getmtime,
+                )
+                for _old in _all_logs[:-_MAX_LOGS]:
+                    _os.remove(_old)
+            except OSError:
+                pass  # best-effort cleanup
+            # Smart inline preview: prioritize findings/structured content over preamble.
+            # Scan for finding markers; if found, show those. Otherwise fall back to head truncation.
+            _content = result.content
+            _finding_markers = [
+                "## Findings", "## Issues", "| Severity |", "| File |",
+                "### [FAIL] CRITICAL", "### [FAIL] HIGH", "### [RED]", "### [YELLOW]",
+                "**CRITICAL**", "**HIGH**", "| Priority |",
+            ]
+            _best_idx = len(_content)  # fallback: show from start
+            for _marker in _finding_markers:
+                _idx = _content.find(_marker)
+                if _idx != -1 and _idx < _best_idx:
+                    _best_idx = _idx
+            _preview_start = 0
+            if _best_idx < len(_content) and _best_idx > 0:
+                # Found a marker -- show from 50 chars before it, or from start if near beginning
+                _preview_start = max(0, _best_idx - 50)
+                _preview = _content[_preview_start:_preview_start + 500]
+            else:
+                _preview = _content[:300]
+            _truncated = len(_content) > len(_preview) + _preview_start if _best_idx < len(_content) else len(_content) > 300
+            result.content = f"[report: {_path}] {'...' if _best_idx > 50 else ''}{_preview}{'...' if _truncated else ''}"
+        except OSError:
+            pass  # can't write report; return inline as fallback
+        return result
 
-    # ── Helper: build SubAgentResult with current local state ──
+    # -- Helper: build SubAgentResult with current local state --
     def _make_result(success: bool, content: str, error: str | None = None) -> SubAgentResult:
         return SubAgentResult(
             success=success, content=content,
@@ -285,11 +268,11 @@ def run_sub_agent(
             scratchpad=_scratchpad, error=error,
         )
 
-    # main loop — no hard turn cap.  Termination is based on:
+    # main loop -- no hard turn cap.  Termination is based on:
     # cancellation, hung detection, error loops, or reaching the runtime's
     # _ABSOLUTE_MAX_TURNS (default 200, configurable via extend_turns).
     _HUNG_TIMEOUT = 300  # seconds without a tool call before considered hung
-    _ERROR_LOOP_THRESHOLD = 3  # same error fingerprint this many times → stuck
+    _ERROR_LOOP_THRESHOLD = 3  # same error fingerprint this many times -> stuck
     _extension_requested = False
     _last_tool_time = time.monotonic()
     _recent_errors: list[str] = []  # fingerprints of last few errors
@@ -306,7 +289,7 @@ def run_sub_agent(
                 content=f"Sub-agent exhausted absolute safety cap ({_safety_cap} turns).",
                 error="Exhausted safety cap",
             ))
-        # ── Progress detection (step 3): hung check ──
+        # -- Progress detection (step 3): hung check --
         _now = time.monotonic()
         if turn_count > 1 and _now - _last_tool_time > _HUNG_TIMEOUT:
             _restore_plan()
@@ -315,7 +298,7 @@ def run_sub_agent(
                 content=f"Sub-agent hung: no tool calls for {_HUNG_TIMEOUT}s.",
                 error="Hung (no tool calls)",
             ))
-        # ── Progress detection: error loop ──
+        # -- Progress detection: error loop --
         if len(_recent_errors) >= _ERROR_LOOP_THRESHOLD and len(set(_recent_errors[-_ERROR_LOOP_THRESHOLD:])) == 1:
             _restore_plan()
             return _write_report(_make_result(
@@ -323,7 +306,7 @@ def run_sub_agent(
                 content=f"Sub-agent stuck: same error '{_recent_errors[-1]}' {_ERROR_LOOP_THRESHOLD}x consecutively.",
                 error=f"Error loop: {_recent_errors[-1]}",
             ))
-        # Re-read max_turns from runtime (parent may have extended it) — used
+        # Re-read max_turns from runtime (parent may have extended it) -- used
         # only for the soft budget warning, not as a hard cap.
         runtime_ctx = getattr(_TOOL_CONTEXT, "_agent_runtime", None)
         if runtime_ctx is not None and task_id:
@@ -348,9 +331,9 @@ def run_sub_agent(
                     }
                 }, write_gate, read_gate)
             except APIError as exc:
-                print(f"  ⚠ auto-ping failed: {exc}", file=sys.stderr, flush=True)
+                print(f"  WARNING: auto-ping failed: {exc}", file=sys.stderr, flush=True)
             except Exception as exc:
-                print(f"  ⚠ auto-ping failed: {exc}", file=sys.stderr, flush=True)
+                print(f"  WARNING: auto-ping failed: {exc}", file=sys.stderr, flush=True)
 
         if cancel_event is not None and cancel_event.is_set():
             _restore_plan()
@@ -374,7 +357,7 @@ def run_sub_agent(
                 tool_calls_made=tool_calls_made,
             )
 
-        # Call the LLM — stream to TUI subagent pane or stderr if config.stream is set
+        # Call the LLM -- stream to TUI subagent pane or stderr if config.stream is set
         on_token = None
         if config.stream:
             # Accumulator for periodic streaming-snapshot updates
@@ -441,10 +424,10 @@ def run_sub_agent(
                     summary = _summarize_pruned(pruned)
                     if summary:
                         messages.insert(0, {"role": "user", "content": summary})
-            # Always strip orphaned tool messages — pruning can delete
+            # Always strip orphaned tool messages -- pruning can delete
             # assistant(tool_calls) but leave orphaned tool results.
             messages = _strip_orphaned_tool_results(messages)
-            # Clear API message cache — _strip_orphaned_tool_results creates
+            # Clear API message cache -- _strip_orphaned_tool_results creates
             # a new list, and Python may reuse the memory address, causing
             # the cache to serve stale cleaned messages with orphaned tools.
             from api import clear_api_cache
@@ -456,7 +439,7 @@ def run_sub_agent(
                 messages.append({
                     "role": "system",
                     "content": (
-                        f"⚠️ WRAP-UP: You have {_turns_left} turns remaining. "
+                        f"WARNING: WRAP-UP: You have {_turns_left} turns remaining. "
                         "STOP reading files. STOP investigating further. "
                         "You MUST write your findings NOW.\n"
                         "1. Compile all findings you've gathered into a structured report.\n"
@@ -471,7 +454,7 @@ def run_sub_agent(
                 messages.append({
                     "role": "system",
                     "content": (
-                        "⛔ FINAL TURN: You are out of turns. "
+                        "? FINAL TURN: You are out of turns. "
                         "Do NOT call any tools that read files. "
                         "Write your report with whatever findings you have, even if incomplete. "
                         "A partial report is better than no report."
@@ -519,7 +502,6 @@ def run_sub_agent(
                 session=requests,
                 cancel_event=cancel_event,
                 on_token=on_token,
-                turn_count=turn_count,
             )
             config.model = _saved_model
             config.api_key = _saved_key
@@ -575,7 +557,7 @@ def run_sub_agent(
                 error="No response",
             )
 
-        # No tool calls → final answer
+        # No tool calls -> final answer
         tool_calls = msg.get("tool_calls", [])
         if not tool_calls:
             messages.append(msg)
@@ -634,7 +616,7 @@ def run_sub_agent(
                     else:
                         result = execute_tool(tc, write_gate, read_gate)
 
-                    # ── Progress tracking (step 3) ──
+                    # -- Progress tracking (step 3) --
                     _last_tool_time = time.monotonic()
                     if not result.success and result.content:
                         _fingerprint = result.content[:60].strip().lower()
@@ -680,7 +662,7 @@ def run_sub_agent(
             # Append tool result message (truncate oversized content)
             r_content = result.content
             if len(r_content) > _MAX_TOOL_RESULT_CHARS:
-                r_content = r_content[:_MAX_TOOL_RESULT_CHARS] + f"\n… (truncated at {_MAX_TOOL_RESULT_CHARS} chars)"
+                r_content = r_content[:_MAX_TOOL_RESULT_CHARS] + f"\n... (truncated at {_MAX_TOOL_RESULT_CHARS} chars)"
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc["id"],
@@ -737,7 +719,7 @@ def run_sub_agent(
                 if summary:
                     messages.insert(0, {"role": "user", "content": summary})
 
-    # ── Safety cap exhausted (step 3: should only happen if hung/loop detection fails) ──
+    # -- Safety cap exhausted (step 3: should only happen if hung/loop detection fails) --
     _restore_plan()
     return _write_report(_make_result(
         success=False,
@@ -751,7 +733,7 @@ def run_sub_agent(
 # ---------------------------------------------------------------------------
 
 _SUB_AGENT_SYSTEM_PROMPT = (
-    "You are a sub-agent — a worker that completes one specific task "
+    "You are a sub-agent -- a worker that completes one specific task "
     "delegated to you by a parent agent.\n"
     "\n"
     "Behavior:\n"
@@ -759,18 +741,18 @@ _SUB_AGENT_SYSTEM_PROMPT = (
     "- Use tools as needed to complete your work.\n"
     "- When done, produce a concise final answer summarizing what you did, "
     "what files you changed, and any results.\n"
-    "- Do not ask clarifying questions — just do the work and report back.\n"
+    "- Do not ask clarifying questions -- just do the work and report back.\n"
     "- If you encounter an error you cannot fix, report it clearly in your "
     "final answer rather than looping.\n"
     "- Keep your response focused and under 2000 characters.\n"
     "\n"
-    "COMPLETION CRITERIA — You are DONE when:\n"
+    "COMPLETION CRITERIA -- You are DONE when:\n"
     "1. You have WRITTEN your findings/report to disk using write_file.\n"
     "2. Your final message contains a summary table of findings.\n"
     "3. If you cannot complete the full task, write a PARTIAL report with "
     "whatever you have. An incomplete report is always better than nothing.\n"
     "\n"
-    "REPORT FORMAT — For audit/investigation tasks, structure output as:\n"
+    "REPORT FORMAT -- For audit/investigation tasks, structure output as:\n"
     "## Findings\n"
     "| Severity | File | Line | Issue | Fix |\n"
     "|----------|------|------|-------|-----|\n"
@@ -778,34 +760,34 @@ _SUB_AGENT_SYSTEM_PROMPT = (
     "the findings table. This ensures the orchestrator sees results even "
     "if your output is truncated.\n"
     "\n"
-    "SCOUT-THEN-DRILL — When analyzing many files:\n"
+    "SCOUT-THEN-DRILL -- When analyzing many files:\n"
     "1. FIRST: use search_files or find_symbol to identify candidate "
     "files/locations (cheap, 1-2 turns).\n"
     "2. SECOND: read only the 3-5 most relevant files deeply (expensive).\n"
-    "3. THIRD: write findings immediately — do NOT keep reading more files.\n"
+    "3. THIRD: write findings immediately -- do NOT keep reading more files.\n"
     "Never try to read ALL files in a codebase. You will run out of context "
     "and produce nothing.\n"
     "\n"
     "You MAY spawn sub-agents (spawn_agent) to parallelize independent "
     "subtasks. When you do, follow the same orchestrator rules as the "
-    "parent: monitor, collect, and extend — but do NOT duplicate work "
+    "parent: monitor, collect, and extend -- but do NOT duplicate work "
     "you've delegated. Your sub-agents inherit your depth + 1.\n"
     "\n"
     "Communication (you are NOT working in isolation):\n"
-    "- **agent_message** — broadcast progress updates to the orchestrator "
+    "- **agent_message** -- broadcast progress updates to the orchestrator "
     "  and all sibling agents. Use this whenever you start a new phase, "
     "  finish a piece of work, or discover something others might need.\n"
-    "- **agent_inbox** — check your own inbox every turn! The orchestrator "
+    "- **agent_inbox** -- check your own inbox every turn! The orchestrator "
     "  or siblings may have sent you handoffs, coordination messages, or "
-    "  requests. Your task_id is injected below — use it with agent_inbox.\n"
-    "- **agent_handoff** — send typed structured results to specific agents "
+    "  requests. Your task_id is injected below -- use it with agent_inbox.\n"
+    "- **agent_handoff** -- send typed structured results to specific agents "
     "  (or to subscribers). Use 'status.heartbeat' every ~3 turns to tell "
     "  the orchestrator what you're doing (summary, progress, next step). "
     "  Use 'handoff.result' to pass structured output to a sibling that "
     "  needs it.\n"
-    "- **agent_read** — read broadcast messages from siblings and parent "
+    "- **agent_read** -- read broadcast messages from siblings and parent "
     "  (flat broadcast stream, different from your typed inbox).\n"
-    "- **agent_subscribe** — narrow your inbox to specific message types "
+    "- **agent_subscribe** -- narrow your inbox to specific message types "
     "  if you only care about certain handoffs.\n"
     "- **Do not work silently.** The orchestrator cannot see your tool "
     "  output unless you broadcast or handoff. Send a heartbeat every 3 "

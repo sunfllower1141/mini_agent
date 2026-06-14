@@ -15,7 +15,7 @@ import ELK from 'elkjs/lib/elk.bundled.js';
 const elk = new ELK();
 
 /**
- * AgentTree — hierarchical agent visualization using React Flow + elkjs.
+ * AgentTree -- hierarchical agent visualization using React Flow + elkjs.
  *
  * Uses the FLAT graph pattern from the official React Flow elkjs example:
  *   https://reactflow.dev/examples/layout/elkjs
@@ -46,7 +46,7 @@ function AgentNode({ data }) {
   if (isOrchestrator) {
     return (
       <div className="agent-rf-node agent-rf-node--orch">
-        🧠 Orchestrator
+        [BRAIN] Orchestrator
         <Handle type="source" position={Position.Bottom} id="source" />
       </div>
     );
@@ -56,9 +56,9 @@ function AgentNode({ data }) {
   const statusColor = ok === true ? 'var(--green)'
     : ok === false ? 'var(--red)'
     : 'var(--pulse)';
-  const statusIcon = ok === true ? '✓'
-    : ok === false ? '✗'
-    : '●';
+  const statusIcon = ok === true ? 'V'
+    : ok === false ? 'X'
+    : '*';
   const shortName = (agent?.name || '').slice(0, 18);
   const toolCount = agent?.toolCalls?.length || 0;
 
@@ -181,7 +181,7 @@ function AgentTreeInner({ agents }) {
   const prevCountRef = useRef(0);
   const ids = Object.keys(agents);
 
-  // ── Build flat ELK graph and run layout ──────────────────────────
+  // -- Build flat ELK graph and run layout --------------------------
   useEffect(() => {
     if (ids.length === 0) {
       setNodes([]);
@@ -225,7 +225,7 @@ function AgentTreeInner({ agents }) {
         const layoutedGraph = await elk.layout(graph);
         if (cancelled) return;
 
-        // 3. Map ELK nodes → ReactFlow nodes
+        // 3. Map ELK nodes -> ReactFlow nodes
         const layChildren = layoutedGraph.children || [];
         const newNodes = layChildren.map((ln) => ({
           id: ln.id,
@@ -240,7 +240,7 @@ function AgentTreeInner({ agents }) {
           },
         }));
 
-        // 4. Map ELK edges → ReactFlow edges
+        // 4. Map ELK edges -> ReactFlow edges
         const layEdges = layoutedGraph.edges || [];
         const newEdges = ids.map((childId) => {
           const agent = agents[childId];
@@ -294,7 +294,7 @@ function AgentTreeInner({ agents }) {
     return () => { cancelled = true; };
   }, [agents, setNodes, setEdges, fitView, ids.length]);
 
-  // ── Tooltip handlers ────────────────────────────────────────────
+  // -- Tooltip handlers --------------------------------------------
   const handleNodeMouseEnter = useCallback(
     (event, node) => {
       if (node.data?.isOrchestrator) return;
@@ -319,7 +319,7 @@ function AgentTreeInner({ agents }) {
     setTooltipPos(null);
   }, []);
 
-  // ── Render ──────────────────────────────────────────────────────
+  // -- Render ------------------------------------------------------
   if (ids.length === 0) {
     return (
       <div className="agent-tree-empty">
@@ -363,7 +363,7 @@ function AgentTreeInner({ agents }) {
           fontFamily: 'monospace', padding: '2px 6px', borderRadius: 4,
         }}>
           agents:{debugInfo.agentCount} nodes:{debugInfo.nodeCount} edges:{debugInfo.edgeCount}
-          {debugInfo.error ? ` ⚠️${debugInfo.error}` : ''}
+          {debugInfo.error ? ` WARNING:${debugInfo.error}` : ''}
         </div>
       )}
     </>

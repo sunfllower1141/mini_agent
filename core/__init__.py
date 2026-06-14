@@ -4,7 +4,7 @@ This __init__.py is intentionally minimal to avoid circular imports.
 Import specific submodules directly (e.g. ``from core.config import AgentConfig``).
 """
 
-# Re-export nothing at module level — import submodules directly.
+# Re-export nothing at module level -- import submodules directly.
 # The following are lazy-loaded convenience accessors for external code.
 # Internal code should import submodules directly.
 

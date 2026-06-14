@@ -1,4 +1,4 @@
-"""Tests for api.py — LLM API communication, truncation, cleaning, error handling."""
+"""Tests for api.py -- LLM API communication, truncation, cleaning, error handling."""
 
 from __future__ import annotations
 
@@ -28,7 +28,6 @@ class _MockConfig:
         self.api_key = overrides.get("api_key", "test-key")
         self.api_url = overrides.get("api_url", "https://api.test.com/v1")
         self.model = overrides.get("model", "test-model")
-        self.routing_model = overrides.get("routing_model", "")
         self.max_tokens = overrides.get("max_tokens", 4096)
         self.context_window = overrides.get("context_window", 32000)
         self.stream = overrides.get("stream", False)
@@ -57,18 +56,18 @@ class TestTruncateContent(unittest.TestCase):
     def test_long_content_truncated_with_ellipsis(self):
         content = "a" * 400
         result = truncate_content(content, max_len=300)
-        self.assertEqual(len(result), 301)  # 300 + "…"
-        self.assertTrue(result.endswith("…"))
+        self.assertEqual(len(result), 303)  # 300 + "..."
+        self.assertTrue(result.endswith("..."))
 
     def test_default_max_len_is_300(self):
         content = "a" * 500
         result = truncate_content(content)
-        self.assertEqual(len(result), 301)
+        self.assertEqual(len(result), 303)
 
     def test_custom_max_len(self):
         content = "a" * 100
         result = truncate_content(content, max_len=50)
-        self.assertEqual(len(result), 51)  # 50 + "…"
+        self.assertEqual(len(result), 53)  # 50 + "..."
 
     def test_empty_string(self):
         self.assertEqual(truncate_content(""), "")
@@ -91,13 +90,13 @@ class TestFormatToolDetail(unittest.TestCase):
         from tools import ToolResult
         result = ToolResult(success=True, content="a" * 500)
         detail = format_tool_detail(result)
-        self.assertEqual(len(detail), 301)
+        self.assertEqual(len(detail), 303)
 
     def test_default_max_len_300(self):
         from tools import ToolResult
         result = ToolResult(success=False, content="b" * 400)
         detail = format_tool_detail(result)
-        self.assertEqual(len(detail), 301)
+        self.assertEqual(len(detail), 303)
 
 
 # ---------------------------------------------------------------------------
@@ -218,7 +217,7 @@ class TestStripOrphanedToolCalls(unittest.TestCase):
             {"role": "assistant", "content": None, "tool_calls": [
                 {"id": "tc1", "function": {"name": "read_file"}}
             ]},
-            # No tool result for tc1 — and no user/system message after it
+            # No tool result for tc1 -- and no user/system message after it
         ]
         result = _strip_orphaned_tool_calls(msgs)
         self.assertEqual(len(result), 1)  # only the first user msg
@@ -226,7 +225,7 @@ class TestStripOrphanedToolCalls(unittest.TestCase):
 
     def test_user_message_after_tool_call_is_stripped(self):
         # An assistant(tool_calls) with no matching tool results is orphaned
-        # regardless of intervening user messages — leaving it in causes a 400.
+        # regardless of intervening user messages -- leaving it in causes a 400.
         msgs = [
             {"role": "user", "content": "read file"},
             {"role": "assistant", "content": None, "tool_calls": [
@@ -250,7 +249,7 @@ class TestStripOrphanedToolCalls(unittest.TestCase):
             {"role": "assistant", "tool_calls": [
                 {"id": "tc2", "function": {"name": "write_file"}}
             ]},
-            # tc2 has no tool result — orphaned
+            # tc2 has no tool result -- orphaned
         ]
         result = _strip_orphaned_tool_calls(msgs)
         # Should strip the last assistant (orphaned tc2)
@@ -335,30 +334,6 @@ class TestBuildPayload(unittest.TestCase):
         self.assertIn("tools", payload)
         self.assertIn("stream", payload)
         self.assertIn("max_tokens", payload)
-
-    def test_routing_model_used_for_simple_prompts(self):
-        config = _MockConfig(
-            api_provider="deepseek",
-            model="big-model",
-            routing_model="small-model",
-        )
-        simple_msgs = [{"role": "user", "content": "what does this do?"}]
-        clean = [_clean_message(m, i) for i, m in enumerate(simple_msgs)]
-        with patch("api.get_active_tools", return_value=[]):
-            payload = _build_payload(config, simple_msgs, clean)
-        self.assertEqual(payload["model"], "small-model")
-
-    def test_main_model_used_for_complex_prompts(self):
-        config = _MockConfig(
-            api_provider="deepseek",
-            model="big-model",
-            routing_model="small-model",
-        )
-        complex_msgs = [{"role": "user", "content": "write a new module"}]
-        clean = [_clean_message(m, i) for i, m in enumerate(complex_msgs)]
-        with patch("api.get_active_tools", return_value=[]):
-            payload = _build_payload(config, complex_msgs, clean)
-        self.assertEqual(payload["model"], "big-model")
 
 
 # ---------------------------------------------------------------------------

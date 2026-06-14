@@ -1,9 +1,9 @@
 /* ==========================================================================
-   style.css — themeable styles for mini_agent Electron
+   style.css -- themeable styles for mini_agent Electron
    ========================================================================== */
 
 /* ---------------------------------------------------------------------------
-   CSS Variables — two themes: dark (default) + light
+   CSS Variables -- two themes: dark (default) + light
    --------------------------------------------------------------------------- */
 :root {
   --font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Cascadia Code',
@@ -53,7 +53,7 @@
   --overlay:        #f6f6f6;
 }
 
-/* ── Dracula ─────────────────────────────────────────────────────────────── */
+/* -- Dracula --------------------------------------------------------------- */
 [data-theme="dracula"] {
   --bg:             #282a36;
   --bg-rgb:         40, 42, 54;
@@ -73,7 +73,7 @@
   --overlay:        #21222c;
 }
 
-/* ── Nord ────────────────────────────────────────────────────────────────── */
+/* -- Nord ------------------------------------------------------------------ */
 [data-theme="nord"] {
   --bg:             #2e3440;
   --bg-rgb:         46, 52, 64;
@@ -93,7 +93,7 @@
   --overlay:        #2e3440;
 }
 
-/* ── Catppuccin Mocha ───────────────────────────────────────────────────── */
+/* -- Catppuccin Mocha ----------------------------------------------------- */
 [data-theme="catppuccin"] {
   --bg:             #1e1e2e;
   --bg-rgb:         30, 30, 46;
@@ -113,7 +113,7 @@
   --overlay:        #1e1e2e;
 }
 
-/* ── Rosé Pine ───────────────────────────────────────────────────────────── */
+/* -- Rose Pine ------------------------------------------------------------- */
 [data-theme="rose-pine"] {
   --bg:             #191724;
   --bg-rgb:         25, 23, 36;
@@ -133,7 +133,7 @@
   --overlay:        #191724;
 }
 
-/* ── Gruvbox Dark ────────────────────────────────────────────────────────── */
+/* -- Gruvbox Dark ---------------------------------------------------------- */
 [data-theme="gruvbox"] {
   --bg:             #282828;
   --bg-rgb:         40, 40, 40;
@@ -153,7 +153,7 @@
   --overlay:        #282828;
 }
 
-/* ── Solarized Dark ──────────────────────────────────────────────────────── */
+/* -- Solarized Dark -------------------------------------------------------- */
 [data-theme="solarized"] {
   --bg:             #002b36;
   --bg-rgb:         0, 43, 54;
@@ -173,7 +173,7 @@
   --overlay:        #002b36;
 }
 
-/* ── Tokyo Night ─────────────────────────────────────────────────────────── */
+/* -- Tokyo Night ----------------------------------------------------------- */
 [data-theme="tokyo-night"] {
   --bg:             #1a1b26;
   --bg-rgb:         26, 27, 38;
@@ -193,7 +193,7 @@
   --overlay:        #1a1b26;
 }
 
-/* ── Monokai ─────────────────────────────────────────────────────────────── */
+/* -- Monokai --------------------------------------------------------------- */
 [data-theme="monokai"] {
   --bg:             #272822;
   --bg-rgb:         39, 40, 34;
@@ -249,6 +249,15 @@ html, body {
   font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.02em;
+}
+
+#header-model.clickable {
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition: opacity 0.15s;
+}
+#header-model.clickable:hover {
+  opacity: 0.75;
 }
 
 /* ---------------------------------------------------------------------------
@@ -317,7 +326,7 @@ html, body {
 }
 
 /* ---------------------------------------------------------------------------
-   Rounded frames — hide the ASCII border cruft, use CSS borders instead
+   Rounded frames -- hide the ASCII border cruft, use CSS borders instead
    --------------------------------------------------------------------------- */
 .rounded-frame {
   display: flex;
@@ -383,7 +392,7 @@ html, body {
 .log::-webkit-scrollbar-thumb:hover { background: var(--dim); }
 
 /* ---------------------------------------------------------------------------
-   Agent Tree — 2D tree visualization
+   Agent Tree -- 2D tree visualization
    --------------------------------------------------------------------------- */
 .agent-tree-container {
   flex: 1;
@@ -407,7 +416,7 @@ html, body {
   min-height: 0;
 }
 
-/* ── React Flow custom node cards ─────────────────────────── */
+/* -- React Flow custom node cards --------------------------- */
 .agent-rf-node {
   display: flex;
   align-items: center;
@@ -425,7 +434,7 @@ html, body {
   position: relative;
 }
 
-/* React Flow handles — theme-aware */
+/* React Flow handles -- theme-aware */
 .agent-rf-node .react-flow__handle {
   width: 8px;
   height: 8px;
@@ -492,7 +501,7 @@ html, body {
   text-align: right;
 }
 
-/* React Flow controls theming — higher-specificity selectors avoid !important */
+/* React Flow controls theming -- higher-specificity selectors avoid !important */
 #agent-tree-panel .react-flow__controls {
   background: var(--bg);
   border: 1px solid var(--border);
@@ -540,7 +549,7 @@ html, body {
   font-size: 12px;
 }
 
-/* ─── Tooltip ─────────────────────────────────────────────────── */
+/* --- Tooltip --------------------------------------------------- */
 .agent-tree-tooltip {
   position: absolute;
   z-index: 50;
@@ -634,6 +643,22 @@ html, body {
   transition: border-color 0.15s ease;
 }
 
+/* Pulsating border when agent is running */
+#input-frame.live {
+  animation: inputPulse 2s ease-in-out infinite;
+}
+
+@keyframes inputPulse {
+  0%, 100% {
+    border-color: var(--border);
+    box-shadow: 0 0 0 0 rgb(var(--accent-rgb) / 0);
+  }
+  50% {
+    border-color: var(--accent);
+    box-shadow: 0 0 10px rgb(var(--accent-rgb) / 0.18);
+  }
+}
+
 #input-frame:focus-within {
   border-color: var(--accent);
 }
@@ -689,7 +714,6 @@ html, body {
    Status bar
    --------------------------------------------------------------------------- */
 .status-bar {
-  position: relative;
   display: flex;
   align-items: center;
   gap: 0;
@@ -701,7 +725,6 @@ html, body {
 }
 
 .status-bar span { margin-right: 12px; }
-.status-bar button { margin-right: 12px; }
 
 .status-right {
   margin-left: auto;
@@ -725,13 +748,6 @@ html, body {
   opacity: 0.6;
   transition: opacity 0.15s;
   position: relative;
-  display: inline-flex;
-  align-items: center;
-  background: none;
-  border: none;
-  padding: 0;
-  font: inherit;
-  color: inherit;
 }
 #theme-toggle:hover {
   opacity: 1;
@@ -739,10 +755,7 @@ html, body {
 
 /* Theme picker dropdown */
 .theme-dropdown {
-  position: absolute;
-  bottom: 100%;
-  right: 0;
-  margin-bottom: 6px;
+  position: fixed;
   background: var(--overlay);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -774,18 +787,10 @@ html, body {
 }
 
 .theme-icon {
+  font-size: 14px;
   flex-shrink: 0;
   width: 20px;
   text-align: center;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* Inline SVG icons — align with text baseline */
-.svg-icon {
-  vertical-align: middle;
-  flex-shrink: 0;
 }
 
 .theme-name {
@@ -796,6 +801,101 @@ html, body {
   color: var(--accent);
   font-size: 11px;
   flex-shrink: 0;
+}
+
+/* Model picker dropdown (in header) */
+.model-dropdown {
+  position: fixed;
+  background: var(--overlay);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-width: 240px;
+  max-height: 400px;
+  overflow-y: auto;
+  z-index: 100;
+  box-shadow: 0 4px 16px rgb(var(--bg-rgb) / 0.9);
+  padding: 4px 0;
+  animation: tooltipFadeIn 0.12s ease-out;
+  -webkit-app-region: no-drag;
+}
+.model-dropdown-header {
+  padding: 6px 12px 2px;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.7;
+}
+.model-dropdown-expandable {
+  cursor: pointer;
+  padding: 7px 12px;
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+  opacity: 1;
+}
+.model-dropdown-expandable:hover {
+  background: rgb(var(--accent-rgb) / 0.06);
+}
+.model-expand-arrow {
+  display: inline-block;
+  width: 14px;
+  font-size: 9px;
+  margin-right: 2px;
+}
+.model-dropdown-item {
+  padding: 5px 12px;
+  cursor: pointer;
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 0.1s;
+  -webkit-app-region: no-drag;
+}
+.model-dropdown-item:hover {
+  background: rgb(var(--accent-rgb) / 0.08);
+}
+.model-dropdown-item.model-current {
+  color: var(--accent);
+}
+.model-name {
+  flex: 1;
+}
+.model-id {
+  font-size: 10px;
+  opacity: 0.5;
+}
+.model-check {
+  color: var(--accent);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.model-dropdown-section {
+  margin-bottom: 2px;
+}
+.model-dropdown-section-header {
+  padding: 8px 12px 4px;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  opacity: 0.8;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 2px;
+}
+.model-dropdown-subheader {
+  padding: 4px 12px 1px;
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 500;
+  opacity: 0.5;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 /* ---------------------------------------------------------------------------
@@ -946,7 +1046,7 @@ html, body {
 .msg-thinking { color: var(--thinking); }
 .msg-agent-pending { min-height: 1em; }
 
-/* Code blocks — unified styling (Shiki + plain) */
+/* Code blocks -- unified styling (Shiki + plain) */
 .code-block {
   margin: 0.5em 0;
   padding: 0.75em 1em;
@@ -990,7 +1090,7 @@ html, body {
 
 /* Plain tool output */
 .tool-out { margin: 2px 0 4px 0; font-size: 0.82em; overflow-x: auto; white-space: pre-wrap; }
-/* Shiki output wrapper — ensure the pre inside renders correctly */
+/* Shiki output wrapper -- ensure the pre inside renders correctly */
 .shiki-wrapper {
   overflow-x: auto;
 }
@@ -1164,7 +1264,7 @@ html, body {
   50% { opacity: 0.4; }
 }
 
-/* Sub-agent thought streaming — each new chunk fades + slides up */
+/* Sub-agent thought streaming -- each new chunk fades + slides up */
 @keyframes thoughtPop {
   from { opacity: 0; transform: translateY(4px); filter: blur(1px); }
   to   { opacity: 1; transform: translateY(0);    filter: blur(0); }
@@ -1173,7 +1273,7 @@ html, body {
 .thought-chunk {
   animation: thoughtPop 0.35s ease-out;
 }
-/* Only the last chunk gets the pop — earlier ones are static */
+/* Only the last chunk gets the pop -- earlier ones are static */
 .thought-chunk:not(:last-child) {
   animation: none;
 }
@@ -1189,7 +1289,7 @@ html, body {
 ::selection { background: var(--accent); color: var(--bg); }
 
 /* ---------------------------------------------------------------------------
-   Shiki syntax highlighter — inherit tool-pane background, no boxes
+   Shiki syntax highlighter -- inherit tool-pane background, no boxes
    --------------------------------------------------------------------------- */
 .shiki {
   background: transparent !important;
@@ -1199,13 +1299,13 @@ html, body {
   background: transparent !important;
 }
 
-/* Wrapper around all Shiki-highlighted blocks — ensure nothing sneaks through */
+/* Wrapper around all Shiki-highlighted blocks -- ensure nothing sneaks through */
 .shiki-block {
   background: transparent !important;
 }
 
 /* ==========================================================================
-   Settings Panel — First-run API key configuration overlay
+   Settings Panel -- First-run API key configuration overlay
    ========================================================================== */
 
 #settings-overlay {

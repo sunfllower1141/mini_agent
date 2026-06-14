@@ -66,7 +66,7 @@ def start_server():
 
 def test(label, result, expect_success=True):
     status = "PASS" if result.success == expect_success else "FAIL"
-    marker = "✅" if result.success == expect_success else "❌"
+    marker = "[OK]" if result.success == expect_success else "[FAIL]"
     print(f"  {marker} {status}: {label}")
     if not result.success:
         print(f"       content: {result.content[:120]}")
@@ -78,8 +78,8 @@ def main():
     all_pass = True
     print(f"Server at {url}\n")
 
-    # 1. open_url (mock — don't open real browser)
-    print("─── open_url ───")
+    # 1. open_url (mock -- don't open real browser)
+    print("--- open_url ---")
     from unittest.mock import patch
     with patch("webbrowser.open", return_value=True):
         all_pass &= test("Opens valid URL",
@@ -91,7 +91,7 @@ def main():
     print()
 
     # 2. browser_navigate
-    print("─── browser_navigate ───")
+    print("--- browser_navigate ---")
     all_pass &= test("Navigates to homepage",
                      _browser_navigate({"url": url}, None, None))
     all_pass &= test("Navigates to page 2",
@@ -101,7 +101,7 @@ def main():
     print()
 
     # 3. browser_snapshot
-    print("─── browser_snapshot ───")
+    print("--- browser_snapshot ---")
     _browser_navigate({"url": url}, None, None)
     snap = _browser_snapshot({}, None, None)
     all_pass &= test("Captures interactive elements", snap)
@@ -109,7 +109,7 @@ def main():
     print()
 
     # 4. browser_click
-    print("─── browser_click ───")
+    print("--- browser_click ---")
     # Re-navigate to reset page state
     _browser_navigate({"url": url}, None, None)
     all_pass &= test("Clicks button 'Login'",
@@ -119,7 +119,7 @@ def main():
     print()
 
     # 5. browser_type
-    print("─── browser_type ───")
+    print("--- browser_type ---")
     _browser_navigate({"url": url}, None, None)
     all_pass &= test("Types into textbox 'Search'",
                      _browser_type(
@@ -130,7 +130,7 @@ def main():
     print()
 
     # 6. browser_screenshot
-    print("─── browser_screenshot ───")
+    print("--- browser_screenshot ---")
     _browser_navigate({"url": url}, None, None)
     shot_path = "browser_validation_screenshot.png"
     result = _browser_screenshot({"path": shot_path}, None, None)
@@ -140,18 +140,18 @@ def main():
         print(f"       File size: {size} bytes")
         all_pass &= (size > 0)
         if size > 0:
-            print("  ✅ PASS: Screenshot > 0 bytes")
+            print("  [OK] PASS: Screenshot > 0 bytes")
         else:
-            print("  ❌ FAIL: Screenshot is empty")
+            print("  [FAIL] FAIL: Screenshot is empty")
     _close_browser()
 
     # Summary
     print()
     print("=" * 50)
     if all_pass:
-        print("ALL TESTS PASSED ✅")
+        print("ALL TESTS PASSED [OK]")
     else:
-        print("SOME TESTS FAILED ❌")
+        print("SOME TESTS FAILED [FAIL]")
     print("=" * 50)
     return 0 if all_pass else 1
 

@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-server.py — JSON-lines backend server for the mini_agent Electron app.
+server.py -- JSON-lines backend server for the mini_agent Electron app.
 
 Communicates with the Electron main process via stdin/stdout using
 JSON-lines protocol. Each line is a complete JSON object.
 
-Protocol (Electron → Python):
+Protocol (Electron -> Python):
   {"type": "submit",    "text": "user message"}
   {"type": "command",   "command": "/clear"}
   {"type": "cancel"}
   {"type": "get_status"}
   {"type": "shutdown"}
 
-Protocol (Python → Electron):
+Protocol (Python -> Electron):
   {"type": "ready",     "model": "...", "workspace": "...", ...}
   {"type": "token",     "text": "..."}
   {"type": "thinking_start"}
@@ -27,17 +27,14 @@ Protocol (Python → Electron):
 from __future__ import annotations
 
 import json
-import logging
 import os
 import subprocess
 import sys
 import threading
 
-_log = logging.getLogger(__name__)
-
 # ---------------------------------------------------------------------------
 # Windows: force UTF-8 for all I/O.  Without this, Python defaults to the
-# system codepage (cp1252) and Unicode characters like → (U+2192) or ☾ (U+263E)
+# system codepage (cp1252) and Unicode characters like -> (U+2192) or [MOON] (U+263E)
 # raise 'charmap' codec can't encode errors when written to stdout/stderr.
 # PYTHONUTF8=1 is the simplest fix (Python 3.7+) and also makes subprocess
 # calls inherit UTF-8 encoding when text=True is used.
@@ -49,7 +46,7 @@ if sys.platform == "win32":
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
         except Exception:
-            _log.debug("server: stdio reconfigure failed", exc_info=True)
+            pass
 
 # Ensure the parent mini_agent package is importable.
 # main.js spawns us with cwd = mini_agent root, so cwd is the right path.
@@ -63,14 +60,13 @@ if _parent not in sys.path:
 
 from core.config import (
     resolve_workspace, init_session, parse_args,
-    _is_remote_workspace, _try_with_timeout,
+    _is_remote_workspace, _try_with_timeout, _switch_to_provider,
 )
 from core.llm import run_agent_turn
 from stream import THINKING_START, THINKING_END
 from core.safety import ReadSafetyGate, WriteSafetyGate
-from core.prompt import build_system_prompt, build_startup_context
+from core.prompt import build_system_prompt, build_startup_context, build_session_header
 from api import clear_api_cache
-from emoji_svg import clean_text
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +74,41 @@ from emoji_svg import clean_text
 # ---------------------------------------------------------------------------
 
 _stdout_lock = threading.Lock()
+
+# ---------------------------------------------------------------------------
+# Heartbeat -- prevents the Electron watchdog from killing the backend during
+# long-running blocking operations (e.g. 5-min run_shell, slow API calls).
+# A daemon thread writes {"type":"heartbeat"} to stdout every 30 seconds.
+# If ALL threads are deadlocked (including this one), heartbeats stop and
+# the watchdog correctly fires.  If the backend is just busy, heartbeats
+# keep coming and the watchdog stays quiet.
+# ---------------------------------------------------------------------------
+_HEARTBEAT_INTERVAL = 30  # seconds
+
+def _start_heartbeat(stop_event: threading.Event) -> threading.Thread:
+    """Start a daemon thread that sends heartbeat messages to stdout.
+
+    Args:
+        stop_event: Set this event to stop the heartbeat thread cleanly.
+
+    Returns:
+        The started thread (daemon=True, so it won't block process exit).
+    """
+    import time as _time
+
+    def _loop() -> None:
+        while not stop_event.wait(_HEARTBEAT_INTERVAL):
+            try:
+                send_msg({"type": "heartbeat"})
+            except Exception:
+                # If stdout is broken, we can't do anything useful.
+                # The watchdog will detect this and restart the backend.
+                break
+
+    t = threading.Thread(target=_loop, daemon=True, name="heartbeat")
+    t.start()
+    return t
+
 
 def send_msg(msg: dict) -> None:
     """Write a JSON message to stdout followed by newline, then flush.
@@ -93,6 +124,7 @@ def send_msg(msg: dict) -> None:
 
 def read_msg() -> dict | None:
     """Read one JSON message from stdin. Returns None on EOF/error."""
+    line = None
     try:
         line = sys.stdin.readline()
         if not line:
@@ -107,7 +139,7 @@ def read_msg() -> dict | None:
         # flushPending() and an IPC handler producing an interleaved line.
         # Show the raw line (truncated) so we can diagnose.
         import sys as _sys
-        raw_preview = repr(line)[:120]
+        raw_preview = repr(line)[:120] if line is not None else '<no line>'
         print(f"[server] Ignoring stdin parse error ({raw_preview}): {e}", file=_sys.stderr, flush=True)
         return None
 
@@ -131,40 +163,40 @@ class StreamCallbacks:
             self._in_thinking = False
             send_msg({"type": "thinking_end"})
             return
-        send_msg({"type": "token", "text": clean_text(text)})
+        send_msg({"type": "token", "text": text})
 
     def on_tool_start(self, summary: str, parallel: bool = False) -> None:
-        send_msg({"type": "tool_start", "summary": clean_text(summary), "parallel": parallel})
+        send_msg({"type": "tool_start", "summary": summary, "parallel": parallel})
 
     def on_tool_end(self, ok: bool, detail: str, turn_id: int = 0, diff_preview=None, content: str = "") -> None:
-        send_msg({"type": "tool_end", "ok": ok, "detail": clean_text(detail), "content": clean_text(content)})
+        send_msg({"type": "tool_end", "ok": ok, "detail": detail, "content": content})
 
     def on_tool_output(self, line: str, turn_id: int = 0) -> None:
-        send_msg({"type": "tool_output", "line": clean_text(line)})
+        send_msg({"type": "tool_output", "line": line})
 
     # -- sub-agent events (wired to _TOOL_CONTEXT._subagent_callback) --
 
     def on_subagent_start(self, task_id: str, parent_id: str, name: str, desc: str) -> None:
-        send_msg({"type": "subagent_start", "task_id": task_id, "parent_id": parent_id, "name": name, "desc": clean_text(desc)})
+        send_msg({"type": "subagent_start", "task_id": task_id, "parent_id": parent_id, "name": name, "desc": desc})
 
     def on_subagent_output(self, task_id: str, line: str) -> None:
-        send_msg({"type": "subagent_output", "task_id": task_id, "line": clean_text(line)})
+        send_msg({"type": "subagent_output", "task_id": task_id, "line": line})
 
     def on_subagent_end(self, task_id: str, ok: bool, content: str) -> None:
-        send_msg({"type": "subagent_end", "task_id": task_id, "ok": ok, "content": clean_text(content[:500])})
+        send_msg({"type": "subagent_end", "task_id": task_id, "ok": ok, "content": content[:500]})
 
     def on_subagent_tool_start(self, task_id: str, tool_name: str, tool_args: str) -> None:
         send_msg({"type": "subagent_tool_start", "task_id": task_id, "tool_name": tool_name, "tool_args": tool_args})
 
     def on_subagent_tool_end(self, task_id: str, tool_name: str, ok: bool, content: str) -> None:
-        send_msg({"type": "subagent_tool_end", "task_id": task_id, "tool_name": tool_name, "ok": ok, "content": clean_text(content[:500])})
+        send_msg({"type": "subagent_tool_end", "task_id": task_id, "tool_name": tool_name, "ok": ok, "content": content[:500]})
 
     def on_subagent_thought(self, task_id: str, text: str) -> None:
-        send_msg({"type": "subagent_thought", "task_id": task_id, "text": clean_text(text)})
+        send_msg({"type": "subagent_thought", "task_id": task_id, "text": text})
 
 
 # ---------------------------------------------------------------------------
-# Agent runner — runs in a background thread so the main thread can accept
+# Agent runner -- runs in a background thread so the main thread can accept
 # cancel messages and new input while a turn is in progress.
 # ---------------------------------------------------------------------------
 
@@ -178,7 +210,7 @@ class AgentRunner:
         # operations (symbol index, LSP) inside init_session so the
         # backend doesn't hang at startup.
         if _is_remote_workspace(workspace):
-            print(f"[server] Remote workspace detected: {workspace} — using local DB and skipping index scan",
+            print(f"[server] Remote workspace detected: {workspace} -- using local DB and skipping index scan",
                   file=sys.stderr, flush=True)
 
         cli = parse_args()
@@ -196,18 +228,13 @@ class AgentRunner:
         self._turn_thread: threading.Thread | None = None
         self._total_turns = 0
         self._total_tokens = 0
-        self._total_prompt_tokens = 0
-        self._total_completion_tokens = 0
-
-        # Read context window from config (provider defaults: V4-Pro 1M, R1 64K, etc.)
-        self._context_window = getattr(self.config, "context_window", 131072) or 131072
         self._input_queue: list[str] = []
         self._input_lock = threading.Lock()
         self._callbacks = StreamCallbacks()
 
         # Sub-agent auto-report tracking:
-        #   _pending_subagents  – set of task_ids spawned during the current turn.
-        #   _auto_report_flag   – prevents double-queuing a synthesis prompt.
+        #   _pending_subagents  - set of task_ids spawned during the current turn.
+        #   _auto_report_flag   - prevents double-queuing a synthesis prompt.
         # Reset at the start of each turn in _run_turn.
         self._pending_subagents: set[str] = set()
         self._auto_report_flag: bool = False
@@ -218,17 +245,6 @@ class AgentRunner:
         self._refresh_git_status()
 
     # -- status ---------------------------------------------------------
-
-    def _build_usage(self) -> dict:
-        """Return usage dict with actual API token breakdown + budget remaining."""
-        remaining = max(0, self._context_window - self._total_tokens)
-        return {
-            "total_tokens": self._total_tokens,
-            "prompt_tokens": self._total_prompt_tokens,
-            "completion_tokens": self._total_completion_tokens,
-            "context_window": self._context_window,
-            "remaining": remaining,
-        }
 
     def send_status(self) -> None:
         """Send current status to Electron."""
@@ -243,16 +259,11 @@ class AgentRunner:
         status = {
             "type": "status",
             "model": self.config.model,
+            "provider": getattr(self.config, 'api_provider', 'deepseek'),
             "workspace": self.workspace,
             "session_name": session_name,
             "git_branch": self._git_branch,
             "git_dirty": self._git_dirty,
-            "tokens": self._total_tokens,
-            "token_remaining": self._context_window - self._total_tokens,
-            "prompt_tokens": self._total_prompt_tokens,
-            "completion_tokens": self._total_completion_tokens,
-            "context_window": self._context_window,
-            "turn_count": getattr(self, '_total_turns', 0),
         }
         status["restored_count"] = max(0, len(self.messages) - 2)
         send_msg(status)
@@ -300,19 +311,28 @@ class AgentRunner:
 
     def _turn_loop(self) -> None:
         """Sequential turn-processing loop: drain queue, run turn, repeat."""
-        while True:
-            with self._input_lock:
-                if not self._input_queue:
-                    return  # all queued messages processed
-                texts = list(self._input_queue)
-                self._input_queue.clear()
+        try:
+            while True:
+                with self._input_lock:
+                    if not self._input_queue:
+                        return  # all queued messages processed
+                    texts = list(self._input_queue)
+                    self._input_queue.clear()
 
-            text = "\n\n".join(texts)
-            self._cancel_event.clear()
-            self._run_turn(text)
+                text = "\n\n".join(texts)
+                self._cancel_event.clear()
+                self._run_turn(text)
+        finally:
+            # Always send idle when the turn loop exits, so the renderer
+            # knows to reset the running indicator / cancel button.
+            send_msg({"type": "idle"})
 
     def _run_turn(self, text: str) -> None:
         """Execute a single agent turn."""
+        # Notify the renderer that a turn is starting, so it can show
+        # the running indicator / cancel button.
+        send_msg({"type": "turn_start"})
+
         # Belt-and-suspenders: sub-agents may mutate config.stream when they
         # share the same config object.  Force it back to True for the
         # orchestrator so streaming always works.
@@ -407,11 +427,11 @@ class AgentRunner:
             # Safety: reset thinking flag so a stuck marker doesn't persist
             self._callbacks._in_thinking = False
             if not self._cancel_event.is_set():
-                send_msg({"type": "error", "message": clean_text(str(e))})
+                send_msg({"type": "error", "message": str(e)})
             # Always send turn_complete so the renderer resets its loading state
             send_msg({
                 "type": "turn_complete",
-                "usage": self._build_usage(),
+                "usage": {"total_tokens": self._total_tokens, "prompt_tokens": 0, "completion_tokens": 0},
                 "turn_count": self._total_turns,
             })
             return
@@ -421,7 +441,7 @@ class AgentRunner:
         if self._cancel_event.is_set():
             send_msg({
                 "type": "turn_complete",
-                "usage": self._build_usage(),
+                "usage": {"total_tokens": self._total_tokens, "prompt_tokens": 0, "completion_tokens": 0},
                 "turn_count": self._total_turns,
                 "cancelled": True,
             })
@@ -430,22 +450,22 @@ class AgentRunner:
         if msg is not None:
             self._total_turns += msg.get("_turn_count", 0)
             usage = msg.get("_total_usage") or {}
-            self._total_prompt_tokens += usage.get("prompt_tokens", 0)
-            self._total_completion_tokens += usage.get("completion_tokens", 0)
             self._total_tokens += usage.get("total_tokens", 0)
 
         # Persist
         self.messages = self.memory.save(self.messages)
-        # memory.save() strips system messages to save DB space (see
-        # _clean_messages).  Restore the main system prompt so the next
-        # turn runs with proper instructions.
-        if not self.messages or self.messages[0].get("role") != "system":
-            self.messages.insert(0, {"role": "system", "content": build_system_prompt(self.config)})
+
+        # Surface any prune summary to the chat panel so the user sees
+        # what was pruned (not just the LLM's internal reasoning about it).
+        summary = self.memory.last_prune_summary
+        if summary:
+            self.memory.last_prune_summary = ""
+            send_msg({"type": "response", "lines": [summary]})
 
         # Notify Electron
         send_msg({
             "type": "turn_complete",
-            "usage": self._build_usage(),
+            "usage": {"total_tokens": self._total_tokens, "prompt_tokens": 0, "completion_tokens": 0},
             "turn_count": self._total_turns,
         })
 
@@ -460,14 +480,13 @@ class AgentRunner:
             knowledge = self.memory.get_top_knowledge(limit=15) if hasattr(self, 'memory') else []
             self.messages = [
                 {"role": "system", "content": build_system_prompt(self.config)},
-                {"role": "system", "content": build_startup_context(self.config.workspace, knowledge=knowledge)},
+                {"role": "user", "content": build_session_header(self.config)},
+                {"role": "user", "content": build_startup_context(self.config.workspace, knowledge=knowledge)},
             ]
             clear_api_cache()
             self.memory.clear()
             self._total_turns = 0
             self._total_tokens = 0
-            self._total_prompt_tokens = 0
-            self._total_completion_tokens = 0
             send_msg({"type": "response", "lines": ["--- conversation cleared ---"]})
             return
 
@@ -501,8 +520,6 @@ class AgentRunner:
                 self.messages = sd["messages"]
                 self._total_turns = 0
                 self._total_tokens = 0
-                self._total_prompt_tokens = 0
-                self._total_completion_tokens = 0
                 send_msg({"type": "response", "lines": [f"Created session '{arg}'."]})
             elif sub == "switch" and arg:
                 from core.config import switch_session
@@ -513,8 +530,6 @@ class AgentRunner:
                 self.messages = sd["messages"]
                 self._total_turns = 0
                 self._total_tokens = 0
-                self._total_prompt_tokens = 0
-                self._total_completion_tokens = 0
                 send_msg({"type": "response", "lines": [f"Switched to '{arg}'."]})
             elif sub == "delete" and arg:
                 from core.config import delete_session
@@ -544,21 +559,21 @@ class AgentRunner:
 
         if cmd == "/test-svg":
             lines = [
-                "✅ SVG icon test — check-circle",
-                "❌ SVG icon test — x-circle",
-                "⚠️ SVG icon test — warning",
-                "💡 SVG icon test — lightbulb",
-                "📁 SVG icon test — folder",
-                "🔧 SVG icon test — wrench",
-                "🚀 SVG icon test — rocket",
-                "⭐ SVG icon test — star",
-                "🐛 SVG icon test — bug",
-                "🔥 SVG icon test — fire",
-                "💥 SVG icon test — burst",
+                "[OK] SVG icon test -- check-circle",
+                "[FAIL] SVG icon test -- x-circle",
+                "WARNING: SVG icon test -- warning",
+                "[IDEA] SVG icon test -- lightbulb",
+                "[DIR] SVG icon test -- folder",
+                "[WRENCH] SVG icon test -- wrench",
+                "? SVG icon test -- rocket",
+                "(*) SVG icon test -- star",
+                "? SVG icon test -- bug",
+                "? SVG icon test -- fire",
+                "? SVG icon test -- burst",
             ]
             send_msg({
                 "type": "response",
-                "lines": [clean_text(l) for l in lines],
+                "lines": [l for l in lines],
             })
             return
 
@@ -624,7 +639,7 @@ class AgentRunner:
                 send_msg({"type": "response", "lines": ["Usage: /workspace <path>"]})
                 return
 
-            # Resolve the path — os.path.abspath may hang on stale network mounts.
+            # Resolve the path -- os.path.abspath may hang on stale network mounts.
             # Use a short timeout to avoid blocking the entire backend.
             ok_abspath, new_workspace = _try_with_timeout(
                 lambda: os.path.abspath(new_path),
@@ -645,6 +660,11 @@ class AgentRunner:
                 send_msg({"type": "response", "lines": [f"Not a directory or inaccessible: {new_workspace}"]})
                 return
 
+            # Persist old session before switching
+            self.messages = self.memory.save(self.messages)
+            self.memory.close()
+            self.workspace = new_workspace
+
             # Notify the UI that we're loading the new workspace
             send_msg({"type": "status", "workspace": new_workspace, "session_name": "loading...",
                       "git_branch": "", "git_dirty": False, "restored_count": 0,
@@ -662,12 +682,9 @@ class AgentRunner:
                 send_msg({"type": "error", "message": f"Timeout initializing workspace: {new_workspace}. "
                                                        "The remote share may be too slow. "
                                                        "Try a local workspace instead."})
+                # Roll back -- keep using old config
+                self.memory = None  # will be recreated below
                 return
-
-            # Persist old session before switching to the new state
-            self.messages = self.memory.save(self.messages)
-            self.memory.close()
-            self.workspace = new_workspace
 
             try:
                 self.config = new_data["config"]
@@ -680,13 +697,11 @@ class AgentRunner:
                 self.session = new_data["session"]
                 self._total_turns = 0
                 self._total_tokens = 0
-                self._total_prompt_tokens = 0
-                self._total_completion_tokens = 0
                 self._refresh_git_status()
                 self.send_status()
                 send_msg({"type": "response", "lines": [f"Workspace set to: {new_workspace}"]})
             except Exception as exc:
-                send_msg({"type": "error", "message": clean_text(str(exc))})
+                send_msg({"type": "error", "message": str(exc)})
             return
 
         send_msg({"type": "response", "lines": [f"Unknown command: {command}"]})
@@ -695,9 +710,68 @@ class AgentRunner:
         """Cancel the current turn."""
         self._cancel_event.set()
 
+    def set_model(self, model: str) -> None:
+        """Switch the LLM model (and provider if needed) on the fly."""
+        if not model:
+            return
+        provider = getattr(self.config, 'api_provider', '')
+        old_provider = provider
+        prefix = provider + '/'
+
+        # Map of bare model names -> their native provider
+        _MODEL_TO_PROVIDER = {
+            'deepseek-v4-pro': 'deepseek',
+            'deepseek-v4-flash': 'deepseek',
+            'deepseek-chat': 'deepseek',
+            'kimi-k2.7-code': 'moonshot',
+            'kimi-k2.6': 'moonshot',
+            'claude-opus-4-8': 'claude',
+            'claude-sonnet-4-5': 'claude',
+            'claude-haiku-4-5': 'claude',
+            'grok-4.3': 'xai',
+            'grok-4.1': 'xai',
+            'qwen-plus': 'qwen',
+            'qwen-flash': 'qwen',
+            'qwen3-max': 'qwen',
+            'qwen3-coder': 'qwen',
+            'gemini-3.5-flash': 'gemini',
+            'gemini-3.5-pro': 'gemini',
+            'qwen3.6:27b': 'ollama',
+        }
+
+        if model.startswith(prefix):
+            # Model matches current provider prefix (e.g. "deepseek/deepseek-v4-flash"
+            # when provider is "deepseek"). Strip prefix for native API.
+            model = model[len(prefix):]
+        elif '/' in model:
+            # Model has a different provider prefix (e.g. "moonshotai/kimi-k2.7-code"
+            # when provider is "deepseek"). Switch to OpenRouter and keep the prefix.
+            new_provider = 'openrouter'
+            err = _switch_to_provider(self.config, new_provider)
+            if err:
+                send_msg({"type": "response", "lines": [f"Error: {err}"]})
+                return
+            provider = new_provider
+        elif model in _MODEL_TO_PROVIDER:
+            # Bare model name — switch to its native provider.
+            new_provider = _MODEL_TO_PROVIDER[model]
+            if new_provider != provider:
+                err = _switch_to_provider(self.config, new_provider)
+                if err:
+                    send_msg({"type": "response", "lines": [f"Error: {err}"]})
+                    return
+                provider = new_provider
+        # else: bare model name, keep current provider
+
+        old = self.config.model
+        self.config.model = model
+        self.send_status()
+        provider_tag = f" (→ {provider})" if provider != old_provider else ""
+        send_msg({"type": "response", "lines": [f"Model: {old} -> {model}{provider_tag}"]})
+
 
 # ---------------------------------------------------------------------------
-# Main — JSON-lines event loop
+# Main -- JSON-lines event loop
 # ---------------------------------------------------------------------------
 
 def main() -> None:
@@ -705,6 +779,11 @@ def main() -> None:
     sys.stdout.reconfigure(line_buffering=True) if hasattr(sys.stdout, 'reconfigure') else None
 
     runner = AgentRunner()
+
+    # Start heartbeat so the Electron watchdog doesn't kill us during long
+    # blocking operations (run_shell, slow API calls, large file reads).
+    _heartbeat_stop = threading.Event()
+    _start_heartbeat(_heartbeat_stop)
 
     # Send initial ready + status
     send_msg({"type": "ready", "model": runner.config.model})
@@ -714,7 +793,7 @@ def main() -> None:
     while True:
         msg = read_msg()
         if msg is None:
-            # EOF — Electron closed stdin
+            # EOF -- Electron closed stdin
             break
 
         msg_type = msg.get("type", "")
@@ -727,6 +806,9 @@ def main() -> None:
 
         elif msg_type == "cancel":
             runner.cancel()
+
+        elif msg_type == "set_model":
+            runner.set_model(msg.get("model", ""))
 
         elif msg_type == "get_status":
             runner.send_status()
@@ -757,8 +839,6 @@ def main() -> None:
                 runner.messages = sd["messages"]
                 runner._total_turns = 0
                 runner._total_tokens = 0
-                runner._total_prompt_tokens = 0
-                runner._total_completion_tokens = 0
                 runner.send_status()
 
         elif msg_type == "session_new":
@@ -775,8 +855,6 @@ def main() -> None:
                 runner.messages = sd["messages"]
                 runner._total_turns = 0
                 runner._total_tokens = 0
-                runner._total_prompt_tokens = 0
-                runner._total_completion_tokens = 0
                 runner.send_status()
 
         elif msg_type == "session_delete":
@@ -787,15 +865,13 @@ def main() -> None:
             else:
                 ok, msg_text = delete_session(runner.workspace, name)
                 if ok and name == getattr(runner, '_session_name', None):
-                    # Deleted the current session — switch to default
+                    # Deleted the current session -- switch to default
                     from core.config import switch_session
                     sd = switch_session(runner.workspace, "default", runner.memory, runner.config)
                     runner.memory = sd["memory"]
                     runner.messages = sd["messages"]
                     runner._total_turns = 0
                     runner._total_tokens = 0
-                    runner._total_prompt_tokens = 0
-                    runner._total_completion_tokens = 0
                 send_msg({"type": "session_delete_result", "ok": ok, "message": msg_text})
                 runner.send_status()
 
@@ -803,14 +879,15 @@ def main() -> None:
             break
 
         else:
-            send_msg({"type": "error", "message": clean_text(f"Unknown message type: {msg_type}")})
+            send_msg({"type": "error", "message": f"Unknown message type: {msg_type}"})
 
     # Cleanup
+    _heartbeat_stop.set()
     try:
         runner.messages = runner.memory.save(runner.messages)
         runner.memory.close()
     except Exception:
-        _log.debug("server: session cleanup failed", exc_info=True)
+        pass
 
 
 if __name__ == "__main__":

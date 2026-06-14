@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-tools package — tool definitions, execution, and structured results for mini_agent.
+tools package -- tool definitions, execution, and structured results for mini_agent.
 
 Every tool execution returns a ToolResult (never a raw exception).
 All read and write paths route through the safety gates.
@@ -12,22 +12,24 @@ Adding a new tool requires:
     3. An entry in ``TOOLS`` (the API schema sent to the LLM).
 
 Submodules:
-    file_ops    — read_file, write_file, edit_file, list_directory, file_info,
+    file_ops    -- read_file, write_file, edit_file, list_directory, file_info,
                   write_scratchpad, diff, restore_file, plan, plan_status
-    shell_ops   — run_shell, task_status, search_files, run_tests, verify, git
-    search_ops  — find_symbol, find_usages, semantic_search, web_search, recall_turn
-    agent_ops   — spawn_agent, agent_status, collect_agent, collect_any,
+    shell_ops   -- run_shell, task_status, search_files, run_tests, verify, git
+    search_ops  -- find_symbol, find_usages, semantic_search, web_search, recall_turn
+    agent_ops   -- spawn_agent, agent_status, collect_agent, collect_any,
                   agent_message, agent_read, agent_handoff, agent_inbox,
                   agent_subscribe, agent_extend, agent_cancel
-    lsp         — lsp_definition, lsp_references, lsp_hover, lsp_diagnostics
+    lsp         -- lsp_definition, lsp_references, lsp_hover, lsp_diagnostics
 
 """
 
 import json
 import re
+import sqlite3
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass
 
 from core.safety import ReadSafetyGate, WriteSafetyGate
@@ -36,7 +38,7 @@ from logging_setup import get_logger, log_tool_failure, log_tool_success, log_er
 
 _log = get_logger("tools")
 
-# Hardcoded core schema for remember — always present even if schema.py is missing
+# Hardcoded core schema for remember -- always present even if schema.py is missing
 # Bootstrap guard: if the canonical "remember" schema is missing from schema.py
 # (e.g. corrupted install), insert a minimal fallback so the tool still works.
 if not any(td["function"]["name"] == "remember" for td in TOOLS):
@@ -58,14 +60,13 @@ if not any(td["function"]["name"] == "remember" for td in TOOLS):
     })
 
 # ---------------------------------------------------------------------------
-# TOOL_SCHEMA_MAP — O(1) name→schema lookup for execute_tool() validation
+# TOOL_SCHEMA_MAP -- O(1) name->schema lookup for execute_tool() validation
 # ---------------------------------------------------------------------------
 
 # Lazily-built dict mirroring TOOLS for O(1) lookup.  Invalidated when
 # TOOLS length changes (skills appending tools between turns).
 _TOOL_SCHEMA_MAP: dict[str, dict] = {}
 _TOOL_SCHEMA_MAP_LEN: int = 0
-
 
 def _get_tool_schema(name: str) -> dict | None:
     """Look up a tool's parameter schema from TOOLS at runtime.
@@ -85,7 +86,7 @@ def _get_tool_schema(name: str) -> dict | None:
 # ---------------------------------------------------------------------------
 # Structured tool result (extracted to tools/result.py)
 # ---------------------------------------------------------------------------
-from tools.result import ToolResult  # noqa: E402, F401 — re-exported for backward compat
+from tools.result import ToolResult  # noqa: E402, F401 -- re-exported for backward compat
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +100,7 @@ _TOOL_SUMMARIES: dict[str, callable] = {}
 _DISPATCH_SIGNATURES: dict[str, bool] = {}
 
 # ---------------------------------------------------------------------------
-# Agent context — extracted to tools/context.py (re-exported for backward compat)
+# Agent context -- extracted to tools/context.py (re-exported for backward compat)
 # ---------------------------------------------------------------------------
 from tools.context import (  # noqa: E402, F401
     AgentContext,
@@ -114,18 +115,74 @@ from tools.context import (  # noqa: E402, F401
     set_context,
 )
 
-# Per-turn cache for read-only tools. Cleared by run_agent_turn each turn.
-# Key: (tool_name, sorted_args_json). Cached read_file/file_info/etc.
-_TOOL_CACHE: dict[str, "ToolResult"] = {}
+# Session-level cache for read-only tools.  Persists across turns within a
+# session, invalidated when files are modified.  Caps at _TOOL_CACHE_MAX_SIZE.
+# Key: json.dumps([name, args], sort_keys=True).
+# Value: (timestamp, ToolResult) with 30-second TTL.
+_TOOL_CACHE: dict[str, tuple[float, "ToolResult"]] = {}
+_TOOL_CACHE_MAX_SIZE = 256
+_TOOL_CACHE_TTL: float = 3600.0  # seconds (1 hour) -- safety net; primary invalidation is write-driven
+_TOOL_CACHE_PATH_MAP: dict[str, set[str]] = {}  # file path -> set of cache keys
+_TOOL_CACHE_HITS: int = 0
+_TOOL_CACHE_MISSES: int = 0
 
-# Files modified by write/edit — used by verify
+def get_tool_cache_stats() -> dict:
+    """Return cache hit/miss/size stats for observability."""
+    return {
+        "size": len(_TOOL_CACHE),
+        "max_size": _TOOL_CACHE_MAX_SIZE,
+        "ttl_s": _TOOL_CACHE_TTL,
+        "hits": _TOOL_CACHE_HITS,
+        "misses": _TOOL_CACHE_MISSES,
+        "hit_rate": (_TOOL_CACHE_HITS / max(_TOOL_CACHE_HITS + _TOOL_CACHE_MISSES, 1)),
+    }
+
+# Files modified by write/edit -- used by verify
 _MODIFIED_FILES: set[str] = set()
 _MODIFIED_FILES_LOCK = threading.Lock()
 
 _TASK_REGISTRY: dict[str, subprocess.Popen] = {}  # background shell task registry
 
+# Per-session tool usage tracking for dead-tool pruning.
+# Incremented in execute_tool(); reset each session via reset_tool_usage().
+# Dead-tool pruning drops tools with zero usage after a threshold turn,
+# shrinking the API payload and stabilizing the KV-cache prefix.
+_TOOL_USAGE_COUNT: dict[str, int] = {}
+_TOOL_USAGE_LOCK = threading.Lock()
+
+def reset_tool_usage() -> None:
+    """Reset per-session tool usage counters (called at session init)."""
+    with _TOOL_USAGE_LOCK:
+        _TOOL_USAGE_COUNT.clear()
+
+def get_tool_usage() -> dict[str, int]:
+    """Return a snapshot of tool usage counts (thread-safe)."""
+    with _TOOL_USAGE_LOCK:
+        return dict(_TOOL_USAGE_COUNT)
+
+def get_unused_tools(min_turns: int = 5) -> set[str]:
+    """Return tool names that have never been called after *min_turns* turns.
+
+    Only meaningful after the agent has had enough turns to establish patterns.
+    Tools in CORE_TOOLS that are essential (read_file, write_file, etc.) are
+    excluded from pruning.
+    """
+    from tools.skills import get_active_tool_names
+    active = frozenset(get_active_tool_names())
+    with _TOOL_USAGE_LOCK:
+        used = frozenset(_TOOL_USAGE_COUNT)
+    # Never prune these — they're essential scaffolding
+    _UNPRUNABLE = frozenset({
+        "read_file", "write_file", "edit_file", "run_shell",
+        "search_files", "list_directory", "file_info", "find_symbol",
+        "remember", "memory_core", "use_skill", "plan", "plan_status",
+        "todo_write", "todo_read", "write_scratchpad",
+    })
+    unused = active - used - _UNPRUNABLE
+    return unused
+
 # ---------------------------------------------------------------------------
-# File reservation system — extracted to tools/reservations.py
+# File reservation system -- extracted to tools/reservations.py
 # ---------------------------------------------------------------------------
 from tools.reservations import (  # noqa: E402, F401
     reserve_file,
@@ -134,10 +191,10 @@ from tools.reservations import (  # noqa: E402, F401
 )
 
 # Sub-agent runtime registry (lazy init in config.init_session)
-_AGENT_RUNTIME = None  # AgentRuntime — set by init_session
+_AGENT_RUNTIME = None  # AgentRuntime -- set by init_session
 _CACHEABLE = frozenset({
     "read_file", "file_info", "list_directory",
-    "search_files", "semantic_search", "web_search",
+    "search_files", "find_symbol", "semantic_search", "web_search",
     "lsp_definition", "lsp_references", "lsp_hover", "lsp_diagnostics",
 })
 _TOOL_TIMEOUT = 120  # P3.1: per-tool execution timeout (seconds)
@@ -216,24 +273,125 @@ _TOOL_SUMMARIES["write_session_handoff"] = (
     lambda args: "write_session_handoff()"
 )
 
-# ── use_skill gate: lazy tool loading ──
-from tools.skills import USE_SKILL_SCHEMA, _use_skill  # noqa: E402
+# -- use_skill gate: lazy tool loading --
+from tools.skills import USE_SKILL_SCHEMA, SKILL_LIST_SCHEMA, SKILL_VIEW_SCHEMA, _use_skill, _skill_list, _skill_view  # noqa: E402
 
 _TOOL_DISPATCH["use_skill"] = _use_skill
 _TOOL_SUMMARIES["use_skill"] = lambda args: f"use_skill({args.get('name', '?')})"
-# Inject schema so it's always in TOOLS (it's a core tool, always visible)
+_TOOL_DISPATCH["skill_list"] = _skill_list
+_TOOL_SUMMARIES["skill_list"] = lambda args: "skill_list()"
+_TOOL_DISPATCH["skill_view"] = _skill_view
+_TOOL_SUMMARIES["skill_view"] = lambda args: f"skill_view({args.get('name', '?')})"
+# Inject schemas so they're always in TOOLS (core tools, always visible)
 TOOLS.append(USE_SKILL_SCHEMA)
+TOOLS.append(SKILL_LIST_SCHEMA)
+TOOLS.append(SKILL_VIEW_SCHEMA)
 
 
 def clear_tool_cache() -> None:
-    """Clear the per-turn tool cache. Called at the start of each agent turn."""
-    _TOOL_CACHE.clear()
+    """Clear the per-turn tool cache. Called at the start of each agent turn.
+
+    Since the cache is now session-level (invalidated by writes, not turns),
+    this is still a no-op in production (writes call clear_tool_cache but
+    actual invalidation happens via write-driven _reindex_file and
+    _FILE_CACHE eviction).  The in-memory _TOOL_CACHE dict is kept for
+    intra-turn deduplication within a single execute_tool call.
+    """
+    pass  # session-level cache -- invalidation is write-driven, not turn-driven
 
 
-# ---------------------------------------------------------------------------
-# JSON repair (extracted to tools/json_repair.py)
-# ---------------------------------------------------------------------------
-from tools.json_repair import repair_json as _repair_json  # noqa: E402, F401
+def _repair_json(raw: str) -> tuple[object, bool]:
+    """Attempt to repair common LLM-generated JSON malformations.
+
+    Returns (parsed_value, was_repaired).  If all repair attempts fail the
+    original raw string is re-raised via json.loads so callers see a standard
+    JSONDecodeError.
+
+    Repairs attempted (in order, each retried independently, then combinations):
+    1. Trailing commas before ``]`` or ``}``
+    2. Single-quoted strings -> double quotes
+    3. Unquoted object keys
+    4. 1+2, 1+3, 2+3, 1+2+3 (combinations)
+    """
+
+    # Helper: apply unquoted-key fix only outside strings
+    def _fix_unquoted_keys(text: str) -> str:
+        """Quote bare keys but skip content inside double-quoted strings."""
+        result: list[str] = []
+        i = 0
+        while i < len(text):
+            if text[i] == '"':
+                # Find end of string (handle backslash escapes)
+                j = i + 1
+                while j < len(text):
+                    if text[j] == '\\' and j + 1 < len(text):
+                        j += 2
+                        continue
+                    if text[j] == '"':
+                        j += 1
+                        break
+                    j += 1
+                result.append(text[i:j])
+                i = j
+            else:
+                # Accumulate consecutive non-quoted chars into one segment
+                j = i
+                while j < len(text) and text[j] != '"':
+                    j += 1
+                result.append(text[i:j])
+                i = j
+        # Only apply regex to segments at even indices (outside strings).
+        # Use [A-Za-z_]\w* instead of \w+ to avoid matching numeric keys
+        # like '1:' which would produce '"1":}' instead of leaving '1:' alone.
+        for idx in range(0, len(result), 2):
+            result[idx] = re.sub(r'([A-Za-z_]\w*)(\s*:)', r'"\1"\2', result[idx])
+        return ''.join(result)
+
+    # Individual fixes
+    fix1 = re.sub(r',\s*([}\]])', r'\1', raw)
+
+    fix2 = raw
+    if "'" in raw:
+        fix2 = raw.replace("'", '"')
+
+    fix3 = raw
+    if not raw.strip().startswith('['):
+        fix3 = _fix_unquoted_keys(raw)
+
+    # Combinations -- apply fixes in sequence on copies
+    def _apply_combo(base: str, *indices: int) -> str:
+        s = base
+        for i in indices:
+            if i == 1:
+                s = re.sub(r',\s*([}\]])', r'\1', s)
+            elif i == 2:
+                s = s.replace("'", '"')
+            elif i == 3:
+                if not s.strip().startswith('['):
+                    s = _fix_unquoted_keys(s)
+        return s
+
+    attempts: list[str] = [
+        fix1,
+        fix2,
+        fix3,
+        _apply_combo(raw, 1, 2),
+        _apply_combo(raw, 1, 3),
+        _apply_combo(raw, 2, 3),
+        _apply_combo(raw, 1, 2, 3),
+    ]
+
+    for attempt in attempts:
+        if attempt == raw:
+            continue
+        try:
+            return json.loads(attempt), True
+        except (json.JSONDecodeError, ValueError):
+            continue
+
+    # Last resort: try the original
+    return json.loads(raw), False
+
 
 # ---------------------------------------------------------------------------
 # Error hints & failure learning (extracted to tools/error_hints.py)
@@ -248,12 +406,19 @@ from tools.error_hints import (  # noqa: E402, F401
 )
 
 
+# Module-level cancel event so tool functions (e.g. _run_shell) can
+# detect cancellation and stop blocking on subprocess I/O.  Set by
+# execute_tool() before dispatching; cleared after the thread completes.
+# This is NOT a ContextVar -- it's shared across all threads on purpose.
+_CURRENT_CANCEL_EVENT: threading.Event | None = None
+
 def execute_tool(
     tool_call: dict,
     write_gate: WriteSafetyGate,
     read_gate: ReadSafetyGate,
     on_output: callable = None,
     approve_callback: callable = None,
+    cancel_event: threading.Event | None = None,
 ) -> ToolResult:
     """Execute a single tool call.  All read/write paths go through safety gates.
 
@@ -291,8 +456,21 @@ def execute_tool(
     cache_key = ""
     if on_output is None and name in _CACHEABLE:
         cache_key = json.dumps([name, args], sort_keys=True)
-        if cache_key in _TOOL_CACHE:
-            return _TOOL_CACHE[cache_key]
+        cached = _TOOL_CACHE.get(cache_key)
+        if cached is not None:
+            ts, result = cached
+            if time.monotonic() - ts < _TOOL_CACHE_TTL:
+                global _TOOL_CACHE_HITS
+                _TOOL_CACHE_HITS += 1
+                return result
+            # Expired -- evict from cache and path map
+            _TOOL_CACHE.pop(cache_key, None)
+            for p, keys in list(_TOOL_CACHE_PATH_MAP.items()):
+                keys.discard(cache_key)
+                if not keys:
+                    del _TOOL_CACHE_PATH_MAP[p]
+        global _TOOL_CACHE_MISSES
+        _TOOL_CACHE_MISSES += 1
 
     # --- schema validation: check parameter names against tool definition ---
     if isinstance(args, dict):
@@ -317,36 +495,6 @@ def execute_tool(
                     success=False,
                     content=f"Invalid arguments: {'; '.join(hint_parts[:2])}",
                     hint="\n".join(hint_parts),
-                )
-
-    # --- Circuit breaker: reject tool calls that have been made 3+ times ---
-    # with the same tool name and identical arguments in the recent window.
-    tool_call_key = f"{name}:{json.dumps(args, sort_keys=True)}"
-    recent_keys = getattr(_TOOL_CONTEXT, "_recent_tool_keys", None)
-    if recent_keys is not None:
-        from collections import Counter
-        recent_list = list(recent_keys)
-        if len(recent_list) >= 3:
-            counts = Counter(recent_list)
-            if counts.get(tool_call_key, 0) >= 3:
-                return ToolResult(
-                    success=False,
-                    content=(
-                        f"⛔ CIRCUIT BREAKER TRIPPED: '{name}' with these exact arguments "
-                        f"has been called {counts[tool_call_key]} times in the last "
-                        f"{len(recent_list)} tool calls.\n\n"
-                        f"This is a HARD STOP. The same call keeps failing identically.\n"
-                        f"Do NOT retry with the same arguments. Instead:\n"
-                        f"  1. Read relevant files with read_file to understand current state\n"
-                        f"  2. Check your assumptions — are you using the correct tool? correct path? correct parameter names?\n"
-                        f"  3. Try a fundamentally different approach\n"
-                        f"  4. Call remember() to capture what you've learned from these failures\n"
-                        f"  5. If stuck, use web_search for help or ask the user to clarify"
-                    ),
-                ).with_typed_error(
-                    "circuit_breaker",
-                    retry_budget=0,
-                    suggested_action="Stop retrying. Read files, check assumptions, try a different approach.",
                 )
 
     dispatch = _TOOL_DISPATCH.get(name)
@@ -380,6 +528,7 @@ def execute_tool(
     _result_container: list[ToolResult | Exception] = []
 
     def _run_and_capture():
+        _t0 = _time.monotonic()
         try:
             if accepts_on_output:
                 _result_container.append(dispatch(args, write_gate, read_gate, on_output=on_output))
@@ -387,15 +536,73 @@ def execute_tool(
                 _result_container.append(dispatch(args, write_gate, read_gate))
         except Exception as exc:
             _result_container.append(exc)
+        _elapsed = _time.monotonic() - _t0
+        # (dispatch timing collected but no longer logged to console)
 
-    t = threading.Thread(target=_run_and_capture, daemon=True)
-    t.start()
-    t.join(timeout=_TOOL_TIMEOUT)
+    import sys as _sys
+    import time as _time
+    _turn = getattr(_TOOL_CONTEXT, '_turn_count', 0)
+    _sys.stderr.write(f"[turn {_turn}] dispatching '{name}' (timeout={_TOOL_TIMEOUT}s)\n")
+    _sys.stderr.flush()
+    _t_dispatch_start = _time.monotonic()
+    _t_start = _time.monotonic()
+    # Set the module-level cancel event so tool functions like _run_shell
+    # can detect cancellation and stop blocking on subprocess I/O.
+    global _CURRENT_CANCEL_EVENT
+    _prev_cancel = _CURRENT_CANCEL_EVENT
+    _CURRENT_CANCEL_EVENT = cancel_event
+    try:
+        t = threading.Thread(target=_run_and_capture, daemon=True)
+        t.start()
+        if cancel_event is not None:
+            # Poll with short intervals so the user can cancel during streaming.
+            # A single t.join(timeout=120) blocks the SSE parsing loop and makes
+            # the UI appear hung -- especially on Windows where the first open()
+            # call in a new thread can be delayed by antivirus filter drivers.
+            _poll_interval = 0.1  # 100 ms
+            _deadline = _time.monotonic() + _TOOL_TIMEOUT
+            _last_hb = _t_dispatch_start
+            while t.is_alive() and _time.monotonic() < _deadline:
+                if cancel_event.is_set():
+                    _sys.stderr.write(f"[turn {_turn}] cancelled '{name}' thread (elapsed={_time.monotonic() - _t_dispatch_start:.2f}s)\n")
+                    _sys.stderr.flush()
+                    # Kill any active process trees immediately to unblock
+                    # tool threads waiting on subprocess I/O (e.g. _run_shell
+                    # blocking on t_out.join).  This prevents orphaned bash.exe
+                    # / cmd.exe from accumulating.
+                    try:
+                        from tools.shell_ops import _cleanup_all_procs
+                        _cleanup_all_procs()
+                    except Exception:
+                        pass
+                    # Don't return yet -- give the thread a brief grace period
+                    # to finish (50 ms).  We can't kill Python threads safely.
+                    t.join(timeout=0.05)
+                    break
+                t.join(timeout=_poll_interval)
+                # Heartbeat: log every 5s so we can tell if thread is stuck
+                _now = _time.monotonic()
+                if _now - _last_hb >= 5.0:
+                    _sys.stderr.write(f"[turn {_turn}] '{name}' still running ({_now - _t_dispatch_start:.1f}s elapsed)...\n")
+                    _sys.stderr.flush()
+                    _last_hb = _now
+        else:
+            t.join(timeout=_TOOL_TIMEOUT)
+    finally:
+        _CURRENT_CANCEL_EVENT = _prev_cancel
     if t.is_alive():
-        # Thread still running after timeout — it's stuck.
+        # Thread still running after timeout -- it's stuck.
         # We cannot safely kill a Python thread, so return a timeout result.
         # The daemon thread will continue running but will be terminated
         # when the process exits.
+        #
+        # On Windows, kill any orphaned subprocess trees to prevent
+        # process multiplication (e.g. thousands of bash.exe).
+        try:
+            from tools.shell_ops import _cleanup_all_procs
+            _cleanup_all_procs()
+        except Exception:
+            pass
         return ToolResult(
             success=False,
             content=f"Tool '{name}' timed out after {_TOOL_TIMEOUT}s.",
@@ -406,6 +613,14 @@ def execute_tool(
     if isinstance(raw, Exception):
         raise raw
     result = raw
+
+    # --- console: success / failure status ---
+    _turn = getattr(_TOOL_CONTEXT, '_turn_count', 0)
+    if result.success:
+        _sys.stderr.write(f"[turn {_turn}] '{name}' OK\n")
+    else:
+        _sys.stderr.write(f"[turn {_turn}] '{name}' ERR -- {result.content[:120]}\n")
+    _sys.stderr.flush()
 
     # Normalize: every failed result gets a _build_error_hint so the LLM
     # always sees the same structure (tool name, error, valid params, retry
@@ -435,14 +650,20 @@ def execute_tool(
                     pattern_store.record_success(name, args)
                 except Exception:
                     _log.warning("FailurePatternStore.record_success failed", exc_info=True)
-            # Clear in-memory counters on success — the agent recovered
+            # Clear in-memory counters on success -- the agent recovered
             _TOOL_CONTEXT.__dict__.pop("_failure_patterns", None)
 
-    # --- Cache invalidation: clear read cache on any write so subsequent ---
-    # reads within the same turn see fresh content.  Also covers restore_file.
+    # --- Cache invalidation: invalidate cache entries for modified files ---
+    # instead of clearing the entire cache.  This preserves session-level
+    # caching for unmodified files across turns while ensuring fresh reads
+    # for just-edited files.  Also covers restore_file.
     _WRITE_TOOLS = frozenset({"write_file", "edit_file", "restore_file"})
     if result.success and name in _WRITE_TOOLS:
-        _TOOL_CACHE.clear()
+        file_path = args.get("path", "") if isinstance(args, dict) else ""
+        if file_path and file_path in _TOOL_CACHE_PATH_MAP:
+            for key in list(_TOOL_CACHE_PATH_MAP.get(file_path, ())):
+                _TOOL_CACHE.pop(key, None)
+            _TOOL_CACHE_PATH_MAP.pop(file_path, None)
 
     # --- Post-edit auto-verification: run LSP diagnostics after file writes ---
     # LSP connections use subprocess pipes + per-connection locks, so they are
@@ -459,9 +680,22 @@ def execute_tool(
         except Exception:
             _log.warning("auto-verify LSP diagnostics failed for %s", file_path, exc_info=True)
 
-    # Cache successful read-only results (only when not streaming)
+    # Cache successful read-only results (only when not streaming).
+    # Session-level LRU with TTL: evict oldest entry when over _TOOL_CACHE_MAX_SIZE.
     if cache_key and result.success:
-        _TOOL_CACHE[cache_key] = result
+        if cache_key not in _TOOL_CACHE and len(_TOOL_CACHE) >= _TOOL_CACHE_MAX_SIZE:
+            # Evict oldest entry (Python 3.7+ dicts are insertion-ordered)
+            _TOOL_CACHE.pop(next(iter(_TOOL_CACHE)), None)
+        _TOOL_CACHE[cache_key] = (time.monotonic(), result)
+        # Track file-path-to-cache-key mapping for targeted invalidation
+        file_path = args.get("path", "") if isinstance(args, dict) else ""
+        if file_path:
+            _TOOL_CACHE_PATH_MAP.setdefault(file_path, set()).add(cache_key)
+
+    # Increment per-session tool usage counter for dead-tool pruning
+    # (count even failed calls — they indicate the agent tried to use the tool)
+    with _TOOL_USAGE_LOCK:
+        _TOOL_USAGE_COUNT[name] = _TOOL_USAGE_COUNT.get(name, 0) + 1
 
     return result
 
@@ -478,7 +712,7 @@ def tool_summary(tc: dict) -> str:
 
     summarize = _TOOL_SUMMARIES.get(name)
     if summarize is None:
-        return f"{name}(…)"
+        return f"{name}(...)"
     return summarize(args)
 
 
@@ -493,6 +727,7 @@ from tools import browser_ops  # noqa: E402, F401  # browser automation tools
 from tools import desktop_ops # noqa: E402, F401  # desktop automation tools
 from tools import macos_ops   # noqa: E402, F401  # intensive macOS API integrations
 from tools import agent_ops   # noqa: E402, F401
+from tools import memory_core  # noqa: E402, F401
 from tools import agent_todos  # noqa: E402, F401
 from tools import agent_patterns  # noqa: E402, F401
 from tools import agent_messages  # noqa: E402, F401
@@ -501,7 +736,7 @@ from tools.search_ops import build_symbol_index  # noqa: E402, F401
 from tools.mcp_client import get_mcp_manager, init_mcp_servers, shutdown_mcp  # noqa: E402, F401
 
 # ---------------------------------------------------------------------------
-# mcp_discover / mcp_call — MCP client tools
+# mcp_discover / mcp_call -- MCP client tools
 # ---------------------------------------------------------------------------
 
 
@@ -547,7 +782,7 @@ def _mcp_call_summary(args: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# atexit cleanup — tear down browser, LSP, MCP, background tasks on exit
+# atexit cleanup -- tear down browser, LSP, MCP, background tasks on exit
 # ---------------------------------------------------------------------------
 
 import atexit as _atexit
@@ -562,7 +797,7 @@ def _cleanup_resources() -> None:
                 proc.kill()
                 proc.wait(timeout=2)
         except Exception:
-            _log.debug("cleanup: background task %s kill failed", tid, exc_info=True)
+            pass
     _TASK_REGISTRY.clear()
 
     # Close browser (Playwright)
@@ -570,20 +805,20 @@ def _cleanup_resources() -> None:
         from tools.browser_ops import _close_browser as _close_browser_fn
         _close_browser_fn()
     except Exception:
-        _log.debug("cleanup: browser close failed", exc_info=True)
+        pass
 
     # Shutdown LSP connections
     try:
         from tools.lsp import shutdown_lsp as _shutdown_lsp_fn
         _shutdown_lsp_fn()
     except Exception:
-        _log.debug("cleanup: LSP shutdown failed", exc_info=True)
+        pass
 
     # Shutdown MCP servers
     try:
         shutdown_mcp()
     except Exception:
-        _log.debug("cleanup: MCP shutdown failed", exc_info=True)
+        pass
 
 
 _atexit.register(_cleanup_resources)

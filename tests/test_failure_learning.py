@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for tools/failure_learning.py — self-learning system."""
+"""Tests for tools/failure_learning.py -- self-learning system."""
 
 import json
 import os
@@ -115,9 +115,11 @@ class TestFailurePatternStore:
     def store(self):
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             db_path = f.name
+        from memory.memory import _close_shared_conn
         fps = FailurePatternStore(db_path)
         fps.init_schema()
         yield fps
+        _close_shared_conn(db_path)
         os.unlink(db_path)
 
     def test_record_failure_new(self, store):
@@ -149,7 +151,7 @@ class TestFailurePatternStore:
         store.record_failure("edit_file", "String not found in file")
         patterns = store.get_relevant_patterns("edit_file")
         # Confidence (0.5+0.33) should be above 0.3 threshold after computing
-        # With 0 successes, 1 failure: (0.5)/(2.0) = 0.25 — below threshold
+        # With 0 successes, 1 failure: (0.5)/(2.0) = 0.25 -- below threshold
         # get_relevant_patterns filters by confidence >= 0.3 AND failure_count >= 2
         assert len(patterns) == 0  # Not enough failures yet
 
@@ -166,11 +168,11 @@ class TestFailurePatternStore:
             "edit_file", "Whitespace mismatch detected",
             fix_strategy="Copy exact text from read_file output"
         )
-        # With 3 failures, confidence = (0.5)/(3+1) = 0.125 — still low
+        # With 3 failures, confidence = (0.5)/(3+1) = 0.125 -- still low
         # get_fix_strategy needs >= 0.3 threshold. Try with successes too.
         store.record_success("edit_file", {"path": "test.py"})
         store.record_success("edit_file", {"path": "test.py"})
-        # Now: (2.5)/(3+2+1) = 0.417 — above 0.3 threshold
+        # Now: (2.5)/(3+2+1) = 0.417 -- above 0.3 threshold
         fix = store.get_fix_strategy("edit_file", "Whitespace mismatch in file at line 5")
         if fix is not None:
             assert "Copy" in fix or "read_file" in fix

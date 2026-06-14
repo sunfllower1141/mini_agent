@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""test_interject.py — tests for the thread-safe user interjection queue."""
+"""test_interject.py -- tests for the thread-safe user interjection queue."""
 
 import threading
 import unittest

@@ -2,11 +2,30 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
 import tempfile
 import unittest
 
 from tools._json_rpc_shared import _drain, drain_stderr, is_subprocess_connected
+
+# Cross-platform helpers
+_IS_WINDOWS = os.name == "nt"
+
+
+def _sleep_cmd(seconds: int) -> list[str]:
+    """Return a platform-appropriate 'sleep' command."""
+    if _IS_WINDOWS:
+        return ["timeout", "/t", str(seconds), "/nobreak"]
+    return ["sleep", str(seconds)]
+
+
+def _true_cmd() -> list[str]:
+    """Return a platform-appropriate 'true' (exit 0) command."""
+    if _IS_WINDOWS:
+        return ["cmd", "/c", "exit 0"]
+    return ["true"]
 
 
 class TestDrainStderr(unittest.TestCase):
@@ -20,7 +39,7 @@ class TestDrainStderr(unittest.TestCase):
     def test_returns_none_when_stderr_is_none(self) -> None:
         """drain_stderr returns None when process has no stderr pipe."""
         proc = subprocess.Popen(
-            ["true"],
+            _true_cmd(),
             stdout=subprocess.PIPE,
             stderr=None,
         )
@@ -34,7 +53,7 @@ class TestDrainStderr(unittest.TestCase):
     def test_returns_thread_and_drains_stderr(self) -> None:
         """drain_stderr starts a daemon thread that drains stderr."""
         proc = subprocess.Popen(
-            ["python3", "-c", "import sys; sys.stderr.write('hello stderr\\n'); sys.stderr.flush()"],
+            [sys.executable, "-c", "import sys; sys.stderr.write('hello stderr\\n'); sys.stderr.flush()"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -51,7 +70,7 @@ class TestDrainStderr(unittest.TestCase):
     def test_custom_thread_name(self) -> None:
         """drain_stderr respects the thread_name parameter."""
         proc = subprocess.Popen(
-            ["python3", "-c", "import sys; sys.stderr.write('x\\n')"],
+            [sys.executable, "-c", "import sys; sys.stderr.write('x\\n')"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -64,9 +83,9 @@ class TestDrainStderr(unittest.TestCase):
 
     def test_drain_prevents_deadlock(self) -> None:
         """Writing enough stderr to fill the pipe buffer does not deadlock."""
-        # Write ~128KB to stderr — more than the default pipe buffer
+        # Write ~128KB to stderr -- more than the default pipe buffer
         proc = subprocess.Popen(
-            ["python3", "-c", "import sys; sys.stderr.write('x' * 200000); sys.stderr.flush()"],
+            [sys.executable, "-c", "import sys; sys.stderr.write('x' * 200000); sys.stderr.flush()"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -127,7 +146,7 @@ class TestIsSubprocessConnected(unittest.TestCase):
     def test_returns_false_when_terminated(self) -> None:
         """is_subprocess_connected returns False for a terminated process."""
         proc = subprocess.Popen(
-            ["python3", "-c", "exit(0)"],
+            [sys.executable, "-c", "exit(0)"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
@@ -137,7 +156,7 @@ class TestIsSubprocessConnected(unittest.TestCase):
     def test_returns_true_when_alive(self) -> None:
         """is_subprocess_connected returns True for a running process."""
         proc = subprocess.Popen(
-            ["sleep", "5"],
+            _sleep_cmd(5),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
@@ -150,7 +169,7 @@ class TestIsSubprocessConnected(unittest.TestCase):
     def test_returns_false_after_process_completes(self) -> None:
         """is_subprocess_connected transitions to False after completion."""
         proc = subprocess.Popen(
-            ["python3", "-c", "exit(0)"],
+            [sys.executable, "-c", "exit(0)"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )

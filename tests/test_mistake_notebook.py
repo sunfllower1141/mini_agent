@@ -19,11 +19,14 @@ class TestMistakeNotebook:
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             path = f.name
         yield path
+        from memory.memory import _close_shared_conn
+        _close_shared_conn(path)
         os.unlink(path)
 
     @pytest.fixture
     def populated_stores(self, db_path):
         """Create FailurePatternStore with data, then MistakeNotebook."""
+        from memory.memory import _close_shared_conn
         fps = FailurePatternStore(db_path)
         fps.init_schema()
 
@@ -152,6 +155,7 @@ class TestExperienceContext:
             importance=0,  # Below _MIN_KNOWLEDGE_IMPORTANCE_DYNAMIC
         )
         yield ms
+        ms.close()
         os.unlink(db_path)
 
     def test_build_experience_context_matches_tool(self, memory_store):

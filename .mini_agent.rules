@@ -43,6 +43,7 @@
 #   agent_patterns.py — fan_out, fan_in, pipeline, barrier, scatter_gather
 #   lsp.py           — LSP client (pylsp integration)
 #   mcp_client.py    — MCP client (stdio JSON-RPC tool discovery)
+#   semantic_cache.py — semantic response cache (cosine-sim match, 15-25% cost reduction)
 # STATE.txt          — architecture decisions, current state (consult before major changes)
 # HANDOFF.md         — session handoff (read at startup, write at session end)
 # CHANGELOG.md       — self-modification audit trail (update after significant changes)

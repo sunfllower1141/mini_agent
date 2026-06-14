@@ -1,4 +1,4 @@
-"""Tests for session.py — session management and DB path resolution."""
+"""Tests for session.py -- session management and DB path resolution."""
 
 from __future__ import annotations
 
@@ -122,7 +122,7 @@ class TestDeleteSession(unittest.TestCase):
 
 
 class TestSwitchSession(unittest.TestCase):
-    """Tests for switch_session() — session save + load."""
+    """Tests for switch_session() -- session save + load."""
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
@@ -148,7 +148,6 @@ class TestSwitchSession(unittest.TestCase):
             "presence_penalty": 0.0,
             "stop_sequences": None,
             "response_format": None,
-            "routing_model": "",
             "sub_agent_max_turns": 25,
         }
         defaults.update(overrides)

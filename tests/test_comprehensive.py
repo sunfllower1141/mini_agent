@@ -244,12 +244,12 @@ class TestPipelineOrdering(unittest.TestCase):
                       "pipeline not in _TOOL_DISPATCH")
 
         # Pipeline orchestrates sequential agent execution.
-        # Without real API keys, sub-agents will fail — but the tool
+        # Without real API keys, sub-agents will fail -- but the tool
         # dispatch itself should work.
         tc = _make_tool_call("pipeline",
                              stages=["Stage 1", "Stage 2", "Stage 3"])
         result = execute_tool(tc, self.wg, self.rg)
-        # May succeed or fail depending on sub-agent API — but shouldn't crash
+        # May succeed or fail depending on sub-agent API -- but shouldn't crash
         self.assertIsInstance(result, ToolResult)
 
 

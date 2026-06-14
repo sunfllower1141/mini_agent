@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-safety.py — file-read and file-write safety layer for mini_agent.
+safety.py -- file-read and file-write safety layer for mini_agent.
 
 Enforces:
     1. All reads/writes must land inside a configured workspace root.
     2. Overwrites trigger a confirmation check (unless explicitly allowed).
-    3. All results are returned as structured dataclasses — never raw exceptions.
+    3. All results are returned as structured dataclasses -- never raw exceptions.
 """
 from __future__ import annotations
 
@@ -43,13 +43,13 @@ def _safe_resolve(root: str, path: str) -> str:
 
 @dataclass(frozen=True)
 class SafetyResult:
-    """Structured result for read/write safety checks — never throws."""
+    """Structured result for read/write safety checks -- never throws."""
     allowed: bool
     reason: str
     resolved_path: str
 
 
-# Backward-compatibility aliases (deprecated — use SafetyResult directly)
+# Backward-compatibility aliases (deprecated -- use SafetyResult directly)
 ReadSafetyResult = SafetyResult
 WriteSafetyResult = SafetyResult
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for agent_runtime.py — SubAgentResult and AgentRuntime."""
+"""Tests for agent_runtime.py -- SubAgentResult and AgentRuntime."""
 
 from __future__ import annotations
 

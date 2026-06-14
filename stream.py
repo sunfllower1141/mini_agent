@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-stream.py — SSE stream parsing for mini_agent.
+stream.py -- SSE stream parsing for mini_agent.
 
 Provides ``_parse_stream()`` for parsing DeepSeek's server-sent event response
 stream, accumulating text content, reasoning blocks, and tool call fragments.
-Resilient to connection drops — returns partial results instead of crashing.
+Resilient to connection drops -- returns partial results instead of crashing.
 """
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ import json
 import sys
 import threading
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
 import requests
 
@@ -25,13 +24,6 @@ THINKING_END = "\n[/thinking]"
 
 # SSE prefix for DeepSeek's server-sent event stream
 _SSE_PREFIX = "data: "
-
-# Per-stream timeout: maximum wall-clock time for the entire SSE stream.
-# If the server stalls mid-stream (TCP open but no data), iter_lines blocks
-# indefinitely on some platforms (notably Windows in CLOSE_WAIT state).
-# This guard runs the parsing in a background thread and returns partial
-# results if the timeout expires.
-_STREAM_TIMEOUT = 300  # 5 minutes — generous for long reasoning streams
 
 def _parse_stream(response: requests.Response, on_token: Callable[[str], None] | None = None, on_tool_ready: Callable[[dict], None] | None = None, cancel_event: threading.Event | None = None) -> dict:
     """Parse an SSE streamed response, printing text as it arrives.
@@ -49,16 +41,17 @@ def _parse_stream(response: requests.Response, on_token: Callable[[str], None] |
     tool execution while the stream tail is still arriving.
 
     If the connection drops mid-stream, whatever was accumulated so far is
-    returned rather than crashing — a warning is printed to stderr.
+    returned rather than crashing -- a warning is printed to stderr.
 
     Returns a reconstructed message dict (role, content, optional
     reasoning_content, optional tool_calls).
     """
     full_content = ""
     full_reasoning = ""
-    tool_calls_by_index: dict[int, dict] = {}  # index → accumulated tc dict
+    tool_calls_by_index: dict[int, dict] = {}  # index -> accumulated tc dict
     fired_indices: set[int] = set()
     reasoning_header_printed = False
+    thinking_ended = False
     usage: dict | None = None
 
     if not on_token:
@@ -87,12 +80,13 @@ def _parse_stream(response: requests.Response, on_token: Callable[[str], None] |
                 if "usage" in chunk and chunk["usage"]:
                     usage = chunk["usage"]
 
-                # Text content — print and accumulate
+                # Text content -- print and accumulate
                 if "content" in delta and delta["content"]:
                     if full_reasoning and not full_content:
-                        # First content token after reasoning — signal end of thinking
+                        # First content token after reasoning -- signal end of thinking
                         if on_token:
                             on_token(THINKING_END)
+                        thinking_ended = True
                     full_content += delta["content"]
                     if on_token:
                         on_token(delta["content"])
@@ -101,13 +95,13 @@ def _parse_stream(response: requests.Response, on_token: Callable[[str], None] |
                         # Fall back to stderr so we don't break the protocol.
                         print(delta["content"], end="", file=sys.stderr, flush=True)
 
-                # Reasoning content (thinking mode) — forward via on_token or print
+                # Reasoning content (thinking mode) -- forward via on_token or print
                 if "reasoning_content" in delta and delta["reasoning_content"]:
                     if not reasoning_header_printed and not full_content:
                         if on_token:
                             on_token(THINKING_START)
                         else:
-                            print(c("  thinking…", DIM), file=sys.stderr, flush=True)
+                            print(c("  thinking...", DIM), file=sys.stderr, flush=True)
                         reasoning_header_printed = True
                     full_reasoning += delta["reasoning_content"]
                     if on_token:
@@ -115,7 +109,7 @@ def _parse_stream(response: requests.Response, on_token: Callable[[str], None] |
                     else:
                         print(c(delta["reasoning_content"], GREEN), end="", file=sys.stderr, flush=True)
 
-                # Tool calls — accumulate fragments by index and detect completion
+                # Tool calls -- accumulate fragments by index and detect completion
                 if "tool_calls" in delta:
                     for tc_delta in delta["tool_calls"]:
                         idx = tc_delta.get("index", 0)
@@ -157,13 +151,11 @@ def _parse_stream(response: requests.Response, on_token: Callable[[str], None] |
     except (
         requests.exceptions.ChunkedEncodingError,
         requests.exceptions.ConnectionError,
-        requests.exceptions.ReadTimeout,
         requests.exceptions.StreamConsumedError,
-        requests.exceptions.Timeout,
         OSError,
     ) as exc:
         print(
-            f"\n  ⚠ stream interrupted ({exc}) — using partial response",
+            f"\n  WARNING: stream interrupted ({exc}) -- using partial response",
             file=sys.stderr, flush=True,
         )
 
@@ -172,6 +164,12 @@ def _parse_stream(response: requests.Response, on_token: Callable[[str], None] |
 
     if full_content and not on_token:
         print(flush=True)  # final newline after streamed text
+
+    # If thinking was opened but never closed (e.g. reasoning-only response
+    # with tool calls and no text content), close it now so subsequent tokens
+    # in this turn don't get stuck in the thinking panel.
+    if full_reasoning and not thinking_ended and on_token:
+        on_token(THINKING_END)
 
     msg: dict = {"role": "assistant", "content": full_content}
     if full_reasoning:

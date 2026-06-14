@@ -3,14 +3,14 @@
 
 Handles the subset of LSP used by tools/lsp.py:
 
-  initialize          → returns capabilities
-  initialized         → notification, no response
-  textDocument/didOpen → notification, sends publishDiagnostics
-  textDocument/definition  → hardcoded location
-  textDocument/references  → two hardcoded locations
-  textDocument/hover       → markdown hover
-  shutdown → null result
-  exit     → notification, exits process
+  initialize          -> returns capabilities
+  initialized         -> notification, no response
+  textDocument/didOpen -> notification, sends publishDiagnostics
+  textDocument/definition  -> hardcoded location
+  textDocument/references  -> two hardcoded locations
+  textDocument/hover       -> markdown hover
+  shutdown -> null result
+  exit     -> notification, exits process
 
 Reads line-delimited JSON from stdin, writes responses to stdout.
 No external dependencies.
@@ -143,7 +143,7 @@ def handle_shutdown(rid, _params):
 
 
 def handle_notification(method, params):
-    """Process a notification (no id → side effects only, no response)."""
+    """Process a notification (no id -> side effects only, no response)."""
     if method == "textDocument/didOpen":
         uri = params.get("textDocument", {}).get("uri", _TEST_URI)
         # Respond with diagnostics for any didOpen URI (real LSP servers do this)
@@ -164,11 +164,11 @@ def dispatch(req):
     params = req.get("params", {})
 
     if rid is None:
-        # Notification — no response expected
+        # Notification -- no response expected
         handle_notification(method, params)
         return None
 
-    # Request — dispatch by method
+    # Request -- dispatch by method
     if method == "initialize":
         return handle_initialize(rid, params)
     elif method == "textDocument/definition":

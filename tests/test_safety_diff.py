@@ -17,7 +17,7 @@ class TestGenerateDiff(unittest.TestCase):
         """Create a temporary workspace directory and a gate for each test."""
         self.tmpdir = tempfile.mkdtemp(prefix="test_safety_diff_")
         # allow_overwrites=True so check() doesn't block, but generate_diff
-        # doesn't call check() — it just needs the gate for formatting.
+        # doesn't call check() -- it just needs the gate for formatting.
         self.gate = WriteSafetyGate(
             self.tmpdir, allow_overwrites=True, unrestricted=False
         )
@@ -39,7 +39,7 @@ class TestGenerateDiff(unittest.TestCase):
         return self.gate.generate_diff(tool_name, args)
 
     # ------------------------------------------------------------------
-    # write_file — new file (no existing file)
+    # write_file -- new file (no existing file)
     # ------------------------------------------------------------------
 
     def test_write_new_file_empty(self):
@@ -67,7 +67,7 @@ class TestGenerateDiff(unittest.TestCase):
         self.assertIn("+line3", result.preview_text)
 
     # ------------------------------------------------------------------
-    # write_file — existing file, identical content
+    # write_file -- existing file, identical content
     # ------------------------------------------------------------------
 
     def test_write_identical_content(self):
@@ -87,7 +87,7 @@ class TestGenerateDiff(unittest.TestCase):
         self.assertEqual(result.preview_text, "")
 
     # ------------------------------------------------------------------
-    # write_file — existing file, changed content
+    # write_file -- existing file, changed content
     # ------------------------------------------------------------------
 
     def test_write_added_lines(self):
@@ -122,7 +122,7 @@ class TestGenerateDiff(unittest.TestCase):
         self.assertIn("-hello", result.preview_text)
 
     # ------------------------------------------------------------------
-    # edit_file — existing file
+    # edit_file -- existing file
     # ------------------------------------------------------------------
 
     def test_edit_identical_strings(self):
@@ -189,12 +189,12 @@ class TestGenerateDiff(unittest.TestCase):
         })
         self.assertTrue(result.changed)
         preview = result.preview_text
-        # unified diff shows the whole line: -x x x  →  +y y y
+        # unified diff shows the whole line: -x x x  ->  +y y y
         self.assertIn("-x x x", preview)
         self.assertIn("+y y y", preview)
 
     # ------------------------------------------------------------------
-    # edit_file — new file (file doesn't exist)
+    # edit_file -- new file (file doesn't exist)
     # ------------------------------------------------------------------
 
     def test_edit_new_file(self):
@@ -221,7 +221,7 @@ class TestGenerateDiff(unittest.TestCase):
     def test_empty_path(self):
         """Empty path still resolves (to tmpdir)."""
         result = self._result("write_file", {"path": "", "content": "hi"})
-        # path="" resolves to tmpdir itself → not a file, so exists=False
+        # path="" resolves to tmpdir itself -> not a file, so exists=False
         self.assertTrue(result.changed)
 
     def test_unknown_tool_name(self):
@@ -274,12 +274,12 @@ class TestGenerateDiff(unittest.TestCase):
 
     def test_write_file_oserror_on_read(self):
         """write_file diff handles OSError when existing file can't be read."""
-        # Create a directory with the same name as a "file" — open() raises
+        # Create a directory with the same name as a "file" -- open() raises
         # IsADirectoryError (subclass of OSError).
         d = os.path.join(self.tmpdir, "cant_read.txt")
         os.mkdir(d)
         result = self._result("write_file", {"path": "cant_read.txt", "content": "new"})
-        # OSError path sets old="" so content differs → changed=True
+        # OSError path sets old="" so content differs -> changed=True
         self.assertTrue(result.changed)
         self.assertIn("+new", result.preview_text)
 
@@ -303,7 +303,7 @@ class TestGenerateDiff(unittest.TestCase):
             "old_string": "old",
             "new_string": "new",
         })
-        # OSError causes original="" so content differs from new → changed=True
+        # OSError causes original="" so content differs from new -> changed=True
         self.assertTrue(result.changed)
 
     # ------------------------------------------------------------------

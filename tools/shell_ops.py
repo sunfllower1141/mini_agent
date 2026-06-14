@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
-shell_ops.py — shell, search, test, and git tools for mini_agent.
+shell_ops.py -- shell, search, test, and git tools for mini_agent.
 
 Tools: run_shell, task_status, search_files, run_tests, verify, git
 """
 from __future__ import annotations
 
-import logging
 import os
 import platform
 import re
@@ -14,12 +13,13 @@ import shutil
 import subprocess
 import threading
 import uuid
-
-_log = logging.getLogger(__name__)
+import threading
 
 from core.safety import ReadSafetyGate, WriteSafetyGate
 from tools import _register, _summarize, ToolResult, _TASK_REGISTRY
 
+_WINDOWS = platform.system() == "Windows"
+_WINDOWS_POPEN_KWARGS = {"creationflags": subprocess.CREATE_NO_WINDOW} if _WINDOWS else {}
 
 # ---------------------------------------------------------------------------
 # Platform helpers for cross-platform shell execution
@@ -142,7 +142,7 @@ def _persist_test_output(output: str) -> None:
         conn.commit()
         conn.close()
     except Exception:
-        _log.debug("_write_test_output: SQLite write failed", exc_info=True)
+        pass
 
 
 _STREAM_READER_MAX_LINES = 10000  # cap to prevent unbounded memory growth
@@ -162,7 +162,7 @@ def _stream_reader(stream, collector: list[str], forward: bool = False,
             try:
                 on_output(prefix + line)
             except Exception:
-                _log.debug("_stream_reader: on_output callback failed", exc_info=True)
+                pass
     stream.close()
 
 
@@ -190,6 +190,36 @@ def _parse_pytest_output(raw_output: str, exit_code: int = 0) -> tuple[str, bool
 # run_shell
 # ---------------------------------------------------------------------------
 
+# Patterns for dangerous commands that should warn or block
+_DANGEROUS_COMMANDS: list[tuple[str, str]] = [
+    # (regex pattern, explanation)
+    (r"\brm\s+-rf\b", "rm -rf: recursive force delete -- will permanently remove files"),
+    (r"\bgit\s+push\s+.*--force\b", "git push --force: overwrites remote history"),
+    (r"\bgit\s+push\s+.*-f\b", "git push -f: overwrites remote history"),
+    (r"\bsudo\b", "sudo: requires elevated privileges"),
+    (r"\bchmod\s+777\b", "chmod 777: makes files world-writable (security risk)"),
+    (r"\bdd\s+if=", "dd: raw disk write -- can destroy data"),
+    (r"\bmkfs\.", "mkfs: creates filesystems (destroys existing data)"),
+    (r">\s*/dev/sd[a-z]", "redirect to /dev/sd*: raw disk write"),
+    (r"\bformat\s+[A-Z]:\\?", "format drive: destroys all data on the drive"),
+]
+
+def _check_dangerous_command(command: str, force: bool) -> str | None:
+    """Return a warning/block message for dangerous commands, or None if safe."""
+    for pattern, explanation in _DANGEROUS_COMMANDS:
+        if re.search(pattern, command, re.IGNORECASE):
+            if force:
+                return (
+                    f"WARNING: DANGEROUS COMMAND: {explanation}\n"
+                    f"The 'force=True' flag was set, so this command WILL execute."
+                )
+            else:
+                return (
+                    f"WARNING: DANGEROUS COMMAND BLOCKED: {explanation}\n"
+                    f"This command was NOT executed. If you are absolutely sure, "
+                    f"set force=True to bypass this safety check."
+                )
+    return None
 
 
 
@@ -219,7 +249,7 @@ def _task_status(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolR
                 test_out = "\n".join(lines[:100]) + f"\n... (truncated - {len(lines)} total lines)"
             output_msg = f"\n\n--- Test Output ---\n{test_out}"
     except Exception:
-        _log.debug("task_status: test output formatting failed", exc_info=True)
+        pass
     return ToolResult(success=True, content=f"Task {task_id}: completed with exit_code={returncode}.{output_msg}")
 
 
@@ -230,21 +260,28 @@ def _task_status_summary(args: dict) -> str:
 
 @_register("run_shell")
 def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: callable = None) -> ToolResult:
+    import sys as _sys
+    import time as _time
     command = args["command"]
     force = args.get("force", False)
     timeout = min(int(args.get("timeout", 60)), 300)
     stdin_text = args.get("stdin", None)  # optional stdin to pipe to the process
-    # Windows: prefer bash for safer, more compatible command execution
+    _sys.stderr.write(f"[shell] _run_shell start: {command[:100]}\n")
+    _sys.stderr.flush()
+    _t_start = _time.monotonic()
+    # ACI upgrade: check for dangerous commands before executing
+    danger_warning = _check_dangerous_command(command, force)
+    if danger_warning and not force:
+        return ToolResult(success=False, content=danger_warning)
+    # If force=True, retain the warning to prepend to final output
+    _danger_prefix = danger_warning + "\n\n" if danger_warning else ""
+    # Windows: note when bash is unavailable (cmd.exe has different pipe/redirect syntax)
     _windows_cmd_note = ""
-    if platform.system() == "Windows":
-        if _is_bash_available():
-            bash = _get_shell_command()[0]
-            command = f'{bash} -c "{command}"'
-        elif not force:
-            _windows_cmd_note = (
-                "\nNote: Running on Windows cmd.exe. "
-                "Some shell commands (pipes, redirects, etc.) may behave differently than on Unix."
-            )
+    if platform.system() == "Windows" and not _is_bash_available() and not force:
+        _windows_cmd_note = (
+            "\nNote: Running on Windows cmd.exe. "
+            "Some shell commands (pipes, redirects, etc.) may behave differently than on Unix."
+        )
     # Auto-backup files before any rm command (prevents permanent data loss)
     if force and re.search(r'\brm\b', command):
         from tools.file_ops import _backup_before_write
@@ -266,9 +303,9 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
         # Commands that need a real terminal (sudo, ssh, etc.) get spawned
         # in a separate terminal window so the user can interact with them.
         _INTERACTIVE_PATTERNS = [
-            r'\bsudo\b', r'\bssh\b', r'\bsu\b', r'\bpasswd\b',
-            r'\blogin\b', r'\bhg\s+commit\b', r'\bpkexec\b',
-            r'\bgit\s+push\b', r'\bgit\s+pull\b', r'\bgit\s+clone\b',
+            r"\bsudo\b", r"\bssh\b", r"\bsu\b", r"\bpasswd\b",
+            r"\blogin\b", r"\bhg\s+commit\b", r"\bpkexec\b",
+            r"\bgit\s+push\b", r"\bgit\s+pull\b", r"\bgit\s+clone\b",
         ]
         _interactive = (
             not args.get("background", False)
@@ -278,11 +315,8 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
         )
         if _interactive:
             import shutil
-            # Prefer terminals that support -e; cosmic-term (Pop!_OS) does not.
-            # x-terminal-emulator on COSMIC points to cosmic-term, so check xterm first.
             term = (shutil.which("xterm") or shutil.which("gnome-terminal")
                     or shutil.which("konsole") or shutil.which("kitty"))
-            # Only use x-terminal-emulator if it's NOT cosmic-term
             xte = shutil.which("x-terminal-emulator")
             if term is None and xte:
                 if os.path.islink(xte):
@@ -303,130 +337,196 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
                 else:
                     term_cmd += ["-e", "bash", "-c", wrap]
                 proc = subprocess.run(term_cmd, cwd=rg.workspace_root,
-                                      timeout=timeout)
+                                      timeout=timeout,
+                                      **(_WINDOWS_POPEN_KWARGS if _WINDOWS else {}))
                 return ToolResult(success=(proc.returncode == 0),
                                   content=f"exit_code={proc.returncode}")
-            # fall through to normal subprocess if no terminal found
 
         # Default to DEVNULL so interactive prompts don't hang the TUI.
-        # Callers that need stdin pass stdin_text which switches to PIPE.
         stdin_kw = {"stdin": subprocess.DEVNULL}
         if stdin_text is not None:
             stdin_kw["stdin"] = subprocess.PIPE
+
+        # On Windows, prevent console windows from flashing
+        popen_kwargs = {}
+        if _WINDOWS:
+            popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+
+        # Always use shell=True: cmd.exe on Windows, /bin/sh on Unix.
+        # No bash wrapping -- it creates a fragile cmd->bash->command chain
+        # and can cause process explosions when quoting is mishandled.
         proc = subprocess.Popen(
-            command,
-            shell=True,
+            command, shell=True,
             cwd=rg.workspace_root,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            **stdin_kw,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            **stdin_kw, **popen_kwargs,
         )
 
+        _register_proc(proc)
         stdout_lines: list[str] = []
         stderr_lines: list[str] = []
 
-        # Background mode: register and return immediately
         background = args.get("background", False)
         if background:
             task_id = str(uuid.uuid4())[:8]
             _TASK_REGISTRY[task_id] = proc
-            # Drain stdout/stderr in daemon threads to prevent pipe-buffer deadlock
             threading.Thread(target=_stream_reader, args=(proc.stdout, []), daemon=True).start()
             threading.Thread(target=_stream_reader, args=(proc.stderr, []), daemon=True).start()
-            # Write stdin in a daemon thread to avoid blocking
             if stdin_text is not None and proc.stdin is not None:
-                threading.Thread(target=lambda p, t: (p.stdin.write(t), p.stdin.close()), args=(proc, stdin_text), daemon=True).start()
-            # Auto-cleanup: remove from registry when the process exits, so
-            # _TASK_REGISTRY doesn't grow unbounded if task_status is never called.
-            def _auto_cleanup(reg: dict, tid: str, p: subprocess.Popen) -> None:
+                threading.Thread(target=lambda p, t: (p.stdin.write(t), p.stdin.close()),
+                                 args=(proc, stdin_text), daemon=True).start()
+            def _auto_cleanup(reg, tid, p):
                 try:
+                    if _WINDOWS:
+                        p.stdout.close(); p.stderr.close()
                     p.wait()
                 except (OSError, subprocess.SubprocessError):
                     pass
                 finally:
                     reg.pop(tid, None)
+                    _unregister_proc(p)
             threading.Thread(target=_auto_cleanup, args=(_TASK_REGISTRY, task_id, proc), daemon=True).start()
-            return ToolResult(
-                success=True,
-                content=f"Started background task {task_id}. Use task_status to check.",
-            )
+            return ToolResult(success=True,
+                              content=f"Started background task {task_id}. Use task_status to check.")
 
         if on_output is not None:
-            # Streaming mode: need threads to forward output in real-time
-            # Write stdin before starting reader threads to avoid race
             if stdin_text is not None and proc.stdin is not None:
                 proc.stdin.write(stdin_text)
                 proc.stdin.close()
-            t_out = threading.Thread(
-                target=_stream_reader, args=(proc.stdout, stdout_lines, True, on_output, ""), daemon=True,
-            )
-            t_err = threading.Thread(
-                target=_stream_reader, args=(proc.stderr, stderr_lines, True, on_output, "[stderr] "), daemon=True,
-            )
+            t_out = threading.Thread(target=_stream_reader,
+                                     args=(proc.stdout, stdout_lines, True, on_output, ""), daemon=True)
+            t_err = threading.Thread(target=_stream_reader,
+                                     args=(proc.stderr, stderr_lines, True, on_output, "[stderr] "), daemon=True)
             t_out.start()
             t_err.start()
 
-            # Register this proc so the TUI can kill it on Ctrl+Z
             from tools import _TOOL_CONTEXT
             _TOOL_CONTEXT._active_proc = proc
-            try:
+
+            if _WINDOWS:
+                kill_fired = threading.Event()
+                def _kill_timer():
+                    kill_fired.set()
+                    _kill_process_tree_windows(proc)
+                timer = threading.Timer(timeout, _kill_timer)
+                timer.daemon = True; timer.start()
+                try:
+                    # Poll t_out.join with short intervals so we can detect
+                    # cancellation (via the module-level _CURRENT_CANCEL_EVENT).
+                    # A single t_out.join(timeout=70) blocks the tool thread
+                    # and prevents cancellation from working.
+                    _poll_deadline = _time.monotonic() + timeout + 10
+                    while t_out.is_alive() and _time.monotonic() < _poll_deadline:
+                        # Check module-level cancel event
+                        try:
+                            from tools import _CURRENT_CANCEL_EVENT as _cce
+                            if _cce is not None and _cce.is_set():
+                                kill_fired.set()
+                                _kill_process_tree_windows(proc)
+                                break
+                        except ImportError:
+                            pass
+                        t_out.join(timeout=0.1)
+                    else:
+                        # Normal completion or timeout -- join t_err briefly
+                        t_err.join(timeout=5)
+                finally:
+                    timer.cancel()
+                if kill_fired.is_set():
+                    _unregister_proc(proc)
+                    _TOOL_CONTEXT._active_proc = None
+                    return ToolResult(success=False,
+                                      content=f"Command timed out after {timeout}s (process tree killed)")
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
+            else:
                 try:
                     proc.wait(timeout=timeout)
                 except subprocess.TimeoutExpired:
                     proc.kill()
                     t_out.join(timeout=2)
                     t_err.join(timeout=2)
+                    _unregister_proc(proc)
+                    _TOOL_CONTEXT._active_proc = None
                     return ToolResult(success=False, content=f"Command timed out after {timeout}s")
-            finally:
-                _TOOL_CONTEXT._active_proc = None
+                finally:
+                    _TOOL_CONTEXT._active_proc = None
 
             t_out.join(timeout=2)
             t_err.join(timeout=2)
-
+            _TOOL_CONTEXT._active_proc = None
             stdout = "\n".join(stdout_lines)
             stderr = "\n".join(stderr_lines)
         else:
-            # No streaming: use communicate() to avoid thread overhead
-            # Register this proc so the TUI can kill it on Ctrl+Z
             from tools import _TOOL_CONTEXT
             _TOOL_CONTEXT._active_proc = proc
-            try:
-                out, err = proc.communicate(input=stdin_text, timeout=timeout)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                out, err = proc.communicate()
-                _TOOL_CONTEXT._active_proc = None
-                return ToolResult(success=False, content=f"Command timed out after {timeout}s")
-            finally:
-                _TOOL_CONTEXT._active_proc = None
-            stdout = out
-            stderr = err
+
+            if stdin_text is not None and proc.stdin is not None:
+                proc.stdin.write(stdin_text)
+                proc.stdin.close()
+
+            if _WINDOWS:
+                try:
+                    stdout, stderr = _communicate_windows(proc, timeout)
+                except subprocess.TimeoutExpired as exc:
+                    _unregister_proc(proc)
+                    _TOOL_CONTEXT._active_proc = None
+                    partial = getattr(exc, "output", None) or ""
+                    if partial:
+                        return ToolResult(success=False,
+                                          content=f"Command timed out after {timeout}s\n\n{partial}")
+                    return ToolResult(success=False, content=f"Command timed out after {timeout}s")
+            else:
+                try:
+                    out, err = proc.communicate(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    out, err = proc.communicate()
+                    _unregister_proc(proc)
+                    _TOOL_CONTEXT._active_proc = None
+                    return ToolResult(success=False, content=f"Command timed out after {timeout}s")
+                stdout = out
+                stderr = err
+
+            _TOOL_CONTEXT._active_proc = None
 
         parts = [f"exit_code={proc.returncode}"]
         if stdout:
-            lines = stdout.split("\n")
-            if len(lines) > 500:
-                stdout = "\n".join(lines[:500])
-                stdout += f"\n… (truncated at 500 lines — {len(lines)} total. "
+            lines_out = stdout.split("\n")
+            if len(lines_out) > 500:
+                stdout = "\n".join(lines_out[:500])
+                stdout += f"\n... (truncated at 500 lines -- {len(lines_out)} total. "
                 stdout += "Use read_file with offset/limit for the full log if needed.)"
             parts.append(f"stdout:\n{stdout}")
+        elif proc.returncode == 0 and not stderr:
+            # ACI upgrade: explicit empty-output message (SWE-agent pattern).
+            # Silence is ambiguous -- the model needs to know the command ran OK.
+            hint = "Command completed successfully (no output)."
+            # Detect likely no-op patterns in python -c commands
+            if "python" in command and " -c " in command:
+                if "#" in command:
+                    hint += " Hint: '#' in python -c comments out the rest of the line. Use ';' separators instead of comments, or use a multi-line script."
+                elif any(kw in command for kw in (" if ", " try:", " for ", " while ", " with ", " def ", " class ")):
+                    hint += " Hint: Compound statements (if/try/for/while/with/def/class) cannot follow ';' in python -c. Use newlines in a script instead."
+            parts.append(hint)
         if stderr:
             err_output = stderr.rstrip()
             err_lines = err_output.split("\n")
             if len(err_lines) > 100:
                 err_output = "\n".join(err_lines[:100])
-                err_output += f"\n… (stderr truncated at 100 lines — {len(err_lines)} total)"
+                err_output += f"\n... (stderr truncated at 100 lines -- {len(err_lines)} total)"
             parts.append(f"stderr:\n{err_output}")
-        content = "\n".join(parts)
+        content_out = "\n".join(parts)
+        if _danger_prefix:
+            content_out = _danger_prefix + content_out
         if _windows_cmd_note:
-            content += _windows_cmd_note
+            content_out += _windows_cmd_note
         if proc.returncode == 127:
-            content += "\nHint: Command not found. Check the spelling and that it is installed."
-        return ToolResult(
-            success=proc.returncode == 0,
-            content=content,
-        )
+            content_out += "\nHint: Command not found. Check the spelling and that it is installed."
+        _unregister_proc(proc)
+        return ToolResult(success=proc.returncode == 0, content=content_out)
     except Exception as e:
         hint = "\nHint: Check the command and flag spelling. Try with --help first, or use search_files to find the right syntax."
         return ToolResult(success=False, content=f"Error running command: {e}{hint}{_windows_cmd_note}")
@@ -437,7 +537,7 @@ def _run_shell_summary(args: dict) -> str:
     cmd = args.get("command", "?")
     preview = cmd[:80]
     if len(cmd) > 80:
-        preview += "…"
+        preview += "..."
     force = args.get("force", False)
     if force:
         return f"run_shell[force] ({preview})"
@@ -448,7 +548,9 @@ def _run_shell_summary(args: dict) -> str:
 # search_files
 # ---------------------------------------------------------------------------
 
-from core.constants import SKIP_DIRS as _SKIP_DIRS  # noqa: E402 — shared skip-dir set
+_SKIP_DIRS = {".git", ".hg", ".svn", "__pycache__", ".pytest_cache",
+              "venv", ".venv", "node_modules", ".mypy_cache", ".tox",
+              "dist", "build", ".eggs"}
 
 # Binary / non-text extensions to skip during search
 _BINARY_EXTS = {".pyc", ".pyo", ".so", ".o", ".a", ".dylib", ".dll",
@@ -459,14 +561,14 @@ _BINARY_EXTS = {".pyc", ".pyo", ".so", ".o", ".a", ".dylib", ".dll",
                 ".ttf", ".otf", ".woff", ".woff2", ".eot",
                 ".db", ".sqlite", ".sqlite3", ".mdb",
                 ".exe", ".bin", ".dat", ".pkl", ".pickle",
-                # SQLite auxiliary files — os.path.splitext splits on last dot
+                # SQLite auxiliary files -- os.path.splitext splits on last dot
                 "-wal", "-shm", "-journal",
                 # Coverage / profiling binary files
                 ".coverage",
                 ".prof", ".gcda", ".gcno",
                 # macOS resource forks
                 ".rsrc",
-                # No extension — catches files like .DS_Store, .coverage (no dot variant)
+                # No extension -- catches files like .DS_Store, .coverage (no dot variant)
                 ".ds_store"}
 
 
@@ -481,10 +583,10 @@ def _is_binary_file(filepath: str) -> bool:
     try:
         with open(filepath, "rb") as f:
             chunk = f.read(512)
-        # Null byte in first 512 bytes → binary (covers SQLite, ELF, Mach-O, etc.)
+        # Null byte in first 512 bytes -> binary (covers SQLite, ELF, Mach-O, etc.)
         return b"\x00" in chunk
     except (OSError, PermissionError):
-        return True  # Can't read → treat as binary, skip it
+        return True  # Can't read -> treat as binary, skip it
 
 
 _SEARCH_MAX_RESULTS = 200
@@ -543,7 +645,8 @@ def _search_with_rg(root_dir: str, pattern: str, use_regex: bool, ignore_case: b
         cmd.append("--ignore-case")
     cmd.extend(["--", pattern, root_dir])
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15,
+                                **(_WINDOWS_POPEN_KWARGS if _WINDOWS else {}))
         # Check for rg errors (regex parse errors, etc.)
         if result.returncode != 0 and result.stderr.strip():
             err = result.stderr.strip().split("\n")[0]
@@ -555,7 +658,9 @@ def _search_with_rg(root_dir: str, pattern: str, use_regex: bool, ignore_case: b
             lines = lines[offset:]
         output = "\n".join(lines[:_SEARCH_MAX_RESULTS])
         if len(lines) > _SEARCH_MAX_RESULTS:
-            output += f"\n\u2026 (capped at {_SEARCH_MAX_RESULTS} results)"
+            output += f"\n... (showing first {_SEARCH_MAX_RESULTS} results. "
+            output += "There may be more matches. Narrow your search with a more specific "
+            output += "pattern, a subdirectory path, or use find_symbol for symbol lookups.)"
         return ToolResult(success=True, content=output)
     except (subprocess.TimeoutExpired, Exception):
         return ToolResult(success=False, content="rg search failed or timed out")
@@ -623,7 +728,7 @@ def _search_files(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolR
                     continue
                 file_count += 1
                 if file_count % 500 == 0:
-                    # Periodic yield — prevents long-running searches from
+                    # Periodic yield -- prevents long-running searches from
                     # appearing hung, but the walk always completes.
                     pass
                 fpath = os.path.join(root, fname)
@@ -656,7 +761,7 @@ def _search_files(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolR
         return ToolResult(success=True, content=msg)
     output = "\n".join(results)
     if len(results) >= _SEARCH_MAX_RESULTS:
-        output += f"\n… (capped at {_SEARCH_MAX_RESULTS} results)"
+        output += f"\n... (capped at {_SEARCH_MAX_RESULTS} results)"
     return ToolResult(success=True, content=output)
 
 
@@ -679,17 +784,46 @@ def _run_tests(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
     target = args.get("path", "").strip()
     background = args.get("background", False)
     timeout = args.get("timeout", 120)
-    cmd = _get_python_cmd() + ["-m", "pytest", "-q", "--ignore=venv", "--ignore=eval", "--ignore=tests"]
-    if target:
-        cmd.append(target)
 
-    try:
-        proc = subprocess.Popen(
-            cmd, cwd=rg.workspace_root,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-        )
-    except Exception as e:
-        return ToolResult(success=False, content=f"Error starting pytest: {e}")
+    global _PYTHON_CMD
+    _retried = False
+
+    def _build_cmd() -> list[str]:
+        cmd = _get_python_cmd() + ["-m", "pytest", "-q", "--ignore=venv", "--ignore=eval", "--ignore=tests"]
+        if target:
+            cmd.append(target)
+        return cmd
+
+    cmd = _build_cmd()
+
+    def _spawn(cmd):
+        # On Windows, use shell=True (same as _run_shell) to avoid pipe-EOF
+        # detection issues with CreateProcess and _communicate_windows.
+        # On Unix, keep the list form (shell=False) for reliability.
+        if _WINDOWS:
+            cmd_str = subprocess.list2cmdline(cmd)
+            try:
+                return subprocess.Popen(
+                    cmd_str, shell=True, cwd=rg.workspace_root,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+            except Exception as e:
+                return ToolResult(success=False, content=f"Error starting pytest: {e}")
+        else:
+            try:
+                return subprocess.Popen(
+                    cmd, cwd=rg.workspace_root,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                )
+            except Exception as e:
+                return ToolResult(success=False, content=f"Error starting pytest: {e}")
+
+    proc_or_err = _spawn(cmd)
+    if isinstance(proc_or_err, ToolResult):
+        return proc_or_err
+    proc = proc_or_err
 
     if background:
         task_id = str(uuid.uuid4())[:8]
@@ -712,13 +846,44 @@ def _run_tests(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
         )
 
     try:
-        out, err = proc.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        out, err = proc.communicate()
+        if _WINDOWS:
+            out, err = _communicate_windows(proc, timeout)
+        else:
+            out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        if not _WINDOWS:
+            proc.kill()
+            out, err = proc.communicate()
+        else:
+            out = getattr(exc, "output", None) or ""
+            err = getattr(exc, "stderr", None) or ""
+        output = (out + err).strip()
+        if output:
+            return ToolResult(success=False,
+                              content=f"Tests timed out after {timeout}s\n\n{output}")
         return ToolResult(success=False, content=f"Tests timed out after {timeout}s")
 
     output = (out + err).strip()
+
+    # Retry once if pytest module not found — the cached python may have
+    # lost its pytest install (e.g. venv was rebuilt or PATH changed).
+    if not _retried and "No module named pytest" in output:
+        _retried = True
+        _PYTHON_CMD = []  # invalidate cache, force re-scan
+        cmd = _build_cmd()
+        proc_or_err = _spawn(cmd)
+        if isinstance(proc_or_err, ToolResult):
+            return proc_or_err
+        proc = proc_or_err
+        try:
+            if _WINDOWS:
+                out, err = _communicate_windows(proc, timeout)
+            else:
+                out, err = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return ToolResult(success=False, content=f"Tests timed out after {timeout}s")
+        output = (out + err).strip()
+
     _persist_test_output(output)
     summary, success = _parse_pytest_output(output, proc.returncode)
     return ToolResult(success=success, content=summary)
@@ -733,7 +898,7 @@ def _run_tests_summary(args: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# verify — lint + run tests for recently modified files
+# verify -- lint + run tests for recently modified files
 # ---------------------------------------------------------------------------
 
 @_register("verify")
@@ -761,6 +926,7 @@ def _verify(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
                 ["ruff", "check", "--select", "F401,F811",
                  "--output-format", "concise", root],
                 capture_output=True, text=True, timeout=10,
+                **(_WINDOWS_POPEN_KWARGS if _WINDOWS else {}),
             )
             if r.returncode == 0 and not r.stdout.strip():
                 results.append("ruff: no unused/redefined imports found")
@@ -774,6 +940,7 @@ def _verify(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
             r = subprocess.run(
                 ["pyflakes", root],
                 capture_output=True, text=True, timeout=10,
+                **(_WINDOWS_POPEN_KWARGS if _WINDOWS else {}),
             )
             stdout = r.stdout
             if (r.returncode == 0
@@ -825,6 +992,7 @@ def _verify(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
     try:
         lint_proc = subprocess.Popen(
             lint_cmd, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            **(_WINDOWS_POPEN_KWARGS if _WINDOWS else {}),
         )
         jobs.append(("lint", lint_proc))
     except Exception as e:
@@ -836,6 +1004,7 @@ def _verify(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
             proc = subprocess.Popen(
                 _get_python_cmd() + ["-m", "pytest", target, "-q"],
                 cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                **(_WINDOWS_POPEN_KWARGS if _WINDOWS else {}),
             )
             jobs.append(("test", (target, proc)))
         except Exception as e:
@@ -889,196 +1058,7 @@ def _verify_summary(args: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# git
-# ---------------------------------------------------------------------------
-
-_GIT_SAFE: set[str] = {"status", "diff", "log", "init", "add", "commit", "show", "restore", "blame", "log_p", "branch_diff"}
-
-
-def _git_run(cwd: str, *args: str) -> tuple[int, str, str]:
-    result = subprocess.run(
-        ["git", *args],
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    return result.returncode, result.stdout, result.stderr
-
-
-@_register("git")
-def _git(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
-    sub = args["subcommand"]
-    extra = args.get("args", "")
-
-    if sub not in _GIT_SAFE:
-        return ToolResult(
-            success=False,
-            content=f"Unknown or unsafe git subcommand: '{sub}'. "
-                    f"Allowed: {', '.join(sorted(_GIT_SAFE))}",
-        )
-
-    cwd = rg.workspace_root
-
-    if sub == "status":
-        rc, out, err = _git_run(cwd, "status", "--short")
-        if rc != 0:
-            return ToolResult(success=False, content=err or out)
-        if not out.strip():
-            return ToolResult(success=True, content="Working tree clean.")
-        return ToolResult(success=True, content=out.rstrip())
-
-    elif sub == "diff":
-        rc, out, err = _git_run(cwd, "diff")
-        if rc != 0:
-            return ToolResult(success=False, content=err or out)
-        if not out.strip():
-            return ToolResult(success=True, content="No unstaged changes.")
-        return ToolResult(success=True, content=out.rstrip())
-
-    elif sub == "log":
-        rc, out, err = _git_run(
-            cwd, "log", "--oneline", "-n", "20", "--decorate",
-        )
-        if rc != 0 and "does not have any commits" not in err:
-            return ToolResult(success=False, content=err or out)
-        if not out.strip():
-            return ToolResult(success=True, content="No commits yet.")
-        return ToolResult(success=True, content=out.rstrip())
-
-    elif sub == "init":
-        rc, out, err = _git_run(cwd, "init")
-        if rc != 0:
-            return ToolResult(success=False, content=err or out)
-        return ToolResult(success=True, content=out.strip() or "Repository initialized.")
-
-    elif sub == "add":
-        paths = extra.strip() if extra.strip() else "."
-        rc, out, err = _git_run(cwd, "add", *paths.split())
-        if rc != 0:
-            return ToolResult(success=False, content=err or out)
-        return ToolResult(success=True, content=f"Staged: {paths}")
-
-    elif sub == "commit":
-        if not extra.strip():
-            return ToolResult(success=False, content="Commit requires a message in 'args'.")
-        rc, out, err = _git_run(cwd, "commit", "-m", extra.strip())
-        if rc != 0:
-            return ToolResult(success=False, content=err or out)
-        return ToolResult(success=True, content=out.strip() or "Committed.")
-
-    elif sub == "show":
-        if not extra.strip():
-            return ToolResult(success=False, content="'show' requires a file path in 'args'.")
-        rc, out, err = _git_run(cwd, "show", f"HEAD:{extra.strip()}")
-        if rc != 0:
-            return ToolResult(success=False, content=err or out)
-        return ToolResult(success=True, content=out)
-
-    elif sub == "blame":
-        if not extra.strip():
-            return ToolResult(success=False, content="'blame' requires a file path in 'args'.")
-        # Limit output to 200 lines to avoid blowing context
-        rc, out, err = _git_run(
-            cwd, "blame", "--date=short", "-w", "-L", "1,200", extra.strip(),
-        )
-        if rc != 0:
-            return ToolResult(success=False, content=err or out)
-        if not out.strip():
-            return ToolResult(success=True, content=f"No blame info for: {extra.strip()}")
-        # Compact the output: hash(8) author date line_num: code
-        lines = out.strip().split("\n")
-        compact = []
-        for line in lines:
-            # git blame format: hash (author date line_num) code
-            parts = line.split(" ", 2)
-            if len(parts) >= 3:
-                # Extract just the first 8 chars of hash
-                short_hash = parts[0][:8] if len(parts[0]) >= 8 else parts[0]
-                # Reassemble: hash author (date line_num) code
-                compact.append(f"{short_hash} {parts[1]} {parts[2]}")
-            else:
-                compact.append(line)
-        return ToolResult(success=True, content="\n".join(compact))
-
-    elif sub == "log_p":
-        # Show log with diff/patch. Optional path filter in args
-        count = args.get("count", 5)
-        path_filter = extra.strip() if extra.strip() else None
-        cmd = ["log", "-p", f"-n{min(count, 20)}", "--decorate"]
-        if path_filter:
-            cmd.extend(["--", path_filter])
-        rc, out, err = _git_run(cwd, *cmd)
-        if rc != 0 and "does not have any commits" not in err:
-            return ToolResult(success=False, content=err or out)
-        if not out.strip():
-            return ToolResult(success=True, content="No commits found.")
-        # Truncate to ~8000 chars to keep response manageable
-        truncated = out[:8000]
-        if len(out) > 8000:
-            truncated += f"\n... (truncated, {len(out)} total chars)"
-        return ToolResult(success=True, content=truncated)
-
-    elif sub == "branch_diff":
-        # Diff between branches. Default: current branch vs main/master.
-        # Optional args: branch name to compare against, or "A..B" syntax
-        if extra.strip():
-            compare = extra.strip()
-        else:
-            # Auto-detect: try "main", then "master"
-            for candidate in ("main", "master"):
-                rc, _, _ = _git_run(cwd, "rev-parse", "--verify", candidate)
-                if rc == 0:
-                    compare = candidate
-                    break
-            else:
-                return ToolResult(
-                    success=False,
-                    content="Could not detect main/master branch. Specify branch in 'args'.",
-                )
-        rc, out, err = _git_run(
-            cwd, "diff", "--stat", f"{compare}...HEAD",
-        )
-        if rc != 0:
-            return ToolResult(success=False, content=err or out)
-        if not out.strip():
-            return ToolResult(success=True, content=f"No differences vs {compare}.")
-        # Append a shortstat summary
-        lines = [f"Changes vs {compare}:\n", out.rstrip()]
-        rc2, diff_out, _ = _git_run(
-            cwd, "diff", "--shortstat", f"{compare}...HEAD",
-        )
-        if rc2 == 0 and diff_out.strip():
-            lines.append(f"\nSummary: {diff_out.strip()}")
-        return ToolResult(success=True, content="\n".join(lines))
-
-    elif sub == "restore":
-        if not extra.strip():
-            extra = "."
-        restoring = extra.strip()
-        rc, changed, _ = _git_run(cwd, "diff", "--name-only", "HEAD")
-        if rc != 0:
-            return ToolResult(success=False, content=changed or "Unable to list changed files.")
-        files = changed.strip()
-        rc, out, err = _git_run(cwd, "restore", *restoring.split())
-        if rc != 0:
-            return ToolResult(success=False, content=err or out)
-        if files:
-            return ToolResult(success=True, content=f"Restored: {files}")
-        return ToolResult(success=True, content="Restored (no changes to revert).")
-
-
-@_summarize("git")
-def _git_summary(args: dict) -> str:
-    sub = args.get("subcommand", "?")
-    extra = args.get("args", "")
-    if extra:
-        return f"git {sub} {extra}"
-    return f"git {sub}"
-
-
-# ---------------------------------------------------------------------------
-# diagnose_failures — parse last test output and summarize failures
+# diagnose_failures -- parse last test output and summarize failures
 # ---------------------------------------------------------------------------
 
 _FAILED_LINE_RE = re.compile(r"FAILED\s+(.+?\.py)::(.+?)(?:\s+-|\s*$)")
@@ -1094,7 +1074,7 @@ def _diagnose_failures(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> 
         return ToolResult(success=False, content="diagnose_failures is restricted to the orchestrator. Sub-agents must not run tests.")
     import os as _os
 
-    # Build MemoryStore path — same default used by _persist_test_output
+    # Build MemoryStore path -- same default used by _persist_test_output
     db_path = _os.path.join(rg.workspace_root, ".mini_agent_memory.db")
     try:
         from memory.memory import MemoryStore
@@ -1140,7 +1120,7 @@ def _diagnose_failures(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> 
             })
 
     if not failures:
-        # No FAILED lines — check if there's useful output at all
+        # No FAILED lines -- check if there's useful output at all
         if summary_line:
             return ToolResult(success=True, content=f"No FAILED lines parsed. Summary: {summary_line}")
         return ToolResult(success=True, content="No FAILED lines found in test output.")
@@ -1233,3 +1213,111 @@ def _diagnose_failures(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> 
 @_summarize("diagnose_failures")
 def _diagnose_failures_summary(args: dict) -> str:
     return "diagnose_failures()"
+
+_ACTIVE_PROCS: set = set()
+_ACTIVE_PROCS_LOCK = threading.Lock()
+
+def _register_proc(proc):
+    with _ACTIVE_PROCS_LOCK: _ACTIVE_PROCS.add((proc.pid, proc))
+
+def _unregister_proc(proc):
+    with _ACTIVE_PROCS_LOCK: _ACTIVE_PROCS.discard((proc.pid, proc))
+
+def _kill_process_tree_windows(proc):
+    """Kill the process tree rooted at *proc* as aggressively as possible.
+
+    Tries three approaches in order:
+    1. ``taskkill /F /T`` -- kills the whole tree including children.
+    2. ``proc.kill()`` -- TerminateProcess (parent only, but may cause
+      children to exit when pipes break).
+    3. ``taskkill`` with just /F (no /T) -- last resort.
+
+    Timeouts are short (4 s for taskkill) to avoid this function itself
+    hanging and leaking processes.
+    """
+    pid = proc.pid
+    # Method 1: taskkill /F /T (kills entire tree)
+    try:
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                      capture_output=True, timeout=4)
+    except Exception:
+        pass
+    # Method 2: TerminateProcess on the parent (may leave orphans, but
+    #            breaking stdout/stderr pipes often causes children to exit)
+    try:
+        proc.kill()
+    except Exception:
+        pass
+    # Method 3: taskkill /F (just the parent, no /T)
+    try:
+        subprocess.run(["taskkill", "/F", "/PID", str(pid)],
+                      capture_output=True, timeout=4)
+    except Exception:
+        pass
+
+def _cleanup_all_procs():
+    with _ACTIVE_PROCS_LOCK:
+        procs = list(_ACTIVE_PROCS)
+        _ACTIVE_PROCS.clear()
+    for _pid, proc in procs:
+        try:
+            if _WINDOWS:
+                _kill_process_tree_windows(proc)
+            else:
+                proc.kill()
+        except Exception:
+            pass
+
+def _communicate_windows(proc, timeout):
+    import time as _time
+    if not _WINDOWS:
+        raise RuntimeError("_communicate_windows called on non-Windows")
+    out_lines, err_lines = [], []
+    t_out = threading.Thread(target=_stream_reader, args=(proc.stdout, out_lines), daemon=True)
+    t_err = threading.Thread(target=_stream_reader, args=(proc.stderr, err_lines), daemon=True)
+    t_out.start(); t_err.start()
+    kill_fired = threading.Event()
+    def _kill():
+        kill_fired.set()
+        _kill_process_tree_windows(proc)
+    timer = threading.Timer(timeout, _kill)
+    timer.daemon = True; timer.start()
+    try:
+        # Poll t_out.join with short intervals to detect cancellation.
+        # A single t_out.join(timeout=timeout+10) blocks the tool thread
+        # and prevents cancellation from working.
+        _deadline = _time.monotonic() + timeout + 10
+        while t_out.is_alive() and _time.monotonic() < _deadline:
+            try:
+                from tools import _CURRENT_CANCEL_EVENT as _cce
+                if _cce is not None and _cce.is_set():
+                    kill_fired.set()
+                    _kill_process_tree_windows(proc)
+                    break
+            except ImportError:
+                pass
+            t_out.join(timeout=0.1)
+        else:
+            t_err.join(timeout=5)
+    finally:
+        timer.cancel()
+    if kill_fired.is_set():
+        # proc.args is a list when shell=False, a string when shell=True
+        _args = proc.args
+        if isinstance(_args, list):
+            _cmd = " ".join(_args)
+        else:
+            _cmd = str(_args or "unknown")
+        raise subprocess.TimeoutExpired(
+            cmd=_cmd,
+            timeout=timeout,
+            output="\n".join(out_lines),
+            stderr="\n".join(err_lines),
+        )
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
+    return "\n".join(out_lines), "\n".join(err_lines)
+
+

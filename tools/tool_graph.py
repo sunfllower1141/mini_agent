@@ -1,27 +1,27 @@
 #!/usr/bin/env python3
 """
-tool_graph.py — tool dependency and sequencing graph for mini_agent.
+tool_graph.py -- tool dependency and sequencing graph for mini_agent.
 
 Tracks tool co-occurrence and sequential dependencies from observed
 tool-call history.  Builds a weighted directed graph where edges
-represent "tool A → tool B" transitions observed in successful turns.
+represent "tool A -> tool B" transitions observed in successful turns.
 
 Provides:
-  A. Tool transition recording — track which tools follow which others
-  B. Sequencing hints — suggest the most likely next tool given context
-  C. Co-occurrence clusters — identify tool pairs that frequently appear together
-  D. Anti-pattern detection — flag suboptimal sequences (e.g. edit_file
+  A. Tool transition recording -- track which tools follow which others
+  B. Sequencing hints -- suggest the most likely next tool given context
+  C. Co-occurrence clusters -- identify tool pairs that frequently appear together
+  D. Anti-pattern detection -- flag suboptimal sequences (e.g. edit_file
      without preceding read_file)
 
 Inspired by: SEARL (tool graph), ToolExpNet (semantic tool relationships),
              TOOLMEM (tool capability memories).
 
 Table: tool_transitions (shared SQLite connection via MemoryStore)
-  - from_tool: str     — source tool name
-  - to_tool:   str     — destination tool name
-  - count:     int     — number of times this transition was observed
-  - success_count: int — transitions that led to eventual task success
-  - last_seen: str     — ISO timestamp
+  - from_tool: str     -- source tool name
+  - to_tool:   str     -- destination tool name
+  - count:     int     -- number of times this transition was observed
+  - success_count: int -- transitions that led to eventual task success
+  - last_seen: str     -- ISO timestamp
 """
 
 from __future__ import annotations
@@ -49,11 +49,11 @@ _MAX_TRANSITION_HINTS = 2
 # Anti-patterns: undesirable sequences that should trigger a warning
 _ANTI_PATTERNS: dict[str, list[tuple[str, str]]] = {
     "edit_file": [
-        ("search_files", "Prefer read_file over search_files before editing — you need exact text, not patterns."),
+        ("search_files", "Prefer read_file over search_files before editing -- you need exact text, not patterns."),
         ("find_symbol", "Use read_file before edit_file to see the exact text you're replacing."),
     ],
     "write_file": [
-        ("read_file", None),  # read_file before write_file is actually good — skip
+        ("read_file", None),  # read_file before write_file is actually good -- skip
     ],
 }
 
@@ -129,7 +129,7 @@ class ToolGraph:
             except sqlite3.Error:
                 warnings.warn("Failed to init tool_transitions table", stacklevel=2)
             finally:
-                # Don't close — shared via get_shared_conn()
+                # Don't close -- shared via get_shared_conn()
                 self._conn = None
 
     # ------------------------------------------------------------------
@@ -179,7 +179,7 @@ class ToolGraph:
     ) -> None:
         """Record all transitions within a single turn's tool sequence.
 
-        Records each adjacent pair (A→B) within the co-occurrence window.
+        Records each adjacent pair (A->B) within the co-occurrence window.
         """
         if len(tool_names) < 2:
             return
@@ -226,10 +226,10 @@ class ToolGraph:
                 hints: list[str] = []
                 for to_tool, count, success_count in rows:
                     success_rate = success_count / max(count, 1)
-                    marker = " ✅" if success_rate >= _MIN_SUCCESS_RATE else ""
+                    marker = " [OK]" if success_rate >= _MIN_SUCCESS_RATE else ""
                     hints.append(
                         f"After {current_tool}, common next: {to_tool} "
-                        f"(seen {count}×, {int(success_rate * 100)}% success rate){marker}"
+                        f"(seen {count}x, {int(success_rate * 100)}% success rate){marker}"
                     )
                 return hints
             except sqlite3.Error:
@@ -255,7 +255,7 @@ class ToolGraph:
         if not hints:
             return None
 
-        parts = ["📊 TOOL SEQUENCING HINTS (learned from past sessions):"]
+        parts = ["? TOOL SEQUENCING HINTS (learned from past sessions):"]
         parts.extend(f"  {h}" for h in hints)
 
         # Anti-pattern detection: check if agent is writing without reading
@@ -263,7 +263,7 @@ class ToolGraph:
             recent_reads = sum(1 for t in recent_tools[-5:] if t in _READ_TOOLS)
             if recent_reads == 0:
                 parts.append(
-                    "  ⚠️ No recent read tool used before writing. "
+                    "  WARNING: No recent read tool used before writing. "
                     "Consider read_file first to understand current state."
                 )
 
@@ -273,7 +273,7 @@ class ToolGraph:
             verify_count = sum(1 for t in recent_tools[-5:] if t in _VERIFY_TOOLS)
             if edit_count >= 3 and verify_count == 0:
                 parts.append(
-                    "  ⚠️ Multiple edits without verification. "
+                    "  WARNING: Multiple edits without verification. "
                     "Run verify or check LSP diagnostics to confirm correctness."
                 )
 
@@ -302,10 +302,10 @@ class ToolGraph:
         if recent_reads == 0:
             # Check if this is a new session (no recent tools at all)
             if len(recent_tools) == 0:
-                return None  # First turn — normal to start with reads
+                return None  # First turn -- normal to start with reads
             write_names = [n for n in pending_names if n in _WRITE_TOOLS]
             return (
-                "⚠️ TOOL SEQUENCING WARNING: About to use "
+                "WARNING: TOOL SEQUENCING WARNING: About to use "
                 f"{', '.join(write_names)} without any recent read operations. "
                 "Strongly consider reading the relevant file(s) first to "
                 "understand the current state before modifying them."

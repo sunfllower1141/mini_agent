@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-test_memory_internals.py — tests for internal MemoryStore mechanics.
+test_memory_internals.py -- tests for internal MemoryStore mechanics.
 
 Covers _clean_messages, _migrate_old_paths, _migrate_json,
 export_conversation_markdown, incremental save, scratchpad,
@@ -35,7 +35,7 @@ from memory.memory import (
 # ---------------------------------------------------------------------------
 
 class TestCleanMessages(unittest.TestCase):
-    """Tests for _clean_messages — stripping transient, orphaned, incomplete."""
+    """Tests for _clean_messages -- stripping transient, orphaned, incomplete."""
 
     # --- _transient messages are stripped ---
 
@@ -123,7 +123,7 @@ class TestCleanMessages(unittest.TestCase):
                     }
                 ],
             },
-            # No matching tool result follows — incomplete sequence
+            # No matching tool result follows -- incomplete sequence
             {"role": "user", "content": "next question"},
         ]
         cleaned = _clean_messages(msgs)
@@ -153,7 +153,7 @@ class TestCleanMessages(unittest.TestCase):
             {"role": "user", "content": "thanks"},
         ]
         cleaned = _clean_messages(msgs)
-        # user, assistant, tool, user — all kept
+        # user, assistant, tool, user -- all kept
         self.assertEqual(len(cleaned), 4)
 
     # --- combined: both orphaned tools AND incomplete sequences ---
@@ -179,7 +179,7 @@ class TestCleanMessages(unittest.TestCase):
                     }
                 ],
             },
-            # No tool result for call_2 — incomplete, truncated here
+            # No tool result for call_2 -- incomplete, truncated here
             {"role": "user", "content": "third"},
         ]
         cleaned = _clean_messages(msgs)
@@ -577,7 +577,7 @@ class TestMessageCaches(unittest.TestCase):
             "tool_call_id": "t1",
             "content": json.dumps({"content": "cached content"}),
         }
-        # First call — should parse JSON
+        # First call -- should parse JSON
         text1 = _get_tool_content(msg)
         self.assertEqual(text1, "cached content")
         self.assertEqual(len(_TOOL_PARSE_CACHE), 1)

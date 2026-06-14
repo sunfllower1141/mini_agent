@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-config.py — project-level configuration for mini_agent.
+config.py -- project-level configuration for mini_agent.
 
 Looks for ``.mini_agent.toml`` in the workspace root and merges settings
 with env vars and CLI flags.  Priority: CLI > env var > config file > default.
@@ -24,7 +24,7 @@ except ImportError:
 CONFIG_FILENAME = ".mini_agent.toml"
 MEMORY_FILENAME = ".mini_agent_memory.db"
 
-DEFAULT_API_PROVIDER = "deepseek"  # "deepseek", "claude", "xai", or "ollama"
+DEFAULT_API_PROVIDER = "deepseek"  # "deepseek", "claude", "xai", "openrouter", or "ollama"
 
 # ---------------------------------------------------------------------------
 # Provider defaults registry
@@ -42,7 +42,13 @@ class ProviderDefaults:
     api_url: str
     max_tokens: int
     context_window: int
-    routing_model: str = ""  # cheaper model for read/search prompts; "" = disabled
+    # Fallback chain: list of provider names to try on 429/5xx errors.
+    # Example: ["claude", "xai"] means try Claude after DeepSeek, then xAI.
+    fallback_providers: tuple[str, ...] = ()
+    # Pricing in USD per 1M tokens (used by session_stats for cost savings)
+    input_price: float = 0.0       # cache-miss (full) input price
+    cache_hit_price: float = 0.0   # cache-hit input price
+    output_price: float = 0.0      # completion/output price
 
 PROVIDER_DEFAULTS: dict[str, ProviderDefaults] = {
     "deepseek": ProviderDefaults(
@@ -51,7 +57,12 @@ PROVIDER_DEFAULTS: dict[str, ProviderDefaults] = {
         api_url="https://api.deepseek.com/v1/chat/completions",
         max_tokens=200_000,
         context_window=1_000_000,  # V4-Pro native context length
-        routing_model="deepseek-v4-flash",  # also use flash for simple read/search prompts
+        fallback_providers=("claude",),  # fall back to Claude on DeepSeek outage
+        # V4-Pro promo pricing (75% off through 2026-05-31):
+        # list $1.74 / $0.0145 / $3.48  ->  promo $0.435 / $0.003625 / $0.87
+        input_price=0.435,          # $0.435 / 1M input tokens (cache miss)
+        cache_hit_price=0.003625,   # $0.003625 / 1M input tokens (cache hit)
+        output_price=0.87,          # $0.87 / 1M output tokens
     ),
     "claude": ProviderDefaults(
         model="claude-sonnet-4-5",
@@ -59,7 +70,9 @@ PROVIDER_DEFAULTS: dict[str, ProviderDefaults] = {
         api_url="https://api.anthropic.com/v1/chat/completions",
         max_tokens=32_000,
         context_window=1_000_000,  # Opus 4.7 / Sonnet 4.5 native context length
-        routing_model="",
+        input_price=3.00,          # $3.00 / 1M input tokens (cache miss)
+        cache_hit_price=0.30,      # $0.30 / 1M input tokens (cache hit)
+        output_price=15.00,        # $15.00 / 1M output tokens
     ),
     "xai": ProviderDefaults(
         model="grok-4.3",
@@ -67,7 +80,6 @@ PROVIDER_DEFAULTS: dict[str, ProviderDefaults] = {
         api_url="https://api.x.ai/v1/chat/completions",
         max_tokens=200_000,
         context_window=1_000_000,  # Grok 4.3 native context length
-        routing_model="",
     ),
     "ollama": ProviderDefaults(
         model="qwen3.6:27b",
@@ -76,7 +88,46 @@ PROVIDER_DEFAULTS: dict[str, ProviderDefaults] = {
         api_url="http://100.79.96.42:11434/v1/chat/completions",
         max_tokens=8_192,
         context_window=65_536,  # qwen3.6: capped at 64K to fit KV cache in 48GB VRAM
-        routing_model="",
+    ),
+    "openrouter": ProviderDefaults(
+        model="moonshotai/kimi-k2.7-code",  # user default: Kimi K2.7 Code via OpenRouter
+        sub_agent_model="deepseek/deepseek-v4-flash",  # cheap worker model for sub-agents
+        api_url="https://openrouter.ai/api/v1/chat/completions",
+        max_tokens=200_000,
+        context_window=256_000,  # Kimi K2.7 native context length
+        fallback_providers=("deepseek", "claude"),  # fall back to native keys on OpenRouter outage
+    ),
+    "moonshot": ProviderDefaults(
+        model="kimi-k2.7-code",  # Kimi K2.7 Code (latest)
+        sub_agent_model="kimi-k2.6",  # cheaper worker for sub-agents
+        api_url="https://api.moonshot.ai/v1/chat/completions",
+        max_tokens=200_000,
+        context_window=256_000,  # Kimi K2.7 native context length
+        input_price=0,    # Moonshot pricing TBD
+        output_price=0,
+    ),
+    "qwen": ProviderDefaults(
+        model="qwen-plus",  # Alibaba Cloud Qwen-Plus
+        sub_agent_model="qwen-flash",  # cheaper worker for sub-agents
+        api_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
+        max_tokens=200_000,
+        context_window=131_072,
+        input_price=0,  # Qwen pricing varies by region
+        output_price=0,
+    ),
+    "gemini": ProviderDefaults(
+        model="gemini-3.5-flash",  # free tier available
+        sub_agent_model="gemini-3.5-flash",
+        api_url="https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        max_tokens=65_536,
+        context_window=1_000_000,
+    ),
+    "openai": ProviderDefaults(
+        model="gpt-5.1",
+        sub_agent_model="gpt-5.1-mini",
+        api_url="https://api.openai.com/v1/chat/completions",
+        max_tokens=128_000,
+        context_window=256_000,
     ),
 }
 
@@ -87,28 +138,23 @@ DEEPSEEK_DEFAULT_SUB_AGENT_MODEL = PROVIDER_DEFAULTS["deepseek"].sub_agent_model
 DEEPSEEK_DEFAULT_API_URL       = PROVIDER_DEFAULTS["deepseek"].api_url
 DEEPSEEK_DEFAULT_MAX_TOKENS    = PROVIDER_DEFAULTS["deepseek"].max_tokens
 DEEPSEEK_DEFAULT_CONTEXT_WINDOW = PROVIDER_DEFAULTS["deepseek"].context_window
-DEEPSEEK_DEFAULT_ROUTING_MODEL = PROVIDER_DEFAULTS["deepseek"].routing_model
-
 CLAUDE_DEFAULT_MODEL           = PROVIDER_DEFAULTS["claude"].model
 CLAUDE_DEFAULT_SUB_AGENT_MODEL = PROVIDER_DEFAULTS["claude"].sub_agent_model
 CLAUDE_DEFAULT_API_URL         = PROVIDER_DEFAULTS["claude"].api_url
 CLAUDE_DEFAULT_MAX_TOKENS      = PROVIDER_DEFAULTS["claude"].max_tokens
 CLAUDE_DEFAULT_CONTEXT_WINDOW  = PROVIDER_DEFAULTS["claude"].context_window
-CLAUDE_DEFAULT_ROUTING_MODEL   = PROVIDER_DEFAULTS["claude"].routing_model
 
 XAI_DEFAULT_MODEL              = PROVIDER_DEFAULTS["xai"].model
 XAI_DEFAULT_SUB_AGENT_MODEL    = PROVIDER_DEFAULTS["xai"].sub_agent_model
 XAI_DEFAULT_API_URL            = PROVIDER_DEFAULTS["xai"].api_url
 XAI_DEFAULT_MAX_TOKENS         = PROVIDER_DEFAULTS["xai"].max_tokens
-XAI_DEFAULT_CONTEXT_WINDOW     = PROVIDER_DEFAULTS["xai"].context_window
-XAI_DEFAULT_ROUTING_MODEL      = PROVIDER_DEFAULTS["xai"].routing_model
+XAI_DEFAULT_CONTEXT_WINDOW  = PROVIDER_DEFAULTS["xai"].context_window
 
 OLLAMA_DEFAULT_MODEL           = PROVIDER_DEFAULTS["ollama"].model
 OLLAMA_DEFAULT_SUB_AGENT_MODEL = PROVIDER_DEFAULTS["ollama"].sub_agent_model
 OLLAMA_DEFAULT_API_URL         = PROVIDER_DEFAULTS["ollama"].api_url
 OLLAMA_DEFAULT_MAX_TOKENS      = PROVIDER_DEFAULTS["ollama"].max_tokens
 OLLAMA_DEFAULT_CONTEXT_WINDOW  = PROVIDER_DEFAULTS["ollama"].context_window
-OLLAMA_DEFAULT_ROUTING_MODEL   = PROVIDER_DEFAULTS["ollama"].routing_model
 
 DEFAULT_MODEL        = DEEPSEEK_DEFAULT_MODEL
 DEFAULT_SUB_AGENT_MODEL = DEEPSEEK_DEFAULT_SUB_AGENT_MODEL
@@ -119,7 +165,6 @@ DEFAULT_MAX_MESSAGES = 50
 DEFAULT_MAX_TOKENS   = DEEPSEEK_DEFAULT_MAX_TOKENS
 DEFAULT_CONTEXT_WINDOW = DEEPSEEK_DEFAULT_CONTEXT_WINDOW
 DEFAULT_SUB_AGENT_MAX_TURNS = 25
-DEFAULT_ROUTING_MODEL = ""  # disabled by default; set to provider-specific cheap model
 DEFAULT_EXA_API_KEY = ""  # set via EXA_API_KEY env var or .mini_agent.toml
 DEFAULT_OPENAI_API_KEY = ""  # set via OPENAI_API_KEY env var or .mini_agent.toml
 
@@ -145,7 +190,23 @@ ENV_XAI_MODEL        = "XAI_MODEL"
 ENV_OLLAMA_MODEL     = "OLLAMA_MODEL"
 ENV_OLLAMA_API_URL   = "OLLAMA_API_URL"
 ENV_OLLAMA_API_KEY   = "OLLAMA_API_KEY"
-ENV_API_PROVIDER     = "API_PROVIDER"  # "deepseek", "claude", "xai", or "ollama" — overrides auto-detection
+ENV_OPENROUTER_MODEL = "OPENROUTER_MODEL"
+ENV_OPENROUTER_API_URL = "OPENROUTER_API_URL"
+ENV_OPENROUTER_API_KEY = "OPENROUTER_API_KEY"
+ENV_MOONSHOT_API_KEY  = "MOONSHOT_API_KEY"
+ENV_MOONSHOT_API_URL  = "MOONSHOT_API_URL"
+ENV_MOONSHOT_MODEL    = "MOONSHOT_MODEL"
+ENV_QWEN_API_KEY      = "QWEN_API_KEY"
+ENV_QWEN_API_URL      = "QWEN_API_URL"
+ENV_QWEN_MODEL        = "QWEN_MODEL"
+ENV_DASHSCOPE_API_KEY  = "DASHSCOPE_API_KEY"
+ENV_GEMINI_API_KEY    = "GEMINI_API_KEY"
+ENV_GOOGLE_API_KEY    = "GOOGLE_API_KEY"  # alt name for Gemini
+ENV_GEMINI_MODEL      = "GEMINI_MODEL"
+ENV_GEMINI_API_URL    = "GEMINI_API_URL"
+ENV_OPENAI_MODEL      = "OPENAI_MODEL"
+ENV_OPENAI_API_URL    = "OPENAI_API_URL"
+ENV_API_PROVIDER     = "API_PROVIDER"  # "deepseek", "claude", "xai", "openrouter", "moonshot", "qwen", "gemini", "openai", or "ollama" -- overrides auto-detection
 ENV_AGENT_WORKSPACE  = "AGENT_WORKSPACE"
 ENV_EXA_API_KEY      = "EXA_API_KEY"
 ENV_OPENAI_API_KEY   = "OPENAI_API_KEY"
@@ -189,7 +250,6 @@ class AgentConfig:
     max_tokens: int = DEFAULT_MAX_TOKENS
     context_window: int = DEFAULT_CONTEXT_WINDOW  # memory budget for pruning; defaults to provider context window
     sub_agent_max_turns: int = DEFAULT_SUB_AGENT_MAX_TURNS
-    routing_model: str = DEFAULT_ROUTING_MODEL  # cheaper model for simple read/search prompts; "" = disabled
     temperature: float = 0.0
     frequency_penalty: float = 0.3
     presence_penalty: float = 0.1
@@ -199,7 +259,7 @@ class AgentConfig:
     openai_api_key: str = DEFAULT_OPENAI_API_KEY
     approve_write_ops: bool = False
     unrestricted: bool = False
-    frontend: str = "terminal"  # "terminal", "electron" — injected into system prompt
+    frontend: str = "terminal"  # "terminal", "electron" -- injected into system prompt
     mcp_servers: dict = field(default_factory=dict)  # {name: {command: [...], env: {...}}}
 
     # ------------------------------------------------------------------
@@ -262,7 +322,6 @@ _TOML_SCHEMA: dict[str, type] = {
     "max_messages": int,
     "max_tokens": int,
     "sub_agent_max_turns": int,
-    "routing_model": str,
     "temperature": float,
     "frequency_penalty": float,
     "presence_penalty": float,
@@ -285,7 +344,7 @@ def _apply_toml(config: AgentConfig, data: dict) -> None:
         expected = _TOML_SCHEMA[key]
 
         # Use type() identity check for int and bool to prevent
-        # isinstance(True, int) == True from silently converting bool→int.
+        # isinstance(True, int) == True from silently converting bool->int.
         if expected in (int, bool):
             type_ok = type(value) is expected
         else:
@@ -294,7 +353,7 @@ def _apply_toml(config: AgentConfig, data: dict) -> None:
         if not type_ok:
             print(
                 f"Warning: .mini_agent.toml key '{key}' expected {expected.__name__}, "
-                f"got {type(value).__name__} — skipping",
+                f"got {type(value).__name__} -- skipping",
                 file=sys.stderr,
             )
             continue
@@ -362,29 +421,76 @@ def _load_dotenv(workspace: str) -> None:
         pass
 
 
-# Provider → env var name for API key lookup.
+# Provider -> env var name for API key lookup.
 _PROVIDER_KEY_ENV: dict[str, str] = {
     "deepseek": ENV_DEEPSEEK_API_KEY,
     "claude": ENV_CLAUDE_API_KEY,
     "xai": ENV_XAI_API_KEY,
     "ollama": ENV_OLLAMA_API_KEY,
+    "openrouter": ENV_OPENROUTER_API_KEY,
+    "moonshot": ENV_MOONSHOT_API_KEY,
+    "qwen": ENV_DASHSCOPE_API_KEY,
+    "gemini": ENV_GEMINI_API_KEY,
+    "openai": ENV_OPENAI_API_KEY,
 }
-# Provider → env var name for API URL override.
+# Provider -> env var name for API URL override.
 _PROVIDER_URL_ENV: dict[str, str] = {
     "deepseek": ENV_DEEPSEEK_API_URL,
     "claude": ENV_CLAUDE_API_URL,
     "xai": ENV_XAI_API_URL,
     "ollama": ENV_OLLAMA_API_URL,
+    "openrouter": ENV_OPENROUTER_API_URL,
+    "moonshot": ENV_MOONSHOT_API_URL,
+    "qwen": ENV_QWEN_API_URL,
+    "gemini": ENV_GEMINI_API_URL,
+    "openai": ENV_OPENAI_API_URL,
 }
-# Provider → env var name for model override.
+# Provider -> env var name for model override.
 _PROVIDER_MODEL_ENV: dict[str, str] = {
     "claude": ENV_CLAUDE_MODEL,
     "xai": ENV_XAI_MODEL,
     "ollama": ENV_OLLAMA_MODEL,
+    "openrouter": ENV_OPENROUTER_MODEL,
+    "moonshot": ENV_MOONSHOT_MODEL,
+    "qwen": ENV_QWEN_MODEL,
+    "gemini": ENV_GEMINI_MODEL,
+    "openai": ENV_OPENAI_MODEL,
 }
 
 # Auto-detection priority order (first provider with an available key wins).
-_AUTO_DETECT_ORDER = ["deepseek", "claude", "xai", "ollama"]
+_AUTO_DETECT_ORDER = ["deepseek", "moonshot", "claude", "xai", "qwen", "gemini", "openai", "ollama", "openrouter"]
+
+
+def _switch_to_provider(config: "AgentConfig", provider: str) -> str | None:
+    """Switch *config* to *provider*, updating api_url, api_key, and model defaults.
+
+    Returns None on success, or an error message string if the provider's API
+    key env var is not set.
+    """
+    defaults = PROVIDER_DEFAULTS.get(provider)
+    if defaults is None:
+        return f"Unknown provider: {provider}"
+
+    # Check API key
+    key_env = _PROVIDER_KEY_ENV.get(provider)
+    api_key = os.environ.get(key_env) if key_env else None
+    if not api_key and provider not in ("ollama",):
+        return f"{provider.upper()}_API_KEY is not set. Set the {key_env} environment variable."
+
+    config.api_url = defaults.api_url
+    config.api_key = api_key or config.api_key
+    # Only swap model defaults if the current model belongs to the *old* provider
+    # (i.e. user hasn't explicitly overridden it).  We check by comparing against
+    # all known provider default models.
+    old_prov = config.api_provider
+    config.api_provider = provider
+    old_provider_defaults = PROVIDER_DEFAULTS.get(old_prov)
+    if old_provider_defaults and config.model in (old_provider_defaults.model, old_provider_defaults.sub_agent_model):
+        config.model = defaults.model
+        config.sub_agent_model = defaults.sub_agent_model
+    config.max_tokens = defaults.max_tokens
+    config.context_window = defaults.context_window
+    return None
 
 
 def _detect_provider() -> str | None:
@@ -412,7 +518,7 @@ def _apply_env_overrides(config: AgentConfig) -> None:
     # --- apply provider-specific defaults on switch ---
     # NOTE: uses equality against deepseek defaults to detect "not yet
     # overridden".  A TOML value equal to a deepseek default will be
-    # overwritten — this is a known limitation (rare in practice).
+    # overwritten -- this is a known limitation (rare in practice).
     provider = config.api_provider
     defaults = PROVIDER_DEFAULTS.get(provider)
     if defaults is not None:
@@ -429,8 +535,6 @@ def _apply_env_overrides(config: AgentConfig) -> None:
             config.max_tokens = defaults.max_tokens
         if config.context_window == deepseek.context_window:
             config.context_window = defaults.context_window
-        if config.routing_model == deepseek.routing_model:
-            config.routing_model = defaults.routing_model
 
     # --- API keys ---
     for prov, env_name in _PROVIDER_KEY_ENV.items():

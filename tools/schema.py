@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-schema.py — API tool schemas sent to the LLM.
+schema.py -- API tool schemas sent to the LLM.
 
 Each entry defines a function that the model can call.
 Adding a new tool requires an entry here plus a @_register implementation.
@@ -18,11 +18,11 @@ from __future__ import annotations
 SUB_AGENT_TOOLS: set[str] = {
     # File & directory
     "read_file", "write_file", "edit_file", "list_directory", "file_info",
-    "diff", "restore_file",
+    "restore_file",
     # Search & navigation
     "search_files", "find_symbol", "find_usages", "semantic_search",
     # Shell & testing
-    "run_shell", "run_tests", "verify", "git",
+    "run_shell", "run_tests", "verify",
     # Web
     "web_search", "fetch_url",
     # Agent coordination (blocked at max_depth by sub_agent.py runtime check)
@@ -39,7 +39,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "todo_write",
-            "description": "Create or update a todo item for tracking progress. Set content to empty string to delete. Use this to track your own progress on complex multi-step tasks.",
+            "description": "Create or update a todo item for tracking progress. Set content to empty string to delete. Use to track progress on complex multi-step tasks.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -70,7 +70,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "remember",
-            "description": "Manually capture a learning or observation to project_knowledge for cross-session persistence. Use this when you discover a pattern, workaround, or convention worth remembering in future sessions.",
+            "description": "Capture a learning or observation to project_knowledge for cross-session persistence. Use when you discover a pattern, workaround, or convention worth remembering.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -80,7 +80,7 @@ TOOLS = [
                     },
                     "detail": {
                         "type": "string",
-                        "description": "The learning itself — what to remember, the pattern, workaround, or convention."
+                        "description": "The learning itself -- what to remember, the pattern, workaround, or convention."
                     },
                     "category": {
                         "type": "string",
@@ -88,6 +88,31 @@ TOOLS = [
                     }
                 },
                 "required": ["topic", "detail"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "memory_core",
+            "description": "Manage your persistent core memory (frozen snapshot injected at session start). The agent's durable memory of facts, preferences, conventions, and environment notes. Changes persist to disk immediately but appear in the system prompt NEXT session. Use 'read' to see current snapshot, 'add' to append, 'replace' to rewrite entirely, 'remove' to delete by line number. Hard-capped at ~2,500 chars -- when full, consolidate (merge similar entries, remove stale ones) before adding. Example: memory_core(action='add', content='Python uses ruff for linting')",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "Action: 'read' (view current), 'add' (append entry), 'replace' (rewrite entire content), 'remove' (delete line by number)."
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Content to add/replace. Required for 'add' and 'replace' actions."
+                    },
+                    "line": {
+                        "type": "integer",
+                        "description": "Line number to remove (1-indexed). Required for 'remove' action."
+                    }
+                },
+                "required": ["action"]
             }
         }
     },
@@ -116,7 +141,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "find_symbol",
-            "description": "Find where a Python symbol (function, class, method name) is defined in the workspace. Returns file path and line number for each match. Much faster than grep/search_files for symbol lookup. Use this to locate definitions before editing code.",
+            "description": "Find where a Python symbol (function, class, method name) is defined in the workspace. Returns file path and line number for each match. Much faster than grep/search_files for symbol lookup. Supports substring matching.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -190,7 +215,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "edit_file",
-            "description": "Edit a file by replacing a specific string with another. Replaces the first occurrence of old_string with new_string by default. Use count=-1 to replace all occurrences. When preview=True, skips the write and returns a unified diff preview. Use 'paths' (list of strings) to apply the same old\u2192new edit to multiple files at once (batch edit). Returns an error if old_string is not found in the file.",
+            "description": "Edit a file by replacing a specific string with another. Replaces first occurrence by default; use count=-1 for all. When preview=True, returns a unified diff without writing. Use 'paths' (list) for batch multi-file edits.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -201,7 +226,7 @@ TOOLS = [
                     "paths": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Optional: list of file paths to apply the same old\u2192new edit to (batch edit). When set, 'path' is ignored."
+                        "description": "Optional: list of file paths to apply the same old->new edit to (batch edit). When set, 'path' is ignored."
                     },
                     "old_string": {
                         "type": "string",
@@ -251,7 +276,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "run_shell",
-            "description": "Run a shell command inside the workspace directory. Returns exit code, stdout, and stderr. Commands time out after 60 seconds (configurable via timeout param, max 300s). Use this to run tests, check syntax, invoke build tools, etc.",
+            "description": "Run a shell command inside the workspace directory. Returns exit code, stdout, and stderr. Timeout defaults to 60s, max 300s. Use for tests, syntax checks, build tools, etc.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -286,7 +311,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_files",
-            "description": "Search for a text pattern recursively in files within the workspace. Returns matching lines with file path and line number. Skips hidden directories, binary files, and common VCS/venv dirs. Capped at 200 results. Use offset for pagination.",
+            "description": "Search for a text pattern recursively in files within the workspace. Returns matching lines with file path and line number. Skips hidden directories, binary files, and common VCS/venv dirs. Capped at 200 results.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -325,7 +350,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "file_info",
-            "description": "Get metadata about a file or directory at the given path. Returns size, permissions, modification time, and type (file/directory). For directories, also returns child count and total size of immediate children. Also reports whether the path exists.",
+            "description": "Get metadata about a file or directory at the given path. Returns size, permissions, modification time, type (file/directory), and whether the path exists. For directories also reports child count and total child size.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -369,7 +394,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "semantic_search",
-            "description": "Search code by meaning using embeddings. Finds code chunks semantically similar to the query, even if they don't share keywords. Good for finding related functionality, similar patterns, or code that 'feels like' something. Indexes files live — no pre-indexing needed. Returns top 10 matches.\n\n⚠️ PERFORMANCE NOTE: The embedding model is preloaded at session startup in a background thread (~9s, ~80MB RAM) so it's typically ready before you need it. If you call semantic_search very early in a session you may see a brief \"still loading\" message while the background thread finishes. Still, prefer find_symbol (instant, indexed) or search_files (instant, grep) for exact name/text queries. Use semantic_search only when you don't know the function/variable name and grep won't work — e.g. 'find code that validates user input' or 'locate retry logic patterns'.",
+            "description": "Search code by meaning using embeddings. Finds code chunks semantically similar to the query, even if they don't share keywords. Good for finding related functionality, similar patterns, or code that 'feels like' something. Indexes files live -- no pre-indexing needed. Returns top 10 matches.\n\nWARNING: PERFORMANCE NOTE: The embedding model is preloaded at session startup in a background thread (~9s, ~80MB RAM) so it's typically ready before you need it. If you call semantic_search very early in a session you may see a brief \"still loading\" message while the background thread finishes. Still, prefer find_symbol (instant, indexed) or search_files (instant, grep) for exact name/text queries. Use semantic_search only when you don't know the function/variable name and grep won't work -- e.g. 'find code that validates user input' or 'locate retry logic patterns'.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -418,46 +443,6 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "git",
-            "description": "Run a git command in the workspace. Supports: status, diff, log, init, add, commit, show, restore. All operations are local-only (no push/pull). Use 'diff' to see unstaged changes, 'status' to see file states, 'log' for recent commits, 'init' to initialize a repo, 'add' to stage files, 'commit' to commit staged changes, 'show' to read a committed version of a file, 'restore' to recover a file from the last commit.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "subcommand": {
-                        "type": "string",
-                        "description": "Git subcommand: status, diff, log, init, add, or commit"
-                    },
-                    "args": {
-                        "type": "string",
-                        "description": "Optional arguments: file paths for 'add', commit message for 'commit', etc."
-                    }
-                },
-                "required": [
-                    "subcommand"
-                ]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "diff",
-            "description": "Show unstaged changes (git diff) in the workspace. If 'path' is given, shows diff for that file only; otherwise shows all unstaged changes. Returns the raw diff output. Works even on files that haven't been staged.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Optional: specific file path to diff. If omitted, shows all unstaged changes."
-                    }
-                },
-                "required": []
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "task_status",
             "description": "Check the status of a background shell task by its ID. background=True in run_shell returns a task_id.",
             "parameters": {
@@ -478,7 +463,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "write_scratchpad",
-            "description": "Write content to the agent's scratchpad — a persistent working note that survives across turns. Use this to track your plan, progress, decisions, things you've tried, and open questions. The scratchpad is shown to you at the start of every turn. Overwrites previous content.",
+            "description": "Write content to the agent's scratchpad -- a persistent working note that survives across turns. Tracks plan, progress, decisions, things tried, and open questions. Shown at start of each turn. Overwrites previous content.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -561,6 +546,27 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "session_search",
+            "description": "Full-text search across all past session messages. Use when the user references something from a previous conversation ('we fixed this before', 'use the approach from last time'). Returns matching message excerpts ordered by relevance. Uses FTS5 full-text indexing for fast retrieval.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search terms to find in past messages."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max results to return (default 10)."
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "fetch_url",
             "description": "Fetch a web page URL and return its text content (truncated). Supports text/html and text/plain content types. Use this to read documentation, API references, or any web page.",
             "parameters": {
@@ -587,7 +593,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "plan",
-            "description": "Declare a structured task plan with numbered steps. Overwrites any previous plan. Use this before starting multi-step work so progress can be tracked. The plan will be shown at the start of each turn until all steps are complete.",
+            "description": "Declare a structured task plan with numbered steps. Overwrites any previous plan. Use before multi-step work so progress is tracked. Shown at start of each turn until all steps complete.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -605,7 +611,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "plan_status",
-            "description": "Mark a plan step as complete, or report current plan progress. Call with no arguments to see the current plan and which steps are done. Call with 'step' to mark that step complete (1-indexed).",
+            "description": "Mark a plan step complete, or view current plan progress. No args: see plan and which steps are done. With 'step' (1-indexed): mark that step complete.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -622,7 +628,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "spawn_agent",
-            "description": "Spawn one or more sub-agents to work on tasks in background threads. Returns a task_id immediately — the parent does NOT block. Use agent_status to poll or collect_agent to block later when you need the result. For multiple tasks, pass 'tasks' (list) instead of 'task' to spawn them all in one call. Sub-agents share your workspace and tools but have their own context. Max 10 concurrent sub-agents, 25 turns each (extendable to 35). Set 'synchronous'=true to block until completion and return the result directly (agent-as-tool pattern).",
+            "description": "Spawn one or more sub-agents to work on tasks in background threads. Returns a task_id immediately -- the parent does NOT block. Use agent_status to poll or collect_agent to block later when you need the result. For multiple tasks, pass 'tasks' (list) instead of 'task' to spawn them all in one call. Sub-agents share your workspace and tools but have their own context. Max 10 concurrent sub-agents, 25 turns each (extendable to 35). Set 'synchronous'=true to block until completion and return the result directly (agent-as-tool pattern).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -805,7 +811,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "agent_handoff",
-            "description": "Produce a typed structured result and route it to subscribed agents. Use this for handoffs between agents — one agent finishes work and hands structured output to another. If 'target' is set, delivers only to that task_id (bypassing subscriptions).",
+            "description": "Produce a typed structured result and route it to subscribed agents. Use this for handoffs between agents -- one agent finishes work and hands structured output to another. If 'target' is set, delivers only to that task_id (bypassing subscriptions).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1143,7 +1149,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "wait_for_agent",
-            "description": "Block until any sub-agent from the given list completes, or timeout expires. Uses exponential backoff sleep (1s→2s→4s…→30s) to minimize token burn while waiting. Returns immediately if any agent has already completed. Use this instead of repeated collect_any calls to save on LLM cost.",
+            "description": "Block until any sub-agent from the given list completes, or timeout expires. Uses exponential backoff sleep (1s->2s->4s...->30s) to minimize token burn while waiting. Returns immediately if any agent has already completed. Use this instead of repeated collect_any calls to save on LLM cost.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1165,7 +1171,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "diagnose_failures",
-            "description": "Read the last test run output from memory store, parse for FAILED lines, extract test function names and file paths, read the relevant source files, and return a structured failure summary with code snippets. No parameters needed — reads automatically from the persisted test output.",
+            "description": "Read the last test run output from memory store, parse for FAILED lines, extract test function names and file paths, read the relevant source files, and return a structured failure summary with code snippets. No parameters needed -- reads automatically from the persisted test output.",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -1190,7 +1196,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "open_url",
-            "description": "Open the user's default browser to the given URL. Opens in a new tab and returns immediately — does not wait for the page to load. For programmatic browser interaction, use the browser_* tools instead.",
+            "description": "Open the user's default browser to the given URL. Opens in a new tab and returns immediately -- does not wait for the page to load. For programmatic browser interaction, use the browser_* tools instead.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1224,7 +1230,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "browser_snapshot",
-            "description": "Capture the accessibility tree of the current browser page. Returns a structured text representation of interactive elements (roles, names, states) — much more compact and LLM-friendly than raw HTML or a screenshot. Use this to understand what's on the page before clicking or typing.",
+            "description": "Capture the accessibility tree of the current browser page. Returns a structured text representation of interactive elements (roles, names, states) -- much more compact and LLM-friendly than raw HTML or a screenshot. Use this to understand what's on the page before clicking or typing.",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -1340,7 +1346,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "desktop_snapshot",
-            "description": "Capture the accessibility tree of the frontmost desktop window. Returns a structured text representation of interactive elements (roles, names, states) — much more compact and LLM-friendly than a screenshot. Use this to understand what's on screen before clicking or typing in native desktop apps. On macOS, requires Accessibility permission (System Settings → Privacy → Accessibility → enable Terminal). On Windows, requires: pip install uiautomation.",
+            "description": "Capture the accessibility tree of the frontmost desktop window. Returns a structured text representation of interactive elements (roles, names, states) -- much more compact and LLM-friendly than a screenshot. Use this to understand what's on screen before clicking or typing in native desktop apps. On macOS, requires Accessibility permission (System Settings -> Privacy -> Accessibility -> enable Terminal). On Windows, requires: pip install uiautomation.",
             "parameters": {
                 "type": "object",
                 "properties": {},

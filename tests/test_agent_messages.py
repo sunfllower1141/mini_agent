@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-test_agent_messages.py — tests for the typed inter-agent message system.
+test_agent_messages.py -- tests for the typed inter-agent message system.
 
 Covers:
     - AgentMessage construction and validation

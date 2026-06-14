@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-desktop_ops.py — Desktop UI automation via OS accessibility APIs.
+desktop_ops.py -- Desktop UI automation via OS accessibility APIs.
 
 Cross-platform desktop interaction for agentic tools:
 - macOS:     AXUIElement (Accessibility API) via atomacos or JXA/osascript
@@ -10,27 +10,24 @@ Cross-platform desktop interaction for agentic tools:
 Architecture
 ------------
 Two-tier routing:
-  Tier 1 — MCP bridge: connects to a desktop MCP server if configured
+  Tier 1 -- MCP bridge: connects to a desktop MCP server if configured
            (e.g. macos-use, win32-mcp-server, native-devtools-mcp)
-  Tier 2 — Native Python: uses platform bindings directly as fallback
+  Tier 2 -- Native Python: uses platform bindings directly as fallback
 
 Tools:
-    desktop_snapshot  — capture the accessibility tree of the frontmost window
-    desktop_click     — click a UI element by role + name
-    desktop_type      — type text into a focused field
-    desktop_find      — find UI elements matching a text/role query
-    desktop_screenshot — capture a screenshot of the current screen (native,
+    desktop_snapshot  -- capture the accessibility tree of the frontmost window
+    desktop_click     -- click a UI element by role + name
+    desktop_type      -- type text into a focused field
+    desktop_find      -- find UI elements matching a text/role query
+    desktop_screenshot -- capture a screenshot of the current screen (native,
                         no browser required)
 """
 
 from __future__ import annotations
 
-import logging
 import platform
 import subprocess
 import time
-
-_log = logging.getLogger(__name__)
 
 from core.safety import ReadSafetyGate, WriteSafetyGate
 from tools import _register, _summarize, ToolResult
@@ -152,7 +149,7 @@ Install one of these (easiest first):
   brew install macos-use
 
 After installing, you must grant Accessibility permission:
-  System Settings → Privacy & Security → Accessibility → enable Terminal
+  System Settings -> Privacy & Security -> Accessibility -> enable Terminal
 """.strip(),
 
     "Windows": """
@@ -208,7 +205,7 @@ def _get_mcp_desktop_server() -> str | None:
                 if any(kw in lower for kw in desktop_keywords):
                     return name
     except Exception:
-        _log.debug("_find_desktop_mcp_server: MCP connection scan failed", exc_info=True)
+        pass
     return None
 
 
@@ -259,7 +256,7 @@ def _atomacos_getattr(element, attr: str, default=None):
     t = threading.Thread(target=_get, daemon=True)
     t.start()
     if not done.wait(timeout=_ATOMACOS_OP_TIMEOUT):
-        # Timed out — abandon thread, return default
+        # Timed out -- abandon thread, return default
         return default
     if exc is not None:
         raise exc
@@ -371,7 +368,7 @@ def _walk_atomacos_tree(element, depth: int = 0, max_depth: int = 4,
                     _walk_atomacos_tree(child, depth + 1, max_depth, deadline)
                 )
     except Exception:
-        _log.debug("_walk_atomacos_tree: child iteration failed", exc_info=True)
+        pass
 
     return elements
 
@@ -387,11 +384,11 @@ def _format_app_no_window(app) -> str:
                 try:
                     menu_items.append(str(getattr(item, 'AXTitle', item)))
                 except Exception:
-                    _log.debug("_format_app_no_window: menu item read failed", exc_info=True)
+                    pass
         if menu_items:
             return f"Frontmost app: {app_name}\nMenu bar items: {', '.join(menu_items)}"
     except Exception:
-        _log.debug("_format_app_no_window: menu bar access failed", exc_info=True)
+        pass
     return f"Frontmost app: {app_name} (no windows open)"
 
 
@@ -436,7 +433,7 @@ def _macos_atomacos_click(role: str, name: str) -> ToolResult:
                     if element:
                         break
             except Exception:
-                _log.debug("_find_atomacos_element: window scan failed", exc_info=True)
+                pass
 
         if element is None:
             return ToolResult(
@@ -508,7 +505,7 @@ def _find_atomacos_element(element, role: str, name: str, max_depth: int = 8,
                 if result is not None:
                     return result
     except Exception:
-        _log.debug("_find_atomacos_element: child search failed", exc_info=True)
+        pass
 
     return None
 
@@ -624,7 +621,7 @@ def _walk_uia_tree(element, depth: int = 0, max_depth: int = 5) -> list[dict]:
         for child in children:
             elements.extend(_walk_uia_tree(child, depth + 1, max_depth))
     except Exception:
-        _log.debug("_walk_uia_tree: child iteration failed", exc_info=True)
+        pass
 
     return elements
 
@@ -678,7 +675,7 @@ def _find_uia_element(element, role: str, name: str, max_depth: int = 6):
             if result is not None:
                 return result
     except Exception:
-        _log.debug("_find_uia_element: child search failed", exc_info=True)
+        pass
 
     return None
 
@@ -763,7 +760,7 @@ def _timestamp() -> str:
 def _truncate(text: str, max_len: int) -> str:
     if len(text) <= max_len:
         return text
-    return text[:max_len] + f"\n… (truncated, {len(text)} chars total)"
+    return text[:max_len] + f"\n... (truncated, {len(text)} chars total)"
 
 
 # ---------------------------------------------------------------------------
@@ -809,12 +806,12 @@ def _desktop_snapshot(args: dict, _wg: WriteSafetyGate,
     """Capture the accessibility tree of the frontmost window.
 
     Returns a structured text representation of interactive elements
-    (roles, names, states) — much more compact and LLM-friendly than
+    (roles, names, states) -- much more compact and LLM-friendly than
     a screenshot. Use this to understand what's on screen before
     clicking or typing.
 
-    On macOS: requires Accessibility permission (System Settings →
-    Privacy & Security → Accessibility → enable Terminal).
+    On macOS: requires Accessibility permission (System Settings ->
+    Privacy & Security -> Accessibility -> enable Terminal).
 
     On Windows: works out of the box with uiautomation installed.
     """
@@ -1023,7 +1020,7 @@ def _desktop_screenshot(args: dict, _wg: WriteSafetyGate,
                         _rg: ReadSafetyGate) -> ToolResult:
     """Capture a screenshot of the current screen (not browser).
 
-    Unlike browser_screenshot, this captures the native desktop —
+    Unlike browser_screenshot, this captures the native desktop --
     any open application, the menubar, dock, taskbar, etc.
 
     Saves to a temp directory. Use read_image to view it,

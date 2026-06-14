@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { createHighlighter, createJavaScriptRegexEngine } from 'shiki';
 
-// ── language detection ──────────────────────────────────────────────────────
+// -- language detection ------------------------------------------------------
 
 const TOOL_LANG_MAP = {
   run_shell: 'bash', execute: 'python', python: 'python',
@@ -9,7 +9,7 @@ const TOOL_LANG_MAP = {
 };
 
 function guessLanguage(toolName, code) {
-  // Content-based detection first — overrides tool name mapping
+  // Content-based detection first -- overrides tool name mapping
   const content = code || '';
   const firstLine = content.trimStart().split('\n')[0];
 
@@ -20,7 +20,7 @@ function guessLanguage(toolName, code) {
     if (firstLine.includes('bash') || firstLine.includes('sh')) return 'bash';
   }
 
-  // Python patterns (strong signals — keywords that bash scripts don't use)
+  // Python patterns (strong signals -- keywords that bash scripts don't use)
   const pyPatterns = [
     /^(from\s+\w+\s+import|import\s+\w+)/m,
     /^\s*(def\s+\w+\s*\(|class\s+\w+\s*[:\(])/m,
@@ -46,7 +46,7 @@ function guessLanguage(toolName, code) {
   return 'text';
 }
 
-// ── singleton highlighter ──────────────────────────────────────────────────
+// -- singleton highlighter --------------------------------------------------
 
 let highlighterPromise = null;
 
@@ -54,8 +54,8 @@ function getHighlighter() {
   if (!highlighterPromise) {
     highlighterPromise = createHighlighter({
       // Only the languages a coding agent actually encounters.
-      // Each grammar is a WASM blob — fewer = less memory.
-      langs: ['python', 'javascript', 'typescript', 'bash', 'json', 'diff', 'html'],
+      // Each grammar is a WASM blob -- fewer = less memory.
+      langs: ['python', 'javascript', 'typescript', 'bash', 'json', 'diff'],
       themes: ['dark-plus'],
       engine: createJavaScriptRegexEngine(),
     });
@@ -63,7 +63,7 @@ function getHighlighter() {
   return highlighterPromise;
 }
 
-// ── styles ──────────────────────────────────────────────────────────────────
+// -- styles ------------------------------------------------------------------
 
 const INLINE_CODE_STYLE = {
   display: 'inline',
@@ -76,7 +76,7 @@ const INLINE_CODE_STYLE = {
   fontFamily: '"JetBrains Mono", "Fira Code", monospace',
 };
 
-// ── component ───────────────────────────────────────────────────────────────
+// -- component ---------------------------------------------------------------
 
 export default function CodeBlock({
   children,
@@ -95,7 +95,7 @@ export default function CodeBlock({
     : null;
   const lang = language || langFromClass || guessLanguage(toolName, source);
 
-  // inline code — keep simple, no Shiki overhead
+  // inline code -- keep simple, no Shiki overhead
   if (inline) {
     if (!highlight) return <code>{source}</code>;
     return <code style={INLINE_CODE_STYLE}>{source}</code>;
@@ -103,7 +103,7 @@ export default function CodeBlock({
 
   if (!source || source.trim().length === 0) return null;
 
-  // no highlighting — plain block
+  // no highlighting -- plain block
   if (!highlight) {
     return (
       <pre style={{
@@ -118,7 +118,7 @@ export default function CodeBlock({
     );
   }
 
-  // Shiki highlighting — async codeToHtml
+  // Shiki highlighting -- async codeToHtml
   return <ShikiBlock source={source} lang={lang} fontSize={fontSize} />;
 }
 
@@ -128,7 +128,7 @@ function stripBg(html) {
   return html.replace(/(<pre[^>]*style=")background-color:#[0-9a-fA-F]+;?/g, '$1');
 }
 
-// ── ShikiBlock (handles the async highlighter lifecycle) ────────────────────
+// -- ShikiBlock (handles the async highlighter lifecycle) --------------------
 
 function ShikiBlock({ source, lang, fontSize }) {
   const [html, setHtml] = useState(null);
@@ -140,17 +140,12 @@ function ShikiBlock({ source, lang, fontSize }) {
 
     getHighlighter().then((h) => {
       if (cancelled) return;
-      const result = h.codeToHtml(source, {
+      // Shiki v4: codeToHtml is synchronous, returns a string directly
+      const htmlStr = h.codeToHtml(source, {
         lang,
         theme: 'dark-plus',
       });
-      if (result && typeof result.then === 'function') {
-        result.then((htmlStr) => {
-          if (!cancelled && mountedRef.current) setHtml(stripBg(htmlStr));
-        });
-      } else if (result && !cancelled && mountedRef.current) {
-        setHtml(stripBg(result));
-      }
+      if (!cancelled && mountedRef.current) setHtml(stripBg(htmlStr));
     });
 
     return () => { cancelled = true; };
@@ -161,7 +156,7 @@ function ShikiBlock({ source, lang, fontSize }) {
   }, []);
 
   if (!html) {
-    // fallback while Shiki loads (first render only — highlighter is cached)
+    // fallback while Shiki loads (first render only -- highlighter is cached)
     return (
       <pre style={{
         padding: '12px 16px', margin: '8px 0', overflowX: 'auto',

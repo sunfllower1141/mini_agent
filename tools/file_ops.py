@@ -1,21 +1,19 @@
 #!/usr/bin/env python3
 """
-file_ops.py — file/directory tools for mini_agent.
+file_ops.py -- file/directory tools for mini_agent.
 
 Tools: read_file, write_file, edit_file, list_directory, file_info
 """
 from __future__ import annotations
 
-import logging
 import os
+import platform
 import re
 import stat as stat_module
 import shutil
+import subprocess
 import sys
-import tempfile
 import time
-
-_log = logging.getLogger(__name__)
 
 from core.safety import ReadSafetyGate, WriteSafetyGate
 from tools import clear_tool_cache
@@ -25,27 +23,154 @@ from tools import _register, _summarize, ToolResult, _TOOL_CONTEXT
 import threading
 _current_agent_id: threading.local = threading.local()
 
+_WINDOWS = platform.system() == "Windows"
+
+# ---------------------------------------------------------------------------
+# Windows-safe file read via _worker subprocess
+# ---------------------------------------------------------------------------
+# On Windows, ``open()`` / ``CreateFileW`` can block indefinitely inside
+# kernel minifilter drivers (antivirus, backup agents, etc.).  Python
+# threads have no way to kill a thread stuck in a kernel I/O call.
+# The _worker subprocess isolates the I/O so the OS can kill it with
+# TerminateProcess if it doesn't respond within the timeout.
+
+_WORKER_READ_TIMEOUT = 30  # seconds for a single file read
+
+
+def _read_file_windows_worker(
+    resolved: str, offset: int, limit: int, line_numbers: bool,
+) -> ToolResult:
+    """Read a file via the _worker subprocess with a hard timeout.
+
+    Falls back to direct open() if the worker fails for non-hang reasons.
+
+    Uses _communicate_windows() on Windows to avoid proc.communicate() hangs.
+    """
+    if _WINDOWS:
+        try:
+            proc = subprocess.run(
+                [
+                    sys.executable, "-m", "tools._worker", "read",
+                    resolved, str(offset), str(limit), str(line_numbers),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=_WORKER_READ_TIMEOUT,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            stdout, stderr = proc.stdout, proc.stderr
+            import json
+            data = json.loads(stdout.strip())
+            if data.get("ok"):
+                return ToolResult(success=True, content=data["content"])
+            else:
+                return ToolResult(
+                    success=False,
+                    content=data.get("content", "Worker read failed"),
+                )
+        except subprocess.TimeoutExpired:
+            return ToolResult(
+                success=False,
+                content=f"File read timed out after {_WORKER_READ_TIMEOUT}s "
+                        f"(possibly blocked by antivirus or filter driver). "
+                        f"Try excluding the project directory from real-time scanning.",
+            )
+        except Exception:
+            pass
+    else:
+        try:
+            result = subprocess.run(
+                [
+                    sys.executable, "-m", "tools._worker", "read",
+                    resolved, str(offset), str(limit), str(line_numbers),
+                ],
+                capture_output=True, text=True, timeout=_WORKER_READ_TIMEOUT,
+            )
+            import json
+            data = json.loads(result.stdout.strip())
+            if data.get("ok"):
+                return ToolResult(success=True, content=data["content"])
+            else:
+                return ToolResult(
+                    success=False,
+                    content=data.get("content", "Worker read failed"),
+                )
+        except subprocess.TimeoutExpired:
+            return ToolResult(
+                success=False,
+                content=f"File read timed out after {_WORKER_READ_TIMEOUT}s "
+                        f"(possibly blocked by antivirus or filter driver). "
+                        f"Try excluding the project directory from real-time scanning.",
+            )
+        except Exception:
+            pass
+
+    # Fallback: direct open (may hang on Windows but we already tried)
+    return _read_file_direct(resolved, offset, limit, line_numbers)
+
+def _read_file_direct(
+    resolved: str, offset: int, limit: int, line_numbers: bool,
+) -> ToolResult:
+    """Direct file read -- used on Unix and as fallback on Windows."""
+    try:
+        with open(resolved, "r", encoding="utf-8", errors="replace") as f:
+            collected: list[str] = []
+            total_lines = 0
+            for lineno, line in enumerate(f):
+                total_lines = lineno + 1
+                if lineno + 1 < offset:
+                    continue
+                if len(collected) < limit:
+                    stripped = line.rstrip("\n")
+                    if line_numbers:
+                        stripped = f"{total_lines}: {stripped}"
+                    collected.append(stripped)
+                if len(collected) >= limit and lineno + 1 >= offset + limit:
+                    break
+    except Exception as e:
+        hint = ""
+        if isinstance(e, FileNotFoundError) or "No such file" in str(e):
+            hint = "\nHint: Check the path spelling. Try list_directory to see available files."
+        return ToolResult(success=False, content=f"Error reading '{resolved}': {e}{hint}")
+
+    if offset > total_lines:
+        return ToolResult(success=False, content=f"Offset {offset} exceeds file length ({total_lines} lines).")
+
+    full_content = "\n".join(collected)
+    lines_after_offset = total_lines - offset + 1
+
+    if lines_after_offset > limit:
+        truncated = "\n".join(collected[:limit])
+        msg = (
+            f"{truncated}\n"
+            f"... (truncated at {limit} lines -- {lines_after_offset} total in selection. "
+            f"Use a higher limit or offset to see more.)"
+        )
+        return ToolResult(success=True, content=msg)
+
+    return ToolResult(success=True, content=full_content)
+
 # ---------------------------------------------------------------------------
 # Unicode & quote normalization maps (used by edit_file matching)
 # ---------------------------------------------------------------------------
 
-# Curly/smart quotes → ASCII straight quotes
+# Curly/smart quotes -> ASCII straight quotes
 _QUOTE_NORMALIZE_MAP: dict[int, int | None] = {
     0x2018: ord("'"),   # ' left single
     0x2019: ord("'"),   # ' right single
-    0x201A: ord("'"),   # ‚ single low-9
-    0x201B: ord("'"),   # ‛ single high-reversed
+    0x201A: ord("'"),   # , single low-9
+    0x201B: ord("'"),   # ' single high-reversed
     0x201C: ord('"'),   # " left double
     0x201D: ord('"'),   # " right double
-    0x201E: ord('"'),   # „ double low-9
-    0x201F: ord('"'),   # ‟ double high-reversed
-    0x2039: ord("'"),   # ‹ single left-pointing angle
-    0x203A: ord("'"),   # › single right-pointing angle
-    0x00AB: ord('"'),   # « left-pointing double angle
-    0x00BB: ord('"'),   # » right-pointing double angle
+    0x201E: ord('"'),   # ,, double low-9
+    0x201F: ord('"'),   # " double high-reversed
+    0x2039: ord("'"),   # < single left-pointing angle
+    0x203A: ord("'"),   # > single right-pointing angle
+    0x00AB: ord('"'),   # << left-pointing double angle
+    0x00BB: ord('"'),   # >> right-pointing double angle
 }
 
-# Unicode whitespace → ASCII space (or None = remove)
+# Unicode whitespace -> ASCII space (or None = remove)
 _UNICODE_WHITESPACE_MAP: dict[int, int | None] = {
     0x00A0: ord(" "),   # non-breaking space
     0x2002: ord(" "),   # en space
@@ -57,12 +182,12 @@ _UNICODE_WHITESPACE_MAP: dict[int, int | None] = {
     0x202F: ord(" "),   # narrow non-breaking space
     0x205F: ord(" "),   # medium mathematical space
     0x3000: ord(" "),   # ideographic space
-    0x00AD: None,       # soft hyphen → remove
-    0x200B: None,       # zero-width space → remove
-    0x200C: None,       # zero-width non-joiner → remove
-    0x200D: None,       # zero-width joiner → remove
-    0xFEFF: None,       # BOM / zero-width no-break space → remove
-    0x2060: None,       # word joiner → remove
+    0x00AD: None,       # soft hyphen -> remove
+    0x200B: None,       # zero-width space -> remove
+    0x200C: None,       # zero-width non-joiner -> remove
+    0x200D: None,       # zero-width joiner -> remove
+    0xFEFF: None,       # BOM / zero-width no-break space -> remove
+    0x2060: None,       # word joiner -> remove
 }
 
 # Build fast translation tables (Python str.translate)
@@ -82,18 +207,47 @@ def _canonicalize_for_match(s: str) -> str:
     return _normalize_quotes(_normalize_unicode_whitespace(s))
 
 # ---------------------------------------------------------------------------
-# Read-before-edit tracking — set of resolved_path values that have been
+# Read-before-edit tracking -- set of resolved_path values that have been
 # read_file'd during this session.  Edit/replace operations check this to
 # ensure the model has seen the current file content.
 # ---------------------------------------------------------------------------
 
-_READ_FILES: dict[str, float] = {}  # resolved_path → mtime at read time
+_READ_FILES: set[str] = set()
+
+# ---------------------------------------------------------------------------
+# ACI (Agent-Computer Interface) upgrade: syntax validation before applying
+# edits.  Catch broken Python syntax before the edit cascades into a series
+# of compounding failures.  This is the SWE-agent linter-in-edit pattern.
+# ---------------------------------------------------------------------------
+
+def _validate_python_syntax(content: str, filepath: str) -> str | None:
+    """Return an error message if *content* is not valid Python, else None.
+
+    Uses ``compile()`` for fast in-process validation.  Only checks .py files.
+    """
+    if not filepath.endswith(".py"):
+        return None
+    try:
+        compile(content, filepath, "exec")
+    except SyntaxError as e:
+        # Build a helpful pointer line
+        lines = content.split("\n")
+        lineno = e.lineno or 1
+        pointer = f"  line {lineno}: {lines[lineno - 1][:100] if lineno <= len(lines) else '?'}"
+        return (
+            f"SyntaxError in {filepath}: {e.msg} at line {lineno}\n"
+            f"{pointer}\n"
+            f"Fix the syntax error before applying. If unsure, read the file "
+            f"with offset near line {lineno} first."
+        )
+    return None
+
 
 # Build fast translation tables at import time
 for _cp, _replacement in _QUOTE_NORMALIZE_MAP.items():
     _QUOTE_TRANS_TABLE[_cp] = _replacement
 
-# Unicode ws table: map cp → replacement (or delete if None via str.maketrans)
+# Unicode ws table: map cp -> replacement (or delete if None via str.maketrans)
 # str.translate with a dict can map to None to delete characters
 _UNICODE_WS_TRANS_TABLE.update({cp: repl for cp, repl in _UNICODE_WHITESPACE_MAP.items() if repl is not None})
 # Zero-width chars: map to None to delete
@@ -103,21 +257,21 @@ for _cp, _repl in _UNICODE_WHITESPACE_MAP.items():
 
 
 # ---------------------------------------------------------------------------
-# Session undo — backs up files before modification
+# Session undo -- backs up files before modification
 # ---------------------------------------------------------------------------
 
 _BACKUPS: dict[str, str] = {}  # resolved_path -> backup path
 
-# Cross-turn file content cache — avoids re-reading files whose mtime hasn't changed.
+# Cross-turn file content cache -- avoids re-reading files whose mtime hasn't changed.
 # Key: resolved path (str), Value: (content: str, mtime: float)
 # Capped at _FILE_CACHE_MAX entries; oldest entries are evicted (LRU via insertion order).
 _FILE_CACHE: dict[str, tuple[str, float]] = {}
-_FILE_CACHE_MAX = 128
+_FILE_CACHE_MAX = 50
 
 
 # ---------------------------------------------------------------------------
-# Auto plan advancement — after a successful write/edit, check if any
-# incomplete plan step’s keywords appear in the file path or edit content,
+# Auto plan advancement -- after a successful write/edit, check if any
+# incomplete plan step's keywords appear in the file path or edit content,
 # and auto-complete it.
 # ---------------------------------------------------------------------------
 
@@ -167,103 +321,14 @@ def _backup_before_write(resolved_path: str) -> None:
     _BACKUPS[resolved_path] = backup_path
 
 
-def _atomic_write(resolved_path: str, content: str, encoding: str = "utf-8") -> None:
-    """Write *content* to *resolved_path* atomically via tempfile + os.replace.
-
-    Writes to a temp file in the same directory (same filesystem) then atomically
-    renames it over the target.  This guarantees that readers always see either
-    the old file or the complete new file — never a partial write.
-
-    On any error the temp file is cleaned up before re-raising.
-    """
-    dirname = os.path.dirname(resolved_path) or "."
-    fd, tmp_path = tempfile.mkstemp(
-        dir=dirname, prefix=".tmp_" + os.path.basename(resolved_path) + "_",
-    )
-    try:
-        with os.fdopen(fd, "w", encoding=encoding) as f:
-            f.write(content)
-        os.replace(tmp_path, resolved_path)
-    except BaseException:
-        # Clean up the temp file on any failure
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
-
-
-# --- Text file detection ---
-# Files with more than this fraction of null bytes in the first chunk
-# are considered binary.  UTF-8 text files (including Python, JS, etc.)
-# never contain null bytes; binary formats (images, compiled code, etc.)
-# almost always do.
-_TEXT_NULL_BYTE_THRESHOLD = 0.0  # any null byte → binary
-_TEXT_SCAN_BYTES = 8192          # scan first 8 KiB
-# Encrypted/random-data heuristic: if >15% of scanned bytes are ASCII control
-# characters (0x00-0x08, 0x0B-0x1F, excluding tab/LF/CR), treat as binary.
-# Normal UTF-8 text (including smart quotes, emoji, CJK) has very few of
-# these; encrypted ciphertext and compressed data have many.
-_BINARY_CONTROL_RATIO = 0.15  # >15% control chars → likely binary
-
-
-def _is_likely_text(filepath: str) -> bool:
-    """Return True if *filepath* looks like a text file (not binary).
-
-    Two-stage detection:
-    1. Null-byte scan: any null byte in the first 8 KiB → binary.
-       Catches compiled code, images, archives, and most binary formats.
-    2. Control-character heuristic: if >15% of bytes are ASCII control
-       characters (0x00-0x08, 0x0B-0x1F, excluding tab/LF/CR), treat as
-       binary.  Catches encrypted files (enterprise DLP), ciphertext, and
-       compressed data — which have abnormal concentrations of control chars
-       that UTF-8 text files (even with smart quotes, emoji, CJK) don't.
-
-    Returns True for non-existent or empty files (they'll fail later with
-    a clearer error).
-    """
-    if not os.path.isfile(filepath):
-        return True  # let the caller produce a clear "not found" error
-    try:
-        with open(filepath, "rb") as f:
-            chunk = f.read(_TEXT_SCAN_BYTES)
-    except OSError:
-        return True  # can't read → let caller handle
-    if not chunk:
-        return True  # empty file is text
-
-    # Stage 1: null byte scan (fast, catches most binaries)
-    null_count = chunk.count(b"\x00")
-    if null_count > int(len(chunk) * _TEXT_NULL_BYTE_THRESHOLD):
-        return False
-
-    # Stage 2: control-character heuristic (catches encrypted/mangled files
-    # that pass the null-byte check but have high entropy typical of
-    # ciphertext/compressed data rather than UTF-8 text)
-    # Control chars are 0x00-0x08 and 0x0B-0x1F (excludes tab=0x09, LF=0x0A, CR=0x0D)
-    control_count = sum(
-        1 for b in chunk
-        if b < 0x20 and b not in (0x09, 0x0A, 0x0D)
-    )
-    if control_count > len(chunk) * _BINARY_CONTROL_RATIO:
-        return False
-
-    return True
-
-
 # ---------------------------------------------------------------------------
 # read_file
 # ---------------------------------------------------------------------------
 
 # Default maximum lines returned by read_file when no limit is given.
 _DEFAULT_READ_LINES = 300
-# Absolute maximum (safety cap) — never return more than this.
+# Absolute maximum (safety cap) -- never return more than this.
 _ABSOLUTE_MAX_LINES = 1000
-# Maximum bytes of text content returned by read_file.  Guards against
-# cumulative payload blowout when reading files with very long lines
-# (e.g. minified JS, one-line JSON) or many files in one turn.
-# Matches Claude Code's 256 KB hard limit.
-_MAX_READ_BYTES = 256 * 1024  # 256 KB
 
 
 @_register("read_file")
@@ -276,32 +341,6 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
             content=f"Read blocked by safety layer: {safety_result.reason}",
         )
     resolved = safety_result.resolved_path
-
-    # Refuse to read binary files as text
-    if not _is_likely_text(resolved):
-        return ToolResult(
-            success=False,
-            content=(
-                f"Read blocked: '{resolved}' appears to be a binary file. "
-                f"Use file_info to inspect its metadata."
-            ),
-        )
-
-    # File-size pre-check: warn if the file is large so the agent uses
-    # offset/limit selectively.  A 50 MB log file with few newlines could
-    # still blow payload, so this is a soft warning, not a hard block.
-    _size_warning = ""
-    try:
-        file_size = os.path.getsize(resolved)
-        if file_size > _MAX_READ_BYTES:
-            _size_warning = (
-                f"\n[NOTE] '{os.path.basename(resolved)}' is {file_size // 1024} KB "
-                f"— larger than the {_MAX_READ_BYTES // 1024} KB read buffer. "
-                f"Output will be truncated. Consider using offset/limit to read "
-                f"specific sections."
-            )
-    except OSError:
-        pass
 
     # Apply offset and limit
     offset = args.get("offset", 0)
@@ -325,72 +364,20 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
         except OSError:
             pass  # fall through to normal read on stat error
 
-    try:
-        with open(resolved, "r", encoding="utf-8", errors="replace") as f:
-            # Use enumerate + early break to avoid reading the whole file
-            collected: list[str] = []
-            total_lines = 0
-            for lineno, line in enumerate(f):
-                total_lines = lineno + 1
-                if lineno + 1 < offset:
-                    continue
-                if len(collected) < limit:
-                    stripped = line.rstrip("\n")
-                    if line_numbers:
-                        stripped = f"{total_lines}: {stripped}"
-                    collected.append(stripped)
-                # Keep iterating to count total lines if we might need truncation message
-                # but stop once we've gone well past what we need (limit + 1 is enough
-                # to know whether we truncated)
-                if len(collected) >= limit and lineno + 1 >= offset + limit:
-                    break
-    except Exception as e:
-        hint = ""
-        if isinstance(e, FileNotFoundError) or "No such file" in str(e):
-            hint = "\nHint: Check the path spelling. Try list_directory to see available files."
-        return ToolResult(success=False, content=f"Error reading '{resolved}': {e}{hint}")
+    # On Windows, use the _worker subprocess to avoid kernel-filter hangs
+    if False:  # _WINDOWS bypassed - subprocess hangs on this system
+        result = _read_file_windows_worker(resolved, offset, limit, line_numbers)
+    else:
+        result = _read_file_direct(resolved, offset, limit, line_numbers)
 
-    if offset > total_lines:
-        return ToolResult(success=False, content=f"Offset {offset} exceeds file length ({total_lines} lines).")
+    if not result.success:
+        return result
 
-    full_content = "\n".join(collected)
-    lines_after_offset = total_lines - offset + 1
+    full_content = result.content
 
-    # Apply line-based truncation first (if needed)
-    line_truncated = ""
-    if lines_after_offset > limit:
-        full_content = "\n".join(collected[:limit])
-        line_truncated = (
-            f"\n… (truncated at {limit} lines — {lines_after_offset} total in selection. "
-            f"Use a higher limit or offset to see more.)"
-        )
-
-    # Byte-size guard: cap output at _MAX_READ_BYTES to prevent payload blowout
-    # from files with very long lines (minified JS/JSON, one-line data files).
-    # Applied AFTER line truncation so both guards compose correctly.
-    content_bytes = full_content.encode("utf-8")
-    byte_truncated = ""
-    if len(content_bytes) > _MAX_READ_BYTES:
-        # Leave 512 bytes of headroom for truncation notices appended below
-        byte_limit = _MAX_READ_BYTES - 512
-        # Truncate at the last valid UTF-8 boundary ≤ byte_limit
-        for cut in range(byte_limit, byte_limit - 5, -1):
-            try:
-                full_content = content_bytes[:cut].decode("utf-8")
-                break
-            except UnicodeDecodeError:
-                continue
-        else:
-            full_content = content_bytes[:byte_limit].decode("utf-8", errors="replace")
-        byte_truncated = (
-            f"\n… (byte-truncated at {_MAX_READ_BYTES // 1024} KB — "
-            f"total selection is {len(content_bytes) // 1024} KB. "
-            f"Use a smaller limit, higher offset, or line_numbers=false to reduce.)"
-        )
-
-    # Cache full file content for cross-turn reuse (only when reading from offset 0)
-    # We store the actual full content from disk for the cache invalidation pattern.
-    if offset == 0:
+    # Cache full file content for cross-turn reuse (only when reading from offset 0
+    # AND the read was not truncated -- avoid caching partial content).
+    if offset == 0 and "... (truncated at " not in full_content:
         try:
             current_mtime = os.path.getmtime(resolved)
             # Evict oldest entry if at capacity
@@ -401,15 +388,9 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
             pass
 
     # Track this file as read for read-before-edit enforcement
-    try:
-        _READ_FILES[resolved] = os.path.getmtime(resolved)
-    except OSError:
-        _READ_FILES[resolved] = 0.0
+    _READ_FILES.add(resolved)
 
-    return ToolResult(
-        success=True,
-        content=full_content + line_truncated + byte_truncated + _size_warning,
-    )
+    return ToolResult(success=True, content=full_content)
 
 
 @_summarize("read_file")
@@ -434,7 +415,20 @@ def _write_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
                 f"Hint: Use a path inside the workspace ({wg.workspace_root}) or enable unrestricted mode."
             ),
         )
-    # File reservation check — prevent sub-agent collisions
+    # Read-before-edit enforcement (ACI upgrade): reject writes to
+    # .py files that haven't been read_file'd this session, unless
+    # the file doesn't exist yet (new file creation is allowed).
+    _resolved = safety_result.resolved_path
+    if _resolved.endswith(".py") and os.path.isfile(_resolved) and _resolved not in _READ_FILES:
+        return ToolResult(
+            success=False,
+            content=(
+                f"Read-before-edit guard: '{_resolved}' has not been read this session. "
+                f"Read the file with read_file first so you have the current content "
+                f"before writing. This prevents accidental overwrites of recent changes."
+            ),
+        )
+    # File reservation check -- prevent sub-agent collisions
     agent_id = getattr(_current_agent_id, "task_id", None)
     if agent_id is not None:
         from tools import reserve_file
@@ -448,22 +442,41 @@ def _write_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
         if parent:
             os.makedirs(parent, exist_ok=True)
         _backup_before_write(safety_result.resolved_path)
-        _atomic_write(safety_result.resolved_path, content)
+        # --- ACI upgrade: syntax validation for .py files ---
+        # Only gate if the existing file was already valid Python. If the file
+        # doesn't even compile now (e.g. prose in a .py test fixture), skip.
+        syntax_error = None
+        if safety_result.resolved_path.endswith(".py"):
+            try:
+                with open(safety_result.resolved_path, "r", encoding="utf-8") as _f:
+                    _prev = _f.read()
+                compile(_prev, safety_result.resolved_path, "exec")
+            except (FileNotFoundError, SyntaxError):
+                pass  # No existing file, or existing content isn't valid Python
+            else:
+                syntax_error = _validate_python_syntax(content, safety_result.resolved_path)
+        if syntax_error:
+            return ToolResult(
+                success=False,
+                content=(
+                    f"Syntax validation failed -- file NOT written to prevent broken code.\n"
+                    f"{syntax_error}"
+                ),
+            )
+        with open(safety_result.resolved_path, "w", encoding="utf-8") as f:
+            f.write(content)
         from tools import add_modified_file
         add_modified_file(safety_result.resolved_path)
         clear_tool_cache()
         # Invalidate cross-turn file cache
         _FILE_CACHE.pop(safety_result.resolved_path, None)
         # Track as read for read-before-edit enforcement (agent wrote it, knows content)
-        try:
-            _READ_FILES[safety_result.resolved_path] = os.path.getmtime(safety_result.resolved_path)
-        except OSError:
-            _READ_FILES[safety_result.resolved_path] = 0.0
+        _READ_FILES.add(safety_result.resolved_path)
         # Keep symbol index fresh for newly written .py files
         if path.endswith(".py"):
             from tools.search_ops import _reindex_file
             _reindex_file(safety_result.resolved_path, wg.workspace_root)
-        # Auto plan advancement (file path only — full content is too noisy)
+        # Auto plan advancement (file path only -- full content is too noisy)
         _auto_advance_plan(safety_result.resolved_path)
         return ToolResult(
             success=True,
@@ -483,8 +496,8 @@ def _write_file_summary(args: dict) -> str:
     content = args.get("content", "")
     preview = content[:60].replace("\n", "\\n")
     if len(content) > 60:
-        preview += "…"
-    return f"write_file({path}, {len(content)}B → \"{preview}\")"
+        preview += "..."
+    return f"write_file({path}, {len(content)}B -> \"{preview}\")"
 
 
 # ---------------------------------------------------------------------------
@@ -495,7 +508,7 @@ _EditResult = tuple[str, ToolResult]  # (path, result)
 
 
 def _normalize_line(s: str) -> str:
-    """Collapse whitespace: Unicode ws→space, tabs→spaces, strip, collapse multiple spaces."""
+    """Collapse whitespace: Unicode ws->space, tabs->spaces, strip, collapse multiple spaces."""
     s = _normalize_unicode_whitespace(s)
     return ' '.join(s.replace('\t', '    ').split())
 
@@ -550,16 +563,16 @@ def _fuzzy_find(content: str, search: str) -> tuple[int, int] | None:
     """Cascading 5-pass match for edit_file.
 
     1. Exact substring match.
-    2. Quote-normalized match (curly→straight quotes).
+    2. Quote-normalized match (curly->straight quotes).
     3. Trailing-whitespace-tolerant.
     4. Indentation-tolerant (full strip).
-    5. Normalized-content fuzzy match (Unicode ws→space, tabs→spaces, collapsed whitespace)
-       with confidence scoring (requires ≥95% normalized line matches).
+    5. Normalized-content fuzzy match (Unicode ws->space, tabs->spaces, collapsed whitespace)
+       with confidence scoring (requires >=95% normalized line matches).
     """
     if not search or not content:
         return None
 
-    # -- Line-ending normalization: CRLF → LF -------
+    # -- Line-ending normalization: CRLF -> LF -------
     content_lf = content.replace('\r\n', '\n').replace('\r', '\n')
     search_lf = search.replace('\r\n', '\n').replace('\r', '\n')
 
@@ -576,7 +589,7 @@ def _fuzzy_find(content: str, search: str) -> tuple[int, int] | None:
     if not search_lines:
         return None
 
-    # Pass 2: quote normalization — try matching after normalizing curly quotes
+    # Pass 2: quote normalization -- try matching after normalizing curly quotes
     result = _quote_normalized_match(content_lf, search_lf, content)
     if result is not None:
         return result
@@ -588,7 +601,7 @@ def _fuzzy_find(content: str, search: str) -> tuple[int, int] | None:
             return _map_lf_region_to_original(content, result[0], result[1])
 
     # Pass 5: normalize whitespace on every line, then try to match
-    # with confidence scoring (≥95% threshold)
+    # with confidence scoring (>=95% threshold)
     return _fuzzy_find_closest(content_lf, search_lines, content_lines, content)
 
 
@@ -609,7 +622,7 @@ def _map_lf_offset_to_original(
             orig_pos += 1
             lf_pos += 1
     start = orig_pos
-    # Now find end — search_len chars in LF space
+    # Now find end -- search_len chars in LF space
     remaining = len(search)
     while remaining > 0 and orig_pos < len(original):
         if original[orig_pos] == '\r':
@@ -643,7 +656,7 @@ def _quote_normalized_match(
     idx = norm_content.find(norm_search)
     if idx != -1:
         # Map the normalized offset back through the LF content to original
-        # Since quote normalization doesn't change string length (1 cp → 1 byte
+        # Since quote normalization doesn't change string length (1 cp -> 1 byte
         # in these cases), the offsets are the same as LF offsets.
         return _map_lf_offset_to_original(original, search_lf, idx)
     return None
@@ -656,10 +669,10 @@ def _preserve_indentation(
 
     Captures the leading whitespace of each line in the matched file region
     and applies the same indentation *relative changes* to the new_string lines.
-    If old_str has N lines with indentation I₁…Iₙ and new_str has M lines with
-    indentation J₁…Jₘ, then for each new line k at position k in the new block:
-      - if k < N: apply (Jₖ - Iₖ) offset relative to file's Iₖ
-      - if k >= N: apply (Jₙ₋₁ - Iₙ₋₁) offset relative to file's last I
+    If old_str has N lines with indentation I?...I? and new_str has M lines with
+    indentation J?...J?, then for each new line k at position k in the new block:
+      - if k < N: apply (J? - I?) offset relative to file's I?
+      - if k >= N: apply (J??? - I???) offset relative to file's last I
 
     This handles the common case where the model outputs refactored code with
     spaces instead of tabs (or vice versa) and we want to match the file's style.
@@ -689,7 +702,7 @@ def _preserve_indentation(
         if k < len(old_indents) and k < len(file_indents):
             old_ws = old_indents[k]
             file_ws = file_indents[k]
-            # Compute the relative indentation change from old→new
+            # Compute the relative indentation change from old->new
             if old_ws:
                 # New wanted more/less indentation relative to old baseline
                 if new_ws.startswith(old_ws):
@@ -719,7 +732,7 @@ def _preserve_indentation(
                 else:
                     result_lines.append(file_ws + new_content)
         elif k < len(new_indents):
-            # Extra lines beyond old: use last old→file diff
+            # Extra lines beyond old: use last old->file diff
             last_idx = len(old_indents) - 1
             if last_idx >= 0 and last_idx < len(file_indents):
                 old_last = old_indents[last_idx]
@@ -766,9 +779,9 @@ def _fuzzy_find_closest(
     """Pass 5: normalize all whitespace on every line, sliding-window match.
 
     Normalizes both search and content lines by collapsing whitespace
-    (Unicode ws→space, tabs→spaces, strip, collapse multiple spaces).
-    Requires a unique match — if multiple windows match, returns None.
-    Also enforces a confidence threshold: the best match must have ≥95% of
+    (Unicode ws->space, tabs->spaces, strip, collapse multiple spaces).
+    Requires a unique match -- if multiple windows match, returns None.
+    Also enforces a confidence threshold: the best match must have >=95% of
     normalized lines matching exactly.  If below threshold, returns None
     so the caller can report the near-miss with a score.
 
@@ -794,7 +807,7 @@ def _fuzzy_find_closest(
             match_start = None  # reset ambiguity
         if norm_window == norm_search:
             if match_start is not None:
-                return None  # ambiguous — multiple exact normalized matches
+                return None  # ambiguous -- multiple exact normalized matches
             match_start = i
 
     # If we have a unique exact normalized match, use it regardless of score
@@ -807,12 +820,12 @@ def _fuzzy_find_closest(
             end_byte -= 1
         return _map_lf_region_to_original(original, start_byte, end_byte)
 
-    # No exact normalized match — check confidence threshold
+    # No exact normalized match -- check confidence threshold
     confidence = best_score / n_search if n_search > 0 else 0.0
     if confidence < confidence_threshold:
         return None  # below threshold, let caller report near-miss
 
-    # Above threshold but not exact — use best match
+    # Above threshold but not exact -- use best match
     # (this handles near-perfect matches with minor whitespace differences)
     start_byte = sum(len(line) + 1 for line in content_lines[:best_idx])
     end_byte = start_byte + sum(
@@ -844,22 +857,6 @@ def _line_match(content_lines, search_lines, trim, content=''):
     return (start_byte, end_byte)
 
 
-def _reflexion_prompt(failure_kind: str) -> str:
-    """Build a structured reflexion prompt for edit_file/write_file failures.
-
-    Research (Reflexion, SAMUEL, PreFlect) shows that prompting the agent
-    to write a structured post-mortem after tool failures improves
-    self-correction by 2-3x vs. just showing the error message.
-    """
-    return (
-        f"\n\n=== REFLEXION PROMPT (answer before retrying) ===\n"
-        f"Failure type: {failure_kind}\n"
-        f"1. What went wrong? (be specific about your assumption)\n"
-        f"2. What was the incorrect assumption you made?\n"
-        f"3. What will you do differently on the next attempt?\n"
-        f"After answering, call remember() to capture this pattern, then retry.\n"
-    )
-
 
 def _apply_single_edit(
     path: str,
@@ -869,21 +866,15 @@ def _apply_single_edit(
     preview: bool,
     wg: WriteSafetyGate,
     args: dict,
-    dry_run: bool = False,
 ) -> _EditResult:
-    """Apply an edit to a single file. Returns (path, ToolResult).
-
-    When *dry_run* is True, validate everything (safety, read-before-edit,
-    binary check, fuzzy match) but do NOT write or modify state (backups,
-    caches, plan advancement, modified-files tracking).
-    """
+    """Apply an edit to a single file. Returns (path, ToolResult)."""
     safety_result = wg.check(path)
     if not safety_result.allowed:
         return (path, ToolResult(
             success=False,
             content=f"Edit blocked by safety layer: {safety_result.reason}",
         ))
-    # File reservation check — prevent sub-agent collisions
+    # File reservation check -- prevent sub-agent collisions
     agent_id = getattr(_current_agent_id, "task_id", None)
     if agent_id is not None:
         from tools import reserve_file
@@ -902,37 +893,9 @@ def _apply_single_edit(
                 f"This ensures the model sees the current file content and can construct\n"
                 f"an accurate old_string for matching."
             ),
-        ).with_typed_error(
-            "read_before_edit",
-            retry_budget=2,
-            suggested_action="Call read_file to read the file, then retry the edit with the exact text.",
         ))
 
-    # Warn if the file was modified externally since last read (stale mental model)
-    _stale_warning = ""
     try:
-        _stored_mtime = _READ_FILES.get(resolved, 0.0)
-        _current_mtime = os.path.getmtime(resolved)
-        if _stored_mtime and _current_mtime > _stored_mtime + 0.01:  # 10ms tolerance
-            _stale_warning = (
-                f"\n[WARNING] '{resolved}' was modified after last read_file "
-                f"(stored mtime: {_stored_mtime:.3f}, current: {_current_mtime:.3f}). "
-                f"Consider re-reading the file to get the latest content."
-            )
-    except OSError:
-        pass
-
-    try:
-        # Refuse to edit binary files
-        if not _is_likely_text(resolved):
-            return (path, ToolResult(
-                success=False,
-                content=(
-                    f"Edit blocked: '{resolved}' appears to be a binary file. "
-                    f"Use file_info to inspect its metadata."
-                ),
-            ))
-
         with open(resolved, "r", encoding="utf-8", errors="replace") as f:
             original = f.read()
         diff = wg.generate_diff("edit_file", args)
@@ -953,7 +916,7 @@ def _apply_single_edit(
             best_match = _find_closest_lines(_content_lines, _old_lines)
             hint = (
                 f"Edit failed: old_string not found in '{resolved}'.\n"
-                f"Hint: The string must match exactly — check whitespace, indentation, "
+                f"Hint: The string must match exactly -- check whitespace, indentation, "
                 f"and line endings. Try read_file first to verify the exact text."
             )
             if best_match:
@@ -991,33 +954,11 @@ def _apply_single_edit(
                             detail=f"File: {resolved}. Could not find exact match for old_string.",
                         )
                 except Exception as exc:
-                    print(f"  ⚠ backup skipped: {exc}", file=sys.stderr, flush=True)
-            return (path, ToolResult(
-                success=False,
-                content=hint + _reflexion_prompt("not_found"),
-            ).with_typed_error(
-                "not_found",
-                retry_budget=2,
-                suggested_action="Call read_file to copy the exact text from the file, then retry with the exact old_string.",
-            ))
+                    print(f"  WARNING: backup skipped: {exc}", file=sys.stderr, flush=True)
+            return (path, ToolResult(success=False, content=hint))
 
         if count == -1:
             occurrences = original.count(old)
-            if occurrences == 0:
-                return (path, ToolResult(
-                    success=False,
-                    content=(
-                        f"Edit failed: old_string not found in '{resolved}' when using count=-1.\n"
-                        f"Hint: count=-1 requires an exact substring match. The fuzzy matcher\n"
-                        f"found a match via normalization, but str.replace requires the exact\n"
-                        f"old_string. Use read_file to copy the exact text from the file,\n"
-                        f"then use count=1 to edit a single occurrence."
-                    ) + _reflexion_prompt("count_mismatch"),
-                ).with_typed_error(
-                    "not_found",
-                    retry_budget=1,
-                    suggested_action="The fuzzy matcher found a match but str.replace didn't. Use read_file to get exact text, then use count=1.",
-                ))
             updated = original.replace(old, new)
             replaced = occurrences
         elif count >= 1:
@@ -1039,16 +980,29 @@ def _apply_single_edit(
                 content=f"Preview: proposed edit to {resolved}\n{raw_diff}",
             ))
 
-        if dry_run:
-            # Batch-edit pre-validation: match found, would succeed.
+        # --- ACI upgrade: syntax validation before applying edit ---
+        # Only gate if the file was already valid Python. If it doesn't even
+        # compile now (e.g. prose in a .py test fixture), skip the gate.
+        syntax_error = None
+        if resolved.endswith(".py"):
+            try:
+                compile(original, resolved, "exec")
+            except SyntaxError:
+                pass  # Existing content isn't valid Python -- skip gate
+            else:
+                syntax_error = _validate_python_syntax(updated, resolved)
+        if syntax_error:
             return (path, ToolResult(
-                success=True,
+                success=False,
                 content=(
-                    f"OK: dry-run validation passed for {resolved}"
+                    f"Syntax validation failed -- edit NOT applied to prevent broken code.\n"
+                    f"{syntax_error}\n"
+                    f"Revert your edit and fix the syntax issue. The file is unchanged."
                 ),
             ))
 
-        _atomic_write(resolved, updated)
+        with open(resolved, "w", encoding="utf-8") as f:
+            f.write(updated)
 
         from tools import add_modified_file
         add_modified_file(resolved)
@@ -1059,7 +1013,7 @@ def _apply_single_edit(
             from tools.search_ops import _reindex_file
             _reindex_file(resolved, wg.workspace_root)
 
-        # Auto plan advancement (file path only — old string is too noisy)
+        # Auto plan advancement (file path only -- old string is too noisy)
         _auto_advance_plan(resolved)
 
         added = updated.count("\n") - original.count("\n")
@@ -1069,7 +1023,6 @@ def _apply_single_edit(
             content=(
                 f"OK: replaced {label} in {resolved}"
                 + (f" (+{added} lines)" if added > 0 else f" ({added} lines)" if added < 0 else "")
-                + _stale_warning
             ),
             diff_preview=diff.preview_text if diff.changed else None,
         ))
@@ -1089,36 +1042,18 @@ def _edit_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResu
     paths = args.get("paths", None)
 
     if paths is not None:
-        # Batch edit: phase 1 — validate all files (dry_run), phase 2 — write all
+        # Batch edit: apply same old->new to all paths
         if not isinstance(paths, list) or not paths:
             return ToolResult(
                 success=False,
                 content="'paths' must be a non-empty list of file paths.",
             )
-        # Phase 1: dry-run validation — check every file before writing any
-        dry_results: list[_EditResult] = []
-        for p in paths:
-            result = _apply_single_edit(p, old, new, count, preview, wg, {**args, "path": p}, dry_run=True)
-            dry_results.append(result)
-        all_valid = all(r.success for _, r in dry_results)
-        if not all_valid:
-            # Report which files failed validation
-            lines: list[str] = ["Batch edit aborted — validation failed (no files were modified):"]
-            for p, r in dry_results:
-                first_line = r.content.split("\n")[0]
-                status = "[OK]" if r.success else "[FAIL]"
-                lines.append(f"  {status} {p}: {first_line}")
-            return ToolResult(
-                success=False,
-                content="\n".join(lines),
-            )
-        # Phase 2: all valid — write for real
         results: list[_EditResult] = []
         for p in paths:
             result = _apply_single_edit(p, old, new, count, preview, wg, {**args, "path": p})
             results.append(result)
         all_ok = all(r.success for _, r in results)
-        lines = ["Batch edit results:"]
+        lines: list[str] = []
         failures: list[str] = []
         for p, r in results:
             first_line = r.content.split("\n")[0]
@@ -1147,7 +1082,7 @@ def _edit_file_summary(args: dict) -> str:
     old = args.get("old_string", "")
     old_preview = old[:40].replace("\n", "\\n")
     if len(old) > 40:
-        old_preview += "…"
+        old_preview += "..."
     preview_flag = args.get("preview", False)
     suffix = " [preview]" if preview_flag else ""
     return f"edit_file({path}, \"{old_preview}\"){suffix}"
@@ -1348,7 +1283,7 @@ def _init_rules(args: dict, _wg, read_gate: ReadSafetyGate) -> ToolResult:
                             if kw in line_stripped and kw not in frameworks:
                                 frameworks[kw] = cat
             except Exception:
-                _log.debug("_init_rules: framework detection failed", exc_info=True)
+                pass
         for framework, cat in sorted(frameworks.items()):
             knowledge.append((
                 f"Uses {framework} ({cat})",

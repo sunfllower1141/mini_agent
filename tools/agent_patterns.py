@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-agent_patterns.py — multi-agent coordination pattern helpers.
+agent_patterns.py -- multi-agent coordination pattern helpers.
 
 Provides Python-API helpers (not tools) that the parent agent or
 orchestrator can call to coordinate sub-agents:
 
-    fan_out()     — spawn N workers from a list of task descriptions
-    fan_in()      — collect all results from a list of task_ids
-    pipeline()    — run stages in sequence, each receiving the prior's handoff
-    barrier()     — block until all task_ids have sent coord.sync for a barrier
-    scatter_gather() — fan-out with per-worker input slices
+    fan_out()     -- spawn N workers from a list of task descriptions
+    fan_in()      -- collect all results from a list of task_ids
+    pipeline()    -- run stages in sequence, each receiving the prior's handoff
+    barrier()     -- block until all task_ids have sent coord.sync for a barrier
+    scatter_gather() -- fan-out with per-worker input slices
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from tools import ToolResult, _register, _summarize, _TOOL_CONTEXT
 
 
 # ============================================================================
-# Python API helpers (non-tool) — keep original functions for programmatic use
+# Python API helpers (non-tool) -- keep original functions for programmatic use
 # ============================================================================
 
 def fan_out(
@@ -94,7 +94,6 @@ def fan_in(
 ) -> list[SubAgentResult]:
     """Collect results from all task_ids. Blocks until all complete or timeout.
 
-    The timeout is a global deadline for the entire fan_in call (not per-task).
     Returns results in the same order as task_ids (None for timed-out tasks).
     """
     from tools import _TOOL_CONTEXT
@@ -105,20 +104,16 @@ def fan_in(
             raise RuntimeError("Agent runtime not initialized.")
 
     results: list[SubAgentResult | None] = [None] * len(task_ids)
-    deadline = time.monotonic() + timeout
 
     for i, tid in enumerate(task_ids):
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            break  # global timeout exhausted; remaining tasks stay None
-
-        # Use wait_for with predicate to avoid lost-wakeup race.
+        # Each task gets the full timeout independently -- earlier tasks
+        # no longer starve later ones.        # Use wait_for with predicate to avoid lost-wakeup race.
         def _ready(tid=tid):
             status = runtime.get_status(tid)
             return status != "running"
 
         with runtime._condition:
-            runtime._condition.wait_for(_ready, timeout=remaining)
+            runtime._condition.wait_for(_ready, timeout=timeout)
 
         status = runtime.get_status(tid)
         if status == "completed":
@@ -141,8 +136,8 @@ def pipeline(
     """Run stages in sequence, each receiving the prior stage's result.
 
     Each stage is a dict with:
-        task: str             — task description
-        subscriptions: list[str] — message types to subscribe to
+        task: str             -- task description
+        subscriptions: list[str] -- message types to subscribe to
 
     Each stage after the first subscribes to "handoff.result" and receives
     the previous stage's output via its inbox.
@@ -294,7 +289,7 @@ def scatter_gather(
 
 
 # ============================================================================
-# Audit coordination — scout-then-drill pattern for codebase audits
+# Audit coordination -- scout-then-drill pattern for codebase audits
 # ============================================================================
 
 # Shared context template for audit sub-agents.
@@ -305,7 +300,7 @@ AUDIT_SHARED_CONTEXT = (
     "1. SCOUT FIRST: Use search_files or find_symbol to identify candidate "
     "files/issues before reading anything. Spend at most 2 turns on discovery.\n"
     "2. READ SELECTIVELY: Read only the 3-5 most relevant files. "
-    "Never try to read ALL files — you will run out of context.\n"
+    "Never try to read ALL files -- you will run out of context.\n"
     "3. REPORT EARLY: Reserve your last 3 turns for writing findings. "
     "When the WRAP-UP message appears, STOP reading and START writing.\n"
     "4. FINDINGS FIRST: Write your findings table BEFORE any explanation or "
@@ -345,7 +340,7 @@ def audit_parallel(
         runtime: AgentRuntime instance.
         config: AgentConfig instance.
         wg, rg: Safety gates.
-        max_turns: Turn budget per auditor (default 15 — intentionally low).
+        max_turns: Turn budget per auditor (default 15 -- intentionally low).
         subscriptions: Message types each auditor subscribes to. Defaults to
             [] (disable heartbeats) to reduce overhead during audit.
 
@@ -395,7 +390,7 @@ def audit_parallel(
 
 
 # ============================================================================
-# Tool wrappers — registered as LLM-callable tools
+# Tool wrappers -- registered as LLM-callable tools
 # ============================================================================
 
 
@@ -404,11 +399,11 @@ def _audit_parallel(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate) -> Tool
     """Fan-out audit across defect classes with scout-then-drill discipline.
 
     Required:
-        defect_classes: list[str] — e.g. ["bugs", "code quality", "performance"].
+        defect_classes: list[str] -- e.g. ["bugs", "code quality", "performance"].
 
     Optional:
-        workspace_scope: str — limit audit to a subdirectory (e.g. "tools/").
-        max_turns: int — turns per auditor (default 15).
+        workspace_scope: str -- limit audit to a subdirectory (e.g. "tools/").
+        max_turns: int -- turns per auditor (default 15).
     """
     from tools import _TOOL_CONTEXT
 
@@ -452,13 +447,13 @@ def _fan_out(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResul
     """Spawn N workers from a list of task descriptions.
 
     Required:
-        descriptions: list[str] — one task string per worker.
+        descriptions: list[str] -- one task string per worker.
 
     Optional:
-        shared_input: dict — injected as shared_context to all workers.
-        max_turns: int — turn budget per worker (default 15).
-        visible: bool — stream sub-agent output (default false).
-        subscriptions: list[str] — message types each worker subscribes to.
+        shared_input: dict -- injected as shared_context to all workers.
+        max_turns: int -- turn budget per worker (default 15).
+        visible: bool -- stream sub-agent output (default false).
+        subscriptions: list[str] -- message types each worker subscribes to.
     """
     descriptions = args.get("descriptions", [])
     if not descriptions:
@@ -515,10 +510,10 @@ def _fan_in(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult
     by the orchestrator (llm.py); no explicit _pipe parameter is needed here.
 
     Required:
-        task_ids: list[str] — task IDs to collect results from.
+        task_ids: list[str] -- task IDs to collect results from.
 
     Optional:
-        timeout: float — max seconds to wait (default 120).
+        timeout: float -- max seconds to wait (default 120).
     """
     task_ids = args.get("task_ids", [])
     if not task_ids:
@@ -544,9 +539,9 @@ def _fan_in(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult
             parts.append(f"  [{i}] {tid}: timed out / not found")
         elif res.success:
             preview = str(res.content)[:200]
-            parts.append(f"  [{i}] {tid}: OK — {preview}")
+            parts.append(f"  [{i}] {tid}: OK -- {preview}")
         else:
-            parts.append(f"  [{i}] {tid}: FAILED — {res.error}")
+            parts.append(f"  [{i}] {tid}: FAILED -- {res.error}")
 
     return ToolResult(
         success=True,
@@ -565,11 +560,11 @@ def _pipeline(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResu
     """Run stages in sequence, each receiving the prior stage's handoff.
 
     Required:
-        stages: list[dict] — each dict has 'task' (str) and optional 'subscriptions' (list[str]).
+        stages: list[dict] -- each dict has 'task' (str) and optional 'subscriptions' (list[str]).
 
     Optional:
-        max_turns: int — turn budget per stage (default 15).
-        timeout: float — max seconds overall (default 300).
+        max_turns: int -- turn budget per stage (default 15).
+        timeout: float -- max seconds overall (default 300).
     """
     stages = args.get("stages", [])
     if not stages:
@@ -622,11 +617,11 @@ def _barrier(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResul
     """Block until all task_ids send coord.sync for a named barrier.
 
     Required:
-        name: str — barrier name to wait on.
-        task_ids: list[str] — agents that must arrive.
+        name: str -- barrier name to wait on.
+        task_ids: list[str] -- agents that must arrive.
 
     Optional:
-        timeout: float — max seconds to wait (default 120).
+        timeout: float -- max seconds to wait (default 120).
     """
     name = args.get("name", "")
     if not name:
@@ -670,13 +665,13 @@ def _scatter_gather(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> To
     """Fan-out with per-worker input slices. Each worker gets one item.
 
     Required:
-        items: list — items to distribute (one per worker).
-        worker_task_template: str — task description with '{item}' placeholder.
+        items: list -- items to distribute (one per worker).
+        worker_task_template: str -- task description with '{item}' placeholder.
 
     Optional:
-        max_turns: int — turn budget per worker (default 15).
-        timeout: float — max seconds to wait for all (default 120).
-        subscriptions: list[str] — message types each worker subscribes to.
+        max_turns: int -- turn budget per worker (default 15).
+        timeout: float -- max seconds to wait for all (default 120).
+        subscriptions: list[str] -- message types each worker subscribes to.
     """
     items = args.get("items", [])
     if not items:
@@ -725,9 +720,9 @@ def _scatter_gather(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> To
             parts.append(f"  [{i}] {item!r}: timed out / not found")
         elif res.success:
             preview = str(res.content)[:200]
-            parts.append(f"  [{i}] {item!r}: OK — {preview}")
+            parts.append(f"  [{i}] {item!r}: OK -- {preview}")
         else:
-            parts.append(f"  [{i}] {item!r}: FAILED — {res.error}")
+            parts.append(f"  [{i}] {item!r}: FAILED -- {res.error}")
 
     return ToolResult(
         success=True,

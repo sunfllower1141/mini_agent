@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-context.py — agent context and thread-safe context-variable proxy.
+context.py -- agent context and thread-safe context-variable proxy.
 
 Extracted from tools/__init__.py to keep the dispatch module focused.
 """
@@ -13,10 +13,10 @@ import contextvars
 # Context keys used across tools and llm
 CTX_SCRATCHPAD_PATH = "scratchpad_path"
 CTX_SCRATCHPAD_UPDATED = "_scratchpad_updated"
-CTX_TURN_HISTORY = "_turn_history"  # dict[int, str] — turn number → summary
-CTX_PLAN_STEPS = "_plan_steps"      # list[str] — from plan tool
-CTX_PLAN_DONE = "_plan_done"        # set[int] — completed step indices
-CTX_PLAN_LAST_ADVANCED = "_plan_last_advanced_turn"  # int — turn when last step advanced
+CTX_TURN_HISTORY = "_turn_history"  # dict[int, str] -- turn number -> summary
+CTX_PLAN_STEPS = "_plan_steps"      # list[str] -- from plan tool
+CTX_PLAN_DONE = "_plan_done"        # set[int] -- completed step indices
+CTX_PLAN_LAST_ADVANCED = "_plan_last_advanced_turn"  # int -- turn when last step advanced
 
 
 class AgentContext:
@@ -30,10 +30,10 @@ class AgentContext:
         exa_api_key           API key for Exa web search
         workspace             Workspace root directory
         _scratchpad_updated   Flag: scratchpad was updated this turn
-        _turn_history         dict[int, str] — turn number → summary
-        _plan_steps           list[str] — declared plan steps
-        _plan_done            set[int] — completed step indices
-        _plan_last_advanced_turn  int — turn number when a step was last completed
+        _turn_history         dict[int, str] -- turn number -> summary
+        _plan_steps           list[str] -- declared plan steps
+        _plan_done            set[int] -- completed step indices
+        _plan_last_advanced_turn  int -- turn number when a step was last completed
     """
 
     def __init__(self):
@@ -46,6 +46,7 @@ class AgentContext:
         self._plan_steps: list[str] = []
         self._plan_done: set[int] = set()
         self._plan_last_advanced_turn: int = 0
+        self._turn_count: int = 0     # current turn number (set by run_agent_turn each iteration)
         self._memory_store = None  # MemoryStore instance (set by init_session)
         self._failure_pattern_store = None  # FailurePatternStore (set by init_session)
         self._self_critique = None  # SelfCritique instance (set by init_session)
@@ -98,7 +99,7 @@ class _ContextProxy:
 _TOOL_CONTEXT = _ContextProxy(_TOOL_CONTEXT_VAR)
 
 
-# P1.4: Dispatch mapping for set_context — replaces if/elif chain
+# P1.4: Dispatch mapping for set_context -- replaces if/elif chain
 _CTX_DISPATCH = {
     "scratchpad_path": lambda ctx, v: setattr(ctx, "scratchpad_path", v),
     "exa_api_key": lambda ctx, v: setattr(ctx, "exa_api_key", v),

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-logging_setup.py — centralized structured logging for mini_agent.
+logging_setup.py -- centralized structured logging for mini_agent.
 
 Provides a single ``AgentLogger`` that writes JSON-lines to a rotating log
 file and text to stderr.  Also maintains in-memory error counters so the
@@ -14,9 +14,9 @@ Usage:
     log.error("Unrecoverable", exc_info=True)
 
 Log files:
-    ~/.mini_agent/logs/agent.log        — all events (rotating, 5×10MB)
-    ~/.mini_agent/logs/api_error.log    — API-level errors (HTTP, timeout)
-    ~/.mini_agent/logs/error_traces.log — full tracebacks for crashes
+    ~/.mini_agent/logs/agent.log        -- all events (rotating, 5x10MB)
+    ~/.mini_agent/logs/api_error.log    -- API-level errors (HTTP, timeout)
+    ~/.mini_agent/logs/error_traces.log -- full tracebacks for crashes
 """
 
 from __future__ import annotations
@@ -51,12 +51,6 @@ LOG_DIR = os.path.join(os.path.expanduser("~"), ".mini_agent", "logs")
 AGENT_LOG = os.path.join(LOG_DIR, "agent.log")
 API_ERROR_LOG = os.path.join(LOG_DIR, "api_error.log")
 ERROR_TRACES_LOG = os.path.join(LOG_DIR, "error_traces.log")
-PROMPT_LOG = os.path.join(LOG_DIR, "prompts.log")
-
-# Rotation constants for non-standard log files (not using RotatingFileHandler
-# because these logs write custom JSON entries, not standard log records)
-_LOG_MAX_BYTES = 10 * 1024 * 1024   # 10 MB
-_LOG_BACKUP_COUNT = 3               # keep .1 .. .3 backups
 
 os.makedirs(LOG_DIR, exist_ok=True)
 
@@ -189,7 +183,7 @@ def _setup_root_logger() -> None:
     stderr_handler.setLevel(logging.WARNING)
     stderr_handler.setFormatter(
         logging.Formatter(
-            "  ⚠ [%(name)s] %(levelname)s: %(message)s",
+            "  WARNING: [%(name)s] %(levelname)s: %(message)s",
         )
     )
     root.addHandler(stderr_handler)
@@ -225,7 +219,6 @@ def log_api_error(
         "session": session,
     }
     try:
-        _rotate_log_file(API_ERROR_LOG)
         with open(API_ERROR_LOG, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry, default=str) + "\n")
     except OSError:
@@ -234,85 +227,6 @@ def log_api_error(
         "API error | provider=%s model=%s status=%s body=%s",
         provider, model, status_code, error_body[:200],
         extra={"provider": provider, "status_code": status_code},
-    )
-
-
-def _rotate_log_file(log_path: str, max_bytes: int | None = None,
-                     backup_count: int | None = None) -> None:
-    """Rotate *log_path* when it exceeds *max_bytes*.
-
-    Uses the same rollover scheme as RotatingFileHandler: rename .2→.3,
-    .1→.2, base→.1, then start a new base file.  Defaults to module-level
-    _LOG_MAX_BYTES / _LOG_BACKUP_COUNT.
-    """
-    if max_bytes is None:
-        max_bytes = _LOG_MAX_BYTES
-    if backup_count is None:
-        backup_count = _LOG_BACKUP_COUNT
-
-    if not os.path.exists(log_path):
-        return
-    try:
-        if os.path.getsize(log_path) < max_bytes:
-            return
-    except OSError:
-        return
-
-    # Roll backups: log.2 → .3, .1 → .2, base → .1
-    for i in range(backup_count - 1, 0, -1):
-        old = f"{log_path}.{i}"
-        new = f"{log_path}.{i + 1}"
-        try:
-            if os.path.exists(old):
-                os.replace(old, new)
-        except OSError:
-            pass
-    try:
-        os.replace(log_path, f"{log_path}.1")
-    except OSError:
-        pass
-
-
-def log_prompt(
-    messages: list[dict],
-    *,
-    provider: str = "",
-    model: str = "",
-    turn: int = 0,
-    session: str = "",
-) -> None:
-    """Write the full LLM prompt (messages array) to prompts.log.
-
-    Called once per API call from ``call_llm()`` in api.py.  Writes a
-    JSON-lines entry with the complete message list plus metadata so
-    every prompt is auditable.
-    """
-    # Rough token estimate: char count / 4
-    msg_json = json.dumps(messages, default=str, ensure_ascii=False)
-    est_tokens = len(msg_json) // 4
-
-    entry: dict = {
-        "ts": _ts(),
-        "provider": provider,
-        "model": model,
-        "turn": turn,
-        "message_count": len(messages),
-        "estimated_tokens": est_tokens,
-        "session": session,
-        "messages": messages,
-    }
-    try:
-        _rotate_log_file(PROMPT_LOG)
-        with open(PROMPT_LOG, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(entry, default=str, ensure_ascii=False) + "\n")
-    except OSError:
-        pass  # Last-resort: don't crash on log write failure
-
-    # Also write a lightweight info line to the main agent.log
-    logger = get_logger("prompts")
-    logger.debug(
-        "Prompt sent | provider=%s model=%s turn=%d messages=%d est_tokens=%d",
-        provider, model, turn, len(messages), est_tokens,
     )
 
 
@@ -340,7 +254,6 @@ def log_error_trace(
         entry["traceback"] = traceback.format_exc()
 
     try:
-        _rotate_log_file(ERROR_TRACES_LOG)
         with open(ERROR_TRACES_LOG, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry, default=str) + "\n")
     except OSError:
@@ -382,7 +295,7 @@ def log_tool_failure(
 
 
 def log_tool_success(tool_name: str, turn: int = 0) -> None:
-    """Log a successful tool call (debug level — not noisy in stderr)."""
+    """Log a successful tool call (debug level -- not noisy in stderr)."""
     logger = get_logger("tools")
     logger.debug(
         "Tool success | tool=%s", tool_name,

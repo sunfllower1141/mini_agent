@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-context_inject.py — per-turn context injection for the agent orchestrator.
+context_inject.py -- per-turn context injection for the agent orchestrator.
 
 Injects scratchpad, git diff, orchestration status, progress reminders,
 circuit breaker warnings, self-critique, and strategy hints into the
@@ -11,11 +11,8 @@ Extracted from llm.py to keep the orchestrator focused on the main loop.
 
 from __future__ import annotations
 
-import logging
 import os
 import subprocess as _sp
-
-_log = logging.getLogger(__name__)
 import sys
 import threading
 from collections import deque
@@ -42,6 +39,12 @@ from collections import Counter
 _CIRCUIT_WINDOW: int = 6
 _CIRCUIT_THRESHOLD: int = 3
 
+# Dead-tool pruning: after this many turns, deactivate skills whose tools
+# have never been used.  Reduces API payload by ~500-2000 tokens and
+# stabilizes the KV-cache prefix (tool definitions stop changing).
+_DEAD_TOOL_PRUNE_TURN: int = 5
+_MIN_PRUNE_COUNT: int = 3  # must have at least this many unused tools to prune
+
 def _tool_call_key(tc: dict) -> str:
     """Stable hash key for a tool call: name + normalized args."""
     fn = tc["function"]
@@ -61,7 +64,7 @@ def _check_circuit(recent_keys: list[str]) -> str | None:
     for key, count in counts.items():
         if count >= _CIRCUIT_THRESHOLD:
             return (
-                f"\u26a0\ufe0f Circuit breaker: you have called '{key}' {count} times "
+                f"WARNING: Circuit breaker: you have called '{key}' {count} times "
                 f"in the last {len(recent_keys)} tool calls. "
                 "The same call keeps being made with identical arguments. "
                 "Stop, diagnose why it isn't working, and try a different "
@@ -80,11 +83,11 @@ MODIFIED_FILES_CHECKPOINT_TURN = 2  # turn to show modified-files checkpoint
 
 
 # One-time context injection flags are stored on _TOOL_CONTEXT
-# (_scratchpad_injected, _git_diff_injected) — no module-level globals.
+# (_scratchpad_injected, _git_diff_injected) -- no module-level globals.
 
 
 # ---------------------------------------------------------------------------
-# Context injection helpers — each appends one kind of context message.
+# Context injection helpers -- each appends one kind of context message.
 # ---------------------------------------------------------------------------
 
 
@@ -172,6 +175,38 @@ def _inject_tasks_context(
     })
 
 
+def _inject_core_memory_context(
+    messages: list[dict], *, memory_store: Any = None,
+) -> None:
+    """Inject core memory at session start (one-time, frozen snapshot).
+
+    Core memory is a bounded, consolidated summary of what the agent
+    has learned across sessions. Injected ONCE at session start so the
+    agent benefits from past learning without burning tokens every turn.
+    """
+    if memory_store is None:
+        return
+    if getattr(_TOOL_CONTEXT, "_core_memory_injected", False):
+        return
+    _TOOL_CONTEXT._core_memory_injected = True
+    try:
+        core_content = memory_store.get_core_memory()
+        if not core_content or not core_content.strip():
+            return
+        messages.append({
+            "role": "user",
+            "content": (
+                "[CORE MEMORY -- persistent learnings from past sessions]\n"
+                "You wrote this in a previous session to help your future self. "
+                "Use it to avoid re-discovering things:\n\n"
+                + core_content.strip()
+            ),
+            "_transient": True,
+        })
+    except Exception:
+        pass  # best-effort; never break the session over memory
+
+
 def _inject_scratchpad_context(
     messages: list[dict], *, memory_store: Any = None,
 ) -> None:
@@ -184,7 +219,7 @@ def _inject_scratchpad_context(
         messages.append({
             "role": "user",
             "content": (
-                "Your scratchpad (current working notes — use write_scratchpad "
+                "Your scratchpad (current working notes -- use write_scratchpad "
                 "to update):\n\n" + scratchpad
             ),
             "_transient": True,
@@ -216,7 +251,7 @@ def _inject_git_diff(
                 "_transient": True,
             })
     except (OSError, _sp.TimeoutExpired) as exc:
-        print(f"  ⚠ git diff failed: {exc}", file=sys.stderr, flush=True)
+        print(f"  WARNING: git diff failed: {exc}", file=sys.stderr, flush=True)
 
 
 def _inject_orchestration_context(messages: list[dict]) -> None:
@@ -307,7 +342,7 @@ def _inject_orchestration_context(messages: list[dict]) -> None:
                     last_action = status_snap.get("last_action", "")
                     if last_action and last_action != "idle":
                         runtime.extend_turns(tid, 10)
-                        parts.append(f"  🔄 Auto-extended '{tid}' (+10 turns, {remaining} left)")
+                        parts.append(f"  [LOOP] Auto-extended '{tid}' (+10 turns, {remaining} left)")
         if parts:
             messages.append({
                 "role": "user",
@@ -349,7 +384,7 @@ def _inject_progress_check(messages: list[dict], *, turn_count: int) -> None:
                 f"You've spent {_TOOL_CONTEXT._consecutive_read_only_turns} turns reading "
                 "code without making changes. If you have enough context to "
                 "answer the user, do so NOW. If you need more, state what "
-                "SPECIFIC information you're still missing — don't just keep "
+                "SPECIFIC information you're still missing -- don't just keep "
                 "reading files broadly."
             ),
             "_transient": True,
@@ -362,7 +397,7 @@ def _inject_progress_check(messages: list[dict], *, turn_count: int) -> None:
         "Briefly assess your progress: are you making headway, "
         "stuck in a loop, or done? If you can wrap up now, "
         "give the final answer. If you truly need more turns, "
-        "continue — but be specific about what remains."
+        "continue -- but be specific about what remains."
     )
     messages.append({"role": "user", "content": reminder, "_transient": True})
 
@@ -408,11 +443,11 @@ def _inject_modified_files_checkpoint(
                             if len(cf["callers"]) > 2:
                                 names_str += f" (+{len(cf['callers']) - 2})"
                             cf_parts.append(f"{cf['file']}({names_str})")
-                        caller_summaries.append(f"  {mf} → called by: {', '.join(cf_parts)}")
+                        caller_summaries.append(f"  {mf} -> called by: {', '.join(cf_parts)}")
                 if caller_summaries:
                     kg_hint = "\nCaller impact analysis:\n" + "\n".join(caller_summaries)
         except Exception:
-            _log.debug("_inject_modified_files_checkpoint: caller analysis failed", exc_info=True)
+            pass
 
     ckpt = (
         f"Files modified this session:\n{mod_list}\n"
@@ -434,152 +469,20 @@ def _inject_circuit_breaker(
         messages.append({"role": "user", "content": warning, "_transient": True})
 
 
-# ---------------------------------------------------------------------------
-# Learning nudge — reminds agent to use remember() after failures
-# ---------------------------------------------------------------------------
+def _inject_cache_degradation_alert(messages: list[dict]) -> None:
+    """Inject a warning if DeepSeek prompt cache hit rate has dropped sharply.
 
-# How many failures before injecting a remember nudge
-_LEARNING_NUDGE_FAILURE_THRESHOLD: int = 1
-
-# Cooldown between learning nudges (turns)
-_LEARNING_NUDGE_COOLDOWN: int = 3
-
-
-def _inject_learning_nudge(
-    messages: list[dict], *, turn_count: int,
-) -> None:
-    """Inject a reminder to use remember() after tool failures.
-
-    Research shows agents rarely call remember() without explicit prompting.
-    This nudge fires after any tool failure and reminds the agent to capture
-    the pattern for cross-session persistence.
-
-    Uses a cooldown to avoid nagging on every turn.
+    The alert is only injected when degradation is detected (most turns:
+    nothing happens, zero cost).  Uses the per-turn cache tracking in
+    api.py:_report_cache_hit.
     """
-    # Check cooldown
-    last_nudge_turn = getattr(_TOOL_CONTEXT, "_last_learning_nudge_turn", -999)
-    if turn_count - last_nudge_turn < _LEARNING_NUDGE_COOLDOWN:
-        return
-
-    # Check for failures in the most recent assistant message
-    has_failures = False
-    failure_names: list[str] = []
-    for m in reversed(messages):
-        if m.get("role") == "tool" and not m.get("_transient"):
-            content = m.get("content") or ""
-            if '"success": false' in content.lower() or '"success":false' in content.lower():
-                has_failures = True
-                # Extract tool name from tool_call_id
-                tc_id = m.get("tool_call_id", "")
-                # Find the matching tool call in the assistant message
-                for am in messages:
-                    if am.get("role") == "assistant":
-                        for tc in am.get("tool_calls", []):
-                            if tc.get("id") == tc_id:
-                                failure_names.append(tc.get("function", {}).get("name", "unknown"))
-                                break
-    if not has_failures or not failure_names:
-        return
-
-    _TOOL_CONTEXT._last_learning_nudge_turn = turn_count
-
-    unique_names = list(dict.fromkeys(failure_names))  # deduplicate preserving order
-    nudge = (
-        f"💡 LEARNING NUDGE: You just had tool failure(s) with: {', '.join(unique_names)}.\n\n"
-        f"Before retrying, consider calling remember() to capture:\n"
-        f"  - What pattern caused this failure (wrong param? file not read? whitespace mismatch?)\n"
-        f"  - What fix strategy worked (if you already fixed it)\n"
-        f"  - Any new convention or workaround you discovered\n\n"
-        f"This makes the fix available to future sessions via project_knowledge.\n"
-        f"Use topic='...' and detail='...' — category auto-detected."
-    )
-    messages.append({"role": "user", "content": nudge, "_transient": True})
-
-
-# ---------------------------------------------------------------------------
-# Plan gate — warns when editing files not in the active plan
-# ---------------------------------------------------------------------------
-
-
-def _inject_plan_gate(messages: list[dict]) -> None:
-    """Warn when the agent is editing files not covered by the active plan.
-
-    Scans the most recent assistant message for edit_file/write_file calls
-    and checks whether target paths appear in the plan's file scope.
-    Only injects when a plan is active and edits diverge from it.
-    """
-    # Check if a plan is active
-    plan = getattr(_TOOL_CONTEXT, "_plan", None)
-    if not plan or not isinstance(plan, dict):
-        return
-
-    plan_steps = plan.get("steps", [])
-    if not plan_steps:
-        return
-
-    # Collect file paths mentioned in plan steps
-    plan_files: set[str] = set()
-    import re as _re
-    for step in plan_steps:
-        text = step.get("description", "") if isinstance(step, dict) else str(step)
-        for match in _re.findall(r'[\w/\-.]+\.py\b', text):
-            plan_files.add(match)
-
-    if not plan_files:
-        return  # Plan doesn't mention specific files, can't gate
-
-    # Scan the most recent assistant message for edit targets
-    edit_targets: list[str] = []
-    for m in reversed(messages):
-        if m.get("role") != "assistant":
-            continue
-        tool_calls = m.get("tool_calls", [])
-        if not tool_calls:
-            continue
-        for tc in tool_calls:
-            fn = tc.get("function", {})
-            name = fn.get("name", "")
-            if name in ("edit_file", "write_file"):
-                try:
-                    args = json.loads(fn.get("arguments", "{}"))
-                except json.JSONDecodeError:
-                    continue
-                path = args.get("path", "")
-                paths = args.get("paths", [])
-                if path:
-                    edit_targets.append(path)
-                if isinstance(paths, list):
-                    edit_targets.extend(paths)
-        break
-
-    if not edit_targets:
-        return
-
-    # Check which targets aren't in the plan
-    outliers = []
-    for target in edit_targets:
-        filename = os.path.basename(target)
-        if filename not in plan_files and target not in plan_files:
-            # Also check partial matches
-            matched = any(pf in target for pf in plan_files)
-            if not matched:
-                outliers.append(target)
-
-    if outliers:
-        outlier_list = "\n".join(f"  - {o}" for o in outliers[:5])
-        plan_list = "\n".join(f"  - {pf}" for pf in sorted(plan_files)[:8])
-        messages.append({
-            "role": "user",
-            "content": (
-                f"⚠️ PLAN GATE: You are editing file(s) not mentioned in your active plan:\n"
-                f"{outlier_list}\n\n"
-                f"Plan scope includes:\n{plan_list}\n\n"
-                f"If this edit is intentional (new requirement discovered during implementation), "
-                f"update your plan with plan_status() to reflect the expanded scope. "
-                f"Otherwise, reconsider whether this edit is necessary."
-            ),
-            "_transient": True,
-        })
+    try:
+        from api import _check_cache_degradation
+        alert = _check_cache_degradation()
+        if alert:
+            messages.append({"role": "user", "content": alert, "_transient": True})
+    except Exception:
+        pass  # never block the turn on cache monitoring failure
 
 
 def _inject_post_edit_verification(messages: list[dict]) -> None:
@@ -605,15 +508,25 @@ def _inject_post_edit_verification(messages: list[dict]) -> None:
     if not py_files:
         return
 
-    # Only inject periodically (every 6 turns after checkpoint) to avoid noise
+    # Inject more frequently: every 6 turns OR whenever there's a new edit
+    # since last verification check.
     turn = getattr(_TOOL_CONTEXT, "_turn_count", 0)
+    last_verified = getattr(_TOOL_CONTEXT, "_last_verification_turn", 0)
+    edits_since_last = turn > last_verified and modified != getattr(
+        _TOOL_CONTEXT, "_last_verified_modified", set()
+    )
+
     if turn <= MODIFIED_FILES_CHECKPOINT_TURN:
         return
-    if (turn - MODIFIED_FILES_CHECKPOINT_TURN) % 6 != 0:
+    if (turn - MODIFIED_FILES_CHECKPOINT_TURN) % 6 != 0 and not edits_since_last:
         return
 
+    # Update tracking
+    _TOOL_CONTEXT._last_verification_turn = turn
+    _TOOL_CONTEXT._last_verified_modified = set(modified)
+
     lines: list[str] = []
-    lines.append("Post-edit verification — files modified this session:")
+    lines.append("Post-edit verification -- files modified this session:")
 
     # Test coverage: show which modified files have/haven't test coverage
     for mf in py_files[:5]:
@@ -625,8 +538,8 @@ def _inject_post_edit_verification(messages: list[dict]) -> None:
         if not has_test:
             alt_path = os.path.join("tests", candidate)
             has_test = os.path.isfile(os.path.join(workspace, alt_path))
-        status = "✅ has test" if has_test else "⚠️ no test found"
-        lines.append(f"  {mf} — {status}")
+        status = "[OK] has test" if has_test else "WARNING: no test found"
+        lines.append(f"  {mf} -- {status}")
 
     # Knowledge graph: show affected callers across all modified files
     try:
@@ -650,7 +563,7 @@ def _inject_post_edit_verification(messages: list[dict]) -> None:
                         names_str += f" (+{len(names) - 3})"
                     lines.append(f"  {f}: {names_str}")
     except Exception:
-        _log.debug("_inject_post_edit_verification: caller lookup failed", exc_info=True)
+        pass
 
     lines.append("\nConsider running `verify` or `run_tests` for affected files.")
     messages.append({
@@ -681,7 +594,7 @@ def _inject_edit_risk_context(messages: list[dict]) -> None:
       - Knowledge graph caller analysis (which callers may break)
       - Git blame (who last touched these lines)
 
-    Only injects when there are pending edits — zero tokens otherwise.
+    Only injects when there are pending edits -- zero tokens otherwise.
     """
     # Find the most recent assistant message with tool calls
     edit_targets: list[str] = []
@@ -741,7 +654,7 @@ def _inject_edit_risk_context(messages: list[dict]) -> None:
                 commit_lines = r.stdout.strip().split("\n")
                 count = len(commit_lines)
                 if count >= 3:
-                    risk_items.append(f"modified in {count}/{_EDIT_RISK_GIT_DEPTH} recent commits ⚠️")
+                    risk_items.append(f"modified in {count}/{_EDIT_RISK_GIT_DEPTH} recent commits WARNING:")
                 elif count > 0:
                     risk_items.append(f"modified in {count} recent commit(s)")
         except (OSError, _sp.TimeoutExpired):
@@ -779,7 +692,7 @@ def _inject_edit_risk_context(messages: list[dict]) -> None:
                 # Also check tests/ directory
                 alt_path = os.path.join("tests", candidate)
                 if not os.path.isfile(os.path.join(workspace, alt_path)):
-                    risk_items.append("no test file found ⚠️")
+                    risk_items.append("no test file found WARNING:")
 
         # 4. Knowledge graph caller analysis (if graph is available)
         if _kg_available and target.endswith(".py"):
@@ -797,11 +710,11 @@ def _inject_edit_risk_context(messages: list[dict]) -> None:
                     caller_summary = "; ".join(caller_parts)
                     if len(callers) > 3:
                         caller_summary += f" (+{len(callers) - 3} more files)"
-                    risk_items.append(f"callers: {caller_summary} — verify after changes")
+                    risk_items.append(f"callers: {caller_summary} -- verify after changes")
             except Exception:
-                _log.debug("_inject_edit_risk_context: caller analysis failed", exc_info=True)
+                pass
 
-        # 5. Git blame — who last modified this file
+        # 5. Git blame -- who last modified this file
         try:
             r = _sp.run(
                 ["git", "-C", workspace, "blame", "--line-porcelain", target],
@@ -977,15 +890,15 @@ def _inject_scratchpad_nudge(messages: list[dict], *, turn_count: int) -> None:
         messages.append({
             "role": "user",
             "content": (
-                "⚠️ Your scratchpad hasn't been updated in several turns. "
+                "WARNING: Your scratchpad hasn't been updated in several turns. "
                 "Consider using write_scratchpad to capture your current "
                 "plan, progress, and decisions before continuing.\n\n"
                 "Good scratchpad format:\n"
-                "  GOAL: [1 line — what the user wants]\n"
+                "  GOAL: [1 line -- what the user wants]\n"
                 "  DONE: [what you've accomplished so far]\n"
-                "  NEXT: [exactly what you'll do next turn — be specific]\n"
+                "  NEXT: [exactly what you'll do next turn -- be specific]\n"
                 "  QUESTIONS: [anything you're uncertain about]\n"
-                "Keep it short — this is for YOUR memory, not the user."
+                "Keep it short -- this is for YOUR memory, not the user."
             ),
             "_transient": True,
         })
@@ -997,7 +910,7 @@ def _inject_plan_status(messages: list[dict]) -> None:
     plan_steps = _TOOL_CONTEXT._plan_steps
     if not plan_steps:
         return
-    # Suppress plan when sub-agents are running — avoids confusion
+    # Suppress plan when sub-agents are running -- avoids confusion
     runtime = getattr(_TOOL_CONTEXT, "_agent_runtime", None)
     if runtime is not None:
         if runtime.get_running_ids():
@@ -1005,7 +918,7 @@ def _inject_plan_status(messages: list[dict]) -> None:
     plan_done = _TOOL_CONTEXT._plan_done
     lines = [f"Active plan ({len(plan_done)}/{len(plan_steps)} done):"]
     for i, s in enumerate(plan_steps, 1):
-        mark = "✓" if (i - 1) in plan_done else "○"
+        mark = "V" if (i - 1) in plan_done else "o"
         lines.append(f"  [{mark}] {i}. {s}")
     lines.append("Use plan_status to mark steps complete as you finish them.")
 
@@ -1016,7 +929,7 @@ def _inject_plan_status(messages: list[dict]) -> None:
     stale_turns = turn_count - last_advanced
     if len(plan_done) < len(plan_steps) and stale_turns >= _PLAN_STALE_TURNS:
         lines.append(
-            f"\n⚠️ PLAN STALLED: No step advanced in {stale_turns} turns. "
+            f"\nWARNING: PLAN STALLED: No step advanced in {stale_turns} turns. "
             "Either you're stuck on the current step, or you forgot to call "
             "plan_status when you finished it. Re-evaluate: are you making "
             "progress? If stuck, read relevant files, try a different approach, "
@@ -1031,14 +944,14 @@ def _inject_plan_status(messages: list[dict]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Main context injector — orchestrates all helpers.
+# Main context injector -- orchestrates all helpers.
 # ---------------------------------------------------------------------------
 
 
 
 def _inject_system_reminder(messages: list[dict], *, turn_count: int) -> None:
     """Re-inject critical rules near end of long contexts to fight
-    'instruction centrifugation' — the system prompt fading as context grows.
+    'instruction centrifugation' -- the system prompt fading as context grows.
 
     Triggers when message count > 20 (~6-7 turns), repeats every 8 messages
     for DeepSeek (prone to tool-call loops), 12 for other providers.
@@ -1055,12 +968,12 @@ def _inject_system_reminder(messages: list[dict], *, turn_count: int) -> None:
     _TOOL_CONTEXT._system_reminder_last_msg_count = len(messages)
 
     reminder = (
-        "⚠️ SYSTEM REMINDER (context is long — critical rules):\n\n"
+        "WARNING: SYSTEM REMINDER (context is long -- critical rules):\n\n"
         "LOOP PREVENTION:\n"
         "- Same tool + same args 2x = STUCK. Switch approach immediately.\n"
         "- edit_file MUST be preceded by read_file in the same batch.\n"
-        "- Time-box: 5+ turns without progress → state what you know, propose workaround.\n"
-        "- Context grows stale — trust write_scratchpad and plan over old tool results.\n\n"
+        "- Time-box: 5+ turns without progress -> state what you know, propose workaround.\n"
+        "- Context grows stale -- trust write_scratchpad and plan over old tool results.\n\n"
         "EFFICIENCY:\n"
         "- Batch ALL independent tool calls in ONE response (parallel execution).\n"
         "- Update write_scratchpad every 3 turns.\n"
@@ -1076,7 +989,7 @@ def _compress_stale_tool_results(messages: list[dict]) -> None:
 
     Uses the content-aware compression from ``memory_prune`` (same
     algorithm used during persistence), so tool results are compressed
-    consistently throughout the turn loop — not just on save.
+    consistently throughout the turn loop -- not just on save.
 
     Only tool results outside the *keep_recent* window are compressed;
     recent results stay intact for the model to reference.
@@ -1092,7 +1005,7 @@ def _inject_failure_pattern_warnings(
     """Inject failure pattern warnings for an assistant message's tool calls.
 
     Called between API call and tool execution so warnings target the
-    CURRENT turn's tool choices.  (M7: deduplicated — removed the
+    CURRENT turn's tool choices.  (M7: deduplicated -- removed the
     pre-API-call variant that re-warned about the previous turn's
     tool_calls that had already been warned post-API.)
     """
@@ -1160,7 +1073,7 @@ def _inject_self_critique(messages: list[dict], *, turn_count: int) -> None:
                     hint = tool_hints.get(first_name, f"STOP retrying {first_name}. It has failed {_CONSECUTIVE_FAILURE_THRESHOLD}+ times. Switch approach.")
                     messages.append({
                         "role": "user",
-                        "content": f"⚠️ {hint}",
+                        "content": f"WARNING: {hint}",
                         "_transient": True,
                     })
                     return  # Don't also inject the general self-critique
@@ -1192,7 +1105,7 @@ def _inject_self_critique(messages: list[dict], *, turn_count: int) -> None:
                                 except (json.JSONDecodeError, TypeError):
                                     pass
                                 break
-            if len(recent_results) >= 30:  # Scan last 30 tool results (was 10 — P6 fix)
+            if len(recent_results) >= 30:  # Scan last 30 tool results (was 10 -- P6 fix)
                 break
 
         if recent_results:
@@ -1207,8 +1120,160 @@ def _inject_self_critique(messages: list[dict], *, turn_count: int) -> None:
         pass
 
 
+# ---------------------------------------------------------------------------
+# Confidence-based web_search nudge
+# ---------------------------------------------------------------------------
+
+# Thresholds for the confidence nudge
+_CONFIDENCE_NO_RESULT_THRESHOLD = 3      # consecutive search misses before nudging
+_CONFIDENCE_FAILURE_THRESHOLD = 2        # consecutive tool failures before nudging
+_CONFIDENCE_NUDGE_COOLDOWN_TURNS = 4     # turns between repeat nudges
+# Tools whose "no results" indicate low knowledge confidence (not just bad queries)
+_CONFIDENCE_SEARCH_TOOLS = {"find_symbol", "search_files", "find_usages",
+                            "semantic_search", "lsp_definition", "lsp_references"}
+# Tools whose repeated failure suggests external knowledge gap
+_CONFIDENCE_FAILURE_TOOLS = {"edit_file", "write_file", "run_shell", "run_tests"}
+
+def _inject_confidence_web_search_nudge(
+    messages: list[dict], *, turn_count: int,
+) -> None:
+    """Inject a web_search nudge when the agent shows signs of low confidence.
+
+    Detects patterns that suggest the agent doesn't know the answer and is
+    flailing with local codebase tools instead of looking things up:
+      - 3+ consecutive search misses (find_symbol, search_files returning nothing)
+      - 2+ consecutive tool failures on edit/write/shell/test
+      - 3+ turns of reading code without progress (complement to read-only nudge)
+
+    When triggered, injects a brief nudge to use web_search/use_skill('web').
+    Has a cooldown to avoid nagging.
+    """
+    # --- Cooldown check ---
+    last_nudge_turn = getattr(_TOOL_CONTEXT, "_confidence_nudge_last_turn", 0)
+    if turn_count - last_nudge_turn < _CONFIDENCE_NUDGE_COOLDOWN_TURNS:
+        return
+
+    # --- Scan recent tool results for difficulty patterns ---
+    consecutive_misses = 0
+    max_consecutive_misses = 0
+    consecutive_failures = 0
+    max_consecutive_failures = 0
+    total_read_only_turns = 0
+    found_any_result = False
+
+    # Walk messages in reverse (most recent first) to count consecutive patterns
+    _stopped_read_only = False
+    for msg in reversed(messages):
+        role = msg.get("role", "")
+
+        if role == "tool":
+            # Parse the tool result
+            content = msg.get("content", "")
+            data = None
+            try:
+                import json as _json
+                data = _json.loads(content)
+                success = data.get("success", True)
+                result_content = data.get("content", "")
+            except Exception:
+                success = True
+                result_content = content
+                data = {}  # ensure data is defined for isinstance check below
+
+            # Find matching tool call
+            tcid = msg.get("tool_call_id", "")
+            tool_name = ""
+            for prev_msg in messages:
+                if prev_msg.get("role") == "assistant":
+                    for tc in prev_msg.get("tool_calls", []):
+                        if tc.get("id") == tcid:
+                            tool_name = tc.get("function", {}).get("name", "")
+                            break
+                    if tool_name:
+                        break
+
+            # Track search misses
+            if tool_name in _CONFIDENCE_SEARCH_TOOLS:
+                is_miss = (
+                    "no match" in str(result_content).lower()
+                    or "not found" in str(result_content).lower()
+                    or "no results" in str(result_content).lower()
+                    or (isinstance(data, dict) and not data.get("content", "").strip())
+                )
+                if is_miss:
+                    consecutive_misses += 1
+                    max_consecutive_misses = max(max_consecutive_misses, consecutive_misses)
+                else:
+                    consecutive_misses = 0
+                    found_any_result = True
+
+            # Track tool failures
+            elif tool_name in _CONFIDENCE_FAILURE_TOOLS:
+                if not success:
+                    consecutive_failures += 1
+                    max_consecutive_failures = max(max_consecutive_failures, consecutive_failures)
+                else:
+                    consecutive_failures = 0
+
+        elif role == "assistant":
+            # Track read-only turns (no tool calls that write/execute)
+            # Once we encounter a productive turn, stop incrementing read-only
+            # counter, but keep iterating for tool failure/miss tracking.
+            tool_calls = msg.get("tool_calls", [])
+            if not _stopped_read_only:
+                if tool_calls:
+                    all_reads = all(
+                        tc.get("function", {}).get("name", "") in
+                        ("read_file", "find_symbol", "search_files", "list_directory",
+                        "file_info", "find_usages", "lsp_definition", "lsp_references",
+                        "lsp_diagnostics", "lsp_hover", "semantic_search", "todo_read",
+                        "plan_status", "session_stats", "recall_turn", "agent_status",
+                        "memory_core", "session_search", "todo_write", "write_scratchpad",
+                        "plan")
+                        for tc in tool_calls
+                    )
+                    if all_reads:
+                        total_read_only_turns += 1
+                    else:
+                        _stopped_read_only = True  # found productive turn, stop counting reads
+                else:
+                    total_read_only_turns += 1
+
+    # --- Determine if a nudge is warranted ---
+    nudge = ""
+    if max_consecutive_misses >= _CONFIDENCE_NO_RESULT_THRESHOLD and not found_any_result:
+        nudge = (
+            f"WARNING: CONFIDENCE CHECK: Your last {max_consecutive_misses} codebase "
+            f"searches returned no results. Your knowledge confidence appears LOW "
+            f"(\u22643/10). Before searching further locally, use "
+            f"web_search to look up documentation for the relevant library, API, "
+            f"or concept. Then return with the right terminology to search effectively."
+        )
+    elif max_consecutive_failures >= _CONFIDENCE_FAILURE_THRESHOLD:
+        nudge = (
+            f"WARNING: CONFIDENCE CHECK: Your last {max_consecutive_failures} "
+            f"tool calls failed. Your approach may be based on incorrect assumptions. "
+            f"Consider web_search to verify the correct API, syntax, or pattern "
+            f"before retrying."
+        )
+    elif total_read_only_turns >= 6:
+        nudge = (
+            f"WARNING: CONFIDENCE CHECK: You've spent {total_read_only_turns} "
+            f"turns reading code without writing. If you're unsure how to proceed, "
+            f"use web_search to find the relevant documentation or examples."
+        )
+
+    if nudge:
+        _TOOL_CONTEXT._confidence_nudge_last_turn = turn_count
+        messages.append({
+            "role": "user",
+            "content": nudge,
+            "_transient": True,
+        })
+
+
 def _inject_strategy_hint(messages: list[dict]) -> None:
-    """#5 Auto tool strategy hints — suggest optimal search tool.
+    """#5 Auto tool strategy hints -- suggest optimal search tool.
 
     Also detects when the agent is using search_files for symbol-like
     patterns (single CamelCase/snake_case identifiers) and nudges
@@ -1254,7 +1319,7 @@ def _inject_strategy_hint(messages: list[dict]) -> None:
                             ):
                                 text_patterns_seen += 1
             if text_patterns_seen >= 2:
-                hint = "[Hint: You've been using search_files for patterns that look like symbol names. Try find_symbol — it's ~10x faster and gives exact line numbers.]"
+                hint = "[Hint: You've been using search_files for patterns that look like symbol names. Try find_symbol -- it's ~10x faster and gives exact line numbers.]"
 
         if hint:
             # Track injected hints in a set for O(1) dedup
@@ -1346,6 +1411,51 @@ def _inject_experience_context(
             })
     except (AttributeError, KeyError, ValueError, TypeError):
         pass
+
+
+def _inject_dead_tool_pruning(
+    messages: list[dict],
+    turn_count: int,
+) -> None:
+    """Prune unused tools after the dead-tool threshold turn.
+
+    After _DEAD_TOOL_PRUNE_TURN turns, any skill whose tools have never
+    been used is deactivated.  This shrinks the API payload (fewer tool
+    definitions) and stabilizes the KV-cache prefix (tool definitions
+    stop changing mid-session).
+
+    A transient message is injected so the agent is aware of the change.
+    Only runs once per session (at exactly the threshold turn).
+    """
+    if turn_count != _DEAD_TOOL_PRUNE_TURN:
+        return
+
+    try:
+        from tools import get_unused_tools
+        from tools.skills import prune_unused_skills, active_skills
+        unused = get_unused_tools(min_turns=_DEAD_TOOL_PRUNE_TURN)
+        if len(unused) < _MIN_PRUNE_COUNT:
+            return
+        pruned = prune_unused_skills(unused)
+        if pruned > 0:
+            remaining = active_skills()
+            msg = (
+                f"TOOL PRUNING: After {turn_count} turns, {pruned} skill(s) were "
+                f"deactivated because none of their tools were used. "
+                f"Remaining active skills: {', '.join(sorted(remaining)) if remaining else 'none'}. "
+                f"This reduces API payload and stabilizes the cache prefix."
+            )
+            messages.append({
+                "role": "user",
+                "content": msg,
+                "_transient": True,
+            })
+            _log.info(
+                "dead_tool_pruning turn=%d pruned=%d unused_count=%d remaining=%d",
+                turn_count, pruned, len(unused), len(remaining),
+            )
+    except Exception:
+        _log.warning("dead_tool_pruning failed", exc_info=True)
 
 
 def _inject_pre_execution_context(
@@ -1451,18 +1561,18 @@ def _inject_context(
 
     Delegates to smaller helpers for one-time and per-turn injections.
     """
-    # Compaction must run FIRST — before injecting new context messages —
+    # Compaction must run FIRST -- before injecting new context messages --
     # so fresh context isn't immediately pruned.
     _compact_if_needed(messages)
 
-    # Build knowledge graph at startup (one-time, lazy — no-op if already built)
+    # Build knowledge graph at startup (one-time, lazy -- no-op if already built)
     workspace = read_gate.workspace_root if read_gate else ""
     if workspace and turn_count == 1:
         try:
             from core.knowledge_graph import ensure_graph_built
             ensure_graph_built(workspace)
         except Exception:
-            _log.debug("_inject_context: knowledge graph build failed", exc_info=True)
+            pass
 
     # One-time injections (first turn only)
     _inject_handoff_context(
@@ -1477,6 +1587,7 @@ def _inject_context(
         messages,
         workspace_root=read_gate.workspace_root if read_gate else "",
     )
+    _inject_core_memory_context(messages, memory_store=memory_store)
     _inject_scratchpad_context(messages, memory_store=memory_store)
     _inject_git_diff(messages, memory_store=memory_store, read_gate=read_gate)
 
@@ -1493,16 +1604,17 @@ def _inject_context(
         _inject_modified_files_checkpoint(messages, read_gate=read_gate)
 
     _inject_circuit_breaker(messages, recent_tool_keys=recent_tool_keys)
-    _inject_learning_nudge(messages, turn_count=turn_count)
-    _inject_plan_gate(messages)
+    _inject_cache_degradation_alert(messages)
     _inject_edit_risk_context(messages)
     _inject_pattern_rules(messages)
     _inject_scratchpad_nudge(messages, turn_count=turn_count)
     _inject_strategy_hint(messages)
     _inject_plan_status(messages)
     _inject_self_critique(messages, turn_count=turn_count)
+    _inject_confidence_web_search_nudge(messages, turn_count=turn_count)
     _inject_tool_graph_context(messages)
     _inject_experience_context(messages, memory_store=memory_store)
+    _inject_dead_tool_pruning(messages, turn_count=turn_count)
     _inject_post_edit_verification(messages)
 
     # Context-quality defences (research-backed: 25% fill degrades quality)
@@ -1579,7 +1691,7 @@ def _compact_if_needed(messages: list[dict]) -> None:
     messages.extend(kept)
 
     _log.info(
-        "Compacted conversation: %d → %d messages (%d pruned)",
+        "Compacted conversation: %d -> %d messages (%d pruned)",
         len(system_msgs) + len(conversation),
         len(messages),
         len(pruned),

@@ -1,16 +1,16 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
 /**
- * useSmoothStream — buffer incoming text chunks and animate them
+ * useSmoothStream -- buffer incoming text chunks and animate them
  * with a smooth exponential catch-up at ~60 fps.  Each tick advances
  * by ceil(behind / 4), so the animation is fast when far behind and
- * slows naturally as it catches up — no jarring discrete thresholds.
+ * slows naturally as it catches up -- no jarring discrete thresholds.
  *
  * Returns:
- *   displayedText  — current visible text (animating)
- *   addChunk       — call with each incoming token chunk
- *   reset          — clear the stream
- *   flush          — instantly display all buffered text
+ *   displayedText  -- current visible text (animating)
+ *   addChunk       -- call with each incoming token chunk
+ *   reset          -- clear the stream
+ *   flush          -- instantly display all buffered text
  */
 export default function useSmoothStream() {
   const [displayedText, setDisplayedText] = useState('');
@@ -18,7 +18,7 @@ export default function useSmoothStream() {
   const indexRef = useRef(0);
   const timerRef = useRef(null);
 
-  // ~60 fps — smooth to the eye
+  // ~60 fps -- smooth to the eye
   const TICK_MS = 16;
 
   // Use a ref to hold the latest tick function so addChunk can always
@@ -33,7 +33,7 @@ export default function useSmoothStream() {
       return;
     }
     // Smooth exponential catch-up: advance by ceil(behind / 4).
-    // Far behind → big jumps.  Close → 1 char per tick.
+    // Far behind -> big jumps.  Close -> 1 char per tick.
     const step = Math.max(1, Math.ceil(behind / 4));
     indexRef.current = Math.min(indexRef.current + step, full.length);
     setDisplayedText(full.slice(0, indexRef.current));

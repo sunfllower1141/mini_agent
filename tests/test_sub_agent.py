@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-test_sub_agent.py — tests for the multi-agent subsystem.
+test_sub_agent.py -- tests for the multi-agent subsystem.
 
 Covers:
     - AgentRuntime (registry)
@@ -104,7 +104,7 @@ class TestAgentRuntime:
         assert pending[0][0] == "task_a"
         assert pending[0][1].content == "first done"
 
-        # Second call returns empty — already seen
+        # Second call returns empty -- already seen
         assert runtime.get_pending_results() == []
 
     def test_get_pending_results_multiple(self, runtime):
@@ -435,7 +435,7 @@ class TestCollectAny:
             _TOOL_CONTEXT.__dict__["_agent_runtime"] = old
 
     def test_collect_any_no_sub_agents(self, configured_context, gates):
-        """No sub-agents running or completed — should return error."""
+        """No sub-agents running or completed -- should return error."""
         wg, rg = gates
         dispatch = _TOOL_DISPATCH.get("collect_any")
         result = dispatch({}, wg, rg)

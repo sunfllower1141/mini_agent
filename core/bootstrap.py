@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""bootstrap.py — agent session initialization for mini_agent.
+"""bootstrap.py -- agent session initialization for mini_agent.
 
 Extracted from config.py to keep the config module focused on
 configuration loading.  This module ties together config, safety,
@@ -24,10 +24,10 @@ from .config import (
 )
 from .safety import ReadSafetyGate, WriteSafetyGate
 from memory.memory import MemoryStore
-from .prompt import build_system_prompt, build_startup_context
+from .prompt import build_system_prompt, build_startup_context, build_session_header, build_memory_snapshot
 from agents.agent_runtime import AgentRuntime
 
-# MCP tool schemas — injected into TOOLS lazily when config.mcp_servers is non-empty.
+# MCP tool schemas -- injected into TOOLS lazily when config.mcp_servers is non-empty.
 _MCP_SCHEMAS = [
     {
         "type": "function",
@@ -78,6 +78,15 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     Returns dict with keys: config, write_gate, read_gate, memory,
     messages, session.
     """
+    # Suppress HF Hub warnings EARLY -- before any huggingface_hub import.
+    # The sentence-transformers model is cached locally; the "unauthenticated
+    # requests" warning is pure noise in the Electron stderr log and can
+    # cause the first tool call to appear hung while the warning writes to
+    # stderr (especially on Windows where I/O is synchronous).
+    import os as _os_bootstrap
+    _os_bootstrap.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+    _os_bootstrap.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+
     from tools import set_context, build_symbol_index
     from tools.skills import reset_skills
 
@@ -137,12 +146,131 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     except (OSError, _sp.TimeoutExpired):
         _TOOL_CONTEXT._session_start_head = None
 
-    # Reset skill gates — start each session with core tools only
+    # Warmup: run a trivial cmd.exe call to absorb any first-invocation
+    # antivirus scan delay (Windows Defender is known to pause first
+    # cmd.exe / conhost.exe launches for behavioral analysis).
+    if os.name == 'nt':
+        try:
+            _sp.run(["cmd.exe", "/c", "rem"], capture_output=True, timeout=10)
+        except Exception:
+            pass
+
+    # Warmup: do a trivial open() to absorb any first-file-I/O antivirus
+    # scan delay.  On Windows, the first CreateFile call from a new process
+    # can be intercepted by minifilter drivers (antivirus, backup agents)
+    # and delayed by several seconds.  Doing this here, before the user
+    # sends their first prompt, hides that latency.
+    _warmup_path = os.path.join(workspace, "CHANGELOG.md")
+    try:
+        if not os.path.isfile(_warmup_path):
+            _warmup_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "CHANGELOG.md")
+        if os.path.isfile(_warmup_path):
+            with open(_warmup_path, "r", encoding="utf-8", errors="replace") as _wf:
+                _wf.read(4096)  # read a small chunk to warm the FS cache
+    except Exception:
+        pass  # best-effort; never block startup on warmup failure
+
+    # Warmup: thread I/O -- execute_tool() dispatches every tool call in a
+    # fresh daemon thread.  Some Windows filter drivers (antivirus, DLP,
+    # backup agents) associate I/O operations with thread context, so the
+    # first CreateFile in a *new thread* can still be delayed even after the
+    # main-thread warmup above.  Spawn a thread that does a trivial
+    # open() + read() so the filter drivers absorb their scan cost before
+    # the user's first prompt.
+    #
+    # We warm up MULTIPLE files because the first tool call typically
+    # reads a different file than CHANGELOG.md, and some filter drivers
+    # trigger per-file scanning on first access.
+    if os.name == 'nt':
+        import threading as _thr
+        _thr_warmup_done = _thr.Event()
+        # Files the LLM is likely to read on its first turn (based on
+        # system prompt rules and startup context).
+        _warmup_files = []
+        for _wf_name in ("CHANGELOG.md", "STATE.txt", "README.md",
+                         ".mini_agent.rules", "HANDOFF.md"):
+            _wp = os.path.join(workspace, _wf_name)
+            if os.path.isfile(_wp):
+                _warmup_files.append(_wp)
+        def _warmup_thread_io():
+            try:
+                import sys as _sys_warmup
+                _sys_warmup.stderr.write("[warmup] thread started\n")
+                _sys_warmup.stderr.flush()
+                for _wp in _warmup_files:
+                    _sys_warmup.stderr.write(f"[warmup] reading {os.path.basename(_wp)}\n")
+                    _sys_warmup.stderr.flush()
+                    with open(_wp, "r", encoding="utf-8", errors="replace") as _wtf:
+                        _wtf.read(4096)
+                # Also warm subprocess.Popen from a daemon thread: on Windows,
+                # the first CreateProcess call in a new thread can be delayed
+                # by antivirus filter drivers (same as the file-I/O warmup).
+                # A trivial cmd.exe invocation absorbs this latency so the
+                # user's first tool call doesn't hang.
+                try:
+                    _sys_warmup.stderr.write("[warmup] spawning cmd.exe\n")
+                    _sys_warmup.stderr.flush()
+                    _sp.run(["cmd.exe", "/c", "rem"],
+                            capture_output=True, timeout=10)
+                except Exception:
+                    pass
+                # Also warm sys.executable (python.exe) -- tool calls like
+                # read_file spawn "python -m tools._worker" subprocesses.
+                # The first CreateProcess for a new executable can trigger
+                # separate antivirus scanning even after cmd.exe is warm.
+                try:
+                    _sys_warmup.stderr.write("[warmup] spawning python.exe\n")
+                    _sys_warmup.stderr.flush()
+                    _sp.run([sys.executable, "-c", "print"],
+                            capture_output=True, timeout=10)
+                except Exception:
+                    pass
+                # SentenceTransformer warmup is handled on the main thread
+                # below, after _sem_preload().  Doing it here would set
+                # _SEM_MODEL prematurely, causing _sem_preload() to no-op
+                # and preventing the main thread from absorbing HF Hub
+                # warnings in a controlled way.
+                _sys_warmup.stderr.write("[warmup] thread done\n")
+                _sys_warmup.stderr.flush()
+            except Exception:
+                pass
+            finally:
+                _thr_warmup_done.set()
+        _tw = _thr.Thread(target=_warmup_thread_io, daemon=True)
+        _tw.start()
+        _thr_warmup_done.wait(timeout=30)
+
+    # Reset skill gates -- start each session with core tools only
     reset_skills()
+    # Reset per-session tool usage tracking for dead-tool pruning
+    from tools import reset_tool_usage
+    reset_tool_usage()
 
     # Initialize multi-agent runtime
     runtime = AgentRuntime()
     set_context(_agent_config=config, _agent_runtime=runtime)
+
+    # --- Start embedding model preload EARLY so the download overlaps with
+    # the slow workspace scan and LSP init below.  _sem_preload() starts a
+    # daemon thread and returns immediately.  We wait for it at the end of
+    # bootstrap, after all other slow init has been kicked off.
+    #
+    # Suppress HF Hub warnings early (before SentenceTransformer is imported
+    # in the preload daemon thread).  The "unauthenticated requests" warning
+    # is emitted via X-HF-Warning response headers for public model downloads.
+    # It is harmless for our use case (all-MiniLM-L6-v2 is public).
+    import os as _os
+    _os.environ.setdefault("HF_HUB_VERBOSITY", "error")
+    import logging as _logging
+    _logging.getLogger("huggingface_hub").setLevel(_logging.ERROR)
+
+    _sem_preload_event = None
+    try:
+        from tools.search_ops import _sem_preload, _SEM_PRELOAD_EVENT
+        _sem_preload()
+        _sem_preload_event = _SEM_PRELOAD_EVENT  # snapshot: set atomically
+    except Exception:
+        pass  # model preload is best-effort; semantic_search degrades gracefully
 
     # --- workspace scanning (skip on remote filesystems to avoid hangs) ---
     remote = _is_remote_workspace(workspace)
@@ -150,11 +278,11 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     if not remote:
         build_symbol_index(workspace)
     else:
-        print(f"  ⚠ Remote workspace detected ({workspace}) — skipping symbol index scan",
+        print(f"  WARNING: Remote workspace detected ({workspace}) -- skipping symbol index scan",
               file=sys.stderr)
 
     # Initialize LSP (pylsp) with workspace root so LSP tools work.
-    # Skip on remote workspaces — LSP scanning over SMB can hang.
+    # Skip on remote workspaces -- LSP scanning over SMB can hang.
     from tools.lsp import set_lsp_root, shutdown_lsp as _shutdown_lsp
     if not remote:
         set_lsp_root(workspace)
@@ -171,18 +299,31 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
             if not any(td["function"]["name"] == "mcp_discover" for td in TOOLS):
                 TOOLS.extend(_MCP_SCHEMAS)
         except Exception:
-            pass  # MCP servers are optional — tolerate startup failures
+            pass  # MCP servers are optional -- tolerate startup failures
 
-    # Preload semantic search model in background (non-blocking)
-    # so the ~9s cold start hides behind the first user interaction.
+    # Wait for the embedding model preload to finish (started above).
+    # On a cold cache (first run), SentenceTransformer downloads ~90 MB from
+    # HuggingFace Hub.  We give it up to 120 s (matching _SEM_MODEL_TIMEOUT).
+    # The overlap with build_symbol_index / set_lsp_root above means much of
+    # this wait is already elapsed by the time we get here.
+    #
+    # IMPORTANT: this block runs unconditionally.  Even if _sem_preload()
+    # no-oped (model already loaded by some other path), we still call
+    # _sem_get_model() + encode() on the MAIN thread to guarantee that any
+    # HF Hub warnings / tokenizer downloads appear as [python:stderr] during
+    # bootstrap rather than during the user's first tool call.
+    if _sem_preload_event is not None:
+        _sem_preload_event.wait(timeout=120)
     try:
-        from tools.search_ops import _sem_preload
-        _sem_preload()
+        from tools.search_ops import _sem_get_model
+        model = _sem_get_model()
+        if model is not None:
+            model.encode("warmup", show_progress_bar=False)
     except Exception:
-        pass  # sentence-transformers may not be installed — tolerate
+        pass  # best-effort; model is optional
 
     # Auto-init .mini_agent.rules and .mini_agent.toml if they don't exist yet.
-    # Skip on remote workspaces — os.path.isfile() can hang on stale SMB mounts.
+    # Skip on remote workspaces -- os.path.isfile() can hang on stale SMB mounts.
     if not remote:
         rules_path = os.path.join(workspace, ".mini_agent.rules")
         if not os.path.isfile(rules_path):
@@ -190,9 +331,9 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
                 from tools.file_ops import _init_rules
                 result = _init_rules({}, None, read_gate)
                 if result.success:
-                    print(f"  ✨ Auto-init: {result.content[:120]}", file=sys.stderr)
+                    print(f"  (*) Auto-init: {result.content[:120]}", file=sys.stderr)
             except OSError as exc:
-                print(f"  ⚠ Auto-init skipped: {exc}", file=sys.stderr)
+                print(f"  WARNING: Auto-init skipped: {exc}", file=sys.stderr)
 
     saved = memory.load()
     # Prune loaded conversation to avoid massive first-turn payload
@@ -204,12 +345,20 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
             summary = _summarize_pruned(pruned)
             if summary:
                 saved.insert(0, {"role": "user", "content": summary})
+                memory.last_prune_summary = summary
     knowledge = memory.get_top_knowledge(limit=15) if memory else []
+    core_memory = memory.get_core_memory() if memory else ""
+    memory_snapshot = build_memory_snapshot(core_memory)
+
     startup_ctx = build_startup_context(workspace, knowledge=knowledge)
+    session_header = build_session_header(config)
     messages: list[dict] = [
         {"role": "system", "content": build_system_prompt(config)},
-        {"role": "user", "content": startup_ctx},
+        {"role": "user", "content": session_header},
     ]
+    if memory_snapshot:
+        messages.append({"role": "user", "content": memory_snapshot})
+    messages.append({"role": "user", "content": startup_ctx})
     if saved:
         messages.extend(saved)
 
@@ -225,10 +374,6 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     # Reset pattern rules for new session
     from core.context_inject import _reset_pattern_rules
     _reset_pattern_rules()
-    # Reset strategy hint dedup cache so hints can fire in new sessions
-    from core.context_inject import _inject_strategy_hint
-    if hasattr(_inject_strategy_hint, '_injected'):
-        _inject_strategy_hint._injected.clear()
 
     session = _requests.Session()
     # Set default timeout (connect, read) for every request.
@@ -237,27 +382,11 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     session.mount("https://", _requests.adapters.HTTPAdapter(
         pool_connections=HTTP_POOL_CONNECTIONS, pool_maxsize=HTTP_POOL_MAXSIZE))
 
-    # Combined exit handler — runs in correct order: summary capture → LSP
-    # shutdown → HTTP session close.  Wrapped in broad try/except so no
+    # Combined exit handler -- runs in correct order: summary capture -> LSP
+    # shutdown -> HTTP session close.  Wrapped in broad try/except so no
     # single failure blocks the rest or prints tracebacks during interpreter
     # teardown (when stderr may already be closed).
-    def _cleanup_warn(msg: str) -> None:
-        """Write a cleanup warning to stderr, guarded against closed handles."""
-        try:
-            sys.stderr.write(f"  ⚠ cleanup: {msg}\n")
-            sys.stderr.flush()
-        except (OSError, ValueError):
-            pass  # stderr already closed — nothing we can do
-
     def _cleanup_on_exit() -> None:
-        # 0. Signal shutdown — blocks writes from error_hints and similar
-        #    persistence code so they don't hit a closed/corrupt DB.
-        try:
-            from memory.memory import mark_shutting_down
-            mark_shutting_down()
-        except ImportError:
-            pass
-
         # 1. Auto-write HANDOFF.md for next-session continuity
         try:
             import warnings as _wrn
@@ -285,8 +414,8 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
                 plan_steps=plan_steps if plan_steps else None,
                 plan_done=plan_done if plan_done else None,
             )
-        except Exception as e:
-            _cleanup_warn(f"HANDOFF.md write failed: {e}")
+        except Exception:
+            pass
 
         # 2. Capture session summary (best-effort, must run before memory is
         #    affected by LSP or session teardown).
@@ -305,36 +434,21 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
             detail = f"Scratchpad:\n{scratchpad[:500]}\n\nTurn history:\n{turn_text[:500]}"
             if summary.strip():
                 memory.capture_session_summary(summary[:200], detail[:1000])
-        except Exception as e:
-            _cleanup_warn(f"session summary capture failed: {e}")
+        except Exception:
+            pass
 
-        # 3. Close memory store (releases the shared SQLite connection so
-        #    the DB file is truly released before interpreter teardown).
-        try:
-            memory.close()
-        except Exception as e:
-            _cleanup_warn(f"memory close failed: {e}")
-
-        # 4. Shutdown LSP connections (skip on remote workspaces).
+        # 3. Shutdown LSP connections (skip on remote workspaces).
         if not remote:
             try:
                 _shutdown_lsp()
-            except Exception as e:
-                _cleanup_warn(f"LSP shutdown failed: {e}")
+            except Exception:
+                pass
 
-        # 5. Cancel running sub-agents (AgentRuntime.shutdown).
-        try:
-            from tools import _AGENT_RUNTIME
-            if _AGENT_RUNTIME is not None:
-                _AGENT_RUNTIME.shutdown()
-        except Exception as e:
-            _cleanup_warn(f"agent runtime shutdown failed: {e}")
-
-        # 6. Close HTTP session.
+        # 4. Close HTTP session.
         try:
             session.close()
-        except Exception as e:
-            _cleanup_warn(f"HTTP session close failed: {e}")
+        except Exception:
+            pass
 
     atexit.register(_cleanup_on_exit)
 

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 
 /**
  * Clickable session label in the footer. On click, shows a dropdown with
- * available sessions and a "New session…" option.
+ * available sessions and a "New session..." option.
  */
 export default function SessionPicker({ sessionName, onSwitch }) {
   const [open, setOpen] = useState(false);
@@ -87,7 +87,7 @@ export default function SessionPicker({ sessionName, onSwitch }) {
       if (result.ok) {
         // Refresh the list
         setSessions((prev) => prev.filter((s) => s !== name));
-        // If we deleted current, the backend switches to default — update current
+        // If we deleted current, the backend switches to default -- update current
         if (name === current) {
           setCurrent('default');
         }
@@ -125,7 +125,7 @@ export default function SessionPicker({ sessionName, onSwitch }) {
       {open && (
         <div className="session-dropdown">
           {error && <div className="session-dropdown-error">{error}</div>}
-          {loading && <div className="session-dropdown-loading dim">loading…</div>}
+          {loading && <div className="session-dropdown-loading dim">loading...</div>}
           {!loading && !error && sessions.length === 0 && (
             <div className="session-dropdown-empty dim">no sessions</div>
           )}
@@ -135,9 +135,9 @@ export default function SessionPicker({ sessionName, onSwitch }) {
               className={`session-dropdown-item${s === current ? ' session-current' : ''}`}
               onClick={() => handleSelect(s)}
             >
-              {s === current && <span className="session-check">✓ </span>}
+              {s === current && <span className="session-check">V </span>}
               <span className="session-name">{s}</span>
-              <button className="session-delete-btn" onClick={(e) => handleDelete(e, s)} title={`Delete "${s}"`} aria-label={`Delete session ${s}`}>×</button>
+              <button className="session-delete-btn" onClick={(e) => handleDelete(e, s)} title={`Delete "${s}"`} aria-label={`Delete session ${s}`}>x</button>
             </div>
           ))}
           <div className="session-dropdown-divider" />
@@ -149,13 +149,13 @@ export default function SessionPicker({ sessionName, onSwitch }) {
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
                 onKeyDown={handleNewSubmit}
-                placeholder="session name…"
+                placeholder="session name..."
                 className="session-new-field"
               />
             </div>
           ) : (
             <div className="session-dropdown-item session-new-item" onClick={handleNewClick}>
-              + New session…
+              + New session...
             </div>
           )}
         </div>

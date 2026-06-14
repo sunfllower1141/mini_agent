@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for terminal.py — ANSI colour helpers and table formatting."""
+"""Tests for terminal.py -- ANSI colour helpers and table formatting."""
 
 import sys
 import unittest

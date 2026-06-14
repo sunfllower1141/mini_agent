@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for tools/agent_patterns.py — fan_out, fan_in, pipeline, barrier, scatter_gather."""
+"""Tests for tools/agent_patterns.py -- fan_out, fan_in, pipeline, barrier, scatter_gather."""
 
 from __future__ import annotations
 
@@ -139,7 +139,7 @@ class TestPipeline(unittest.TestCase):
     @patch("tools._TOOL_CONTEXT")
     @patch("tools.agent_ops._spawn_one")
     def test_pipeline_stages_execute_in_order(self, mock_spawn_one, mock_ctx):
-        """pipeline runs stages sequentially: spawn → wait → spawn → wait."""
+        """pipeline runs stages sequentially: spawn -> wait -> spawn -> wait."""
         runtime = AgentRuntime()
         mock_config = MagicMock()
         mock_ctx._agent_runtime = runtime

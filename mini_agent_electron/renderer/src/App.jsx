@@ -17,41 +17,72 @@ import SettingsPanel from './components/SettingsPanel';
 const MAX_RENDERED_CHAT_LINES = 400;
 const MAX_RENDERED_TOOL_LINES = 400;
 
-// ---------------------------------------------------------------------------
-// SVG icons — minimalistic Lucide-style, matching emoji_svg.py convention
-// ---------------------------------------------------------------------------
-// SVG icons — minimalistic Lucide-style, matching emoji_svg.py convention.
-// Defined as functions so React gets fresh elements each render.
-const SVG = {
-  moon:      () => <svg className="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>,
-  sun:       () => <svg className="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>,
-  droplet:   () => <svg className="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>,
-  snowflake: () => <svg className="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/><path d="m20 16-4-4 4-4"/><path d="m4 8 4 4-4 4"/><path d="m16 4-4 4-4-4"/><path d="m8 20 4-4 4 4"/></svg>,
-  coffee:    () => <svg className="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>,
-  flower:    () => <svg className="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M4.93 7.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 16.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>,
-  layers:    () => <svg className="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"/><line x1="12" y1="22" x2="12" y2="15.5"/><polyline points="22 8.5 12 15.5 2 8.5"/></svg>,
-  circleHalf: () => <svg className="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a10 10 0 1 0 0 20V2z"/></svg>,
-  moonStars: () => <svg className="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 3a5 5 0 0 0 0 10"/><path d="M6 7l1 1M9 10l-1-1M18 17l1 1M21 20l-1-1M3 17l3-3"/><circle cx="8" cy="17" r="2"/><path d="M21 12.79A9 9 0 1 1 11.21 3"/></svg>,
-  palette:   () => <svg className="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="13.5" cy="6.5" r="1.5" fill="currentColor"/><circle cx="17.5" cy="10.5" r="1.5" fill="currentColor"/><circle cx="8.5" cy="7.5" r="1.5" fill="currentColor"/><circle cx="6.5" cy="12.5" r="1.5" fill="currentColor"/><path d="M12 2C6.49 2 2 6.49 2 12s4.49 10 10 10a2 2 0 0 0 2-2c0-.52-.2-1-.53-1.37-.33-.36-.47-.83-.47-1.3 0-1.1.9-2 2-2h2.35c3.52 0 6.35-2.83 6.35-6.35C23.7 5.27 19.73 2 12 2z"/></svg>,
-  gitBranch: () => <svg className="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>,
-  circleFill: () => <svg className="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="12" cy="12" r="6"/></svg>,
-  refresh:   () => <svg className="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>,
-  circleDot: () => <svg className="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg>,
-  check:     () => <svg className="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>,
-};
-
-// Theme registry — name, data-theme value, status-bar icon
+// Theme registry -- name, data-theme value, status-bar icon
 const THEMES = [
-  { name: 'Dark',         id: 'dark',         icon: SVG.moon },
-  { name: 'Light',        id: 'light',        icon: SVG.sun },
-  { name: 'Dracula',      id: 'dracula',      icon: SVG.droplet },
-  { name: 'Nord',         id: 'nord',         icon: SVG.snowflake },
-  { name: 'Catppuccin',   id: 'catppuccin',   icon: SVG.coffee },
-  { name: 'Rosé Pine',    id: 'rose-pine',    icon: SVG.flower },
-  { name: 'Gruvbox',      id: 'gruvbox',      icon: SVG.layers },
-  { name: 'Solarized',    id: 'solarized',    icon: SVG.circleHalf },
-  { name: 'Tokyo Night',  id: 'tokyo-night',  icon: SVG.moonStars },
-  { name: 'Monokai',      id: 'monokai',      icon: SVG.palette },
+  { name: 'Dark',         id: 'dark',         icon: '☾' },
+  { name: 'Light',        id: 'light',        icon: '☀' },
+  { name: 'Dracula',      id: 'dracula',      icon: '🧛' },
+  { name: 'Nord',         id: 'nord',         icon: '❄️' },
+  { name: 'Catppuccin',   id: 'catppuccin',   icon: '🐱' },
+  { name: 'Rose Pine',    id: 'rose-pine',    icon: '🌹' },
+  { name: 'Gruvbox',      id: 'gruvbox',      icon: '🪵' },
+  { name: 'Solarized',    id: 'solarized',    icon: '☯️' },
+  { name: 'Tokyo Night',  id: 'tokyo-night',  icon: '🌆' },
+  { name: 'Monokai',      id: 'monokai',      icon: '🎨' },
+];
+
+// Model catalog for the clickable model picker dropdown.
+//
+// DIRECT_MODEL_GROUPS: models accessible via their native provider APIs.
+//   Bare IDs trigger provider switch in server.py's set_model().
+//   Requires corresponding API key env var (DEEPSEEK_API_KEY, MOONSHOT_API_KEY, etc.).
+//
+// OPENROUTER_MODEL_GROUPS: models routed through OpenRouter's unified API.
+//   Prefixed IDs (provider/model) are sent to OpenRouter which handles routing.
+//   Requires OPENROUTER_API_KEY env var.  Free models use the :free suffix.
+
+const DIRECT_MODEL_GROUPS = [
+  { group: 'DeepSeek', models: [
+    { id: 'deepseek-v4-pro',   label: 'DeepSeek V4 Pro' },
+    { id: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
+  ]},
+  { group: 'Kimi / Moonshot', models: [
+    { id: 'kimi-k2.7-code', label: 'Kimi K2.7 Code' },
+    { id: 'kimi-k2.6',      label: 'Kimi K2.6' },
+  ]},
+  { group: 'Qwen (DashScope)', models: [
+    { id: 'qwen-plus',    label: 'Qwen-Plus' },
+    { id: 'qwen-flash',   label: 'Qwen-Flash' },
+    { id: 'qwen3-max',    label: 'Qwen 3 Max' },
+    { id: 'qwen3-coder',  label: 'Qwen 3 Coder' },
+  ]},
+  { group: 'Free Tier', models: [
+    { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash (free)' },
+  ]},
+];
+
+const OPENROUTER_MODEL_GROUPS = [
+  { group: 'Kimi / Moonshot', models: [
+    { id: 'moonshotai/kimi-k2.7-code', label: 'Kimi K2.7 Code' },
+    { id: 'moonshotai/kimi-k2.6',      label: 'Kimi K2.6' },
+  ]},
+  { group: 'Google / Gemini', models: [
+    { id: 'google/gemini-3.5-flash', label: 'Gemini 3.5 Flash' },
+    { id: 'google/gemini-3.5-pro',   label: 'Gemini 3.5 Pro' },
+  ]},
+  { group: 'Qwen (DashScope)', models: [
+    { id: 'qwen/qwen-plus',    label: 'Qwen-Plus' },
+    { id: 'qwen/qwen3-max',    label: 'Qwen 3 Max' },
+    { id: 'qwen/qwen3-coder',  label: 'Qwen 3 Coder' },
+  ]},
+  { group: 'Free Models', models: [
+    { id: 'deepseek/deepseek-v4-flash:free',   label: 'DeepSeek V4 Flash (free)' },
+    { id: 'qwen/qwen3-coder:free',             label: 'Qwen 3 Coder (free)' },
+    { id: 'google/gemma-4-31b-it:free',        label: 'Gemma 4 31B (free)' },
+    { id: 'openai/gpt-oss-120b:free',          label: 'GPT-OSS 120B (free)' },
+    { id: 'meta-llama/llama-3.3-70b-instruct:free', label: 'Llama 3.3 70B (free)' },
+    { id: 'openrouter/free',                   label: 'OpenRouter Free Router' },
+  ]},
 ];
 
 function setThemeDom(id) {
@@ -64,16 +95,16 @@ function setThemeDom(id) {
 // App
 // ---------------------------------------------------------------------------
 function AppShell() {
-  // Log state — arrays of { text, cls?, html?, icon? }
+  // Log state -- arrays of { text, cls?, html?, icon? }
   const [toolsLines, setToolsLines] = useState([]);
   const [chatLines, setChatLines] = useState([]);
 
-  // Sub-agent data — { [task_id]: { name, desc, toolCalls: [], thoughts: [], output: "", ok: null } }
+  // Sub-agent data -- { [task_id]: { name, desc, toolCalls: [], thoughts: [], output: "", ok: null } }
   const [subagentData, setSubagentData] = useState({});
 
   // Smooth streaming for thinking & chat
-  const thinking = useSmoothStream({ speed: 10 });
-  const chatStream = useSmoothStream({ speed: 8 });
+  const thinking = useSmoothStream();
+  const chatStream = useSmoothStream();
 
   // UI state
   const [modelName, setModelName] = useState('starting...');
@@ -85,6 +116,7 @@ function AppShell() {
   const [isLive, setIsLive] = useState(false);
   const [turnCountVal, setTurnCountVal] = useState(null);
   const [tokenCountVal, setTokenCountVal] = useState(null);
+  const [elapsedSec, setElapsedSec] = useState(null);
   const [inputDisabled, setInputDisabled] = useState(false);
   const [thinkingBlocks, setThinkingBlocks] = useState([]);
 
@@ -93,14 +125,43 @@ function AppShell() {
   const chatLogRef = useRef(null);
   const inThinkingRef = useRef(false);
   const submitTimeoutRef = useRef(null);
+  const timerRef = useRef(null);
+  const turnStartRef = useRef(null);
   const toolOutputStack = useRef([]); // stack of buffers for parallel tool calls
   const lineIdRef = useRef(0); // monotonically increasing ID for stable React keys
-  const themeToggleRef = useRef(null);
   const nextLineId = useCallback(() => ++lineIdRef.current, []);
+
+  const startTimer = useCallback(() => {
+    if (timerRef.current) return; // already running
+    turnStartRef.current = Date.now();
+    setElapsedSec(0);
+    timerRef.current = setInterval(() => {
+      setElapsedSec(Math.floor((Date.now() - turnStartRef.current) / 1000));
+    }, 1000);
+  }, []);
+
+  const stopTimer = useCallback(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    if (turnStartRef.current) {
+      setElapsedSec(Math.floor((Date.now() - turnStartRef.current) / 1000));
+      turnStartRef.current = null;
+    }
+  }, []);
   const [showSettings, setShowSettings] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const [theme, setTheme] = useState(() => localStorage.getItem('mini_agent_theme') || 'dark');
   const [themePickerOpen, setThemePickerOpen] = useState(false);
+  const themeToggleRef = useRef(null);
+  const [dropdownPos, setDropdownPos] = useState(null);
+
+  // Model picker
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [provider, setProvider] = useState('deepseek');
+  const modelRef = useRef(null);
+  const [modelDropdownPos, setModelDropdownPos] = useState(null);
 
   const themeIndex = THEMES.findIndex((t) => t.id === theme);
   const themeEntry = THEMES[themeIndex] || THEMES[0];
@@ -129,20 +190,54 @@ function AppShell() {
     return () => document.removeEventListener('click', close);
   }, [themePickerOpen]);
 
-  // Native click listener on theme toggle (bypasses React synthetic events)
+  // Position the theme dropdown relative to the toggle icon
   useEffect(() => {
-    const el = themeToggleRef.current;
-    if (!el) return;
-    const handler = (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setThemePickerOpen((p) => !p);
+    if (!themePickerOpen || !themeToggleRef.current) {
+      setDropdownPos(null);
+      return;
+    }
+    const rect = themeToggleRef.current.getBoundingClientRect();
+    const dropdownW = 190;
+    let right = window.innerWidth - rect.right;
+    // Clamp so dropdown doesn't overflow right edge
+    if (right + dropdownW > window.innerWidth - 8) {
+      right = Math.max(4, window.innerWidth - dropdownW - 8);
+    }
+    setDropdownPos({
+      bottom: window.innerHeight - rect.top + 4,
+      right,
+    });
+  }, [themePickerOpen]);
+
+  // Position the model dropdown relative to the header model span
+  useEffect(() => {
+    if (!modelPickerOpen || !modelRef.current) {
+      setModelDropdownPos(null);
+      return;
+    }
+    const rect = modelRef.current.getBoundingClientRect();
+    const dropdownW = 240;
+    let left = rect.left;
+    if (left + dropdownW > window.innerWidth - 8) {
+      left = Math.max(4, window.innerWidth - dropdownW - 8);
+    }
+    setModelDropdownPos({
+      top: rect.bottom + 4,
+      left,
+    });
+  }, [modelPickerOpen]);
+
+  // Close model picker on outside click
+  useEffect(() => {
+    if (!modelPickerOpen) return;
+    const close = (e) => {
+      if (!e.target.closest('.model-dropdown') && !e.target.closest('#header-model')) {
+        setModelPickerOpen(false);
+      }
     };
-    el.addEventListener('click', handler, { capture: true });
-    return () => {
-      el.removeEventListener('click', handler, { capture: true });
-    };
-  }, []);
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [modelPickerOpen]);
 
   // Helper to add a line to any log
   const addLine = useCallback((setter) => (line) => {
@@ -151,7 +246,7 @@ function AppShell() {
 
   const addToolLine = useCallback((line) => addLine(setToolsLines)(line), [addLine]);
 
-  // Status / init — fetched once on mount (empty deps to avoid re-render loop)
+  // Status / init -- fetched once on mount (empty deps to avoid re-render loop)
   useEffect(() => {
     const api = window.miniAgent;
     if (!api) return;
@@ -163,10 +258,11 @@ function AppShell() {
         return;
       }
       if (data.ready) {
-        // Backend came online — hide settings if it was showing
+        // Backend came online -- hide settings if it was showing
         setShowSettings(false);
       }
       if (data.model != null) setModelName(data.model);
+      if (data.provider != null) setProvider(data.provider);
       if (data.session_name != null) setSessionName(data.session_name);
       if (data.workspace != null) setWorkspace(data.workspace);
       if (data.git_branch != null) {
@@ -174,14 +270,6 @@ function AppShell() {
         setGitDirty(!!data.git_dirty);
       }
       if (data.restored_count != null) setRestoredCount(data.restored_count);
-      if (data.turn_count != null) setTurnCountVal(data.turn_count);
-      if (data.tokens != null && data.context_window != null) {
-        const tok = data.tokens;
-        const used = tok >= 1000 ? `${(tok / 1000).toFixed(1)}k` : String(tok);
-        const total = data.context_window;
-        const totalStr = total >= 1000 ? `${(total / 1000).toFixed(1)}k` : String(total);
-        setTokenCountVal(`${used}/${totalStr}`);
-      }
       if (data.ready) {
         addToolLine({ text: 'backend ready', cls: 'dim' });
       }
@@ -297,21 +385,19 @@ function AppShell() {
         chatStream.reset();
       }
       if (data.usage?.total_tokens) {
-        const u = data.usage;
-        const tok = u.total_tokens;
-        const used = tok >= 1000 ? `${(tok / 1000).toFixed(1)}k` : String(tok);
-        const total = u.context_window ?? 0;
-        const totalStr = total >= 1000 ? `${(total / 1000).toFixed(1)}k` : String(total);
-        setTokenCountVal(`${used}/${totalStr}`);
+        const tok = data.usage.total_tokens;
+        setTokenCountVal(tok >= 1000 ? `${(tok / 1000).toFixed(1)}k` : String(tok));
       }
       if (data.turn_count) setTurnCountVal(data.turn_count);
-      setIsLive(false);
-      setInputDisabled(false);
-      inputRef.current?.focus();
+      // NOTE: Do NOT set isLive=false here.  The agent may start another
+      // turn immediately (sub-agent auto-report, tool continuations, etc.).
+      // Only the 'idle' message (sent when _turn_loop truly drains the
+      // queue) should reset isLive.
     }));
 
     unsubs.push(api.on('stream:error', (data) => {
       clearTimeout(submitTimeoutRef.current);
+      stopTimer();
       chatStream.flush();
       chatStream.reset();
       setChatLines((prev) => [...prev, { id: nextLineId(), text: `Error: ${data.message}`, cls: 'msg-error' }]);
@@ -320,12 +406,35 @@ function AppShell() {
       inputRef.current?.focus();
     }));
 
+    unsubs.push(api.on('stream:status', (data) => {
+      setChatLines((prev) => [...prev, { id: nextLineId(), text: data.message, cls: 'msg-status' }]);
+    }));
+
     unsubs.push(api.on('backend:response', (data) => {
-      if (data.lines && data.target === 'chat') {
+      if (data.lines) {
         for (const line of data.lines) {
           setChatLines((prev) => [...prev, { id: nextLineId(), text: line, cls: 'msg-status' }]);
         }
       }
+    }));
+
+    // --- Turn lifecycle: start / idle ---
+    // The backend sends turn_start at the beginning of each turn and idle
+    // when the sequential turn-loop truly exits (input queue drained).
+    // These provide a reliable running/cancel indicator that doesn't flicker
+    // between turns.
+    unsubs.push(api.on('backend:turn_start', () => {
+      setIsLive(true);
+      setInputDisabled(true);
+      startTimer();
+    }));
+
+    unsubs.push(api.on('backend:idle', () => {
+      clearTimeout(submitTimeoutRef.current);
+      stopTimer();
+      setIsLive(false);
+      setInputDisabled(false);
+      inputRef.current?.focus();
     }));
 
     // --- Sub-agent events ---
@@ -446,7 +555,7 @@ function AppShell() {
       if (trimmed.startsWith('/theme')) {
         const arg = trimmed.replace('/theme', '').trim();
         if (arg) {
-          // `/theme <name>` — fuzzy match against theme id or name
+          // `/theme <name>` -- fuzzy match against theme id or name
           const match = THEMES.find((t) =>
             t.id.toLowerCase() === arg.toLowerCase() ||
             t.name.toLowerCase() === arg.toLowerCase()
@@ -455,7 +564,7 @@ function AppShell() {
             applyTheme(match.id);
           }
         } else {
-          // `/theme` with no arg — cycle
+          // `/theme` with no arg -- cycle
           cycleTheme();
         }
         setInputValue('');
@@ -490,9 +599,10 @@ function AppShell() {
 
     window.miniAgent.submit(text);
 
-    // Safety timeout — re-enable after 120s
+    // Safety timeout -- re-enable input after 120s in case the backend
+    // hangs or crashes.  The idle message handles normal completion;
+    // this is a last-resort fallback.
     submitTimeoutRef.current = setTimeout(() => {
-      setIsLive(false);
       setInputDisabled(false);
       inputRef.current?.focus();
     }, 120_000);
@@ -548,16 +658,17 @@ function AppShell() {
     // Session name in footer will update via backend:status event
   }, []);
 
-  // Settings saved handler — backend will send backend:status { ready: true }
+  // Settings saved handler -- backend will send backend:status { ready: true }
   // which triggers setShowSettings(false) in the onStatus listener
   const handleSettingsSaved = useCallback(() => {
     // Let the backend:status event handle hiding the panel
   }, []);
 
-  // Cancel handler — immediately reset UI, then tell backend
+  // Cancel handler -- immediately reset UI, then tell backend
   const handleCancel = useCallback(() => {
     window.miniAgent?.cancel();
     clearTimeout(submitTimeoutRef.current);
+    stopTimer();
     inThinkingRef.current = false;
     const agentText = chatStream.flush();
     const thinkText = thinking.flush();
@@ -577,7 +688,7 @@ function AppShell() {
     setInputDisabled(false);
     setInputValue('');
     inputRef.current?.focus();
-  }, [chatStream, thinking]);
+  }, [chatStream, thinking, stopTimer]);
 
   // Auto-scroll thinking log
   useEffect(() => {
@@ -598,19 +709,87 @@ function AppShell() {
     inputRef.current?.focus();
   }, []);
 
+  // Cleanup timers on unmount
+  useEffect(() => {
+    return () => {
+      clearTimeout(submitTimeoutRef.current);
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, []);
+
   return (
     <div id="app">
       {/* Header */}
       <div id="header" className="header">
-        <span className="dim"> mini_agent — </span>
-        <span id="header-model" className="text">{modelName}</span>
+        <span className="dim"> mini_agent -- </span>
+        <span
+          id="header-model"
+          className="text clickable"
+          ref={modelRef}
+          onClick={() => setModelPickerOpen((p) => !p)}
+          title="Click to switch model"
+        >{modelName}</span>
+        {modelPickerOpen && modelDropdownPos && (
+          <div className="model-dropdown" style={modelDropdownPos} onClick={(e) => e.stopPropagation()}>
+            {/* DIRECT API section */}
+            <div className="model-dropdown-section">
+              <div className="model-dropdown-header model-dropdown-section-header">── DIRECT API ──</div>
+              {DIRECT_MODEL_GROUPS.map((grp, gi) => (
+                <div key={`direct-${gi}`}>
+                  <div className="model-dropdown-subheader">{grp.group}</div>
+                  {grp.models.map((m) => {
+                    const isCurrent = m.id === modelName;
+                    return (
+                      <div
+                        key={m.id}
+                        className={`model-dropdown-item${isCurrent ? ' model-current' : ''}`}
+                        onClick={(e) => { e.stopPropagation(); setModelPickerOpen(false); window.miniAgent?.setModel(m.id); }}
+                      >
+                        <span className="model-name">{m.label}</span>
+                        <span className="model-id dim">{m.id}</span>
+                        {isCurrent && <span className="model-check">{'\u2713'}</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+
+            {/* OPENROUTER section */}
+            <div className="model-dropdown-section">
+              <div className="model-dropdown-header model-dropdown-section-header">── OPENROUTER ──</div>
+              {OPENROUTER_MODEL_GROUPS.map((grp, gi) => (
+                <div key={`or-${gi}`}>
+                  <div className="model-dropdown-subheader">{grp.group}</div>
+                  {grp.models.map((m) => {
+                    const isCurrent = m.id === modelName;
+                    return (
+                      <div
+                        key={m.id}
+                        className={`model-dropdown-item${isCurrent ? ' model-current' : ''}`}
+                        onClick={(e) => { e.stopPropagation(); setModelPickerOpen(false); window.miniAgent?.setModel(m.id); }}
+                      >
+                        <span className="model-name">{m.label}</span>
+                        <span className="model-id dim">{m.id}</span>
+                        {isCurrent && <span className="model-check">{'\u2713'}</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Body: three panels */}
       <div id="body-panels">
         {/* Left stack: Tools & Thinking + Agent Tree */}
         <div id="left-stack">
-          <RoundedFrame id="left-pane" title="Tools &amp; Thinking">
+          <RoundedFrame id="left-pane">
             <LogPanel id="tools-log" className="scrollable dim" lines={toolsLines.slice(-MAX_RENDERED_TOOL_LINES)} />
             <div className="hr" />
             <div id="thinking-log" ref={thinkingLogRef} className="log thinking-log thinking">
@@ -632,7 +811,7 @@ function AppShell() {
         </div>
 
         {/* Right pane: Chat */}
-        <RoundedFrame id="right-pane" title="Chat">
+        <RoundedFrame id="right-pane">
           <div id="chat-log" ref={chatLogRef} className="log scrollable text">
             {chatLines.slice(-MAX_RENDERED_CHAT_LINES).map((line) => {
               if (line.cls === 'msg-agent') {
@@ -654,7 +833,7 @@ function AppShell() {
       </div>
 
       {/* Input */}
-      <div id="input-frame" className="rounded-frame">
+      <div id="input-frame" className={`rounded-frame${isLive ? ' live' : ''}`}>
         <div className="frame-body">
           <div className="frame-content">
             <div id="input-container">
@@ -680,34 +859,37 @@ function AppShell() {
       {/* Status bar */}
       <div id="status-bar" className="status-bar dim">
         <span id="git-status">
-          {gitBranch && <>{SVG.gitBranch()} {gitBranch}{gitDirty ? '*' : ''}</>}
+          {gitBranch && `⎇ ${gitBranch}${gitDirty ? '*' : ''}`}
         </span>
         {isLive && (
-          <span id="live-indicator" onClick={handleCancel} title="Cancel"> {SVG.circleFill()}</span>
+          <span id="live-indicator" onClick={handleCancel} title="Cancel"> ●</span>
         )}
-        <button id="theme-toggle" ref={themeToggleRef} onClick={() => setThemePickerOpen((p) => !p)} title={`Theme: ${themeEntry.name}`}>
-          {themeEntry.icon()}
-        </button>
-        {themePickerOpen && (
-          <div className="theme-dropdown">
-            {THEMES.map((t) => (
-              <div
-                key={t.id}
-                className={`theme-dropdown-item${t.id === theme ? ' theme-current' : ''}`}
-                onClick={() => applyTheme(t.id)}
-              >
-                <span className="theme-icon">{t.icon()}</span>
-                <span className="theme-name">{t.name}</span>
-                {t.id === theme && <span className="theme-check">{SVG.check()}</span>}
-              </div>
-            ))}
-          </div>
+        {elapsedSec != null && (
+          <span id="timer">⏱ {elapsedSec}s</span>
         )}
+        <span id="theme-toggle" ref={themeToggleRef} onClick={() => setThemePickerOpen((p) => !p)} title={`Theme: ${themeEntry.name}`}>
+          {themeEntry.icon}
+          {themePickerOpen && dropdownPos && (
+            <div className="theme-dropdown" style={dropdownPos} onClick={(e) => e.stopPropagation()}>
+              {THEMES.map((t) => (
+                <div
+                  key={t.id}
+                  className={`theme-dropdown-item${t.id === theme ? ' theme-current' : ''}`}
+                  onClick={(e) => { e.stopPropagation(); applyTheme(t.id); }}
+                >
+                  <span className="theme-icon">{t.icon}</span>
+                  <span className="theme-name">{t.name}</span>
+                  {t.id === theme && <span className="theme-check">\u2713</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </span>
         {turnCountVal != null && (
-          <span id="turn-counter"> {SVG.refresh()} turn <span id="turn-count">{turnCountVal}</span></span>
+          <span id="turn-counter">{'↻'} turn <span id="turn-count">{turnCountVal}</span></span>
         )}
         {tokenCountVal != null && (
-          <span id="token-counter"> {SVG.circleDot()} <span id="token-count">{tokenCountVal}</span> tok</span>
+          <span id="token-counter">{'⊙'} <span id="token-count">{tokenCountVal}</span> tok</span>
         )}
         <div className="status-right">
           {restoredCount != null && (
@@ -724,7 +906,7 @@ function AppShell() {
 
 
 // ---------------------------------------------------------------------------
-// Root export — wraps App in Error Boundary
+// Root export -- wraps App in Error Boundary
 // ---------------------------------------------------------------------------
 export default function App() {
   return (

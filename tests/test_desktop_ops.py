@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for tools/desktop_ops.py — desktop UI automation."""
+"""Tests for tools/desktop_ops.py -- desktop UI automation."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ class TestProviderDetection:
         assert PLATFORM in ("Darwin", "Windows", "Linux")
 
     def test_detect_providers_returns_dict(self):
-        """_detect_providers returns a dict of str→bool."""
+        """_detect_providers returns a dict of str->bool."""
         providers = _detect_providers()
         assert isinstance(providers, dict)
         for k, v in providers.items():
@@ -96,7 +96,7 @@ class TestHelpers:
         """Long text should be truncated with ellipsis."""
         result = _truncate("x" * 100, 10)
         assert len(result) <= 10 + 50  # allows for truncation message
-        assert "…" in result or "..." in result
+        assert "..." in result or "..." in result
 
     def test_truncate_exact(self):
         """Exact-length text should not be truncated."""

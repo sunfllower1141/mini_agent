@@ -1,28 +1,84 @@
 /**
- * main.js — Electron main process for mini_agent.
+ * main.js -- Electron main process for mini_agent.
  *
  * Spawns the Python backend as a child process and bridges messages
  * between the renderer (via IPC) and the Python process (via JSON-lines
  * on stdin/stdout).
  */
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, protocol, net } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
+
+const HOMEDIR = os.homedir();
 
 // ---------------------------------------------------------------------------
-// Resource tuning — this is a text-based chat app, not a game or browser.
-// Merge GPU into main process (saves ~180 MB separate GPU process).
-app.commandLine.appendSwitch('in-process-gpu');
-// Linux: disable sandbox when running outside a full desktop (e.g. SSH, VNC, WSL, containers)
-if (process.platform === 'linux') {
-  app.commandLine.appendSwitch('no-sandbox');
+// Resource tuning -- this is a text-based chat app, not a game or browser.
+// ---------------------------------------------------------------------------
+// NOTE: Do NOT use --in-process-gpu on Windows -- it causes blank rendering
+// on many GPU/driver combinations because the merged GPU thread can't get a
+// valid drawing context for the BrowserWindow.
+//
+// Do NOT cap V8 heap at 128 MB -- React 19 + Shiki (syntax highlighting with
+// ~200 language grammars) needs 300-500 MB during startup.  A tight limit
+// causes silent OOM in the renderer process, killing the JS engine before
+// React can mount.
+//
+// Keep --disable-gpu-shader-disk-cache and --disable-http-cache on Windows
+// only: they prevent "Access is denied" errors when Chromium tries to write
+// to %LOCALAPPDATA% disk caches.
+
+// Windows: Chromium's disk cache can hit "Access is denied" (0x5) on some
+// machines when trying to write to the default %LOCALAPPDATA% cache location.
+// This is a local-first chat app that loads files via file:// -- disk caches
+// are not needed.  Disable them entirely to avoid permission errors.
+if (process.platform === 'win32') {
+  // GPU shader disk cache (fixes: ERROR:gpu\ipc\host\gpu_disk_cache.cc:737)
+  app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
+  // HTTP disk cache (fixes: ERROR:net\disk_cache\disk_cache.cc:284)
+  app.commandLine.appendSwitch('disable-http-cache');
+  console.log('[main] Windows: disabled disk caches to avoid Access Denied errors');
 }
-// Cap V8 heap: 128 MB old-space, 16 MB nursery (young gen).
-app.commandLine.appendSwitch('js-flags', '--max-old-space-size=128 --max-semi-space-size=16');
 
 // ---------------------------------------------------------------------------
-// Load .env file — GUI apps on macOS don't inherit shell profile vars
+// Custom protocol -- serves renderer files with CORS headers so ES modules
+// work.  Chromium blocks <script type="module"> from file:// URLs; using a
+// custom scheme with corsEnabled bypasses this.
+// ---------------------------------------------------------------------------
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'miniagent',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true,
+    },
+  },
+]);
+
+/**
+* Resolve a miniagent:// path to an absolute file-system path inside
+* renderer/dist/.  Returns null if the path tries to escape the dist dir
+* (path traversal prevention).
+*/
+function resolveDistPath(urlPath) {
+  // Strip leading slash
+  const rel = urlPath.replace(/^\/+/, '') || 'index.html';
+  // Prevent path traversal
+  if (rel.includes('..') || rel.includes(':')) return null;
+  const abs = path.join(__dirname, 'renderer', 'dist', rel);
+  if (!fs.existsSync(abs)) {
+    // If not found, fall back to index.html (for SPA routing)
+    return path.join(__dirname, 'renderer', 'dist', 'index.html');
+  }
+  return abs;
+}
+
+// ---------------------------------------------------------------------------
+// Load .env file -- GUI apps on macOS don't inherit shell profile vars
 // ---------------------------------------------------------------------------
 
 function loadEnvFile(filePath) {
@@ -43,7 +99,7 @@ function loadEnvFile(filePath) {
 
 // Load .env from project root (mini_agent/) and ~/.mini_agent_env
 loadEnvFile(path.join(__dirname, '..', '.env'));
-loadEnvFile(path.join(require('os').homedir(), '.mini_agent_env'));
+loadEnvFile(path.join(HOMEDIR, '.mini_agent_env'));
 
 // ---------------------------------------------------------------------------
 // API key detection
@@ -51,9 +107,12 @@ loadEnvFile(path.join(require('os').homedir(), '.mini_agent_env'));
 
 const PROVIDER_KEY_ENV = {
   deepseek: 'DEEPSEEK_API_KEY',
+  moonshot: 'MOONSHOT_API_KEY',
   claude: 'CLAUDE_API_KEY',
   xai: 'XAI_API_KEY',
   ollama: 'OLLAMA_API_KEY',
+  openrouter: 'OPENROUTER_API_KEY',
+  qwen: 'DASHSCOPE_API_KEY',
 };
 
 function detectApiKey() {
@@ -67,7 +126,7 @@ function detectApiKey() {
 }
 
 function apiKeyEnvFile() {
-  return path.join(require('os').homedir(), '.mini_agent_env');
+  return path.join(HOMEDIR, '.mini_agent_env');
 }
 
 function readEnvFile(filePath) {
@@ -102,7 +161,60 @@ let pythonProcess = null;
 let pythonReady = false;
 let pendingRequests = [];
 let lastStatus = null; // cached status for renderer to fetch on mount
+let workspacePath = null;  // module-scoped so watchdog/restart closures can use it
 let _shuttingDown = false;  // set during window-close to prevent restart loops
+// Restart throttle: prevent infinite restart loops that spawn thousands of
+// processes when the Python backend keeps crashing (e.g. hung proc.communicate()
+// on Windows that can't be killed from userspace).
+let _restartCount = 0;
+let _restartWindowStart = 0;
+let _notifyRestarted = false; // set after crash; cleared once backend sends 'ready'
+const _MAX_RESTARTS = 3;
+const _RESTART_WINDOW_MS = 30000;
+
+// Watchdog: if the backend sends no messages for 120 seconds (e.g. hung
+// API call, stuck subprocess, deadlocked thread), force-kill and restart.
+// This prevents the "freeze mid-run" bug where the UI goes blank because
+// the backend is alive (proc.on('close') never fires) but unresponsive.
+let _watchdogTimer = null;
+const _WATCHDOG_TIMEOUT_MS = 120_000;
+
+function _clearWatchdog() {
+  if (_watchdogTimer) { clearTimeout(_watchdogTimer); _watchdogTimer = null; }
+}
+
+function _resetWatchdog() {
+  _clearWatchdog();
+  if (_shuttingDown) return;
+  const watchedProc = pythonProcess;  // capture the specific backend instance
+  _watchdogTimer = setTimeout(() => {
+    // Only act if the backend we were watching is STILL the current one
+    if (pythonProcess !== watchedProc) return;
+    console.error('[main] WATCHDOG: backend unresponsive for 120s -- force-killing and restarting');
+    const win = BrowserWindow.getAllWindows()[0];
+    if (win) win.webContents.send('stream:error', { message: 'Backend appears hung. Restarting...' });
+    _killPythonProcessTree();
+    pythonReady = false;
+    pythonProcess = null;
+    _clearWatchdog();
+    if (!_shuttingDown) {
+      pythonProcess = spawnPythonBackend(workspacePath);
+    }
+  }, _WATCHDOG_TIMEOUT_MS);
+}
+
+function _killPythonProcessTree() {
+  // Kill the backend process tree on Windows (taskkill /T kills children).
+  // On Unix, send SIGKILL to the process group.
+  if (!pythonProcess || pythonProcess.killed) return;
+  try {
+    if (process.platform === 'win32') {
+      require('child_process').execSync(`taskkill /F /T /PID ${pythonProcess.pid}`, { timeout: 5000 });
+    } else {
+      pythonProcess.kill('SIGKILL');
+    }
+  } catch (e) { /* best-effort */ }
+}
 
 function spawnPythonBackend(workspacePath) {
   const backendScript = path.join(__dirname, 'backend', 'server.py');
@@ -114,7 +226,7 @@ function spawnPythonBackend(workspacePath) {
 
   const env = { ...process.env };
   // Force UTF-8 on Windows to prevent 'charmap' codec errors when the
-  // Python backend writes Unicode characters (→, ☾, …) to stdout/stderr.
+  // Python backend writes Unicode characters (->, [MOON], ...) to stdout/stderr.
   // Python's locale.getpreferredencoding() reads this at startup, so it
   // must be set before spawning the child process.
   if (process.platform === 'win32') {
@@ -169,10 +281,15 @@ function spawnPythonBackend(workspacePath) {
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 
+  // Start the watchdog immediately -- the backend must produce stdout
+  // (e.g. the 'ready' message) within the timeout window or it's killed.
+  _resetWatchdog();
+
   // Buffer for incomplete JSON lines from stdout
   let stdoutBuffer = '';
 
   proc.stdout.on('data', (data) => {
+    _resetWatchdog();  // backend is alive -- reset the hang watchdog
     stdoutBuffer += data.toString();
     const lines = stdoutBuffer.split('\n');
     // Keep the last potentially incomplete line in the buffer
@@ -190,26 +307,22 @@ function spawnPythonBackend(workspacePath) {
   });
 
   proc.stderr.on('data', (data) => {
-    // Log Python stderr to Electron console only — not the tools panel.
+    _resetWatchdog();  // stderr output also means backend is alive
+    // Log Python stderr to Electron console only -- not the tools panel.
     // HF warnings, tqdm bars, etc. are noise in the UI.
     const text = data.toString().trim();
     if (text) {
-      // Suppress known-harmless multiprocess shutdown tracebacks (Python 3.12+).
-      // multiprocess 0.70.x resource_tracker __del__ fires after interpreter
-      // teardown begins, causing AttributeError on _recursion_count, _stop, etc.
-      if (text.includes('multiprocess/resource_tracker.py') && text.includes('Exception ignored')) {
+      // Suppress known-harmless multiprocess shutdown traceback (Python 3.12+)
+      // multiprocess 0.70.x resource_tracker hits AttributeError on _recursion_count
+      if (text.includes('multiprocess/resource_tracker.py') && text.includes('_recursion_count')) {
         return;
       }
-      // Suppress HuggingFace unauthenticated-request warning (noise in UI).
-      // sentence-transformers downloads models from HF Hub without an auth token.
-      if (text.includes('unauthenticated requests to the HF Hub')) {
-        return;
-      }
-      process.stderr.write(`[python:stderr] ${data}`);
+      console.log(`[python:stderr] ${data}`);
     }
   });
 
   proc.on('close', (code) => {
+    _clearWatchdog();  // backend exited -- clear watchdog
     console.log(`Python backend exited with code ${code}`);
     pythonReady = false;
     pythonProcess = null;
@@ -219,21 +332,40 @@ function spawnPythonBackend(workspacePath) {
       app.quit();
       return;
     }
-    // Auto-restart on unexpected exit (not a clean shutdown)
+    // Auto-restart on unexpected exit (not a clean shutdown).
+    // Throttle restarts to prevent infinite spawn loops that can
+    // create thousands of base.exe/conhost.exe processes on Windows.
     if (code !== 0 && code !== null) {
+      const now = Date.now();
+      if (now - _restartWindowStart > _RESTART_WINDOW_MS) {
+        _restartCount = 0;
+        _restartWindowStart = now;
+      }
+      _restartCount++;
+      if (_restartCount > _MAX_RESTARTS) {
+        const msg = `Backend crashed ${_restartCount}x in ${Math.round((now - _restartWindowStart) / 1000)}s -- giving up. Please restart the app.`;
+        console.error(msg);
+        const win = BrowserWindow.getAllWindows()[0];
+        if (win) win.webContents.send('stream:error', { message: msg });
+        return;
+      }
       const win = BrowserWindow.getAllWindows()[0];
-      if (win) win.webContents.send('stream:error', { message: `Backend crashed (exit ${code}). Restarting...` });
+      const restartMsg = `Backend crashed (exit ${code}). Restarting (attempt ${_restartCount}/${_MAX_RESTARTS})...`;
+      if (win) win.webContents.send('stream:error', { message: restartMsg });
+      _notifyRestarted = true; // notify user once backend comes back
       const restartWorkspace = workspacePath;
+      // Exponential backoff: 1.5s -> 3s -> 6s
+      const delay = 1500 * Math.pow(2, _restartCount - 1);
       setTimeout(() => {
         if (!pythonProcess) {
           pythonProcess = spawnPythonBackend(restartWorkspace);
           if (!pythonProcess) {
             const win = BrowserWindow.getAllWindows()[0];
             if (win) win.webContents.send('stream:error', { message: 'Backend server.py not found.' });
-            console.error('Backend script not found — agent will not start.');
+            console.error('Backend script not found -- agent will not start.');
           }
         }
-      }, 1500);
+      }, delay);
     }
   });
 
@@ -269,14 +401,20 @@ function sendToPython(msg) {
     _stdinQueue.push(msg);
     return;
   }
-  _stdinLock = true;
-  _stdinWriteUnlocked(msg);
-  _stdinLock = false;
-  // Drain any queued messages
-  while (_stdinQueue.length > 0) {
+  try {
     _stdinLock = true;
-    _stdinWriteUnlocked(_stdinQueue.shift());
+    _stdinWriteUnlocked(msg);
+  } finally {
     _stdinLock = false;
+  }
+  // Drain any queued messages (with try/finally on each)
+  while (_stdinQueue.length > 0) {
+    try {
+      _stdinLock = true;
+      _stdinWriteUnlocked(_stdinQueue.shift());
+    } finally {
+      _stdinLock = false;
+    }
   }
 }
 
@@ -299,6 +437,10 @@ function handlePythonMessage(msg) {
       flushPending();
       lastStatus = { ...lastStatus, ready: true, model: data.model };
       win.webContents.send('backend:status', { ready: true, model: data.model });
+      if (_notifyRestarted) {
+        _notifyRestarted = false;
+        win.webContents.send('stream:status', { message: 'Backend restarted successfully.' });
+      }
       break;
 
     case 'token':
@@ -327,6 +469,21 @@ function handlePythonMessage(msg) {
 
     case 'turn_complete':
       win.webContents.send('stream:turn_complete', data);
+      console.log('[main] Agent turn complete');
+      break;
+
+    case 'turn_start':
+      win.webContents.send('backend:turn_start', data);
+      break;
+
+    case 'idle':
+      win.webContents.send('backend:idle', data);
+      console.log('[main] Agent idle');
+      break;
+
+    case 'heartbeat':
+      // Daemon heartbeat from Python backend -- resets watchdog via stdout
+      // data handler (no renderer action needed).
       break;
 
     case 'error':
@@ -381,7 +538,7 @@ function handlePythonMessage(msg) {
 }
 
 // ---------------------------------------------------------------------------
-// IPC Handlers — renderer → main → Python
+// IPC Handlers -- renderer -> main -> Python
 // ---------------------------------------------------------------------------
 
 function setupIPC() {
@@ -424,7 +581,7 @@ function setupIPC() {
   });
 
   ipcMain.handle('workspace:save', async (event, workspacePath) => {
-    const persistedFile = path.join(require('os').homedir(), '.mini_agent_workspace');
+    const persistedFile = path.join(HOMEDIR, '.mini_agent_workspace');
     fs.writeFileSync(persistedFile, workspacePath, 'utf-8');
     return { ok: true };
   });
@@ -476,6 +633,12 @@ function setupIPC() {
     return { ok: true };
   });
 
+  ipcMain.handle('settings:setModel', async (event, model) => {
+    if (!model) return { ok: false, error: 'Model name required' };
+    sendToPython({ type: 'set_model', model });
+    return { ok: true };
+  });
+
   ipcMain.handle('settings:restartBackend', async () => {
     // Kill existing backend if running
     if (pythonProcess && !pythonProcess.killed) {
@@ -487,7 +650,13 @@ function setupIPC() {
       } catch (e) { /* ignore */ }
       setTimeout(() => {
         if (pythonProcess && !pythonProcess.killed) {
-          try { pythonProcess.kill(); } catch (e) { /* ignore */ }
+          try {
+            if (process.platform === 'win32') {
+              require('child_process').execSync(`taskkill /F /T /PID ${pythonProcess.pid}`, { timeout: 5000 });
+            } else {
+              pythonProcess.kill();
+            }
+          } catch (e) { /* ignore */ }
         }
       }, 2000);
     }
@@ -497,8 +666,8 @@ function setupIPC() {
     lastStatus = null;
 
     // Resolve workspace (same logic as app.whenReady)
-    const persistedFile = path.join(require('os').homedir(), '.mini_agent_workspace');
-    let workspacePath = null;
+    const persistedFile = path.join(HOMEDIR, '.mini_agent_workspace');
+    workspacePath = null;
     if (fs.existsSync(persistedFile)) {
       const persisted = fs.readFileSync(persistedFile, 'utf-8').trim();
       if (persisted && fs.existsSync(persisted)) {
@@ -524,12 +693,13 @@ function createWindow() {
     height: 800,
     minWidth: 800,
     minHeight: 500,
-    title: `mini_agent — Electron`,
+    title: `mini_agent -- Electron`,
     backgroundColor: '#1e1e2e',  // dark base background
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      webSecurity: false,  // allow ES modules from file:// URLs
     },
     // Use dark title bar on macOS
     titleBarStyle: 'hiddenInset',
@@ -537,16 +707,25 @@ function createWindow() {
   });
 
   const isDev = process.argv.includes('--dev');
+
+  // Avoid loading the page until the protocol handler is registered.
+  // We load after a 0-delay tick to let the event loop process any pending
+  // protocol registration (belt-and-suspenders, normally not needed).
+
   if (isDev) {
-    // Load from Vite dev server
+    // Load from Vite dev server (HMR, source maps, etc.)
     const VITE_URL = 'http://localhost:5173';
     win.loadURL(VITE_URL).catch(() => {
-      // Fallback: load built files if dev server isn't running
-      win.loadFile(path.join(__dirname, 'renderer', 'dist', 'index.html'));
+      // Fallback: load built files directly
+      const distIndex = path.join(__dirname, 'renderer', 'dist', 'index.html');
+      if (fs.existsSync(distIndex)) {
+        win.loadFile(distIndex);
+      }
     });
   } else {
-    // Production: load built files
-    win.loadFile(path.join(__dirname, 'renderer', 'dist', 'index.html'));
+    // Production: load built files directly
+    const distIndex = path.join(__dirname, 'renderer', 'dist', 'index.html');
+    win.loadFile(distIndex);
   }
 
   // Open DevTools in dev mode
@@ -554,7 +733,7 @@ function createWindow() {
     win.webContents.openDevTools({ mode: 'detach' });
   }
 
-  // Block file-drop navigation — the preload handles drag-and-drop to
+  // Block file-drop navigation -- the preload handles drag-and-drop to
   // extract file paths and feed them into the user input.  This is a
   // safety net in case the preload's preventDefault doesn't fire first.
   win.webContents.on('will-navigate', (event, url) => {
@@ -564,6 +743,17 @@ function createWindow() {
     }
   });
 
+  // Diagnostic: log page load success/failure
+  win.webContents.on('did-finish-load', () => {
+    console.log('[main] renderer page loaded successfully');
+  });
+  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    console.error(`[main] renderer FAILED to load: ${errorDescription} (code ${errorCode}) URL: ${validatedURL}`);
+  });
+  win.webContents.on('page-title-updated', (_event, title) => {
+    console.log(`[main] page title: "${title}"`);
+  });
+
   return win;
 }
 
@@ -571,7 +761,50 @@ function createWindow() {
 // App lifecycle
 // ---------------------------------------------------------------------------
 
+// MIME map for serving static files from the custom protocol handler.
+const MIME_MAP = {
+  '.html': 'text/html; charset=utf-8',
+  '.js':   'text/javascript; charset=utf-8',
+  '.mjs':  'text/javascript; charset=utf-8',
+  '.css':  'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.png':  'image/png',
+  '.jpg':  'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif':  'image/gif',
+  '.svg':  'image/svg+xml',
+  '.ico':  'image/x-icon',
+  '.woff':  'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf':   'font/ttf',
+  '.map':  'application/json; charset=utf-8',
+};
+
 app.whenReady().then(() => {
+  // Register the custom protocol handler -- serve renderer/dist files.
+  // Using fs.readFileSync instead of net.fetch('file:///...') because
+  // net.fetch may not support file:// URLs in protocol handlers on all
+  // platforms (especially Windows).
+  protocol.handle('miniagent', (request) => {
+    try {
+      const urlPath = new URL(request.url).pathname;
+      const filePath = resolveDistPath(urlPath);
+      if (!filePath) {
+        return new Response('Not found', { status: 404 });
+      }
+      const ext = path.extname(filePath).toLowerCase();
+      const mimeType = MIME_MAP[ext] || 'application/octet-stream';
+      const content = fs.readFileSync(filePath);
+      return new Response(content, {
+        status: 200,
+        headers: { 'Content-Type': mimeType },
+      });
+    } catch (err) {
+      console.error(`[miniagent] Failed to serve ${request.url}:`, err.message);
+      return new Response('Internal error', { status: 500 });
+    }
+  });
+
   setupIPC();
   createWindow();
 
@@ -591,12 +824,12 @@ app.whenReady().then(() => {
   } else {
     // Resolve workspace: CLI flag > persisted file > env var > cwd
     const workspaceArg = process.argv.find(a => a.startsWith('--workspace='));
-    let workspacePath = null;
+    workspacePath = null;
     if (workspaceArg) {
       workspacePath = workspaceArg.split('=')[1];
     } else {
       // Try persisted workspace from last session
-      const persistedFile = path.join(require('os').homedir(), '.mini_agent_workspace');
+      const persistedFile = path.join(HOMEDIR, '.mini_agent_workspace');
       if (fs.existsSync(persistedFile)) {
         const persisted = fs.readFileSync(persistedFile, 'utf-8').trim();
         if (persisted && fs.existsSync(persisted)) {
@@ -625,19 +858,28 @@ app.on('window-all-closed', () => {
       pythonProcess.stdin.write(JSON.stringify({ type: 'shutdown' }) + '\n');
       pythonProcess.stdin.end();
     } catch (e) { /* ignore */ }
-    // Hard timeout: if Python hasn't exited within 5s, force-kill and quit.
+    // Hard timeout: if Python hasn't exited within 5s, force-kill the entire
+    // process tree (on Windows this is critical -- proc.kill() only kills the
+    // immediate process, leaving orphaned bash.exe/conhost.exe children).
     setTimeout(() => {
       if (pythonProcess && !pythonProcess.killed) {
-        try { pythonProcess.kill('SIGKILL'); } catch (e) { /* ignore */ }
+        try {
+          if (process.platform === 'win32') {
+            // Kill entire process tree via taskkill
+            require('child_process').execSync(`taskkill /F /T /PID ${pythonProcess.pid}`, { timeout: 5000 });
+          } else {
+            pythonProcess.kill('SIGKILL');
+          }
+        } catch (e) { /* ignore */ }
       }
-      // On macOS, also force quit — window-all-closed normally skips app.quit()
+      // On macOS, also force quit -- window-all-closed normally skips app.quit()
       // but we're shutting down the backend, not just hiding the window.
       if (process.platform === 'darwin') {
         app.quit();
       }
     }, 5000);
   } else {
-    // No backend running — quit immediately on all platforms.
+    // No backend running -- quit immediately on all platforms.
     app.quit();
   }
   if (process.platform !== 'darwin') {
@@ -646,7 +888,13 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
-  if (pythonProcess) {
-    try { pythonProcess.kill(); } catch (e) { /* ignore */ }
+  if (pythonProcess && !pythonProcess.killed) {
+    try {
+      if (process.platform === 'win32') {
+        require('child_process').execSync(`taskkill /F /T /PID ${pythonProcess.pid}`, { timeout: 5000 });
+      } else {
+        pythonProcess.kill();
+      }
+    } catch (e) { /* ignore */ }
   }
 });

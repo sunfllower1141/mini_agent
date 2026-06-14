@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for llm.py — pure functions: circuit breaker, tool call key, compression."""
+"""Tests for llm.py -- pure functions: circuit breaker, tool call key, compression."""
 
 from __future__ import annotations
 
@@ -108,7 +108,7 @@ class TestCompressStaleToolResults:
         padding = [{"role": "user", "content": f"msg {i}"} for i in range(14)]
         msgs = msgs + padding
         _compress_stale_tool_results(msgs)
-        # The tool message (index 0) should be compressed — check the JSON content
+        # The tool message (index 0) should be compressed -- check the JSON content
         data = json.loads(msgs[0]["content"])
         assert "truncated" in data["content"]
 
@@ -125,7 +125,7 @@ class TestCompressStaleToolResults:
 
     def test_skips_already_compressed(self):
         import json
-        # Content that is already short enough — won't be re-compressed
+        # Content that is already short enough -- won't be re-compressed
         msgs = [{"role": "tool", "content": json.dumps({"content": "line1\nline2", "success": True})}]
         padding = [{"role": "user", "content": f"msg {i}"} for i in range(20)]
         msgs = msgs + padding

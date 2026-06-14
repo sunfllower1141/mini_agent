@@ -21,9 +21,6 @@ tui_stderr.log
 logs/
 api_error.log
 
-# Coverage
-.coverage
-
 # Secrets / local config (contains API keys)
 keys
 .mini_agent.toml
@@ -34,9 +31,25 @@ keys
 .mini_agent_scratchpad.md
 result.txt
 
+# Semantic search cache (auto-generated)
+.mini_agent_semantic.npz
+.mini_agent_semantic.npz.tmp.npz
+.mini_agent_semantic_meta.json
+
 # Local data mounted in workspace
 .mini_agent_memory_session_default.db*
 .mini_agent_memory_session_images.db
 reports/
 error_traces.log
 mini_agent_electron/electron-dist/
+
+# Node modules
+node_modules/
+package-lock.json
+
+# Temp / scratch files
+_*.py
+_*.bat
+nul
+list_pkgs_temp.py
+_cleanup_temp.py

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-mcp_client.py — Lightweight MCP (Model Context Protocol) client over stdio.
+mcp_client.py -- Lightweight MCP (Model Context Protocol) client over stdio.
 
 Connects to MCP servers via stdio JSON-RPC (newline-delimited),
 discovers their tools, and exposes mcp_discover + mcp_call to the LLM.
 
 Uses the same subprocess + drain_stderr pattern as tools/lsp.py.
-No dependency on the `mcp` SDK — raw JSON-RPC only.
+No dependency on the `mcp` SDK -- raw JSON-RPC only.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ class McpConnectionError(Exception):
 
 
 # ---------------------------------------------------------------------------
-# McpConnection — one per server
+# McpConnection -- one per server
 # ---------------------------------------------------------------------------
 
 class McpConnection:
@@ -123,12 +123,17 @@ class McpConnection:
         if self.env:
             merged_env.update(self.env)
 
+        creationflags = 0
+        if os.name == 'nt':
+            creationflags = subprocess.CREATE_NO_WINDOW
+
         self.process = subprocess.Popen(
             self.command,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             bufsize=0,
+            creationflags=creationflags or 0,
             env=merged_env,
         )
         drain_stderr(self.process, f"mcp-stderr-{self.name}")
@@ -219,9 +224,9 @@ class McpConnection:
                         raise McpError(response["error"])
                     return response.get("result", {})
                 elif resp_id is None and "method" in response:
-                    # Notification — ignore for now
+                    # Notification -- ignore for now
                     pass
-                # else: response for a different concurrent request — ignore
+                # else: response for a different concurrent request -- ignore
 
     def _send_notification(self, method: str, params: dict | None = None) -> None:
         """Send a JSON-RPC 2.0 notification (no id field)."""
@@ -327,7 +332,7 @@ class McpConnection:
 
 
 # ---------------------------------------------------------------------------
-# McpClientManager — orchestrates all MCP connections
+# McpClientManager -- orchestrates all MCP connections
 # ---------------------------------------------------------------------------
 
 class McpClientManager:
@@ -339,7 +344,7 @@ class McpClientManager:
     """
 
     def __init__(self, server_configs: dict[str, dict] | None = None):
-        """*server_configs* maps server name → {command: [...], env: {...}}."""
+        """*server_configs* maps server name -> {command: [...], env: {...}}."""
         self._configs: dict[str, dict] = server_configs or {}
         self._connections: dict[str, McpConnection] = {}
         self._started: bool = False
@@ -379,18 +384,18 @@ class McpClientManager:
             if conn.is_connected:
                 tools = conn.tools
                 total_tools += len(tools)
-                lines.append(f"\n[{name}] — {len(tools)} tools:")
+                lines.append(f"\n[{name}] -- {len(tools)} tools:")
                 for tool in tools:
                     tname = tool.get("name", "?")
                     tdesc = tool.get("description", "")
                     # Truncate description for listing
                     if len(tdesc) > 120:
                         tdesc = tdesc[:117] + "..."
-                    lines.append(f"  • {tname}: {tdesc}")
+                    lines.append(f"  * {tname}: {tdesc}")
                 if not tools:
                     lines.append("  (no tools exposed)")
             else:
-                lines.append(f"\n[{name}] — DISCONNECTED")
+                lines.append(f"\n[{name}] -- DISCONNECTED")
 
         if not lines:
             return ToolResult(

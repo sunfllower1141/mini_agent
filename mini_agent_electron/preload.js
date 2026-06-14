@@ -1,5 +1,5 @@
 /**
- * preload.js — Context bridge for mini_agent Electron app.
+ * preload.js -- Context bridge for mini_agent Electron app.
  *
  * Exposes a safe `miniAgent` API to the renderer via contextBridge.
  * All Python communication goes through IPC to the main process.
@@ -61,8 +61,11 @@ contextBridge.exposeInMainWorld('miniAgent', {
   getApiKeyStatus: () => ipcRenderer.invoke('settings:getApiKeyStatus'),
 
   // Save an API key for the chosen provider to ~/.mini_agent_env.
-  // provider: 'deepseek' | 'claude' | 'xai' | 'ollama'
+  // provider: 'deepseek' | 'claude' | 'xai' | 'ollama' | 'openrouter'
   saveApiKey: (provider, key) => ipcRenderer.invoke('settings:saveApiKey', provider, key),
+
+  // Switch the LLM model on the fly (no restart needed).
+  setModel: (model) => ipcRenderer.invoke('settings:setModel', model),
 
   // Kill and restart the Python backend (called after saving a new API key).
   restartBackend: () => ipcRenderer.invoke('settings:restartBackend'),
@@ -76,7 +79,7 @@ contextBridge.exposeInMainWorld('miniAgent', {
     const handler = (e) => {
       const frame = inputFrame();
       if (frame) frame.classList.remove('drag-over');
-      // Must preventDefault BEFORE reading paths — Electron's default
+      // Must preventDefault BEFORE reading paths -- Electron's default
       // is to navigate to / open the dropped file.
       e.preventDefault();
       e.stopPropagation();
@@ -94,7 +97,7 @@ contextBridge.exposeInMainWorld('miniAgent', {
     const dragOver = (e) => {
       const files = e.dataTransfer?.files;
       if (!files || files.length === 0) return;
-      // Always prevent default for file drags — do NOT gate on file.path,
+      // Always prevent default for file drags -- do NOT gate on file.path,
       // because file.path may only be populated on drop, not dragover.
       e.preventDefault();
       e.stopPropagation();
@@ -130,6 +133,7 @@ contextBridge.exposeInMainWorld('miniAgent', {
       'stream:thinking_end',
       'stream:turn_complete',
       'stream:error',
+      'stream:status',
       'stream:subagent_start',
       'stream:subagent_output',
       'stream:subagent_end',
@@ -138,6 +142,8 @@ contextBridge.exposeInMainWorld('miniAgent', {
       'stream:subagent_thought',
       'backend:status',
       'backend:response',
+      'backend:turn_start',
+      'backend:idle',
     ];
     if (validChannels.includes(channel)) {
       const subscription = (_event, data) => callback(data);

@@ -2,7 +2,7 @@ import { useRef, useEffect, memo } from 'react';
 import LogLine from './LogLine';
 
 /**
- * Auto-scrolling log container — memoized so it only re-renders when
+ * Auto-scrolling log container -- memoized so it only re-renders when
  * its `lines` or `children` props actually change, not on every parent tick.
  */
 const LogPanel = memo(function LogPanel({ id, className, lines, children }) {

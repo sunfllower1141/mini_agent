@@ -19,7 +19,7 @@ class TestBackwardOrphanDetection(unittest.TestCase):
     """Verify that tool messages with no preceding assistant are removed."""
 
     def test_tool_result_before_assistant_removed(self):
-        """Tool result with id=X before assistant with tool_calls=[X] → removed."""
+        """Tool result with id=X before assistant with tool_calls=[X] -> removed."""
         messages = [
             {"role": "user", "content": "hi"},
             {"role": "tool", "tool_call_id": "call_1",
@@ -51,7 +51,7 @@ class TestBackwardOrphanDetection(unittest.TestCase):
         self.assertEqual(cleaned[2]["role"], "tool")
 
     def test_orphan_with_wrong_id_removed(self):
-        """Tool result with id not matching any assistant → removed."""
+        """Tool result with id not matching any assistant -> removed."""
         messages = [
             {"role": "user", "content": "hi"},
             {"role": "tool", "tool_call_id": "ghost_id",
@@ -71,7 +71,7 @@ class TestBackwardOrphanDetection(unittest.TestCase):
         self.assertEqual(cleaned[2]["tool_call_id"], "call_1")
 
     def test_multiple_orphans_mixed_with_valid(self):
-        """Mixed orphans and valid tool results — only orphans removed."""
+        """Mixed orphans and valid tool results -- only orphans removed."""
         messages = [
             {"role": "user", "content": "hi"},
             {"role": "tool", "tool_call_id": "orphan_1",
@@ -195,7 +195,7 @@ class TestToolErrorHints(unittest.TestCase):
     def test_successful_call_has_no_hint(self):
         tc = self._make_tc("read_file", '{"path": "/tmp"}')
         result = execute_tool(tc, self.wg, self.rg)
-        # May succeed or fail depending on file existence — but hint is only
+        # May succeed or fail depending on file existence -- but hint is only
         # for structured errors, not all failures
         if not result.success:
             # Even if file not found, hint is about malformation, not about
@@ -301,7 +301,7 @@ class TestSchemaValidation(unittest.TestCase):
         }
 
     def test_unknown_param_rejected(self):
-        """Using 'file_path' instead of 'path' on read_file → rejected with hint."""
+        """Using 'file_path' instead of 'path' on read_file -> rejected with hint."""
         tc = self._make_tc("read_file", '{"file_path": "/tmp/x"}')
         result = execute_tool(tc, self.wg, self.rg)
         self.assertFalse(result.success)
@@ -311,7 +311,7 @@ class TestSchemaValidation(unittest.TestCase):
         self.assertIn("Valid parameters:", result.hint)
 
     def test_missing_required_param_rejected(self):
-        """Missing required 'path' param → rejected with hint."""
+        """Missing required 'path' param -> rejected with hint."""
         tc = self._make_tc("read_file", '{}')
         result = execute_tool(tc, self.wg, self.rg)
         self.assertFalse(result.success)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""session.py — session management for mini_agent.
+"""session.py -- session management for mini_agent.
 
 Session DBs are SQLite databases stored as .mini_agent_memory_session_<name>.db
 in the workspace root.  The default session uses .mini_agent_memory.db directly.
@@ -10,7 +10,7 @@ import os
 from typing import TYPE_CHECKING
 
 from core.config import MEMORY_FILENAME
-from core.prompt import build_startup_context
+from core.prompt import build_startup_context, build_session_header
 
 if TYPE_CHECKING:
     from core.config import AgentConfig
@@ -69,8 +69,10 @@ def switch_session(
 
     knowledge = memory.get_top_knowledge(limit=15) if not memory._skip_load else []
     startup_ctx = build_startup_context(workspace, knowledge=knowledge)
+    session_header = build_session_header(current_config)
     messages: list[dict] = [
         {"role": "system", "content": build_system_prompt(current_config)},
+        {"role": "user", "content": session_header},
         {"role": "user", "content": startup_ctx},
     ]
     if saved:

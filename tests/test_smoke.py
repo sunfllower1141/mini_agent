@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Smoke tests that verify the agent can actually boot without crashing.
 
-These tests run the full startup path — init_session, build_system_prompt,
-build_startup_context, and tool dispatch — in a real temp workspace.
+These tests run the full startup path -- init_session, build_system_prompt,
+build_startup_context, and tool dispatch -- in a real temp workspace.
 Catches AttributeErrors, ImportErrors, and missing tool handlers that
 unit tests in isolation miss.
 """
@@ -90,7 +90,7 @@ class TestBuildStartupContext(unittest.TestCase):
         ]
         ctx = build_startup_context(self.tmp, knowledge=knowledge)
         self.assertIn("Last session summary", ctx)
-        self.assertIn("Project Learnings", ctx)
+        self.assertIn("Project Knowledge", ctx)
 
     def test_startup_context_without_knowledge(self):
         """build_startup_context should work fine with knowledge=None."""
@@ -122,7 +122,7 @@ class TestAllToolsDispatchable(unittest.TestCase):
         # Base count from schema.py (static) + 1 for use_skill injected by __init__.py
         # MCP schemas are injected dynamically by init_session() if MCP servers configured.
         # So we assert a minimum, not an exact count.
-        min_expected = 75  # static TOOLS from schema.py + use_skill + desktop ops + macos ops
+        min_expected = 78  # static TOOLS from schema.py + use_skill + skill_list + skill_view
         actual = len(TOOLS)
         self.assertGreaterEqual(actual, min_expected,
             f"Expected at least {min_expected} tools, got {actual}. "
@@ -171,7 +171,7 @@ class TestProjectKnowledgeMethods(unittest.TestCase):
         self.assertIsNone(result, "Empty DB should return None, not crash")
 
     def test_knowledge_roundtrip(self):
-        """add_knowledge → get_top_knowledge should return the entry."""
+        """add_knowledge -> get_top_knowledge should return the entry."""
         from memory.memory import MemoryStore
 
         db_path = os.path.join(self.tmp, ".mini_agent_memory.db")

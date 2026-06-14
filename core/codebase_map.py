@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-codebase_map.py — structural codebase map for agent context injection.
+codebase_map.py -- structural codebase map for agent context injection.
 
 Generates a compact (~2-5K token) symbol-level map of the workspace:
-  - Module → file grouping with public symbols (classes, functions)
+  - Module -> file grouping with public symbols (classes, functions)
   - Import relationships between internal modules
   - Entry-point detection
   - Supports Python (AST), TypeScript/JavaScript (regex fallback)
@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import ast
 import os
+import platform
 import re
 import threading
 from collections import defaultdict
@@ -28,7 +29,34 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 # Directories to skip entirely during the walk
-from core.constants import SKIP_DIRS  # noqa: E402 — shared skip-dir set
+SKIP_DIRS: set[str] = {
+    ".git", "__pycache__", ".venv", "venv", "node_modules", ".mypy_cache",
+    ".pytest_cache", ".ruff_cache", "dist", "build", ".tox", ".eggs",
+    "*.egg-info",
+}
+
+# Windows reserved device names -- os.walk can encounter files/dirs with
+# these names (nul, con, prn, aux, com1-9, lpt1-9) which resolve to
+# NT namespace paths like \\.\nul, breaking os.path.relpath.
+_WIN_RESERVED: set[str] = {
+    "nul", "con", "prn", "aux",
+    *(f"com{i}" for i in range(1, 10)),
+    *(f"lpt{i}" for i in range(1, 10)),
+}
+
+
+def _is_win_reserved(name: str) -> bool:
+    """Check if a bare name (no extension) is a Windows reserved device name."""
+    stem, _ = os.path.splitext(name.lower())
+    return stem in _WIN_RESERVED
+
+
+def _safe_relpath(filepath: str, start: str) -> str | None:
+    """os.path.relpath that tolerates different Windows mounts."""
+    try:
+        return os.path.relpath(filepath, start)
+    except ValueError:
+        return None
 
 # File extensions we can extract symbols from
 PYTHON_EXT: set[str] = {".py"}
@@ -42,7 +70,7 @@ MAX_IMPORTS_PER_FILE: int = 10
 MAX_OUTPUT_LINES: int = 80
 
 # --- Incremental map cache ---
-# Path → FileSymbols for all indexed files.  Updated incrementally when
+# Path -> FileSymbols for all indexed files.  Updated incrementally when
 # files are written/edited so the agent's context stays current without
 # a full workspace re-scan.
 _MAP_CACHE: dict[str, FileSymbols] = {}
@@ -107,7 +135,7 @@ def _extract_python_symbols(
     try:
         tree = ast.parse(source, filename=filepath)
     except SyntaxError:
-        # Non-parseable Python — still record as a file, just without symbols
+        # Non-parseable Python -- still record as a file, just without symbols
         return FileSymbols(path=rel_path, line_count=line_count)
 
     sym = FileSymbols(path=rel_path, line_count=line_count)
@@ -150,7 +178,7 @@ def _extract_python_symbols(
     sym.imports_external = sorted(set(sym.imports_external))
 
     # If the file has no public symbols and no internal imports, it's likely
-    # a data/config file — still worth listing but skip if it's empty of meaning
+    # a data/config file -- still worth listing but skip if it's empty of meaning
     return sym
 
 
@@ -190,7 +218,7 @@ def _extract_ts_symbols(
         name = m.group(1)
         if name.startswith("_"):
             continue
-        # Heuristic: uppercase first char → likely a class/type/component
+        # Heuristic: uppercase first char -> likely a class/type/component
         if name[0].isupper():
             sym.classes.append(name)
         else:
@@ -200,10 +228,10 @@ def _extract_ts_symbols(
     for m in _TS_IMPORT_RE.finditer(source):
         mod = m.group(1)
         if mod.startswith("."):
-            # Relative import — resolve to internal
+            # Relative import -- resolve to internal
             sym.imports_internal.append(mod)
         elif mod.startswith("@"):
-            # Scoped package — might be internal or external
+            # Scoped package -- might be internal or external
             sym.imports_external.append(mod)
         else:
             # Could be workspace package or external
@@ -342,7 +370,9 @@ def update_file_in_map(filepath: str, workspace: str) -> None:
     global _MAP_CACHE, _MAP_CACHE_WORKSPACE_PACKAGES, _MAP_CACHE_WORKSPACE
     if not os.path.isfile(filepath):
         return
-    rel_path = os.path.relpath(filepath, workspace)
+    rel_path = _safe_relpath(filepath, workspace)
+    if rel_path is None:
+        return
     if os.path.basename(filepath).startswith("."):
         return
     if _MAP_CACHE_WORKSPACE != workspace or not _MAP_CACHE_WORKSPACE_PACKAGES:
@@ -359,7 +389,9 @@ def update_file_in_map(filepath: str, workspace: str) -> None:
 def remove_file_from_map(filepath: str, workspace: str) -> None:
     """Remove a file from the cached codebase map (e.g. on deletion)."""
     global _MAP_CACHE
-    rel_path = os.path.relpath(filepath, workspace)
+    rel_path = _safe_relpath(filepath, workspace)
+    if rel_path is None:
+        return
     with _MAP_CACHE_LOCK:
         _MAP_CACHE.pop(rel_path, None)
 
@@ -448,14 +480,20 @@ def build_codebase_map(
             for dirpath, dirnames, filenames in os.walk(workspace):
                 dirnames[:] = sorted(
                     d for d in dirnames
-                    if d not in SKIP_DIRS and not d.startswith(".")
+                    if d not in SKIP_DIRS
+                    and not d.startswith(".")
+                    and not _is_win_reserved(d)
                 )
 
                 for fname in sorted(filenames):
                     if fname.startswith("."):
                         continue
+                    if _is_win_reserved(fname):
+                        continue
                     filepath = os.path.join(dirpath, fname)
-                    rel_path = os.path.relpath(filepath, workspace)
+                    rel_path = _safe_relpath(filepath, workspace)
+                    if rel_path is None:
+                        continue
 
                     symbols = _extract_single_file(
                         filepath, rel_path, workspace_packages,
@@ -488,7 +526,7 @@ def build_codebase_map(
             # Use the first directory component, or first two if single depth is common
             prefix = parts[0] + "/"
             if len(parts) > 2:
-                # Check if this is a deep nesting — use two components
+                # Check if this is a deep nesting -- use two components
                 prefix = "/".join(parts[:2]) + "/"
         groups[prefix].append(sym)
 
@@ -496,7 +534,7 @@ def build_codebase_map(
     lines: list[str] = []
     lines.append("## Codebase Structure (symbol-level map)")
 
-    # Sort groups: non-root first, then root — prioritize source dirs
+    # Sort groups: non-root first, then root -- prioritize source dirs
     def _group_sort_key(kv: tuple[str, list[FileSymbols]]) -> tuple[int, str]:
         prefix = kv[0]
         # Source-like dirs first
@@ -529,7 +567,7 @@ def build_codebase_map(
                         if not i.startswith(".")]  # skip relative
             if internal:
                 shown = internal[:MAX_IMPORTS_PER_FILE]
-                parts.append(f"→ {', '.join(shown)}")
+                parts.append(f"-> {', '.join(shown)}")
                 if len(internal) > MAX_IMPORTS_PER_FILE:
                     parts[-1] += f" (+{len(internal) - MAX_IMPORTS_PER_FILE})"
 

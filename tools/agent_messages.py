@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-agent_messages.py — typed inter-agent messages for mini_agent.
+agent_messages.py -- typed inter-agent messages for mini_agent.
 
 Provides:
-    AgentMessage     — typed, schema-validated message dataclass
-    MSG_TYPE_REGISTRY — dict of known message type names → {schema, description}
-    register_message_type() — register a new typed message schema
-    _validate_payload() — validate payload against a type schema
-    _route_message()  — deliver a message to subscribed agent inboxes
+    AgentMessage     -- typed, schema-validated message dataclass
+    MSG_TYPE_REGISTRY -- dict of known message type names -> {schema, description}
+    register_message_type() -- register a new typed message schema
+    _validate_payload() -- validate payload against a type schema
+    _route_message()  -- deliver a message to subscribed agent inboxes
 """
 
 from __future__ import annotations
@@ -189,7 +189,7 @@ def _validate_payload(payload: dict, schema: dict) -> None:
             )
         checker = _TYPE_CHECKERS.get(expected)
         if checker is None:
-            continue  # unknown type string — allow it
+            continue  # unknown type string -- allow it
         if not checker(value):
             raise ValueError(
                 f"Payload key {key!r}: expected {expected}, got {type(value).__name__}"
@@ -217,7 +217,7 @@ def _route_message(
     """
     with lock:
         if target is not None:
-            # Direct delivery — bypass subscription routing
+            # Direct delivery -- bypass subscription routing
             inbox = inboxes.setdefault(target, [])
             inbox.append(msg)
             return
@@ -226,7 +226,7 @@ def _route_message(
         routed = False
         for task_id, subs in subscriptions.items():
             if not subs:
-                # Empty subscriptions → receive everything
+                # Empty subscriptions -> receive everything
                 inbox = inboxes.setdefault(task_id, [])
                 inbox.append(msg)
                 routed = True
@@ -303,7 +303,7 @@ def _agent_message_summary(args: dict) -> str:
     text = args.get("text", "?")
     preview = text[:50]
     if len(text) > 50:
-        preview += "\u2026"
+        preview += "..."
     return f"agent_message(\"{preview}\")"
 
 
@@ -370,10 +370,10 @@ def _agent_handoff(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> Too
     """Produce a typed result and route it to subscribed agents.
 
     Parameters:
-        type: str              — message type (default \"handoff.result\")
-        result: dict           — structured result payload
-        correlation_id: str    — optional correlation ID
-        target: str | None     — if set, deliver only to this task_id
+        type: str              -- message type (default \"handoff.result\")
+        result: dict           -- structured result payload
+        correlation_id: str    -- optional correlation ID
+        target: str | None     -- if set, deliver only to this task_id
     """
 
     msg_type = args.get("type", "handoff.result")
@@ -552,8 +552,8 @@ def _agent_subscribe(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> T
     """Declare or update message type subscriptions for an agent at runtime.
 
     Parameters:
-        task_id: str       — the agent to update
-        types: list[str]   — message types to subscribe to (empty = all)
+        task_id: str       -- the agent to update
+        types: list[str]   -- message types to subscribe to (empty = all)
     """
 
     task_id = args.get("task_id", "")
