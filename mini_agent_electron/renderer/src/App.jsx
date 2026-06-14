@@ -103,8 +103,8 @@ function AppShell() {
   const [subagentData, setSubagentData] = useState({});
 
   // Smooth streaming for thinking & chat
-  const thinking = useSmoothStream({ speed: 10 });
-  const chatStream = useSmoothStream({ speed: 8 });
+  const thinking = useSmoothStream();
+  const chatStream = useSmoothStream();
 
   // UI state
   const [modelName, setModelName] = useState('starting...');
@@ -668,6 +668,7 @@ function AppShell() {
   const handleCancel = useCallback(() => {
     window.miniAgent?.cancel();
     clearTimeout(submitTimeoutRef.current);
+    stopTimer();
     inThinkingRef.current = false;
     const agentText = chatStream.flush();
     const thinkText = thinking.flush();
@@ -687,7 +688,7 @@ function AppShell() {
     setInputDisabled(false);
     setInputValue('');
     inputRef.current?.focus();
-  }, [chatStream, thinking]);
+  }, [chatStream, thinking, stopTimer]);
 
   // Auto-scroll thinking log
   useEffect(() => {
@@ -706,6 +707,17 @@ function AppShell() {
   // Auto-focus input on mount
   useEffect(() => {
     inputRef.current?.focus();
+  }, []);
+
+  // Cleanup timers on unmount
+  useEffect(() => {
+    return () => {
+      clearTimeout(submitTimeoutRef.current);
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    };
   }, []);
 
   return (
@@ -777,7 +789,7 @@ function AppShell() {
       <div id="body-panels">
         {/* Left stack: Tools & Thinking + Agent Tree */}
         <div id="left-stack">
-          <RoundedFrame id="left-pane" title="Tools &amp; Thinking">
+          <RoundedFrame id="left-pane">
             <LogPanel id="tools-log" className="scrollable dim" lines={toolsLines.slice(-MAX_RENDERED_TOOL_LINES)} />
             <div className="hr" />
             <div id="thinking-log" ref={thinkingLogRef} className="log thinking-log thinking">
@@ -799,7 +811,7 @@ function AppShell() {
         </div>
 
         {/* Right pane: Chat */}
-        <RoundedFrame id="right-pane" title="Chat">
+        <RoundedFrame id="right-pane">
           <div id="chat-log" ref={chatLogRef} className="log scrollable text">
             {chatLines.slice(-MAX_RENDERED_CHAT_LINES).map((line) => {
               if (line.cls === 'msg-agent') {

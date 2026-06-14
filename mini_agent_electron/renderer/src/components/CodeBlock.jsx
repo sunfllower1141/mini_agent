@@ -140,17 +140,12 @@ function ShikiBlock({ source, lang, fontSize }) {
 
     getHighlighter().then((h) => {
       if (cancelled) return;
-      const result = h.codeToHtml(source, {
+      // Shiki v4: codeToHtml is synchronous, returns a string directly
+      const htmlStr = h.codeToHtml(source, {
         lang,
         theme: 'dark-plus',
       });
-      if (result && typeof result.then === 'function') {
-        result.then((htmlStr) => {
-          if (!cancelled && mountedRef.current) setHtml(stripBg(htmlStr));
-        });
-      } else if (result && !cancelled && mountedRef.current) {
-        setHtml(stripBg(result));
-      }
+      if (!cancelled && mountedRef.current) setHtml(stripBg(htmlStr));
     });
 
     return () => { cancelled = true; };

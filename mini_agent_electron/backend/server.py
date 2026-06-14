@@ -67,7 +67,6 @@ from stream import THINKING_START, THINKING_END
 from core.safety import ReadSafetyGate, WriteSafetyGate
 from core.prompt import build_system_prompt, build_startup_context, build_session_header
 from api import clear_api_cache
-from emoji_svg import clean_text
 
 
 # ---------------------------------------------------------------------------
@@ -125,6 +124,7 @@ def send_msg(msg: dict) -> None:
 
 def read_msg() -> dict | None:
     """Read one JSON message from stdin. Returns None on EOF/error."""
+    line = None
     try:
         line = sys.stdin.readline()
         if not line:
@@ -139,7 +139,7 @@ def read_msg() -> dict | None:
         # flushPending() and an IPC handler producing an interleaved line.
         # Show the raw line (truncated) so we can diagnose.
         import sys as _sys
-        raw_preview = repr(line)[:120]
+        raw_preview = repr(line)[:120] if line is not None else '<no line>'
         print(f"[server] Ignoring stdin parse error ({raw_preview}): {e}", file=_sys.stderr, flush=True)
         return None
 
@@ -163,36 +163,36 @@ class StreamCallbacks:
             self._in_thinking = False
             send_msg({"type": "thinking_end"})
             return
-        send_msg({"type": "token", "text": clean_text(text)})
+        send_msg({"type": "token", "text": text})
 
     def on_tool_start(self, summary: str, parallel: bool = False) -> None:
-        send_msg({"type": "tool_start", "summary": clean_text(summary), "parallel": parallel})
+        send_msg({"type": "tool_start", "summary": summary, "parallel": parallel})
 
     def on_tool_end(self, ok: bool, detail: str, turn_id: int = 0, diff_preview=None, content: str = "") -> None:
-        send_msg({"type": "tool_end", "ok": ok, "detail": clean_text(detail), "content": clean_text(content)})
+        send_msg({"type": "tool_end", "ok": ok, "detail": detail, "content": content})
 
     def on_tool_output(self, line: str, turn_id: int = 0) -> None:
-        send_msg({"type": "tool_output", "line": clean_text(line)})
+        send_msg({"type": "tool_output", "line": line})
 
     # -- sub-agent events (wired to _TOOL_CONTEXT._subagent_callback) --
 
     def on_subagent_start(self, task_id: str, parent_id: str, name: str, desc: str) -> None:
-        send_msg({"type": "subagent_start", "task_id": task_id, "parent_id": parent_id, "name": name, "desc": clean_text(desc)})
+        send_msg({"type": "subagent_start", "task_id": task_id, "parent_id": parent_id, "name": name, "desc": desc})
 
     def on_subagent_output(self, task_id: str, line: str) -> None:
-        send_msg({"type": "subagent_output", "task_id": task_id, "line": clean_text(line)})
+        send_msg({"type": "subagent_output", "task_id": task_id, "line": line})
 
     def on_subagent_end(self, task_id: str, ok: bool, content: str) -> None:
-        send_msg({"type": "subagent_end", "task_id": task_id, "ok": ok, "content": clean_text(content[:500])})
+        send_msg({"type": "subagent_end", "task_id": task_id, "ok": ok, "content": content[:500]})
 
     def on_subagent_tool_start(self, task_id: str, tool_name: str, tool_args: str) -> None:
         send_msg({"type": "subagent_tool_start", "task_id": task_id, "tool_name": tool_name, "tool_args": tool_args})
 
     def on_subagent_tool_end(self, task_id: str, tool_name: str, ok: bool, content: str) -> None:
-        send_msg({"type": "subagent_tool_end", "task_id": task_id, "tool_name": tool_name, "ok": ok, "content": clean_text(content[:500])})
+        send_msg({"type": "subagent_tool_end", "task_id": task_id, "tool_name": tool_name, "ok": ok, "content": content[:500]})
 
     def on_subagent_thought(self, task_id: str, text: str) -> None:
-        send_msg({"type": "subagent_thought", "task_id": task_id, "text": clean_text(text)})
+        send_msg({"type": "subagent_thought", "task_id": task_id, "text": text})
 
 
 # ---------------------------------------------------------------------------
@@ -427,7 +427,7 @@ class AgentRunner:
             # Safety: reset thinking flag so a stuck marker doesn't persist
             self._callbacks._in_thinking = False
             if not self._cancel_event.is_set():
-                send_msg({"type": "error", "message": clean_text(str(e))})
+                send_msg({"type": "error", "message": str(e)})
             # Always send turn_complete so the renderer resets its loading state
             send_msg({
                 "type": "turn_complete",
@@ -573,7 +573,7 @@ class AgentRunner:
             ]
             send_msg({
                 "type": "response",
-                "lines": [clean_text(l) for l in lines],
+                "lines": [l for l in lines],
             })
             return
 
@@ -701,7 +701,7 @@ class AgentRunner:
                 self.send_status()
                 send_msg({"type": "response", "lines": [f"Workspace set to: {new_workspace}"]})
             except Exception as exc:
-                send_msg({"type": "error", "message": clean_text(str(exc))})
+                send_msg({"type": "error", "message": str(exc)})
             return
 
         send_msg({"type": "response", "lines": [f"Unknown command: {command}"]})
@@ -879,7 +879,7 @@ def main() -> None:
             break
 
         else:
-            send_msg({"type": "error", "message": clean_text(f"Unknown message type: {msg_type}")})
+            send_msg({"type": "error", "message": f"Unknown message type: {msg_type}"})
 
     # Cleanup
     _heartbeat_stop.set()

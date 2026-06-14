@@ -9,6 +9,9 @@ const { app, BrowserWindow, ipcMain, dialog, protocol, net } = require('electron
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
+
+const HOMEDIR = os.homedir();
 
 // ---------------------------------------------------------------------------
 // Resource tuning -- this is a text-based chat app, not a game or browser.
@@ -96,7 +99,7 @@ function loadEnvFile(filePath) {
 
 // Load .env from project root (mini_agent/) and ~/.mini_agent_env
 loadEnvFile(path.join(__dirname, '..', '.env'));
-loadEnvFile(path.join(require('os').homedir(), '.mini_agent_env'));
+loadEnvFile(path.join(HOMEDIR, '.mini_agent_env'));
 
 // ---------------------------------------------------------------------------
 // API key detection
@@ -123,7 +126,7 @@ function detectApiKey() {
 }
 
 function apiKeyEnvFile() {
-  return path.join(require('os').homedir(), '.mini_agent_env');
+  return path.join(HOMEDIR, '.mini_agent_env');
 }
 
 function readEnvFile(filePath) {
@@ -578,7 +581,7 @@ function setupIPC() {
   });
 
   ipcMain.handle('workspace:save', async (event, workspacePath) => {
-    const persistedFile = path.join(require('os').homedir(), '.mini_agent_workspace');
+    const persistedFile = path.join(HOMEDIR, '.mini_agent_workspace');
     fs.writeFileSync(persistedFile, workspacePath, 'utf-8');
     return { ok: true };
   });
@@ -663,7 +666,7 @@ function setupIPC() {
     lastStatus = null;
 
     // Resolve workspace (same logic as app.whenReady)
-    const persistedFile = path.join(require('os').homedir(), '.mini_agent_workspace');
+    const persistedFile = path.join(HOMEDIR, '.mini_agent_workspace');
     workspacePath = null;
     if (fs.existsSync(persistedFile)) {
       const persisted = fs.readFileSync(persistedFile, 'utf-8').trim();
@@ -826,7 +829,7 @@ app.whenReady().then(() => {
       workspacePath = workspaceArg.split('=')[1];
     } else {
       // Try persisted workspace from last session
-      const persistedFile = path.join(require('os').homedir(), '.mini_agent_workspace');
+      const persistedFile = path.join(HOMEDIR, '.mini_agent_workspace');
       if (fs.existsSync(persistedFile)) {
         const persisted = fs.readFileSync(persistedFile, 'utf-8').trim();
         if (persisted && fs.existsSync(persisted)) {
