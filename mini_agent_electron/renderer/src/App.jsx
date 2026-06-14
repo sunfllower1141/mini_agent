@@ -817,7 +817,7 @@ function AppShell() {
       </div>
 
       {/* Input */}
-      <div id="input-frame" className="rounded-frame">
+      <div id="input-frame" className={`rounded-frame${isLive ? ' live' : ''}`}>
         <div className="frame-body">
           <div className="frame-content">
             <div id="input-container">
