@@ -182,7 +182,7 @@ function _resetWatchdog() {
   _watchdogTimer = setTimeout(() => {
     // Only act if the backend we were watching is STILL the current one
     if (pythonProcess !== watchedProc) return;
-    console.error('[main] WATCHDOG: backend unresponsive for 120s — force-killing and restarting');
+    console.error('[main] WATCHDOG: backend unresponsive for 120s -- force-killing and restarting');
     const win = BrowserWindow.getAllWindows()[0];
     if (win) win.webContents.send('stream:error', { message: 'Backend appears hung. Restarting...' });
     _killPythonProcessTree();
@@ -273,7 +273,7 @@ function spawnPythonBackend(workspacePath) {
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 
-  // Start the watchdog immediately — the backend must produce stdout
+  // Start the watchdog immediately -- the backend must produce stdout
   // (e.g. the 'ready' message) within the timeout window or it's killed.
   _resetWatchdog();
 
@@ -281,7 +281,7 @@ function spawnPythonBackend(workspacePath) {
   let stdoutBuffer = '';
 
   proc.stdout.on('data', (data) => {
-    _resetWatchdog();  // backend is alive — reset the hang watchdog
+    _resetWatchdog();  // backend is alive -- reset the hang watchdog
     stdoutBuffer += data.toString();
     const lines = stdoutBuffer.split('\n');
     // Keep the last potentially incomplete line in the buffer
@@ -314,7 +314,7 @@ function spawnPythonBackend(workspacePath) {
   });
 
   proc.on('close', (code) => {
-    _clearWatchdog();  // backend exited — clear watchdog
+    _clearWatchdog();  // backend exited -- clear watchdog
     console.log(`Python backend exited with code ${code}`);
     pythonReady = false;
     pythonProcess = null;
