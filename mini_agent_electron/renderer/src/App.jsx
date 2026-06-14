@@ -700,6 +700,9 @@ function AppShell() {
         {isLive && (
           <span id="live-indicator" onClick={handleCancel} title="Cancel"> ●</span>
         )}
+        {elapsedSec != null && (
+          <span id="timer">⏱ {elapsedSec}s</span>
+        )}
         <span id="theme-toggle" ref={themeToggleRef} onClick={() => setThemePickerOpen((p) => !p)} title={`Theme: ${themeEntry.name}`}>
           {themeEntry.icon}
           {themePickerOpen && dropdownPos && (
@@ -723,9 +726,6 @@ function AppShell() {
         )}
         {tokenCountVal != null && (
           <span id="token-counter">{'⊙'} <span id="token-count">{tokenCountVal}</span> tok</span>
-        )}
-        {elapsedSec != null && (
-          <span id="timer">⏱ {elapsedSec}s</span>
         )}
         <div className="status-right">
           {restoredCount != null && (
