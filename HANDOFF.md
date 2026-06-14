@@ -4,8 +4,19 @@
 ## Last Session: 2026-06-14 06:12 UTC
 
 ### What I Changed
+
+**Audit: CREATE_NO_WINDOW coverage**
+- Defined `_WINDOWS_POPEN_KWARGS` module-level constant in `tools/shell_ops.py`
+- Applied to `_verify()` Popen calls (lint + pytest) — were missing CREATE_NO_WINDOW
+- Applied to `_search_with_rg()` subprocess.run — was missing CREATE_NO_WINDOW
+- Applied to ruff/pyflakes subprocess.run in `_verify()` — were missing
+- Applied to terminal exec subprocess.run path in `_run_shell()` — was missing
+
+All other Popen/run calls in the codebase (mcp_client, lsp, file_ops, _git_run, _run_tests _spawn, desktop_ops, agent_ops _diff) already had CREATE_NO_WINDOW coverage.
+
 ### Commits
 ```
+96b8494 fix(audit): add CREATE_NO_WINDOW to remaining subprocess.run calls in shell_ops (rg, ruff, pyflakes, term exec)
 8176856 fix: add CREATE_NO_WINDOW to verify Popen calls + define _WINDOWS_POPEN_KWARGS
 ```
 ```
