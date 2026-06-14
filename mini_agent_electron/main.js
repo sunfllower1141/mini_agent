@@ -456,6 +456,7 @@ function handlePythonMessage(msg) {
 
     case 'turn_complete':
       win.webContents.send('stream:turn_complete', data);
+      console.log('[main] ✓ Agent turn complete');
       break;
 
     case 'turn_start':
@@ -464,6 +465,7 @@ function handlePythonMessage(msg) {
 
     case 'idle':
       win.webContents.send('backend:idle', data);
+      console.log('[main] ✓ Agent idle');
       break;
 
     case 'error':
