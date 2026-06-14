@@ -623,7 +623,7 @@ def run_agent_turn(
     on_tool_output: Callable[..., Any] | None = None,
     approve_callback: Callable[..., Any] | None = None,
     cancel_event: threading.Event | None = None,
-    max_turns: int = 100,
+    max_turns: int = 500,
     session: requests.Session | None = None,
     memory_store: Any = None,
 ) -> dict | None:
@@ -634,7 +634,7 @@ def run_agent_turn(
 
     *messages* is mutated in place: assistant and tool messages are appended.
     Returns the final assistant message dict, or ``None`` if cancelled.
-    *max_turns* is a hard safety cap (default 100).
+    *max_turns* is a hard safety cap (default 500).
 
     If *memory_store* is provided, the scratchpad is read from it and
     injected as context at the start of the turn.

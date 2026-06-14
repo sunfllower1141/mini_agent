@@ -2392,6 +2392,8 @@ def _diff(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
     """Show unstaged changes (git diff) for the workspace or a specific file."""
 
 
+    import os
+    import platform
     import subprocess
 
 
@@ -2412,6 +2414,7 @@ def _diff(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
 
         env = os.environ.copy()
         env.setdefault("GIT_TERMINAL_PROMPT", "0")
+        env.setdefault("GCM_INTERACTIVE", "Never")
         kwargs: dict = dict(capture_output=True, text=True, timeout=10, env=env)
         if platform.system() == "Windows":
             kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]

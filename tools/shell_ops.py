@@ -19,6 +19,7 @@ from core.safety import ReadSafetyGate, WriteSafetyGate
 from tools import _register, _summarize, ToolResult, _TASK_REGISTRY
 
 _WINDOWS = platform.system() == "Windows"
+_WINDOWS_POPEN_KWARGS = {"creationflags": subprocess.CREATE_NO_WINDOW} if _WINDOWS else {}
 
 # ---------------------------------------------------------------------------
 # Platform helpers for cross-platform shell execution
@@ -980,6 +981,7 @@ def _verify(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
     try:
         lint_proc = subprocess.Popen(
             lint_cmd, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            **(_WINDOWS_POPEN_KWARGS if _WINDOWS else {}),
         )
         jobs.append(("lint", lint_proc))
     except Exception as e:
@@ -991,6 +993,7 @@ def _verify(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
             proc = subprocess.Popen(
                 _get_python_cmd() + ["-m", "pytest", target, "-q"],
                 cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                **(_WINDOWS_POPEN_KWARGS if _WINDOWS else {}),
             )
             jobs.append(("test", (target, proc)))
         except Exception as e:

@@ -1,0 +1,23 @@
+{
+  "type": "function",
+  "function": {
+    "name": "git",
+    "description": "Run a git command in the workspace. Supports: status, diff, log, init, add, commit, show, restore. All operations are local-only (no push/pull). Use 'diff' to see unstaged changes, 'status' to see file states, 'log' for recent commits, 'init' to initialize a repo, 'add' to stage files, 'commit' to commit staged changes, 'show' to read a committed version of a file, 'restore' to recover a file from the last commit.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "subcommand": {
+          "type": "string",
+          "description": "Git subcommand: status, diff, log, init, add, or commit"
+        },
+        "args": {
+          "type": "string",
+          "description": "Optional arguments: file paths for 'add', commit message for 'commit', etc."
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    }
+  }
+}
