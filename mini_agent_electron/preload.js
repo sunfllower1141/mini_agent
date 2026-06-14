@@ -70,6 +70,10 @@ contextBridge.exposeInMainWorld('miniAgent', {
   // Kill and restart the Python backend (called after saving a new API key).
   restartBackend: () => ipcRenderer.invoke('settings:restartBackend'),
 
+  // --- Discord bot control ---
+  startBot: (script) => ipcRenderer.invoke('bot:start', script),
+  stopBot: (script) => ipcRenderer.invoke('bot:stop', script),
+
   // --- File drop bridge ---
   // Registers a callback that receives an array of absolute file paths
   // whenever the user drops files from the OS onto the window.
@@ -144,6 +148,7 @@ contextBridge.exposeInMainWorld('miniAgent', {
       'backend:response',
       'backend:turn_start',
       'backend:idle',
+      'backend:bot_status',
     ];
     if (validChannels.includes(channel)) {
       const subscription = (_event, data) => callback(data);

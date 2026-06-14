@@ -163,6 +163,104 @@ let pendingRequests = [];
 let lastStatus = null; // cached status for renderer to fetch on mount
 let workspacePath = null;  // module-scoped so watchdog/restart closures can use it
 let _shuttingDown = false;  // set during window-close to prevent restart loops
+// Discord bot status tracking
+let _botStatusTimer = null;
+let _botProcesses = {}; // name -> ChildProcess
+const _BOTS = [
+  { name: 'emotion-game',   label: 'discord_bot',   script: 'discord_bot.py',   pattern: 'discord_bot\\.py' },
+  { name: 'mini-agent',     label: 'workspace_bot', script: 'workspace_bot.py', pattern: 'workspace_bot\\.py' },
+];
+
+function _sendBotStatus(name, alive) {
+  const bot = _BOTS.find(b => b.name === name);
+  if (!bot) return;
+  const win = BrowserWindow.getAllWindows()[0];
+  if (win) {
+    win.webContents.send('backend:bot_status', { name: bot.name, label: bot.label, alive });
+  }
+}
+
+function _pollBotStatus() {
+  const { exec } = require('child_process');
+  for (const bot of _BOTS) {
+    // If we have a tracked process, check it directly
+    const proc = _botProcesses[bot.name];
+    if (proc && !proc.killed) {
+      _sendBotStatus(bot.name, true);
+      continue;
+    }
+    exec(`pgrep -q -f "${bot.pattern}"`, (err) => {
+      _sendBotStatus(bot.name, !err);
+    });
+  }
+}
+
+function _startBot(script) {
+  const bot = _BOTS.find(b => b.script === script);
+  if (!bot) return { ok: false, error: 'unknown bot' };
+  // Already running?
+  if (_botProcesses[bot.name] && !_botProcesses[bot.name].killed) {
+    _sendBotStatus(bot.name, true);
+    return { ok: true, alreadyRunning: true };
+  }
+  const { spawn } = require('child_process');
+  const wsPath = workspacePath || process.cwd();
+  const proc = spawn('python3', [script], {
+    cwd: wsPath,
+    detached: true,
+    stdio: 'ignore',
+    env: { ...process.env },
+  });
+  proc.on('error', (err) => {
+    console.error(`[bot] ${bot.name} spawn error:`, err.message);
+    delete _botProcesses[bot.name];
+    _sendBotStatus(bot.name, false);
+  });
+  proc.on('exit', (code) => {
+    console.log(`[bot] ${bot.name} exited (code ${code})`);
+    delete _botProcesses[bot.name];
+    _sendBotStatus(bot.name, false);
+  });
+  proc.unref();
+  _botProcesses[bot.name] = proc;
+  _sendBotStatus(bot.name, true);
+  return { ok: true };
+}
+
+function _stopBot(script) {
+  const bot = _BOTS.find(b => b.script === script);
+  if (!bot) return { ok: false, error: 'unknown bot' };
+  const proc = _botProcesses[bot.name];
+  if (proc && !proc.killed) {
+    proc.kill();
+    delete _botProcesses[bot.name];
+    _sendBotStatus(bot.name, false);
+    return { ok: true };
+  }
+  // Try pgrep fallback
+  const { execSync } = require('child_process');
+  try {
+    const pid = execSync(`pgrep -f "${bot.pattern}"`, { encoding: 'utf-8' }).trim();
+    if (pid) {
+      process.kill(parseInt(pid), 'SIGTERM');
+      _sendBotStatus(bot.name, false);
+      return { ok: true };
+    }
+  } catch (e) { /* not found */ }
+  _sendBotStatus(bot.name, false);
+  return { ok: true, alreadyStopped: true };
+}
+
+function _startBotPolling() {
+  _stopBotPolling();
+  _pollBotStatus(); // immediate first poll
+  _botStatusTimer = setInterval(_pollBotStatus, 30_000); // every 30s
+}
+
+function _stopBotPolling() {
+  if (_botStatusTimer) { clearInterval(_botStatusTimer); _botStatusTimer = null; }
+}
+
 // Restart throttle: prevent infinite restart loops that spawn thousands of
 // processes when the Python backend keeps crashing (e.g. hung proc.communicate()
 // on Windows that can't be killed from userspace).
@@ -681,6 +779,16 @@ function setupIPC() {
     pythonProcess = spawnPythonBackend(workspacePath);
     return { ok: true };
   });
+
+  // --- Bot control ---
+
+  ipcMain.handle('bot:start', async (_event, script) => {
+    return _startBot(script);
+  });
+
+  ipcMain.handle('bot:stop', async (_event, script) => {
+    return _stopBot(script);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -807,6 +915,7 @@ app.whenReady().then(() => {
 
   setupIPC();
   createWindow();
+  _startBotPolling();
 
   const keyInfo = detectApiKey();
 
@@ -853,6 +962,7 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   _shuttingDown = true;
+  _stopBotPolling();
   if (pythonProcess && pythonProcess.stdin && !pythonProcess.killed) {
     try {
       pythonProcess.stdin.write(JSON.stringify({ type: 'shutdown' }) + '\n');
@@ -888,6 +998,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  _stopBotPolling();
   if (pythonProcess && !pythonProcess.killed) {
     try {
       if (process.platform === 'win32') {

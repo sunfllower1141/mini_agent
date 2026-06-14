@@ -726,6 +726,42 @@ html, body {
 
 .status-bar span { margin-right: 12px; }
 
+/* Status bar SVG icons */
+.status-bar svg.icon-sm {
+  vertical-align: -2px;
+  margin-right: 2px;
+}
+
+/* Discord bot indicators */
+.bot-indicators { display: inline-flex; align-items: center; gap: 6px; margin-right: 0; }
+.discord-label {
+  font-size: 10px;
+  color: #5865F2;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-right: 4px;
+  opacity: 0.85;
+}
+.bot-dot {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background 0.15s;
+  user-select: none;
+}
+.bot-dot:hover { opacity: 0.8; }
+.bot-on  { background: #22c55e33; color: #22c55e; }
+.bot-off { background: #ef444433; color: #ef4444; }
+
+/* Live indicator pulsing dot */
+.live-dot { animation: pulse-dot 1.5s ease-in-out infinite; }
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
 .status-right {
   margin-left: auto;
   display: flex;

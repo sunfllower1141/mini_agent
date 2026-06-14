@@ -31,6 +31,7 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 from core.config import AgentConfig, ENV_AGENT_WORKSPACE
+from voice_handler import VoiceHandler
 from core.llm import run_agent_turn
 from core.bootstrap import init_session
 from api import clear_api_cache
@@ -45,6 +46,7 @@ DISCORD_MAX_MSG = 1900  # Discord limit is 2000; leave margin
 INTENTS = discord.Intents.default()
 INTENTS.message_content = True   # needed to read @mention content
 INTENTS.messages = True          # needed for on_message events
+INTENTS.voice_states = True      # needed for voice-channel join/leave detection
 
 # ---------------------------------------------------------------------------
 # Per-channel session
@@ -91,6 +93,7 @@ class MiniAgentDiscordBot(discord.Client):
         read_gate: Any,
         memory: Any,
         base_messages: list[dict],
+        voice: VoiceHandler | None = None,
     ):
         super().__init__(intents=INTENTS)
         self.workspace = workspace
@@ -99,6 +102,7 @@ class MiniAgentDiscordBot(discord.Client):
         self.read_gate = read_gate
         self.memory = memory
         self.base_messages = base_messages
+        self.voice = voice
         self.channels: dict[int, ChannelSession] = {}
         self._channels_lock = threading.Lock()
 
@@ -213,16 +217,54 @@ class MiniAgentDiscordBot(discord.Client):
                 return
             await self._search_server(msg, term)
 
+        elif cmd == "/join":
+            if self.voice is None:
+                await msg.channel.send("Voice support not configured for this bot.")
+            else:
+                result = await self.voice.join(msg)
+                await msg.channel.send(result)
+
+        elif cmd == "/leave":
+            if self.voice is None:
+                await msg.channel.send("Voice support not configured for this bot.")
+            elif msg.guild is None:
+                await msg.channel.send("Voice commands only work in servers.")
+            else:
+                result = await self.voice.leave(msg.guild.id)
+                await msg.channel.send(result)
+
+        elif cmd.startswith("/say"):
+            if self.voice is None:
+                await msg.channel.send("Voice support not configured for this bot.")
+            elif msg.guild is None:
+                await msg.channel.send("Voice commands only work in servers.")
+            else:
+                text = content[4:].strip()
+                if not text:
+                    await msg.channel.send("Usage: `/say <text>` — speak in voice channel")
+                else:
+                    result = await self.voice.say(msg.guild.id, text)
+                    if result:
+                        await msg.channel.send(result)  # error message
+
         elif cmd == "/help":
-            await msg.channel.send(
-                "**mini_agent Discord bot**\n"
-                "Mention me with a question about the project.\n\n"
-                "**Commands:**\n"
-                "`/clear` — Reset this channel's conversation\n"
-                "`/stats` — Show session stats\n"
-                "`/search <keyword>` — Search server message history\n"
-                "`/help`  — This message"
-            )
+            parts = [
+                "**mini_agent Discord bot**",
+                "Mention me with a question about the project.",
+                "",
+                "**Commands:**",
+                "`/clear` — Reset this channel's conversation",
+                "`/stats` — Show session stats",
+                "`/search <keyword>` — Search server message history",
+            ]
+            if self.voice is not None:
+                parts += [
+                    "`/join` — Join your voice channel",
+                    "`/leave` — Leave the voice channel",
+                    "`/say <text>` — Speak in voice channel (TTS)",
+                ]
+            parts.append("`/help` — This message")
+            await msg.channel.send("\n".join(parts))
 
         else:
             await msg.channel.send(f"Unknown command: `{cmd}`. Try `/help`.")
@@ -462,6 +504,14 @@ def main() -> None:
         sys.exit(1)
 
     # --- Start the bot -----------------------------------------------------
+    # Voice handler: use ElevenLabs if key is available
+    elevenlabs_key = os.environ.get("ELEVENLABS_API_KEY", "")
+    voice = VoiceHandler(elevenlabs_api_key=elevenlabs_key)
+    if elevenlabs_key:
+        print(f"[discord_bot] Voice TTS: ElevenLabs")
+    else:
+        print(f"[discord_bot] Voice TTS: macOS say (no ELEVENLABS_API_KEY set)")
+
     bot = MiniAgentDiscordBot(
         workspace=workspace,
         config=config,
@@ -469,6 +519,7 @@ def main() -> None:
         read_gate=read_gate,
         memory=memory,
         base_messages=base_messages,
+        voice=voice,
     )
 
     try:

@@ -17,18 +17,31 @@ import SettingsPanel from './components/SettingsPanel';
 const MAX_RENDERED_CHAT_LINES = 400;
 const MAX_RENDERED_TOOL_LINES = 400;
 
-// Theme registry -- name, data-theme value, status-bar icon
+// Theme registry -- name, data-theme value, status-bar icon (colored circle + palette)
+const PALETTE_SVG = <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="5" cy="8" r="2.5"/><circle cx="12" cy="4" r="2"/><circle cx="12" cy="11.5" r="2"/><path d="M3 13a3 3 0 0 0 5.2-2 1.8 1.8 0 0 1 2.1-1.8A3 3 0 0 0 13 6"/></svg>;
+const THEME_COLORS = {
+  dark:         '#a0a8c0',
+  light:        '#e8ac4a',
+  dracula:      '#bd93f9',
+  nord:         '#88c0d0',
+  catppuccin:   '#cba6f7',
+  'rose-pine':  '#ebbcba',
+  gruvbox:      '#d79921',
+  solarized:    '#2aa198',
+  'tokyo-night':'#7aa2f7',
+  monokai:      '#a6e22e',
+};
 const THEMES = [
-  { name: 'Dark',         id: 'dark',         icon: '☾' },
-  { name: 'Light',        id: 'light',        icon: '☀' },
-  { name: 'Dracula',      id: 'dracula',      icon: '🧛' },
-  { name: 'Nord',         id: 'nord',         icon: '❄️' },
-  { name: 'Catppuccin',   id: 'catppuccin',   icon: '🐱' },
-  { name: 'Rose Pine',    id: 'rose-pine',    icon: '🌹' },
-  { name: 'Gruvbox',      id: 'gruvbox',      icon: '🪵' },
-  { name: 'Solarized',    id: 'solarized',    icon: '☯️' },
-  { name: 'Tokyo Night',  id: 'tokyo-night',  icon: '🌆' },
-  { name: 'Monokai',      id: 'monokai',      icon: '🎨' },
+  { name: 'Dark',         id: 'dark',         icon: <svg viewBox="0 0 12 12" width="10" height="10"><circle cx="6" cy="6" r="4" fill={THEME_COLORS.dark}/></svg> },
+  { name: 'Light',        id: 'light',        icon: <svg viewBox="0 0 12 12" width="10" height="10"><circle cx="6" cy="6" r="4" fill={THEME_COLORS.light}/></svg> },
+  { name: 'Dracula',      id: 'dracula',      icon: <svg viewBox="0 0 12 12" width="10" height="10"><circle cx="6" cy="6" r="4" fill={THEME_COLORS.dracula}/></svg> },
+  { name: 'Nord',         id: 'nord',         icon: <svg viewBox="0 0 12 12" width="10" height="10"><circle cx="6" cy="6" r="4" fill={THEME_COLORS.nord}/></svg> },
+  { name: 'Catppuccin',   id: 'catppuccin',   icon: <svg viewBox="0 0 12 12" width="10" height="10"><circle cx="6" cy="6" r="4" fill={THEME_COLORS.catppuccin}/></svg> },
+  { name: 'Rose Pine',    id: 'rose-pine',    icon: <svg viewBox="0 0 12 12" width="10" height="10"><circle cx="6" cy="6" r="4" fill={THEME_COLORS['rose-pine']}/></svg> },
+  { name: 'Gruvbox',      id: 'gruvbox',      icon: <svg viewBox="0 0 12 12" width="10" height="10"><circle cx="6" cy="6" r="4" fill={THEME_COLORS.gruvbox}/></svg> },
+  { name: 'Solarized',    id: 'solarized',    icon: <svg viewBox="0 0 12 12" width="10" height="10"><circle cx="6" cy="6" r="4" fill={THEME_COLORS.solarized}/></svg> },
+  { name: 'Tokyo Night',  id: 'tokyo-night',  icon: <svg viewBox="0 0 12 12" width="10" height="10"><circle cx="6" cy="6" r="4" fill={THEME_COLORS['tokyo-night']}/></svg> },
+  { name: 'Monokai',      id: 'monokai',      icon: <svg viewBox="0 0 12 12" width="10" height="10"><circle cx="6" cy="6" r="4" fill={THEME_COLORS.monokai}/></svg> },
 ];
 
 // Model catalog for the clickable model picker dropdown.
@@ -119,6 +132,7 @@ function AppShell() {
   const [elapsedSec, setElapsedSec] = useState(null);
   const [inputDisabled, setInputDisabled] = useState(false);
   const [thinkingBlocks, setThinkingBlocks] = useState([]);
+  const [botStatus, setBotStatus] = useState({});
 
   const inputRef = useRef(null);
   const thinkingLogRef = useRef(null);
@@ -285,6 +299,16 @@ function AppShell() {
 
     return () => unsub();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Discord bot status listener
+  useEffect(() => {
+    const api = window.miniAgent;
+    if (!api) return;
+    const unsub = api.on('backend:bot_status', (data) => {
+      setBotStatus((prev) => ({ ...prev, [data.name]: data.alive }));
+    });
+    return () => unsub();
+  }, []);
 
   // Stream listeners
   useEffect(() => {
@@ -690,6 +714,26 @@ function AppShell() {
     inputRef.current?.focus();
   }, [chatStream, thinking, stopTimer]);
 
+  // Discord bot start/stop toggle
+  const BOT_SCRIPTS = { 'mini-agent': 'workspace_bot.py', 'emotion-game': 'discord_bot.py' };
+  const handleBotToggle = useCallback(async (botName) => {
+    const api = window.miniAgent;
+    if (!api) return;
+    const script = BOT_SCRIPTS[botName];
+    if (!script) return;
+    const current = botStatus[botName];
+    setBotStatus((prev) => ({ ...prev, [botName]: !current }));
+    try {
+      if (current) {
+        await api.stopBot(script);
+      } else {
+        await api.startBot(script);
+      }
+    } catch (e) {
+      setBotStatus((prev) => ({ ...prev, [botName]: current }));
+    }
+  }, [botStatus]);
+
   // Auto-scroll thinking log
   useEffect(() => {
     if (thinkingLogRef.current) {
@@ -859,16 +903,29 @@ function AppShell() {
       {/* Status bar */}
       <div id="status-bar" className="status-bar dim">
         <span id="git-status">
-          {gitBranch && `⎇ ${gitBranch}${gitDirty ? '*' : ''}`}
+          {gitBranch && (<><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.5" className="icon-sm"><path d="M3 4v6a2 2 0 0 0 2 2h2M7 12l-2-2 2-2M11 5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM3 4.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z"/></svg>{gitBranch}{gitDirty ? '*' : ''}</>)}
+        </span>
+        <span className="bot-indicators">
+          <span className="discord-label"><svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" className="icon-sm"><path d="M19.27 5.33C17.94 4.71 16.5 4.26 15 4a.09.09 0 0 0-.07.03c-.18.33-.39.76-.53 1.09a16.09 16.09 0 0 0-4.8 0c-.14-.34-.35-.76-.54-1.09-.01-.02-.04-.03-.07-.03-1.5.26-2.93.71-4.27 1.33-.01 0-.02.01-.03.02-2.72 4.07-3.47 8.03-3.1 11.95 0 .02.01.04.03.05 1.8 1.32 3.53 2.12 5.24 2.65.03.01.06 0 .07-.02.4-.55.76-1.13 1.07-1.74.02-.04 0-.08-.04-.09-.57-.22-1.11-.48-1.64-.78-.04-.02-.04-.08-.01-.11.11-.08.22-.17.33-.25.02-.02.05-.02.07-.01 3.44 1.57 7.15 1.57 10.55 0 .02-.01.05-.01.07.01.11.09.22.17.33.26.04.03.04.09-.01.11-.52.31-1.07.56-1.64.78-.04.01-.05.06-.04.09.32.61.68 1.19 1.07 1.74.03.01.06.02.09.01 1.72-.53 3.45-1.33 5.25-2.65.02-.01.03-.03.03-.05.44-4.53-.73-8.46-3.1-11.95-.01-.01-.02-.02-.04-.02zM8.52 14.91c-1.03 0-1.89-.95-1.89-2.12s.84-2.12 1.89-2.12c1.06 0 1.9.96 1.89 2.12 0 1.17-.84 2.12-1.89 2.12zm6.97 0c-1.03 0-1.89-.95-1.89-2.12s.84-2.12 1.89-2.12c1.06 0 1.9.96 1.89 2.12 0 1.17-.83 2.12-1.89 2.12z"/></svg>Discord</span>
+          <span
+            className={`bot-dot ${botStatus['mini-agent'] ? 'bot-on' : 'bot-off'}`}
+            title={`mini-agent — ${botStatus['mini-agent'] ? 'click to stop' : 'click to start'}`}
+            onClick={() => handleBotToggle('mini-agent')}
+          >{botStatus['mini-agent'] !== undefined ? (botStatus['mini-agent'] ? 'on' : 'off') : '...'}</span>
+          <span
+            className={`bot-dot ${botStatus['emotion-game'] ? 'bot-on' : 'bot-off'}`}
+            title={`emotion-game — ${botStatus['emotion-game'] ? 'click to stop' : 'click to start'}`}
+            onClick={() => handleBotToggle('emotion-game')}
+          >{botStatus['emotion-game'] !== undefined ? (botStatus['emotion-game'] ? 'on' : 'off') : '...'}</span>
         </span>
         {isLive && (
-          <span id="live-indicator" onClick={handleCancel} title="Cancel"> ●</span>
+          <span id="live-indicator" onClick={handleCancel} title="Cancel"><svg viewBox="0 0 12 12" width="10" height="10" className="icon-sm"><circle cx="6" cy="6" r="4" fill="currentColor" className="live-dot"/></svg></span>
         )}
         {elapsedSec != null && (
-          <span id="timer">⏱ {elapsedSec}s</span>
+          <span id="timer"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.5" className="icon-sm"><circle cx="8" cy="8" r="6.5"/><path d="M8 4.5V8l2.5 2"/></svg>{elapsedSec}s</span>
         )}
         <span id="theme-toggle" ref={themeToggleRef} onClick={() => setThemePickerOpen((p) => !p)} title={`Theme: ${themeEntry.name}`}>
-          {themeEntry.icon}
+          {PALETTE_SVG}
           {themePickerOpen && dropdownPos && (
             <div className="theme-dropdown" style={dropdownPos} onClick={(e) => e.stopPropagation()}>
               {THEMES.map((t) => (
@@ -879,17 +936,17 @@ function AppShell() {
                 >
                   <span className="theme-icon">{t.icon}</span>
                   <span className="theme-name">{t.name}</span>
-                  {t.id === theme && <span className="theme-check">\u2713</span>}
+                  {t.id === theme && <span className="theme-check"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" className="icon-sm"><polyline points="3,8 6.5,11.5 13,5"/></svg></span>}
                 </div>
               ))}
             </div>
           )}
         </span>
         {turnCountVal != null && (
-          <span id="turn-counter">{'↻'} turn <span id="turn-count">{turnCountVal}</span></span>
+          <span id="turn-counter"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.5" className="icon-sm"><path d="M2 8a6 6 0 0 1 6-6 5.5 5.5 0 0 1 5 3.5M14 8a6 6 0 0 1-6 6"/><polyline points="11,3 13,1 15,3"/></svg> turn <span id="turn-count">{turnCountVal}</span></span>
         )}
         {tokenCountVal != null && (
-          <span id="token-counter">{'⊙'} <span id="token-count">{tokenCountVal}</span> tok</span>
+          <span id="token-counter"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.5" className="icon-sm"><circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/></svg> <span id="token-count">{tokenCountVal}</span> tok</span>
         )}
         <div className="status-right">
           {restoredCount != null && (

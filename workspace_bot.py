@@ -23,6 +23,7 @@ if _HERE not in sys.path:
 from discord_bot import MiniAgentDiscordBot, DISCORD_MAX_MSG, INTENTS
 from core.config import AgentConfig
 from core.bootstrap import init_session
+from voice_handler import VoiceHandler
 
 
 def main() -> None:
@@ -64,6 +65,14 @@ def main() -> None:
     print(f"[workspace_bot] Agent initialized (model={config.model}, "
           f"provider={config.api_provider})")
 
+    # --- Voice handler --------------------------------------------------
+    elevenlabs_key = os.environ.get("ELEVENLABS_API_KEY", "")
+    voice = VoiceHandler(elevenlabs_api_key=elevenlabs_key)
+    if elevenlabs_key:
+        print(f"[workspace_bot] Voice TTS: ElevenLabs")
+    else:
+        print(f"[workspace_bot] Voice TTS: macOS say (no ELEVENLABS_API_KEY set)")
+
     bot = MiniAgentDiscordBot(
         workspace=workspace,
         config=config,
@@ -71,6 +80,7 @@ def main() -> None:
         read_gate=read_gate,
         memory=memory,
         base_messages=base_messages,
+        voice=voice,
     )
 
     try:

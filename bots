@@ -1,0 +1,9 @@
+#!/bin/bash
+# Quick bot checker — just run: ./bots
+cd "$(dirname "$0")"
+for bot in discord_bot workspace_bot; do
+  pid=$(ps aux | grep "[P]ython.*${bot}.py" | awk '{print $2}' | head -1)
+  status=$( [ -n "$pid" ] && echo "UP (pid $pid)" || echo "DOWN" )
+  last=$(tail -1 /tmp/${bot}.log 2>/dev/null | cut -c1-80)
+  echo "$bot: $status | $last"
+done
