@@ -32,27 +32,57 @@ const THEMES = [
 ];
 
 // Model catalog for the clickable model picker dropdown.
-// Each entry: { id: OpenRouter model slug, label: display name }
-// Entries with only a 'group' property render as section headers.
-const MODELS = [
-  { group: 'Kimi' },
-  { id: 'moonshotai/kimi-k2.7-code', label: 'Kimi K2.7 Code' },
-  { group: 'DeepSeek' },
-  { id: 'deepseek/deepseek-v4-pro',  label: 'DeepSeek V4 Pro' },
-  { id: 'deepseek/deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
-  { group: 'Claude' },
-  { id: 'anthropic/claude-opus-4-8',   label: 'Claude Opus 4.8' },
-  { id: 'anthropic/claude-sonnet-4-5', label: 'Claude Sonnet 4.5' },
-  { group: 'OpenAI' },
-  { id: 'openai/gpt-5.1', label: 'GPT-5.1' },
-  { group: 'Google' },
-  { id: 'google/gemini-3.5-flash', label: 'Gemini 3.5 Flash' },
-  { group: 'Other' },
-  { id: 'stepfun/step-3.7-flash',   label: 'Step 3.7 Flash' },
-  { id: 'qwen/qwen3.7-max',         label: 'Qwen 3.7 Max' },
-  { id: 'minimax/minimax-m3',       label: 'MiniMax M3' },
-  { id: 'xiaomi/mimo-v2.5-pro',     label: 'MiMo V2.5 Pro' },
-  { id: 'moonshotai/kimi-k2.6',     label: 'Kimi K2.6' },
+//
+// DIRECT_MODEL_GROUPS: models accessible via their native provider APIs.
+//   Bare IDs trigger provider switch in server.py's set_model().
+//   Requires corresponding API key env var (DEEPSEEK_API_KEY, MOONSHOT_API_KEY, etc.).
+//
+// OPENROUTER_MODEL_GROUPS: models routed through OpenRouter's unified API.
+//   Prefixed IDs (provider/model) are sent to OpenRouter which handles routing.
+//   Requires OPENROUTER_API_KEY env var.  Free models use the :free suffix.
+
+const DIRECT_MODEL_GROUPS = [
+  { group: 'DeepSeek', models: [
+    { id: 'deepseek-v4-pro',   label: 'DeepSeek V4 Pro' },
+    { id: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
+  ]},
+  { group: 'Kimi / Moonshot', models: [
+    { id: 'kimi-k2.7-code', label: 'Kimi K2.7 Code' },
+    { id: 'kimi-k2.6',      label: 'Kimi K2.6' },
+  ]},
+  { group: 'Qwen (DashScope)', models: [
+    { id: 'qwen-plus',    label: 'Qwen-Plus' },
+    { id: 'qwen-flash',   label: 'Qwen-Flash' },
+    { id: 'qwen3-max',    label: 'Qwen 3 Max' },
+    { id: 'qwen3-coder',  label: 'Qwen 3 Coder' },
+  ]},
+  { group: 'Free Tier', models: [
+    { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash (free)' },
+  ]},
+];
+
+const OPENROUTER_MODEL_GROUPS = [
+  { group: 'Kimi / Moonshot', models: [
+    { id: 'moonshotai/kimi-k2.7-code', label: 'Kimi K2.7 Code' },
+    { id: 'moonshotai/kimi-k2.6',      label: 'Kimi K2.6' },
+  ]},
+  { group: 'Google / Gemini', models: [
+    { id: 'google/gemini-3.5-flash', label: 'Gemini 3.5 Flash' },
+    { id: 'google/gemini-3.5-pro',   label: 'Gemini 3.5 Pro' },
+  ]},
+  { group: 'Qwen (DashScope)', models: [
+    { id: 'qwen/qwen-plus',    label: 'Qwen-Plus' },
+    { id: 'qwen/qwen3-max',    label: 'Qwen 3 Max' },
+    { id: 'qwen/qwen3-coder',  label: 'Qwen 3 Coder' },
+  ]},
+  { group: 'Free Models', models: [
+    { id: 'deepseek/deepseek-v4-flash:free',   label: 'DeepSeek V4 Flash (free)' },
+    { id: 'qwen/qwen3-coder:free',             label: 'Qwen 3 Coder (free)' },
+    { id: 'google/gemma-4-31b-it:free',        label: 'Gemma 4 31B (free)' },
+    { id: 'openai/gpt-oss-120b:free',          label: 'GPT-OSS 120B (free)' },
+    { id: 'meta-llama/llama-3.3-70b-instruct:free', label: 'Llama 3.3 70B (free)' },
+    { id: 'openrouter/free',                   label: 'OpenRouter Free Router' },
+  ]},
 ];
 
 function setThemeDom(id) {
@@ -129,6 +159,7 @@ function AppShell() {
 
   // Model picker
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [provider, setProvider] = useState('deepseek');
   const modelRef = useRef(null);
   const [modelDropdownPos, setModelDropdownPos] = useState(null);
 
@@ -231,6 +262,7 @@ function AppShell() {
         setShowSettings(false);
       }
       if (data.model != null) setModelName(data.model);
+      if (data.provider != null) setProvider(data.provider);
       if (data.session_name != null) setSessionName(data.session_name);
       if (data.workspace != null) setWorkspace(data.workspace);
       if (data.git_branch != null) {
@@ -375,7 +407,7 @@ function AppShell() {
     }));
 
     unsubs.push(api.on('backend:response', (data) => {
-      if (data.lines && data.target === 'chat') {
+      if (data.lines) {
         for (const line of data.lines) {
           setChatLines((prev) => [...prev, { id: nextLineId(), text: line, cls: 'msg-status' }]);
         }
@@ -686,25 +718,53 @@ function AppShell() {
         >{modelName}</span>
         {modelPickerOpen && modelDropdownPos && (
           <div className="model-dropdown" style={modelDropdownPos} onClick={(e) => e.stopPropagation()}>
-            {MODELS.map((m, i) => {
-              if (m.group) {
-                return (
-                  <div key={`hdr-${i}`} className="model-dropdown-header">{m.group}</div>
-                );
-              }
-              const isCurrent = m.id === modelName;
-              return (
-                <div
-                  key={m.id}
-                  className={`model-dropdown-item${isCurrent ? ' model-current' : ''}`}
-                  onClick={(e) => { e.stopPropagation(); setModelPickerOpen(false); window.miniAgent?.setModel(m.id); }}
-                >
-                  <span className="model-name">{m.label}</span>
-                  <span className="model-id dim">{m.id}</span>
-                  {isCurrent && <span className="model-check">\u2713</span>}
+            {/* DIRECT API section */}
+            <div className="model-dropdown-section">
+              <div className="model-dropdown-header model-dropdown-section-header">── DIRECT API ──</div>
+              {DIRECT_MODEL_GROUPS.map((grp, gi) => (
+                <div key={`direct-${gi}`}>
+                  <div className="model-dropdown-subheader">{grp.group}</div>
+                  {grp.models.map((m) => {
+                    const isCurrent = m.id === modelName;
+                    return (
+                      <div
+                        key={m.id}
+                        className={`model-dropdown-item${isCurrent ? ' model-current' : ''}`}
+                        onClick={(e) => { e.stopPropagation(); setModelPickerOpen(false); window.miniAgent?.setModel(m.id); }}
+                      >
+                        <span className="model-name">{m.label}</span>
+                        <span className="model-id dim">{m.id}</span>
+                        {isCurrent && <span className="model-check">{'\u2713'}</span>}
+                      </div>
+                    );
+                  })}
                 </div>
-              );
-            })}
+              ))}
+            </div>
+
+            {/* OPENROUTER section */}
+            <div className="model-dropdown-section">
+              <div className="model-dropdown-header model-dropdown-section-header">── OPENROUTER ──</div>
+              {OPENROUTER_MODEL_GROUPS.map((grp, gi) => (
+                <div key={`or-${gi}`}>
+                  <div className="model-dropdown-subheader">{grp.group}</div>
+                  {grp.models.map((m) => {
+                    const isCurrent = m.id === modelName;
+                    return (
+                      <div
+                        key={m.id}
+                        className={`model-dropdown-item${isCurrent ? ' model-current' : ''}`}
+                        onClick={(e) => { e.stopPropagation(); setModelPickerOpen(false); window.miniAgent?.setModel(m.id); }}
+                      >
+                        <span className="model-name">{m.label}</span>
+                        <span className="model-id dim">{m.id}</span>
+                        {isCurrent && <span className="model-check">{'\u2713'}</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>

@@ -104,10 +104,12 @@ loadEnvFile(path.join(require('os').homedir(), '.mini_agent_env'));
 
 const PROVIDER_KEY_ENV = {
   deepseek: 'DEEPSEEK_API_KEY',
+  moonshot: 'MOONSHOT_API_KEY',
   claude: 'CLAUDE_API_KEY',
   xai: 'XAI_API_KEY',
   ollama: 'OLLAMA_API_KEY',
   openrouter: 'OPENROUTER_API_KEY',
+  qwen: 'DASHSCOPE_API_KEY',
 };
 
 function detectApiKey() {

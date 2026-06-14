@@ -2,7 +2,7 @@
 cd /d "%~dp0"
 
 echo =======================================================
-echo   mini_agent -- Windows Setup (Bulletproof Version)
+echo   mini_agent -- Windows Setup
 echo =======================================================
 echo.
 
@@ -61,8 +61,8 @@ if %errorlevel% neq 0 (
 echo.
 echo [4] Installing Node Dependencies...
 cd mini_agent_electron
-call npm run build
 call npm install 
+call npm run build
 if %errorlevel% neq 0 (
     echo [FAIL] Failed to install Node dependencies.
     cd ..

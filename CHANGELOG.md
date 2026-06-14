@@ -2,6 +2,33 @@
 
 Self-modification audit trail -- what the agent changed and why.
 
+## 2026-06-14 -- Fix OpenRouter Kimi Model ID Prefix (moonshot -> moonshotai)
+### Fixed
+- **App.jsx**: Changed `moonshot/kimi-k2.7-code` -> `moonshotai/kimi-k2.7-code` and
+  `moonshot/kimi-k2.6` -> `moonshotai/kimi-k2.6` in `OPENROUTER_MODEL_GROUPS`.
+  OpenRouter uses provider prefix `moonshotai/` (not `moonshot/`). The old prefix
+  caused API error 400: "moonshot/kimi-k2.7-code is not a valid model ID".
+- **config.py**: Fixed `openrouter` provider default model from
+  `moonshot/kimi-k2.7-code` to `moonshotai/kimi-k2.7-code`.
+- Rebuilt renderer dist (`npx vite build`).
+
+## 2026-06-14 -- Fix backend:response Handler Silent Drop
+### Fixed
+- **App.jsx**: `backend:response` event handler had `data.target === 'chat'` guard,
+  but the Python backend never sets a `target` field on response messages.
+  This caused ALL slash-command responses (`/stats`, `/session`, `/workspace`)
+  and model-switch errors to be silently discarded. Removed the broken guard.
+
+## 2026-06-14 -- Model Picker Two-Section Layout
+### Changed
+- **App.jsx**: Reorganized model picker into two clear sections:
+  - `DIRECT_MODEL_GROUPS`: DeepSeek, Kimi/Moonshot, Qwen (qwen-plus/flash/3-max/3-coder), Free Tier (Gemini 3.5 Flash)
+  - `OPENROUTER_MODEL_GROUPS`: Kimi (moonshotai/), Gemini (google/), Qwen (qwen/), Free Models (:free suffix)
+  - Removed old `PROVIDER_MODELS` and `ALL_MODEL_GROUPS`; removed unused `allModelsExpanded` state
+- **style.css**: Added `.model-dropdown-section`, `.model-dropdown-section-header`, `.model-dropdown-subheader`
+- **server.py**: Added `qwen3-coder`, `gemini-3.5-flash`, `gemini-3.5-pro` to `_MODEL_TO_PROVIDER` mapping
+- **config.py**: Set OpenRouter default model to `moonshot/kimi-k2.7-code` (later corrected to `moonshotai/`)
+
 ## 2026-06-13 -- ASCII-Only Codebase Cleanup
 ### Fixed
 - **All 134 `.py` files now ASCII-only**: Removed all non-ASCII Unicode bytes

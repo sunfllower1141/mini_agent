@@ -1,5 +1,5 @@
 # mini_agent Architecture State
-# Last updated: 2026-06-13 (ASCII-only cleanup: all 134 .py files, 1000 tests pass)
+# Last updated: 2026-06-14 (fix: backend:response handler silently dropped all response messages)
 #
 # This file is the agent's map of the codebase. Update it after every
 # completed change. The agent reads this at session start for context.
@@ -305,6 +305,13 @@
     Now imports and uses ``(HTTP_CONNECT_TIMEOUT, HTTP_READ_TIMEOUT)``, increasing
     connect timeout from 10s -> 30s. Same values as ``bootstrap.py``'s session-level
     timeout, so timeouts stay consistent whether or not a Session is passed.
+
+42. **Frontend backend:response handler fix (2026-06-14)**: ``App.jsx`` had a bug where
+    the ``backend:response`` event handler checked ``data.target === 'chat'``, but the
+    Python backend NEVER sets a ``target`` field on response messages. This caused ALL
+    response messages (slash-command output, model switch errors, etc.) to be silently
+    dropped. Removed the guard — responses are now shown in the chat panel as
+    ``msg-status`` lines. (Also affected ``/stats``, ``/session``, ``/workspace`` commands.)
 
 ## Known Issues
 - `_json_rpc_shared.py` -- shared drain_stderr() utility used by lsp.py and mcp_client.py

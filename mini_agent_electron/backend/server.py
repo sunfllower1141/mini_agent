@@ -60,7 +60,7 @@ if _parent not in sys.path:
 
 from core.config import (
     resolve_workspace, init_session, parse_args,
-    _is_remote_workspace, _try_with_timeout,
+    _is_remote_workspace, _try_with_timeout, _switch_to_provider,
 )
 from core.llm import run_agent_turn
 from stream import THINKING_START, THINKING_END
@@ -259,6 +259,7 @@ class AgentRunner:
         status = {
             "type": "status",
             "model": self.config.model,
+            "provider": getattr(self.config, 'api_provider', 'deepseek'),
             "workspace": self.workspace,
             "session_name": session_name,
             "git_branch": self._git_branch,
@@ -710,13 +711,63 @@ class AgentRunner:
         self._cancel_event.set()
 
     def set_model(self, model: str) -> None:
-        """Switch the LLM model on the fly without restarting the backend."""
+        """Switch the LLM model (and provider if needed) on the fly."""
         if not model:
             return
+        provider = getattr(self.config, 'api_provider', '')
+        old_provider = provider
+        prefix = provider + '/'
+
+        # Map of bare model names -> their native provider
+        _MODEL_TO_PROVIDER = {
+            'deepseek-v4-pro': 'deepseek',
+            'deepseek-v4-flash': 'deepseek',
+            'deepseek-chat': 'deepseek',
+            'kimi-k2.7-code': 'moonshot',
+            'kimi-k2.6': 'moonshot',
+            'claude-opus-4-8': 'claude',
+            'claude-sonnet-4-5': 'claude',
+            'claude-haiku-4-5': 'claude',
+            'grok-4.3': 'xai',
+            'grok-4.1': 'xai',
+            'qwen-plus': 'qwen',
+            'qwen-flash': 'qwen',
+            'qwen3-max': 'qwen',
+            'qwen3-coder': 'qwen',
+            'gemini-3.5-flash': 'gemini',
+            'gemini-3.5-pro': 'gemini',
+            'qwen3.6:27b': 'ollama',
+        }
+
+        if model.startswith(prefix):
+            # Model matches current provider prefix (e.g. "deepseek/deepseek-v4-flash"
+            # when provider is "deepseek"). Strip prefix for native API.
+            model = model[len(prefix):]
+        elif '/' in model:
+            # Model has a different provider prefix (e.g. "moonshotai/kimi-k2.7-code"
+            # when provider is "deepseek"). Switch to OpenRouter and keep the prefix.
+            new_provider = 'openrouter'
+            err = _switch_to_provider(self.config, new_provider)
+            if err:
+                send_msg({"type": "response", "lines": [f"Error: {err}"]})
+                return
+            provider = new_provider
+        elif model in _MODEL_TO_PROVIDER:
+            # Bare model name — switch to its native provider.
+            new_provider = _MODEL_TO_PROVIDER[model]
+            if new_provider != provider:
+                err = _switch_to_provider(self.config, new_provider)
+                if err:
+                    send_msg({"type": "response", "lines": [f"Error: {err}"]})
+                    return
+                provider = new_provider
+        # else: bare model name, keep current provider
+
         old = self.config.model
         self.config.model = model
         self.send_status()
-        send_msg({"type": "response", "lines": [f"Model: {old} -> {model}"]})
+        provider_tag = f" (→ {provider})" if provider != old_provider else ""
+        send_msg({"type": "response", "lines": [f"Model: {old} -> {model}{provider_tag}"]})
 
 
 # ---------------------------------------------------------------------------

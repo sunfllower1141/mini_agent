@@ -97,6 +97,38 @@ PROVIDER_DEFAULTS: dict[str, ProviderDefaults] = {
         context_window=256_000,  # Kimi K2.7 native context length
         fallback_providers=("deepseek", "claude"),  # fall back to native keys on OpenRouter outage
     ),
+    "moonshot": ProviderDefaults(
+        model="kimi-k2.7-code",  # Kimi K2.7 Code (latest)
+        sub_agent_model="kimi-k2.6",  # cheaper worker for sub-agents
+        api_url="https://api.moonshot.ai/v1/chat/completions",
+        max_tokens=200_000,
+        context_window=256_000,  # Kimi K2.7 native context length
+        input_price=0,    # Moonshot pricing TBD
+        output_price=0,
+    ),
+    "qwen": ProviderDefaults(
+        model="qwen-plus",  # Alibaba Cloud Qwen-Plus
+        sub_agent_model="qwen-flash",  # cheaper worker for sub-agents
+        api_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
+        max_tokens=200_000,
+        context_window=131_072,
+        input_price=0,  # Qwen pricing varies by region
+        output_price=0,
+    ),
+    "gemini": ProviderDefaults(
+        model="gemini-3.5-flash",  # free tier available
+        sub_agent_model="gemini-3.5-flash",
+        api_url="https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        max_tokens=65_536,
+        context_window=1_000_000,
+    ),
+    "openai": ProviderDefaults(
+        model="gpt-5.1",
+        sub_agent_model="gpt-5.1-mini",
+        api_url="https://api.openai.com/v1/chat/completions",
+        max_tokens=128_000,
+        context_window=256_000,
+    ),
 }
 
 # Legacy module-level aliases (kept for backward compatibility with tests
@@ -161,7 +193,20 @@ ENV_OLLAMA_API_KEY   = "OLLAMA_API_KEY"
 ENV_OPENROUTER_MODEL = "OPENROUTER_MODEL"
 ENV_OPENROUTER_API_URL = "OPENROUTER_API_URL"
 ENV_OPENROUTER_API_KEY = "OPENROUTER_API_KEY"
-ENV_API_PROVIDER     = "API_PROVIDER"  # "deepseek", "claude", "xai", "openrouter", or "ollama" -- overrides auto-detection
+ENV_MOONSHOT_API_KEY  = "MOONSHOT_API_KEY"
+ENV_MOONSHOT_API_URL  = "MOONSHOT_API_URL"
+ENV_MOONSHOT_MODEL    = "MOONSHOT_MODEL"
+ENV_QWEN_API_KEY      = "QWEN_API_KEY"
+ENV_QWEN_API_URL      = "QWEN_API_URL"
+ENV_QWEN_MODEL        = "QWEN_MODEL"
+ENV_DASHSCOPE_API_KEY  = "DASHSCOPE_API_KEY"
+ENV_GEMINI_API_KEY    = "GEMINI_API_KEY"
+ENV_GOOGLE_API_KEY    = "GOOGLE_API_KEY"  # alt name for Gemini
+ENV_GEMINI_MODEL      = "GEMINI_MODEL"
+ENV_GEMINI_API_URL    = "GEMINI_API_URL"
+ENV_OPENAI_MODEL      = "OPENAI_MODEL"
+ENV_OPENAI_API_URL    = "OPENAI_API_URL"
+ENV_API_PROVIDER     = "API_PROVIDER"  # "deepseek", "claude", "xai", "openrouter", "moonshot", "qwen", "gemini", "openai", or "ollama" -- overrides auto-detection
 ENV_AGENT_WORKSPACE  = "AGENT_WORKSPACE"
 ENV_EXA_API_KEY      = "EXA_API_KEY"
 ENV_OPENAI_API_KEY   = "OPENAI_API_KEY"
@@ -383,6 +428,10 @@ _PROVIDER_KEY_ENV: dict[str, str] = {
     "xai": ENV_XAI_API_KEY,
     "ollama": ENV_OLLAMA_API_KEY,
     "openrouter": ENV_OPENROUTER_API_KEY,
+    "moonshot": ENV_MOONSHOT_API_KEY,
+    "qwen": ENV_DASHSCOPE_API_KEY,
+    "gemini": ENV_GEMINI_API_KEY,
+    "openai": ENV_OPENAI_API_KEY,
 }
 # Provider -> env var name for API URL override.
 _PROVIDER_URL_ENV: dict[str, str] = {
@@ -391,6 +440,10 @@ _PROVIDER_URL_ENV: dict[str, str] = {
     "xai": ENV_XAI_API_URL,
     "ollama": ENV_OLLAMA_API_URL,
     "openrouter": ENV_OPENROUTER_API_URL,
+    "moonshot": ENV_MOONSHOT_API_URL,
+    "qwen": ENV_QWEN_API_URL,
+    "gemini": ENV_GEMINI_API_URL,
+    "openai": ENV_OPENAI_API_URL,
 }
 # Provider -> env var name for model override.
 _PROVIDER_MODEL_ENV: dict[str, str] = {
@@ -398,10 +451,46 @@ _PROVIDER_MODEL_ENV: dict[str, str] = {
     "xai": ENV_XAI_MODEL,
     "ollama": ENV_OLLAMA_MODEL,
     "openrouter": ENV_OPENROUTER_MODEL,
+    "moonshot": ENV_MOONSHOT_MODEL,
+    "qwen": ENV_QWEN_MODEL,
+    "gemini": ENV_GEMINI_MODEL,
+    "openai": ENV_OPENAI_MODEL,
 }
 
 # Auto-detection priority order (first provider with an available key wins).
-_AUTO_DETECT_ORDER = ["deepseek", "claude", "xai", "ollama", "openrouter"]
+_AUTO_DETECT_ORDER = ["deepseek", "moonshot", "claude", "xai", "qwen", "gemini", "openai", "ollama", "openrouter"]
+
+
+def _switch_to_provider(config: "AgentConfig", provider: str) -> str | None:
+    """Switch *config* to *provider*, updating api_url, api_key, and model defaults.
+
+    Returns None on success, or an error message string if the provider's API
+    key env var is not set.
+    """
+    defaults = PROVIDER_DEFAULTS.get(provider)
+    if defaults is None:
+        return f"Unknown provider: {provider}"
+
+    # Check API key
+    key_env = _PROVIDER_KEY_ENV.get(provider)
+    api_key = os.environ.get(key_env) if key_env else None
+    if not api_key and provider not in ("ollama",):
+        return f"{provider.upper()}_API_KEY is not set. Set the {key_env} environment variable."
+
+    config.api_url = defaults.api_url
+    config.api_key = api_key or config.api_key
+    # Only swap model defaults if the current model belongs to the *old* provider
+    # (i.e. user hasn't explicitly overridden it).  We check by comparing against
+    # all known provider default models.
+    old_prov = config.api_provider
+    config.api_provider = provider
+    old_provider_defaults = PROVIDER_DEFAULTS.get(old_prov)
+    if old_provider_defaults and config.model in (old_provider_defaults.model, old_provider_defaults.sub_agent_model):
+        config.model = defaults.model
+        config.sub_agent_model = defaults.sub_agent_model
+    config.max_tokens = defaults.max_tokens
+    config.context_window = defaults.context_window
+    return None
 
 
 def _detect_provider() -> str | None:
