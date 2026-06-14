@@ -62,6 +62,7 @@ function AppShell() {
   const [isLive, setIsLive] = useState(false);
   const [turnCountVal, setTurnCountVal] = useState(null);
   const [tokenCountVal, setTokenCountVal] = useState(null);
+  const [elapsedSec, setElapsedSec] = useState(null);
   const [inputDisabled, setInputDisabled] = useState(false);
   const [thinkingBlocks, setThinkingBlocks] = useState([]);
 
@@ -70,9 +71,31 @@ function AppShell() {
   const chatLogRef = useRef(null);
   const inThinkingRef = useRef(false);
   const submitTimeoutRef = useRef(null);
+  const timerRef = useRef(null);
+  const turnStartRef = useRef(null);
   const toolOutputStack = useRef([]); // stack of buffers for parallel tool calls
   const lineIdRef = useRef(0); // monotonically increasing ID for stable React keys
   const nextLineId = useCallback(() => ++lineIdRef.current, []);
+
+  const startTimer = useCallback(() => {
+    if (timerRef.current) return; // already running
+    turnStartRef.current = Date.now();
+    setElapsedSec(0);
+    timerRef.current = setInterval(() => {
+      setElapsedSec(Math.floor((Date.now() - turnStartRef.current) / 1000));
+    }, 1000);
+  }, []);
+
+  const stopTimer = useCallback(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    if (turnStartRef.current) {
+      setElapsedSec(Math.floor((Date.now() - turnStartRef.current) / 1000));
+      turnStartRef.current = null;
+    }
+  }, []);
   const [showSettings, setShowSettings] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const [theme, setTheme] = useState(() => localStorage.getItem('mini_agent_theme') || 'dark');
@@ -283,6 +306,7 @@ function AppShell() {
 
     unsubs.push(api.on('stream:error', (data) => {
       clearTimeout(submitTimeoutRef.current);
+      stopTimer();
       chatStream.flush();
       chatStream.reset();
       setChatLines((prev) => [...prev, { id: nextLineId(), text: `Error: ${data.message}`, cls: 'msg-error' }]);
@@ -307,10 +331,12 @@ function AppShell() {
     unsubs.push(api.on('backend:turn_start', () => {
       setIsLive(true);
       setInputDisabled(true);
+      startTimer();
     }));
 
     unsubs.push(api.on('backend:idle', () => {
       clearTimeout(submitTimeoutRef.current);
+      stopTimer();
       setIsLive(false);
       setInputDisabled(false);
       inputRef.current?.focus();
@@ -697,6 +723,9 @@ function AppShell() {
         )}
         {tokenCountVal != null && (
           <span id="token-counter">{'⊙'} <span id="token-count">{tokenCountVal}</span> tok</span>
+        )}
+        {elapsedSec != null && (
+          <span id="timer">⏱ {elapsedSec}s</span>
         )}
         <div className="status-right">
           {restoredCount != null && (
