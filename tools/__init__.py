@@ -544,9 +544,9 @@ def execute_tool(
     # --- console: success / failure status ---
     _turn = getattr(_TOOL_CONTEXT, '_turn_count', 0)
     if result.success:
-        _sys.stderr.write(f"[turn {_turn}] '{name}' V\n")
+        _sys.stderr.write(f"[turn {_turn}] '{name}' OK\n")
     else:
-        _sys.stderr.write(f"[turn {_turn}] '{name}' X -- {result.content[:120]}\n")
+        _sys.stderr.write(f"[turn {_turn}] '{name}' ERR -- {result.content[:120]}\n")
     _sys.stderr.flush()
 
     # Normalize: every failed result gets a _build_error_hint so the LLM
