@@ -469,6 +469,11 @@ function handlePythonMessage(msg) {
       console.log('[main] Agent idle');
       break;
 
+    case 'heartbeat':
+      // Daemon heartbeat from Python backend -- resets watchdog via stdout
+      // data handler (no renderer action needed).
+      break;
+
     case 'error':
       win.webContents.send('stream:error', data);
       break;

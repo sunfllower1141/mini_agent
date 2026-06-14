@@ -76,6 +76,41 @@ from emoji_svg import clean_text
 
 _stdout_lock = threading.Lock()
 
+# ---------------------------------------------------------------------------
+# Heartbeat -- prevents the Electron watchdog from killing the backend during
+# long-running blocking operations (e.g. 5-min run_shell, slow API calls).
+# A daemon thread writes {"type":"heartbeat"} to stdout every 30 seconds.
+# If ALL threads are deadlocked (including this one), heartbeats stop and
+# the watchdog correctly fires.  If the backend is just busy, heartbeats
+# keep coming and the watchdog stays quiet.
+# ---------------------------------------------------------------------------
+_HEARTBEAT_INTERVAL = 30  # seconds
+
+def _start_heartbeat(stop_event: threading.Event) -> threading.Thread:
+    """Start a daemon thread that sends heartbeat messages to stdout.
+
+    Args:
+        stop_event: Set this event to stop the heartbeat thread cleanly.
+
+    Returns:
+        The started thread (daemon=True, so it won't block process exit).
+    """
+    import time as _time
+
+    def _loop() -> None:
+        while not stop_event.wait(_HEARTBEAT_INTERVAL):
+            try:
+                send_msg({"type": "heartbeat"})
+            except Exception:
+                # If stdout is broken, we can't do anything useful.
+                # The watchdog will detect this and restart the backend.
+                break
+
+    t = threading.Thread(target=_loop, daemon=True, name="heartbeat")
+    t.start()
+    return t
+
+
 def send_msg(msg: dict) -> None:
     """Write a JSON message to stdout followed by newline, then flush.
 
@@ -685,6 +720,11 @@ def main() -> None:
 
     runner = AgentRunner()
 
+    # Start heartbeat so the Electron watchdog doesn't kill us during long
+    # blocking operations (run_shell, slow API calls, large file reads).
+    _heartbeat_stop = threading.Event()
+    _start_heartbeat(_heartbeat_stop)
+
     # Send initial ready + status
     send_msg({"type": "ready", "model": runner.config.model})
     runner.send_status()
@@ -779,6 +819,7 @@ def main() -> None:
             send_msg({"type": "error", "message": clean_text(f"Unknown message type: {msg_type}")})
 
     # Cleanup
+    _heartbeat_stop.set()
     try:
         runner.messages = runner.memory.save(runner.messages)
         runner.memory.close()
