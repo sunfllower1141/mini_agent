@@ -57,6 +57,9 @@ class AgentContext:
         self._state_txt_injected: bool = False   # one-time STATE.txt context injected this session
         self._session_start_head: str | None = None  # git HEAD hash at session start (for auto-handoff)
         self._consecutive_read_only_turns: int = 0  # turns of pure reads (reset on write/shell)
+        # Discord bot integration: set by discord_bot.py before each turn
+        self.discord_guild_id: int | None = None
+        self.discord_token: str | None = None
 
 
 _TOOL_CONTEXT_VAR: contextvars.ContextVar[AgentContext] = contextvars.ContextVar(
@@ -105,6 +108,8 @@ _CTX_DISPATCH = {
     "exa_api_key": lambda ctx, v: setattr(ctx, "exa_api_key", v),
     "openai_api_key": lambda ctx, v: setattr(ctx, "openai_api_key", v),
     "workspace": lambda ctx, v: setattr(ctx, "workspace", v),
+    "discord_guild_id": lambda ctx, v: setattr(ctx, "discord_guild_id", v),
+    "discord_token": lambda ctx, v: setattr(ctx, "discord_token", v),
 }
 
 

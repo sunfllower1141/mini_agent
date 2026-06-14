@@ -275,6 +275,82 @@ _TOOL_SUMMARIES["write_session_handoff"] = (
     lambda args: "write_session_handoff()"
 )
 
+# -- discord_search: search Discord server message history --
+def _discord_search(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
+    """Search Discord server channel history for a keyword via REST API."""
+    import requests as _requests
+
+    token = _TOOL_CONTEXT.discord_token
+    guild_id = _TOOL_CONTEXT.discord_guild_id
+    if not token or not guild_id:
+        return ToolResult(False, "", "Discord not connected (no guild/token in context).")
+
+    query = (args.get("query") or "").strip()
+    if not query:
+        return ToolResult(False, "", "Missing required 'query' parameter.")
+
+    limit = min(int(args.get("limit", 15)), 30)
+    query_lower = query.lower()
+
+    headers = {"Authorization": f"Bot {token}", "Content-Type": "application/json"}
+    base = "https://discord.com/api/v10"
+
+    results: list[dict] = []
+
+    try:
+        # Get all text channels
+        resp = _requests.get(f"{base}/guilds/{guild_id}/channels", headers=headers, timeout=10)
+        if resp.status_code != 200:
+            return ToolResult(False, "", f"Discord API error: {resp.status_code} {resp.text[:200]}")
+        channels = resp.json()
+    except Exception as e:
+        return ToolResult(False, "", f"Failed to list channels: {e}")
+
+    for ch in channels:
+        if ch.get("type") != 0:  # GUILD_TEXT only
+            continue
+        if len(results) >= limit:
+            break
+        try:
+            resp = _requests.get(
+                f"{base}/channels/{ch['id']}/messages?limit=100",
+                headers=headers, timeout=10,
+            )
+            if resp.status_code != 200:
+                continue
+            messages = resp.json()
+            for m in messages:
+                content = m.get("content", "")
+                if query_lower in content.lower():
+                    results.append({
+                        "channel": ch.get("name", f"#{ch['id']}"),
+                        "author": m["author"]["username"],
+                        "timestamp": m.get("timestamp", ""),
+                        "content": content[:400],
+                        "jump_url": f"https://discord.com/channels/{guild_id}/{ch['id']}/{m['id']}",
+                    })
+                    if len(results) >= limit:
+                        break
+        except Exception:
+            continue
+
+    if not results:
+        return ToolResult(True, f"No Discord messages found matching **{query}**.")
+
+    out_lines = [f"**{len(results)} Discord match(es) for \"{query}\":**\n"]
+    for r in results:
+        ts = r["timestamp"][:16].replace("T", " ") if r["timestamp"] else "?"
+        out_lines.append(
+            f"**#{r['channel']}** — {r['author']} ({ts})\n"
+            f">>> {r['content'][:300]}\n"
+            f"🔗 {r['jump_url']}\n"
+        )
+
+    return ToolResult(True, "\n".join(out_lines))
+
+_TOOL_DISPATCH["discord_search"] = _discord_search
+_TOOL_SUMMARIES["discord_search"] = lambda args: f"discord_search({args.get('query', '?')})"
+
 # -- use_skill gate: lazy tool loading --
 from tools.skills import USE_SKILL_SCHEMA, SKILL_LIST_SCHEMA, SKILL_VIEW_SCHEMA, _use_skill, _skill_list, _skill_view  # noqa: E402
 

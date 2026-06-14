@@ -1609,4 +1609,25 @@ TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "discord_search",
+            "description": "Search recent message history across all channels in the connected Discord server. Use this when asked about conversations, links, or information shared in Discord. Returns matching messages with channel name, author, timestamp, snippet, and jump URL.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Keyword or phrase to search for in Discord messages."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Optional: max results to return (default 15, max 30)."
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
 ]
