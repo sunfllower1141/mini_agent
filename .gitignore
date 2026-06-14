@@ -43,6 +43,10 @@ reports/
 error_traces.log
 mini_agent_electron/electron-dist/
 
+# Discord bot runtime
+discord_bot.log
+.bot.pid
+
 # Node modules
 node_modules/
 package-lock.json

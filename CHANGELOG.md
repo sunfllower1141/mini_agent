@@ -2,6 +2,28 @@
 
 Self-modification audit trail -- what the agent changed and why.
 
+## 2026-06-14 -- Workspace Organization Audit & Doc Drift Fix
+
+### Changed
+- **`.mini_agent.rules`**: Updated Testing section to reflect `tests/` directory
+  (not root `test_*.py`). Synced Module Map with STATE.txt — added 19 missing
+  module entries (agent_spawn, agent_collect, result, context, reservations,
+  skills, error_hints, failure_learning, tool_graph, _json_rpc_shared,
+  desktop_ops, macos_ops, browser_ops, memory_consolidation, memory_core,
+  discord_bot, voice_handler, workspace_bot, skills/).
+- **`.mini_agent/rules.toml`**: Fixed `[rules.test_files]` pattern from
+  `test_*.py` → `tests/test_*.py` (old pattern never fired — no root-level tests).
+- **`.gitignore`**: Added `discord_bot.log` and `.bot.pid` to prevent
+  workspace log/pid leakage (logs should live at `~/.mini_agent/logs/`).
+- **`TASKS.md`**: Fixed `tools/tool_result.py` → `tools/result.py`. Updated
+  agent orchestration section for agent_ops.py split (spawn → agent_spawn,
+  collect → agent_collect). Updated Testing section to `tests/` directory.
+
+### Why
+Audit revealed 5 documentation drift issues from rapid iteration (Hermes skills,
+agent_ops split, discord bot additions). No structural problems — directories
+match architecture, no missing files or circular import landmines.
+
 ## 2026-06-14 -- Tool Result Cache with TTL
 ### Changed
 - **tools/__init__.py**: Added 30-second TTL to the existing `_TOOL_CACHE`. Cache

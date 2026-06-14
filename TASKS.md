@@ -38,7 +38,9 @@ Read before starting work to orient yourself in the codebase.
 - **`logging_setup.py`** -- Structured logging for tool calls
 
 ### Modify Agent Orchestration
-- **`tools/agent_ops.py`** -- spawn, status, collect, cancel, extend sub-agents
+- **`tools/agent_ops.py`** -- extend, cancel, wait, restore, session_stats, recall_turn, remember, read_image
+- **`tools/agent_spawn.py`** -- spawn_agent, _spawn_one (sub-agent spawning)
+- **`tools/agent_collect.py`** -- agent_status, collect_agent, collect_any (status & collection)
 - **`tools/agent_messages.py`** -- Typed inter-agent messaging (handoff, fan-out/in, pipeline)
 - **`tools/agent_patterns.py`** -- fan_out, fan_in, pipeline, barrier, scatter_gather
 - **`agents/sub_agent.py`** -- Sub-agent engine, turn budget, pruning
@@ -46,7 +48,7 @@ Read before starting work to orient yourself in the codebase.
 ### Modify Tool Context / Reservations
 - **`tools/context.py`** -- AgentContext, _ContextProxy, _TOOL_CONTEXT, set_context
 - **`tools/reservations.py`** -- File reservation system (per-agent file locks)
-- **`tools/tool_result.py`** -- ToolResult dataclass, JSON repair, error formatting
+- **`tools/result.py`** -- ToolResult dataclass, JSON repair, error formatting
 
 ### Modify Planning / Task Tracking
 - **`tools/agent_todos.py`** -- plan, plan_status, todo_write, todo_read, write_scratchpad
@@ -91,8 +93,8 @@ Read before starting work to orient yourself in the codebase.
 ## Testing
 
 ### Add/Modify Tests
-- Root `test_*.py` files -- Unit tests using unittest.TestCase
-- **`tests/`** directory -- Tests with supporting files, fixtures, mock servers
+- **`tests/`** directory -- Unit tests using unittest.TestCase
+- **`tests/`** subdirectories -- Tests with supporting files, fixtures, mock servers
 
 ### Test Infrastructure
 - **`conftest.py`** -- Shared fixtures, mocks, test helpers

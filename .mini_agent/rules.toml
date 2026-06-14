@@ -9,12 +9,12 @@
 #   instruction = """...""" # injected into context when files match
 
 [rules.test_files]
-pattern = "test_*.py"
+pattern = "tests/test_*.py"
 instruction = """
 When modifying test files:
 1. Each test function needs a docstring explaining what it validates
 2. Use pytest fixtures where appropriate; prefer unittest.TestCase for consistency
-3. Run the specific test file after changes: `python3 -m pytest test_<name>.py -v`
+3. Run the specific test file after changes: `python3 -m pytest tests/test_<name>.py -v`
 4. If adding new assertions, verify they fail correctly before they pass
 """
 
