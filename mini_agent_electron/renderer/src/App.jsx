@@ -406,6 +406,10 @@ function AppShell() {
       inputRef.current?.focus();
     }));
 
+    unsubs.push(api.on('stream:status', (data) => {
+      setChatLines((prev) => [...prev, { id: nextLineId(), text: data.message, cls: 'msg-status' }]);
+    }));
+
     unsubs.push(api.on('backend:response', (data) => {
       if (data.lines) {
         for (const line of data.lines) {

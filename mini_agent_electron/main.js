@@ -165,6 +165,7 @@ let _shuttingDown = false;  // set during window-close to prevent restart loops
 // on Windows that can't be killed from userspace).
 let _restartCount = 0;
 let _restartWindowStart = 0;
+let _notifyRestarted = false; // set after crash; cleared once backend sends 'ready'
 const _MAX_RESTARTS = 3;
 const _RESTART_WINDOW_MS = 30000;
 
@@ -348,6 +349,7 @@ function spawnPythonBackend(workspacePath) {
       const win = BrowserWindow.getAllWindows()[0];
       const restartMsg = `Backend crashed (exit ${code}). Restarting (attempt ${_restartCount}/${_MAX_RESTARTS})...`;
       if (win) win.webContents.send('stream:error', { message: restartMsg });
+      _notifyRestarted = true; // notify user once backend comes back
       const restartWorkspace = workspacePath;
       // Exponential backoff: 1.5s -> 3s -> 6s
       const delay = 1500 * Math.pow(2, _restartCount - 1);
@@ -432,6 +434,10 @@ function handlePythonMessage(msg) {
       flushPending();
       lastStatus = { ...lastStatus, ready: true, model: data.model };
       win.webContents.send('backend:status', { ready: true, model: data.model });
+      if (_notifyRestarted) {
+        _notifyRestarted = false;
+        win.webContents.send('stream:status', { message: 'Backend restarted successfully.' });
+      }
       break;
 
     case 'token':
