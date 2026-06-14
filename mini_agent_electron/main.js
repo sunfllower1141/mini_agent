@@ -155,6 +155,7 @@ let pythonProcess = null;
 let pythonReady = false;
 let pendingRequests = [];
 let lastStatus = null; // cached status for renderer to fetch on mount
+let workspacePath = null;  // module-scoped so watchdog/restart closures can use it
 let _shuttingDown = false;  // set during window-close to prevent restart loops
 // Restart throttle: prevent infinite restart loops that spawn thousands of
 // processes when the Python backend keeps crashing (e.g. hung proc.communicate()
@@ -643,7 +644,7 @@ function setupIPC() {
 
     // Resolve workspace (same logic as app.whenReady)
     const persistedFile = path.join(require('os').homedir(), '.mini_agent_workspace');
-    let workspacePath = null;
+    workspacePath = null;
     if (fs.existsSync(persistedFile)) {
       const persisted = fs.readFileSync(persistedFile, 'utf-8').trim();
       if (persisted && fs.existsSync(persisted)) {
@@ -800,7 +801,7 @@ app.whenReady().then(() => {
   } else {
     // Resolve workspace: CLI flag > persisted file > env var > cwd
     const workspaceArg = process.argv.find(a => a.startsWith('--workspace='));
-    let workspacePath = null;
+    workspacePath = null;
     if (workspaceArg) {
       workspacePath = workspaceArg.split('=')[1];
     } else {
