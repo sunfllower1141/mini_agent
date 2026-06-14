@@ -1,2 +1,0 @@
-hex: 74 68 65 6d 65 2d 63 68 65 63 6b 22 3e 5c 75 32 37 31 33 3c 2f 73 70 61 6e 3e 7d 0d 0a 20
-repr: 'theme-check">\\u2713</span>}\r\n '

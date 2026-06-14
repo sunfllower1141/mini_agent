@@ -71,7 +71,7 @@ def pytest_ignore_collect(collection_path, config):
 
     if config.getoption("--run-benchmarks"):
         return False
-    if collection_path.name == "test_benchmarks.py":
+    if collection_path.name in ("test_benchmarks.py", "test_eval_integration.py"):
         return True
     return False
 
@@ -94,7 +94,8 @@ def pytest_collection_modifyitems(config, items) -> None:
             deselected.append(item)
             continue
         # Separate benchmarks for ordering
-        if os.path.basename(item.location[0]) == "test_benchmarks.py":
+        basename = os.path.basename(item.location[0])
+        if basename in ("test_benchmarks.py", "test_eval_integration.py"):
             benchmark_items.append(item)
         else:
             other_items.append(item)

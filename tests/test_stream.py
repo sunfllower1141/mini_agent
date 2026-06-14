@@ -416,7 +416,7 @@ def test_on_tool_ready_fires_only_once_per_index():
 # ---------------------------------------------------------------------------
 
 def test_reasoning_without_content():
-    """Only reasoning, no content -- no THINKING_END emitted."""
+    """Only reasoning, no content -- THINKING_END is now always emitted to close the block."""
     lines = [
         _data({"choices": [{"delta": {"reasoning_content": "just thinking"}}]}),
         "data: [DONE]",
@@ -426,7 +426,8 @@ def test_reasoning_without_content():
     assert msg["content"] == ""
     assert msg["reasoning_content"] == "just thinking"
     assert THINKING_START in tokens
-    assert THINKING_END not in tokens
+    # THINKING_END is emitted to prevent tokens from getting stuck in thinking panel
+    assert THINKING_END in tokens
 
 
 def test_reasoning_header_printed_only_once():

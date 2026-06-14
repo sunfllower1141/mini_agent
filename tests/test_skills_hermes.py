@@ -287,9 +287,9 @@ class TestSkillListAndView(unittest.TestCase):
 
     def test_skill_view_known(self):
         skills.reload_skills()
-        doc = skills.skill_view("git")
+        doc = skills.skill_view("test")
         self.assertIsNotNone(doc)
-        self.assertIn("Skill: git", doc)
+        self.assertIn("Skill: test", doc)
 
     def test_skill_view_unknown(self):
         skills.reload_skills()
@@ -329,14 +329,14 @@ class TestActiveSkillContent(unittest.TestCase):
 
     def test_returns_content_for_active_skill(self):
         skills.reload_skills()
-        skills.activate_skill("git")
+        skills.activate_skill("test")
         content = skills.get_active_skill_content()
-        self.assertIn("Skill: git", content)
-        self.assertIn("# Git Skill", content)
+        self.assertIn("Skill: test", content)
+        self.assertIn("# Test Skill", content)
 
     def test_only_injects_once_per_session(self):
         skills.reload_skills()
-        skills.activate_skill("git")
+        skills.activate_skill("test")
         first = skills.get_active_skill_content()
         self.assertNotEqual(first, "")
 
@@ -345,12 +345,12 @@ class TestActiveSkillContent(unittest.TestCase):
 
     def test_multiple_skills_inject_once_each(self):
         skills.reload_skills()
-        skills.activate_skill("git")
         skills.activate_skill("test")
+        skills.activate_skill("web")
 
         content = skills.get_active_skill_content()
-        self.assertIn("Skill: git", content)
         self.assertIn("Skill: test", content)
+        self.assertIn("Skill: web", content)
 
         second = skills.get_active_skill_content()
         self.assertEqual(second, "")
@@ -377,10 +377,10 @@ class TestUseSkillReturnsDocs(unittest.TestCase):
 
     def test_use_skill_returns_skill_documentation(self):
         skills.reload_skills()
-        result = skills._use_skill({"name": "git"})
+        result = skills._use_skill({"name": "test"})
         self.assertTrue(result.success)
-        self.assertIn("Skill: git", result.content)
-        self.assertIn("# Git Skill", result.content)
+        self.assertIn("Skill: test", result.content)
+        self.assertIn("# Test Skill", result.content)
 
     def test_use_skill_unknown_no_docs(self):
         skills.reload_skills()
@@ -416,9 +416,9 @@ class TestSkillToolWrappers(unittest.TestCase):
 
     def test_skill_view_tool_known(self):
         skills.reload_skills()
-        result = skills._skill_view({"name": "git"})
+        result = skills._skill_view({"name": "test"})
         self.assertTrue(result.success)
-        self.assertIn("Skill: git", result.content)
+        self.assertIn("Skill: test", result.content)
 
     def test_skill_view_tool_unknown(self):
         skills.reload_skills()
