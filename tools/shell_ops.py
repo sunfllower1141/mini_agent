@@ -337,7 +337,8 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
                 else:
                     term_cmd += ["-e", "bash", "-c", wrap]
                 proc = subprocess.run(term_cmd, cwd=rg.workspace_root,
-                                      timeout=timeout)
+                                      timeout=timeout,
+                                      **(_WINDOWS_POPEN_KWARGS if _WINDOWS else {}))
                 return ToolResult(success=(proc.returncode == 0),
                                   content=f"exit_code={proc.returncode}")
 
@@ -637,7 +638,8 @@ def _search_with_rg(root_dir: str, pattern: str, use_regex: bool, ignore_case: b
         cmd.append("--ignore-case")
     cmd.extend(["--", pattern, root_dir])
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15,
+                                **(_WINDOWS_POPEN_KWARGS if _WINDOWS else {}))
         # Check for rg errors (regex parse errors, etc.)
         if result.returncode != 0 and result.stderr.strip():
             err = result.stderr.strip().split("\n")[0]
@@ -917,6 +919,7 @@ def _verify(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
                 ["ruff", "check", "--select", "F401,F811",
                  "--output-format", "concise", root],
                 capture_output=True, text=True, timeout=10,
+                **(_WINDOWS_POPEN_KWARGS if _WINDOWS else {}),
             )
             if r.returncode == 0 and not r.stdout.strip():
                 results.append("ruff: no unused/redefined imports found")
@@ -930,6 +933,7 @@ def _verify(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
             r = subprocess.run(
                 ["pyflakes", root],
                 capture_output=True, text=True, timeout=10,
+                **(_WINDOWS_POPEN_KWARGS if _WINDOWS else {}),
             )
             stdout = r.stdout
             if (r.returncode == 0
