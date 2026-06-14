@@ -31,6 +31,11 @@ keys
 .mini_agent_scratchpad.md
 result.txt
 
+# Semantic search cache (auto-generated)
+.mini_agent_semantic.npz
+.mini_agent_semantic.npz.tmp.npz
+.mini_agent_semantic_meta.json
+
 # Local data mounted in workspace
 .mini_agent_memory_session_default.db*
 .mini_agent_memory_session_images.db

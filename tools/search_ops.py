@@ -7,10 +7,19 @@ Tools: find_symbol, find_usages, semantic_search, web_search
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re as _re
 import threading
 from typing import Any
+
+# Suppress HF Hub warnings about unauthenticated requests at module level.
+# SentenceTransformer loads models from HuggingFace Hub, which emits
+# "You are sending unauthenticated requests to the HF Hub" warnings
+# via X-HF-Warning response headers.  These are harmless for public
+# models (all-MiniLM-L6-v2 is public) but noisy at startup.
+os.environ.setdefault("HF_HUB_VERBOSITY", "error")
+logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
 
 from core.safety import ReadSafetyGate, WriteSafetyGate
 from tools import _register, _summarize, ToolResult, _TOOL_CONTEXT
@@ -331,6 +340,7 @@ _SEM_CACHE_DIRTY = False  # set when store changes, cleared on disk write
 # --- Semantic persistence ---
 _SEM_CACHE_FILE = ".mini_agent_semantic.npz"
 _SEM_META_FILE = ".mini_agent_semantic_meta.json"
+_SEM_MODEL_NAME = "isuruwijesiri/all-MiniLM-L6-v2-code-search-512"
 
 
 def _sem_save_cache(root: str) -> None:
@@ -354,6 +364,9 @@ def _sem_save_cache(root: str) -> None:
 
         meta_path = os.path.join(root, _SEM_META_FILE)
         npz_path = os.path.join(root, _SEM_CACHE_FILE)
+
+        # Embed model name so cache auto-invalidates on model change
+        meta["_model"] = _SEM_MODEL_NAME
 
         # Write meta JSON
         tmp_meta = meta_path + ".tmp"
@@ -382,9 +395,12 @@ def _sem_load_cache(root: str) -> bool:
         return False
 
     try:
-        # Check cache freshness: all cached files must exist and have same mtime
+        # Check cache freshness: model must match and all cached files must exist
         with open(meta_path, "r", encoding="utf-8") as f:
             meta = json.load(f)
+        # Auto-invalidate if embedding model changed
+        if meta.get("_model", "") != _SEM_MODEL_NAME:
+            return False
         stale = False
         for fpath, info in meta.items():
             if not os.path.exists(fpath):
@@ -487,7 +503,7 @@ def _sem_preload() -> None:
         global _SEM_MODEL
         try:
             from sentence_transformers import SentenceTransformer
-            _SEM_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+            _SEM_MODEL = SentenceTransformer(_SEM_MODEL_NAME)
         except Exception:
             pass  # model load failed -- _sem_get_model() will retry on demand
         finally:
@@ -531,7 +547,7 @@ def _sem_get_model():
           file=sys.stderr, end='', flush=True)
     try:
         from sentence_transformers import SentenceTransformer
-        _SEM_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+        _SEM_MODEL = SentenceTransformer(_SEM_MODEL_NAME)
     except Exception as e:
         raise TimeoutError(
             f"Failed to load embedding model: {e}. "
@@ -897,10 +913,12 @@ def _sem_index(root: str) -> None:
 
 @_register("semantic_search")
 def _semantic_search(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
-    """Hybrid semantic + keyword search with Reciprocal Rank Fusion.
+    """Hybrid semantic + keyword search with Weighted Reciprocal Rank Fusion.
 
-    Combines vector similarity (all-MiniLM-L6-v2) with BM25 keyword matching
-    for best-in-class retrieval. Supports .py, .js, .ts, .jsx, .tsx files.
+    Combines vector similarity (isuruwijesiri/all-MiniLM-L6-v2-code-search-512,
+    fine-tuned on CodeSearchNet) with BM25 keyword matching for best-in-class retrieval.
+    Weights auto-tuned by query type: identifier queries favor BM25, natural
+    language queries favor semantic. Supports .py, .js, .ts, .jsx, .tsx files.
     """
     query = args.get("query", "")
     if not query:
@@ -949,7 +967,7 @@ def _semantic_search(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> To
         for i, cid in enumerate(chunk_ids):
             bm25_scores[i] = _bm25_score(query_tokens, cid)
 
-    # --- Reciprocal Rank Fusion ---
+    # --- Weighted Reciprocal Rank Fusion ---
     # Get rankings from each method (descending by score)
     vec_rank = np.zeros(len(chunk_ids), dtype=np.float64)
     bm25_rank = np.zeros(len(chunk_ids), dtype=np.float64)
@@ -964,8 +982,25 @@ def _semantic_search(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> To
         for rank, idx in enumerate(bm25_order):
             bm25_rank[idx] = 1.0 / (60 + rank + 1)
 
-    # Fuse: equal weight to both methods
-    fused = vec_rank + bm25_rank
+    # Determine query type for adaptive weighting
+    # - Identifier queries (single symbol, camelCase/snake_case) → BM25 heavy
+    # - Natural language queries (multi-word, stopwords present) → semantic heavy
+    # - Default: semantic 0.6 / BM25 0.4 (research: embedding beats BM25 on nDCG)
+    _is_identifier = bool(
+        query and not any(c in query for c in " \t\n")  # single token
+        and not query[0].isupper()  # not a sentence
+    )
+    _has_nl_markers = bool(
+        query and (" " in query or len(query.split()) >= 2)
+    )
+    if _is_identifier and not _has_nl_markers:
+        w_sem, w_bm25 = 0.3, 0.7  # identifier → favor exact keyword match
+    elif _has_nl_markers:
+        w_sem, w_bm25 = 0.7, 0.3  # natural language → favor semantic understanding
+    else:
+        w_sem, w_bm25 = 0.6, 0.4  # balanced default (semantic-favored per benchmarks)
+
+    fused = w_sem * vec_rank + w_bm25 * bm25_rank
     top_indices = np.argsort(fused)[-15:][::-1]  # top 15
 
     # Filter to only results with any signal

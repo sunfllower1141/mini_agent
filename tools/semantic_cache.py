@@ -6,7 +6,7 @@ message.  When a new query has cosine similarity >= threshold to a cached
 query, the cached response is returned directly, bypassing the LLM API
 call entirely.
 
-Uses the same SentenceTransformer model (all-MiniLM-L6-v2) already loaded
+Uses the same SentenceTransformer model (all-MiniLM-L6-v2-code-search-512) already loaded
 by search_ops.py, so no additional memory footprint.
 
 Cache entries expire after TTL seconds (default: 1 hour) and the cache

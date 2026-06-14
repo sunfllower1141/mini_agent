@@ -225,20 +225,11 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
                             capture_output=True, timeout=10)
                 except Exception:
                     pass
-                # Also warm the SentenceTransformer encode() call so any
-                # HF Hub warnings / lazy downloads / tokenizer warmup happen
-                # in the background before the first tool call.
-                try:
-                    _sys_warmup.stderr.write("[warmup] loading embedding model\n")
-                    _sys_warmup.stderr.flush()
-                    from tools.search_ops import _sem_get_model
-                    _model = _sem_get_model()
-                    if _model is not None:
-                        _sys_warmup.stderr.write("[warmup] running encode()\n")
-                        _sys_warmup.stderr.flush()
-                        _model.encode("warmup", show_progress_bar=False)
-                except Exception:
-                    pass
+                # SentenceTransformer warmup is handled on the main thread
+                # below, after _sem_preload().  Doing it here would set
+                # _SEM_MODEL prematurely, causing _sem_preload() to no-op
+                # and preventing the main thread from absorbing HF Hub
+                # warnings in a controlled way.
                 _sys_warmup.stderr.write("[warmup] thread done\n")
                 _sys_warmup.stderr.flush()
             except Exception:
@@ -260,6 +251,16 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     # the slow workspace scan and LSP init below.  _sem_preload() starts a
     # daemon thread and returns immediately.  We wait for it at the end of
     # bootstrap, after all other slow init has been kicked off.
+    #
+    # Suppress HF Hub warnings early (before SentenceTransformer is imported
+    # in the preload daemon thread).  The "unauthenticated requests" warning
+    # is emitted via X-HF-Warning response headers for public model downloads.
+    # It is harmless for our use case (all-MiniLM-L6-v2 is public).
+    import os as _os
+    _os.environ.setdefault("HF_HUB_VERBOSITY", "error")
+    import logging as _logging
+    _logging.getLogger("huggingface_hub").setLevel(_logging.ERROR)
+
     _sem_preload_event = None
     try:
         from tools.search_ops import _sem_preload, _SEM_PRELOAD_EVENT
@@ -302,20 +303,21 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     # HuggingFace Hub.  We give it up to 120 s (matching _SEM_MODEL_TIMEOUT).
     # The overlap with build_symbol_index / set_lsp_root above means much of
     # this wait is already elapsed by the time we get here.
+    #
+    # IMPORTANT: this block runs unconditionally.  Even if _sem_preload()
+    # no-oped (model already loaded by some other path), we still call
+    # _sem_get_model() + encode() on the MAIN thread to guarantee that any
+    # HF Hub warnings / tokenizer downloads appear as [python:stderr] during
+    # bootstrap rather than during the user's first tool call.
     if _sem_preload_event is not None:
         _sem_preload_event.wait(timeout=120)
-        # Warmup: do a trivial encoding to trigger any lazy initialization
-        # (tokenizer download, HF Hub auth warnings, etc.) NOW during bootstrap
-        # instead of during the first tool call. On Windows, the first
-        # SentenceTransformer.encode() call can trigger HuggingFace Hub
-        # downloads that interfere with concurrent subprocess tool calls.
-        try:
-            from tools.search_ops import _sem_get_model
-            model = _sem_get_model()
-            if model is not None:
-                model.encode("warmup", show_progress_bar=False)
-        except Exception:
-            pass  # best-effort; model is optional
+    try:
+        from tools.search_ops import _sem_get_model
+        model = _sem_get_model()
+        if model is not None:
+            model.encode("warmup", show_progress_bar=False)
+    except Exception:
+        pass  # best-effort; model is optional
 
     # Auto-init .mini_agent.rules and .mini_agent.toml if they don't exist yet.
     # Skip on remote workspaces -- os.path.isfile() can hang on stale SMB mounts.
