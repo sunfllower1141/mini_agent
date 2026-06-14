@@ -18,11 +18,11 @@ from __future__ import annotations
 SUB_AGENT_TOOLS: set[str] = {
     # File & directory
     "read_file", "write_file", "edit_file", "list_directory", "file_info",
-    "diff", "restore_file",
+    "restore_file",
     # Search & navigation
     "search_files", "find_symbol", "find_usages", "semantic_search",
     # Shell & testing
-    "run_shell", "run_tests", "verify", "git",
+    "run_shell", "run_tests", "verify",
     # Web
     "web_search", "fetch_url",
     # Agent coordination (blocked at max_depth by sub_agent.py runtime check)
@@ -437,46 +437,6 @@ TOOLS = [
                 "required": [
                     "query"
                 ]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "git",
-            "description": "Run a git command in the workspace. Supports: status, diff, log, init, add, commit, show, restore. All operations are local-only (no push/pull). Use 'diff' to see unstaged changes, 'status' to see file states, 'log' for recent commits, 'init' to initialize a repo, 'add' to stage files, 'commit' to commit staged changes, 'show' to read a committed version of a file, 'restore' to recover a file from the last commit.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "subcommand": {
-                        "type": "string",
-                        "description": "Git subcommand: status, diff, log, init, add, or commit"
-                    },
-                    "args": {
-                        "type": "string",
-                        "description": "Optional arguments: file paths for 'add', commit message for 'commit', etc."
-                    }
-                },
-                "required": [
-                    "subcommand"
-                ]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "diff",
-            "description": "Show unstaged changes (git diff) in the workspace. If 'path' is given, shows diff for that file only; otherwise shows all unstaged changes. Returns the raw diff output. Works even on files that haven't been staged.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Optional: specific file path to diff. If omitted, shows all unstaged changes."
-                    }
-                },
-                "required": []
             }
         }
     },

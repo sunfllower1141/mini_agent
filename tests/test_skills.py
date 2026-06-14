@@ -18,11 +18,11 @@ class TestActivateSkill(unittest.TestCase):
         skills.reset_skills()
 
     def test_activate_known_skill(self):
-        ok, msg = skills.activate_skill("git")
+        ok, msg = skills.activate_skill("test")
         self.assertTrue(ok)
-        self.assertIn("git", msg)
+        self.assertIn("test", msg)
         self.assertIn("Activated", msg)
-        self.assertIn("git", skills._active_skills)
+        self.assertIn("test", skills._active_skills)
 
     def test_activate_unknown_skill(self):
         ok, msg = skills.activate_skill("nonexistent_skill_xyz")
@@ -31,21 +31,21 @@ class TestActivateSkill(unittest.TestCase):
         self.assertIn("Available:", msg)
 
     def test_activate_already_active_skill(self):
-        skills.activate_skill("git")
-        ok, msg = skills.activate_skill("git")
+        skills.activate_skill("test")
+        ok, msg = skills.activate_skill("test")
         self.assertTrue(ok)
         self.assertIn("already active", msg)
 
     def test_activate_multiple_skills(self):
-        skills.activate_skill("git")
         skills.activate_skill("test")
-        self.assertIn("git", skills._active_skills)
+        skills.activate_skill("web")
         self.assertIn("test", skills._active_skills)
+        self.assertIn("web", skills._active_skills)
         self.assertEqual(len(skills._active_skills), 2)
 
     def test_whitespace_name_not_recognized(self):
         # activate_skill does NOT strip whitespace -- the name must match exactly
-        ok, msg = skills.activate_skill("  git  ")
+        ok, msg = skills.activate_skill("  test  ")
         self.assertFalse(ok)
         self.assertIn("Unknown skill", msg)
 
@@ -60,22 +60,22 @@ class TestDeactivateSkill(unittest.TestCase):
         skills.reset_skills()
 
     def test_deactivate_active_skill(self):
-        skills.activate_skill("git")
-        ok, msg = skills.deactivate_skill("git")
+        skills.activate_skill("test")
+        ok, msg = skills.deactivate_skill("test")
         self.assertTrue(ok)
         self.assertIn("Deactivated", msg)
-        self.assertNotIn("git", skills._active_skills)
+        self.assertNotIn("test", skills._active_skills)
 
     def test_deactivate_not_active_skill(self):
-        ok, msg = skills.deactivate_skill("git")
+        ok, msg = skills.deactivate_skill("test")
         self.assertFalse(ok)
         self.assertIn("not active", msg)
 
     def test_deactivate_then_reactivate(self):
-        skills.activate_skill("git")
-        skills.deactivate_skill("git")
-        skills.activate_skill("git")
-        self.assertIn("git", skills._active_skills)
+        skills.activate_skill("test")
+        skills.deactivate_skill("test")
+        skills.activate_skill("test")
+        self.assertIn("test", skills._active_skills)
 
 
 class TestListSkills(unittest.TestCase):
@@ -89,7 +89,7 @@ class TestListSkills(unittest.TestCase):
 
     def test_all_expected_skill_names(self):
         result = skills.list_skills()
-        expected = {"git", "test", "lsp", "web", "agents",
+        expected = {"test", "lsp", "web", "agents",
                     "search", "tasks", "image", "bootstrap", "desktop"}
         self.assertTrue(expected.issubset(set(result.keys())))
 
@@ -107,17 +107,17 @@ class TestActiveSkills(unittest.TestCase):
         self.assertEqual(skills.active_skills(), set())
 
     def test_returns_copy(self):
-        skills.activate_skill("git")
+        skills.activate_skill("test")
         result = skills.active_skills()
-        self.assertEqual(result, {"git"})
+        self.assertEqual(result, {"test"})
         # Mutating returned set should not affect internal state
-        result.add("test")
-        self.assertNotIn("test", skills._active_skills)
+        result.add("web")
+        self.assertNotIn("web", skills._active_skills)
 
     def test_tracks_multiple(self):
-        skills.activate_skill("git")
+        skills.activate_skill("test")
         skills.activate_skill("lsp")
-        self.assertEqual(skills.active_skills(), {"git", "lsp"})
+        self.assertEqual(skills.active_skills(), {"test", "lsp"})
 
 
 class TestResetSkills(unittest.TestCase):
@@ -130,8 +130,8 @@ class TestResetSkills(unittest.TestCase):
         skills.reset_skills()
 
     def test_reset_clears_all(self):
-        skills.activate_skill("git")
         skills.activate_skill("test")
+        skills.activate_skill("web")
         skills.activate_skill("lsp")
         skills.reset_skills()
         self.assertEqual(skills._active_skills, set())
@@ -156,9 +156,9 @@ class TestGetActiveToolNames(unittest.TestCase):
         self.assertEqual(names, skills.CORE_TOOLS)
 
     def test_includes_active_skill_tools(self):
-        skills.activate_skill("git")
+        skills.activate_skill("test")
         names = skills.get_active_tool_names()
-        for tool in skills.SKILLS["git"]:
+        for tool in skills.SKILLS["test"]:
             self.assertIn(tool, names)
         # Core tools still present
         for tool in skills.CORE_TOOLS:
@@ -166,13 +166,13 @@ class TestGetActiveToolNames(unittest.TestCase):
 
     def test_deduplicates_overlapping_tools(self):
         # Just verify no duplicates in output
-        skills.activate_skill("git")
         skills.activate_skill("test")
+        skills.activate_skill("web")
         names = skills.get_active_tool_names()
         self.assertEqual(len(names), len(set(names)))
 
     def test_order_preserves_core_first(self):
-        skills.activate_skill("git")
+        skills.activate_skill("test")
         names = skills.get_active_tool_names()
         # Core tools should appear first, in original order
         core_slice = names[:len(skills.CORE_TOOLS)]
@@ -220,7 +220,7 @@ class TestUseSkillImpl(unittest.TestCase):
         skills.reset_skills()
 
     def test_valid_skill_activates_and_returns_tool_count(self):
-        result = skills._use_skill({"name": "git"})
+        result = skills._use_skill({"name": "test"})
         self.assertTrue(result.success)
         self.assertIn("Activated", result.content)
         self.assertIn("Total tools now available", result.content)
@@ -245,8 +245,8 @@ class TestUseSkillImpl(unittest.TestCase):
         self.assertFalse(result.success)
 
     def test_already_active_returns_success_with_count(self):
-        skills._use_skill({"name": "git"})
-        result = skills._use_skill({"name": "git"})
+        skills._use_skill({"name": "test"})
+        result = skills._use_skill({"name": "test"})
         self.assertTrue(result.success)
         self.assertIn("already active", result.content)
 

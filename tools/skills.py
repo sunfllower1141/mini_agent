@@ -268,7 +268,6 @@ def _get_skills_tool_map() -> dict[str, list[str]]:
 
     # Hardcoded fallback for backward compatibility
     return {
-        "git": ["git", "diff", "restore_file"],
         "test": ["run_tests", "verify", "diagnose_failures"],
         "lsp": ["lsp_definition", "lsp_references", "lsp_hover", "lsp_diagnostics"],
         "web": ["fetch_url", "open_url", "browser_navigate", "browser_snapshot",
@@ -291,16 +290,8 @@ def _get_skills_tool_map() -> dict[str, list[str]]:
 
 
 #: Backward-compatible SKILLS dict: name -> list of tool names.
-#: Lazily initialized from disk discovery on first access.
-SKILLS: dict[str, list[str]] | None = None
-
-
-def _get_skills_compat() -> dict[str, list[str]]:
-    """Return the SKILLS dict, initializing from disk if needed."""
-    global SKILLS
-    if SKILLS is None:
-        SKILLS = _get_skills_tool_map()
-    return SKILLS
+#: Initialized from disk discovery at import time.
+SKILLS: dict[str, list[str]] = _get_skills_tool_map()
 
 
 # -- Runtime state -----------------------------------------------------------
@@ -380,7 +371,7 @@ def deactivate_skill(name: str) -> tuple[bool, str]:
 def list_skills() -> dict[str, list[str]]:
     """Return all available skills and their tool lists."""
     # Return a copy for backward compat (tests expect is not SKILLS)
-    return dict(_get_skills_compat())
+    return dict(SKILLS)
 
 
 def active_skills() -> set[str]:

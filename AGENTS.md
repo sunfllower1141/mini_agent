@@ -1,8 +1,7 @@
 # Agent Rules
 
 ## Git Operations
-- **NEVER use the `git` tool** — it freezes/hangs.
-- **ALWAYS use `run_shell`** for all git operations:
+- The `git` and `diff` tools have been **removed**. All git commands go through `run_shell`:
   - `git status --short`
   - `git diff`
   - `git add -A`
