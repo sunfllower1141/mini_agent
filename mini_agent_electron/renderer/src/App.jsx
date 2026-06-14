@@ -672,7 +672,7 @@ function AppShell() {
           {gitBranch && `⎇ ${gitBranch}${gitDirty ? '*' : ''}`}
         </span>
         {isLive && (
-          <span id="live-indicator" onClick={handleCancel} title="Cancel"> *</span>
+          <span id="live-indicator" onClick={handleCancel} title="Cancel"> ●</span>
         )}
         <span id="theme-toggle" ref={themeToggleRef} onClick={() => setThemePickerOpen((p) => !p)} title={`Theme: ${themeEntry.name}`}>
           {themeEntry.icon}
