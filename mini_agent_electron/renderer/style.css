@@ -755,6 +755,60 @@ html, body {
 .bot-on  { background: #22c55e33; color: #22c55e; }
 .bot-off { background: #ef444433; color: #ef4444; }
 
+/* Bot action menu (popup on bot dot click) */
+.bot-menu {
+  position: fixed;
+  z-index: 999;
+  background: var(--bg2, #1e2030);
+  border: 1px solid var(--border, #2a2d3f);
+  border-radius: 6px;
+  padding: 8px 0;
+  min-width: 170px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+  font-size: 11px;
+}
+.bot-menu-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 6px;
+  border-bottom: 1px solid var(--border, #2a2d3f);
+  margin-bottom: 4px;
+  color: #5865F2;
+}
+.bot-menu-name {
+  font-weight: 600;
+  color: var(--text, #c8ccd4);
+}
+.bot-menu-status {
+  margin-left: auto;
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.bot-menu-on  { background: #22c55e33; color: #22c55e; }
+.bot-menu-off { background: #ef444433; color: #ef4444; }
+.bot-menu-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 6px;
+}
+.bot-menu-btn {
+  border: none;
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-size: 10px;
+  cursor: pointer;
+  text-align: left;
+  background: transparent;
+  color: var(--text, #c8ccd4);
+  transition: background 0.15s;
+}
+.bot-menu-btn:hover { background: var(--hover, #2a2d3f); }
+.bot-menu-start { color: #22c55e; }
+.bot-menu-stop  { color: #ef4444; }
+
 /* Live indicator pulsing dot */
 .live-dot { animation: pulse-dot 1.5s ease-in-out infinite; }
 @keyframes pulse-dot {
