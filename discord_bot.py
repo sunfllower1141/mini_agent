@@ -47,6 +47,8 @@ INTENTS = discord.Intents.default()
 INTENTS.message_content = True   # needed to read @mention content
 INTENTS.messages = True          # needed for on_message events
 INTENTS.voice_states = True      # needed for voice-channel join/leave detection
+INTENTS.members = True           # needed for member lists & events
+INTENTS.presences = True         # needed for user activity/status
 
 # ---------------------------------------------------------------------------
 # Per-channel session
