@@ -774,32 +774,46 @@ def _run_tests(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
     target = args.get("path", "").strip()
     background = args.get("background", False)
     timeout = args.get("timeout", 120)
-    cmd = _get_python_cmd() + ["-m", "pytest", "-q", "--ignore=venv", "--ignore=eval", "--ignore=tests"]
-    if target:
-        cmd.append(target)
 
-    # On Windows, use shell=True (same as _run_shell) to avoid pipe-EOF
-    # detection issues with CreateProcess and _communicate_windows.
-    # On Unix, keep the list form (shell=False) for reliability.
-    if _WINDOWS:
-        cmd_str = subprocess.list2cmdline(cmd)
-        try:
-            proc = subprocess.Popen(
-                cmd_str, shell=True, cwd=rg.workspace_root,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-        except Exception as e:
-            return ToolResult(success=False, content=f"Error starting pytest: {e}")
-    else:
-        try:
-            proc = subprocess.Popen(
-                cmd, cwd=rg.workspace_root,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            )
-        except Exception as e:
-            return ToolResult(success=False, content=f"Error starting pytest: {e}")
+    global _PYTHON_CMD
+    _retried = False
+
+    def _build_cmd() -> list[str]:
+        cmd = _get_python_cmd() + ["-m", "pytest", "-q", "--ignore=venv", "--ignore=eval", "--ignore=tests"]
+        if target:
+            cmd.append(target)
+        return cmd
+
+    cmd = _build_cmd()
+
+    def _spawn(cmd):
+        # On Windows, use shell=True (same as _run_shell) to avoid pipe-EOF
+        # detection issues with CreateProcess and _communicate_windows.
+        # On Unix, keep the list form (shell=False) for reliability.
+        if _WINDOWS:
+            cmd_str = subprocess.list2cmdline(cmd)
+            try:
+                return subprocess.Popen(
+                    cmd_str, shell=True, cwd=rg.workspace_root,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+            except Exception as e:
+                return ToolResult(success=False, content=f"Error starting pytest: {e}")
+        else:
+            try:
+                return subprocess.Popen(
+                    cmd, cwd=rg.workspace_root,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                )
+            except Exception as e:
+                return ToolResult(success=False, content=f"Error starting pytest: {e}")
+
+    proc_or_err = _spawn(cmd)
+    if isinstance(proc_or_err, ToolResult):
+        return proc_or_err
+    proc = proc_or_err
 
     if background:
         task_id = str(uuid.uuid4())[:8]
@@ -840,6 +854,26 @@ def _run_tests(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
         return ToolResult(success=False, content=f"Tests timed out after {timeout}s")
 
     output = (out + err).strip()
+
+    # Retry once if pytest module not found — the cached python may have
+    # lost its pytest install (e.g. venv was rebuilt or PATH changed).
+    if not _retried and "No module named pytest" in output:
+        _retried = True
+        _PYTHON_CMD = []  # invalidate cache, force re-scan
+        cmd = _build_cmd()
+        proc_or_err = _spawn(cmd)
+        if isinstance(proc_or_err, ToolResult):
+            return proc_or_err
+        proc = proc_or_err
+        try:
+            if _WINDOWS:
+                out, err = _communicate_windows(proc, timeout)
+            else:
+                out, err = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return ToolResult(success=False, content=f"Tests timed out after {timeout}s")
+        output = (out + err).strip()
+
     _persist_test_output(output)
     summary, success = _parse_pytest_output(output, proc.returncode)
     return ToolResult(success=success, content=summary)
