@@ -107,6 +107,7 @@ const PROVIDER_KEY_ENV = {
   claude: 'CLAUDE_API_KEY',
   xai: 'XAI_API_KEY',
   ollama: 'OLLAMA_API_KEY',
+  openrouter: 'OPENROUTER_API_KEY',
 };
 
 function detectApiKey() {
@@ -618,6 +619,12 @@ function setupIPC() {
       if (p !== provider) delete process.env[name];
     }
 
+    return { ok: true };
+  });
+
+  ipcMain.handle('settings:setModel', async (event, model) => {
+    if (!model) return { ok: false, error: 'Model name required' };
+    sendToPython({ type: 'set_model', model });
     return { ok: true };
   });
 

@@ -31,6 +31,30 @@ const THEMES = [
   { name: 'Monokai',      id: 'monokai',      icon: '🎨' },
 ];
 
+// Model catalog for the clickable model picker dropdown.
+// Each entry: { id: OpenRouter model slug, label: display name }
+// Entries with only a 'group' property render as section headers.
+const MODELS = [
+  { group: 'Kimi' },
+  { id: 'moonshotai/kimi-k2.7-code', label: 'Kimi K2.7 Code' },
+  { group: 'DeepSeek' },
+  { id: 'deepseek/deepseek-v4-pro',  label: 'DeepSeek V4 Pro' },
+  { id: 'deepseek/deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
+  { group: 'Claude' },
+  { id: 'anthropic/claude-opus-4-8',   label: 'Claude Opus 4.8' },
+  { id: 'anthropic/claude-sonnet-4-5', label: 'Claude Sonnet 4.5' },
+  { group: 'OpenAI' },
+  { id: 'openai/gpt-5.1', label: 'GPT-5.1' },
+  { group: 'Google' },
+  { id: 'google/gemini-3.5-flash', label: 'Gemini 3.5 Flash' },
+  { group: 'Other' },
+  { id: 'stepfun/step-3.7-flash',   label: 'Step 3.7 Flash' },
+  { id: 'qwen/qwen3.7-max',         label: 'Qwen 3.7 Max' },
+  { id: 'minimax/minimax-m3',       label: 'MiniMax M3' },
+  { id: 'xiaomi/mimo-v2.5-pro',     label: 'MiMo V2.5 Pro' },
+  { id: 'moonshotai/kimi-k2.6',     label: 'Kimi K2.6' },
+];
+
 function setThemeDom(id) {
   document.documentElement.setAttribute('data-theme', id);
   localStorage.setItem('mini_agent_theme', id);
@@ -103,6 +127,11 @@ function AppShell() {
   const themeToggleRef = useRef(null);
   const [dropdownPos, setDropdownPos] = useState(null);
 
+  // Model picker
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const modelRef = useRef(null);
+  const [modelDropdownPos, setModelDropdownPos] = useState(null);
+
   const themeIndex = THEMES.findIndex((t) => t.id === theme);
   const themeEntry = THEMES[themeIndex] || THEMES[0];
 
@@ -148,6 +177,36 @@ function AppShell() {
       right,
     });
   }, [themePickerOpen]);
+
+  // Position the model dropdown relative to the header model span
+  useEffect(() => {
+    if (!modelPickerOpen || !modelRef.current) {
+      setModelDropdownPos(null);
+      return;
+    }
+    const rect = modelRef.current.getBoundingClientRect();
+    const dropdownW = 240;
+    let left = rect.left;
+    if (left + dropdownW > window.innerWidth - 8) {
+      left = Math.max(4, window.innerWidth - dropdownW - 8);
+    }
+    setModelDropdownPos({
+      top: rect.bottom + 4,
+      left,
+    });
+  }, [modelPickerOpen]);
+
+  // Close model picker on outside click
+  useEffect(() => {
+    if (!modelPickerOpen) return;
+    const close = (e) => {
+      if (!e.target.closest('.model-dropdown') && !e.target.closest('#header-model')) {
+        setModelPickerOpen(false);
+      }
+    };
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [modelPickerOpen]);
 
   // Helper to add a line to any log
   const addLine = useCallback((setter) => (line) => {
@@ -618,7 +677,36 @@ function AppShell() {
       {/* Header */}
       <div id="header" className="header">
         <span className="dim"> mini_agent -- </span>
-        <span id="header-model" className="text">{modelName}</span>
+        <span
+          id="header-model"
+          className="text clickable"
+          ref={modelRef}
+          onClick={() => setModelPickerOpen((p) => !p)}
+          title="Click to switch model"
+        >{modelName}</span>
+        {modelPickerOpen && modelDropdownPos && (
+          <div className="model-dropdown" style={modelDropdownPos} onClick={(e) => e.stopPropagation()}>
+            {MODELS.map((m, i) => {
+              if (m.group) {
+                return (
+                  <div key={`hdr-${i}`} className="model-dropdown-header">{m.group}</div>
+                );
+              }
+              const isCurrent = m.id === modelName;
+              return (
+                <div
+                  key={m.id}
+                  className={`model-dropdown-item${isCurrent ? ' model-current' : ''}`}
+                  onClick={(e) => { e.stopPropagation(); setModelPickerOpen(false); window.miniAgent?.setModel(m.id); }}
+                >
+                  <span className="model-name">{m.label}</span>
+                  <span className="model-id dim">{m.id}</span>
+                  {isCurrent && <span className="model-check">\u2713</span>}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Body: three panels */}

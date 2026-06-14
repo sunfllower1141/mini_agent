@@ -61,8 +61,11 @@ contextBridge.exposeInMainWorld('miniAgent', {
   getApiKeyStatus: () => ipcRenderer.invoke('settings:getApiKeyStatus'),
 
   // Save an API key for the chosen provider to ~/.mini_agent_env.
-  // provider: 'deepseek' | 'claude' | 'xai' | 'ollama'
+  // provider: 'deepseek' | 'claude' | 'xai' | 'ollama' | 'openrouter'
   saveApiKey: (provider, key) => ipcRenderer.invoke('settings:saveApiKey', provider, key),
+
+  // Switch the LLM model on the fly (no restart needed).
+  setModel: (model) => ipcRenderer.invoke('settings:setModel', model),
 
   // Kill and restart the Python backend (called after saving a new API key).
   restartBackend: () => ipcRenderer.invoke('settings:restartBackend'),

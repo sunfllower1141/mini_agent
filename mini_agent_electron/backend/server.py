@@ -709,6 +709,15 @@ class AgentRunner:
         """Cancel the current turn."""
         self._cancel_event.set()
 
+    def set_model(self, model: str) -> None:
+        """Switch the LLM model on the fly without restarting the backend."""
+        if not model:
+            return
+        old = self.config.model
+        self.config.model = model
+        self.send_status()
+        send_msg({"type": "response", "lines": [f"Model: {old} -> {model}"]})
+
 
 # ---------------------------------------------------------------------------
 # Main -- JSON-lines event loop
@@ -746,6 +755,9 @@ def main() -> None:
 
         elif msg_type == "cancel":
             runner.cancel()
+
+        elif msg_type == "set_model":
+            runner.set_model(msg.get("model", ""))
 
         elif msg_type == "get_status":
             runner.send_status()

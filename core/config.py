@@ -24,7 +24,7 @@ except ImportError:
 CONFIG_FILENAME = ".mini_agent.toml"
 MEMORY_FILENAME = ".mini_agent_memory.db"
 
-DEFAULT_API_PROVIDER = "deepseek"  # "deepseek", "claude", "xai", or "ollama"
+DEFAULT_API_PROVIDER = "deepseek"  # "deepseek", "claude", "xai", "openrouter", or "ollama"
 
 # ---------------------------------------------------------------------------
 # Provider defaults registry
@@ -89,6 +89,14 @@ PROVIDER_DEFAULTS: dict[str, ProviderDefaults] = {
         max_tokens=8_192,
         context_window=65_536,  # qwen3.6: capped at 64K to fit KV cache in 48GB VRAM
     ),
+    "openrouter": ProviderDefaults(
+        model="moonshotai/kimi-k2.7-code",  # user default: Kimi K2.7 Code via OpenRouter
+        sub_agent_model="deepseek/deepseek-v4-flash",  # cheap worker model for sub-agents
+        api_url="https://openrouter.ai/api/v1/chat/completions",
+        max_tokens=200_000,
+        context_window=256_000,  # Kimi K2.7 native context length
+        fallback_providers=("deepseek", "claude"),  # fall back to native keys on OpenRouter outage
+    ),
 }
 
 # Legacy module-level aliases (kept for backward compatibility with tests
@@ -150,7 +158,10 @@ ENV_XAI_MODEL        = "XAI_MODEL"
 ENV_OLLAMA_MODEL     = "OLLAMA_MODEL"
 ENV_OLLAMA_API_URL   = "OLLAMA_API_URL"
 ENV_OLLAMA_API_KEY   = "OLLAMA_API_KEY"
-ENV_API_PROVIDER     = "API_PROVIDER"  # "deepseek", "claude", "xai", or "ollama" -- overrides auto-detection
+ENV_OPENROUTER_MODEL = "OPENROUTER_MODEL"
+ENV_OPENROUTER_API_URL = "OPENROUTER_API_URL"
+ENV_OPENROUTER_API_KEY = "OPENROUTER_API_KEY"
+ENV_API_PROVIDER     = "API_PROVIDER"  # "deepseek", "claude", "xai", "openrouter", or "ollama" -- overrides auto-detection
 ENV_AGENT_WORKSPACE  = "AGENT_WORKSPACE"
 ENV_EXA_API_KEY      = "EXA_API_KEY"
 ENV_OPENAI_API_KEY   = "OPENAI_API_KEY"
@@ -371,6 +382,7 @@ _PROVIDER_KEY_ENV: dict[str, str] = {
     "claude": ENV_CLAUDE_API_KEY,
     "xai": ENV_XAI_API_KEY,
     "ollama": ENV_OLLAMA_API_KEY,
+    "openrouter": ENV_OPENROUTER_API_KEY,
 }
 # Provider -> env var name for API URL override.
 _PROVIDER_URL_ENV: dict[str, str] = {
@@ -378,16 +390,18 @@ _PROVIDER_URL_ENV: dict[str, str] = {
     "claude": ENV_CLAUDE_API_URL,
     "xai": ENV_XAI_API_URL,
     "ollama": ENV_OLLAMA_API_URL,
+    "openrouter": ENV_OPENROUTER_API_URL,
 }
 # Provider -> env var name for model override.
 _PROVIDER_MODEL_ENV: dict[str, str] = {
     "claude": ENV_CLAUDE_MODEL,
     "xai": ENV_XAI_MODEL,
     "ollama": ENV_OLLAMA_MODEL,
+    "openrouter": ENV_OPENROUTER_MODEL,
 }
 
 # Auto-detection priority order (first provider with an available key wins).
-_AUTO_DETECT_ORDER = ["deepseek", "claude", "xai", "ollama"]
+_AUTO_DETECT_ORDER = ["deepseek", "claude", "xai", "ollama", "openrouter"]
 
 
 def _detect_provider() -> str | None:

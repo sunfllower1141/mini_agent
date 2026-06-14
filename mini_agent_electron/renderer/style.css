@@ -251,6 +251,15 @@ html, body {
   letter-spacing: 0.02em;
 }
 
+#header-model.clickable {
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition: opacity 0.15s;
+}
+#header-model.clickable:hover {
+  opacity: 0.75;
+}
+
 /* ---------------------------------------------------------------------------
    Divider
    --------------------------------------------------------------------------- */
@@ -773,6 +782,59 @@ html, body {
 }
 
 .theme-check {
+  color: var(--accent);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+/* Model picker dropdown (in header) */
+.model-dropdown {
+  position: fixed;
+  background: var(--overlay);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-width: 240px;
+  max-height: 400px;
+  overflow-y: auto;
+  z-index: 100;
+  box-shadow: 0 4px 16px rgb(var(--bg-rgb) / 0.9);
+  padding: 4px 0;
+  animation: tooltipFadeIn 0.12s ease-out;
+}
+.model-dropdown-header {
+  padding: 6px 12px 2px;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.7;
+}
+.model-dropdown-item {
+  padding: 5px 12px;
+  cursor: pointer;
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 0.1s;
+}
+.model-dropdown-item:hover {
+  background: rgb(var(--accent-rgb) / 0.08);
+}
+.model-dropdown-item.model-current {
+  color: var(--accent);
+}
+.model-name {
+  flex: 1;
+}
+.model-id {
+  font-size: 10px;
+  opacity: 0.5;
+}
+.model-check {
   color: var(--accent);
   font-size: 11px;
   flex-shrink: 0;

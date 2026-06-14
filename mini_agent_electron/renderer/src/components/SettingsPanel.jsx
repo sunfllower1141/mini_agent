@@ -8,10 +8,11 @@
 import { useState, useCallback } from 'react';
 
 const PROVIDERS = [
-  { value: 'deepseek', label: 'DeepSeek',    keyEnv: 'DEEPSEEK_API_KEY' },
-  { value: 'claude',   label: 'Claude (Anthropic)', keyEnv: 'CLAUDE_API_KEY' },
-  { value: 'xai',      label: 'xAI (Grok)',        keyEnv: 'XAI_API_KEY' },
-  { value: 'ollama',   label: 'Ollama (local)',    keyEnv: 'OLLAMA_API_KEY' },
+  { value: 'deepseek',   label: 'DeepSeek',              keyEnv: 'DEEPSEEK_API_KEY' },
+  { value: 'claude',     label: 'Claude (Anthropic)',    keyEnv: 'CLAUDE_API_KEY' },
+  { value: 'xai',        label: 'xAI (Grok)',            keyEnv: 'XAI_API_KEY' },
+  { value: 'ollama',     label: 'Ollama (local)',        keyEnv: 'OLLAMA_API_KEY' },
+  { value: 'openrouter', label: 'OpenRouter',            keyEnv: 'OPENROUTER_API_KEY' },
 ];
 
 export default function SettingsPanel({ onSaved }) {
