@@ -727,8 +727,7 @@ def run_agent_turn(
                     msg["_turn_count"] = turn_count
                 messages.append(msg)
                 _save_turn_summary(turn_count, msg, [], messages)
-                # Background consolidation: extract durable facts after turn
-                _run_consolidation(messages, config)
+                # _run_consolidation(messages, config)  # disabled: causes API connection collision + cost surge
                 return msg
 
             # ----- phase 3: tool execution -----
@@ -749,8 +748,7 @@ def run_agent_turn(
             # _tool_execution_phase returns False when all tools were
             # already streamed -- just continue the loop.
 
-            # Background consolidation: extract durable facts after turn
-            _run_consolidation(messages, config)
+            # _run_consolidation(messages, config)  # disabled: causes API connection collision + cost surge
 
             # --- Track consecutive read-only turns ---
             _write_tools = {"write_file", "edit_file", "run_shell"}

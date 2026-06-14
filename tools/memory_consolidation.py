@@ -214,7 +214,7 @@ def _extract_facts(
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             },
-            timeout=20,
+            timeout=60,  # generous timeout — avoid competing with main turn
         )
         resp.raise_for_status()
         body = resp.json()
@@ -315,9 +315,15 @@ def consolidate_if_needed(
     except Exception:
         pass
 
-    # Run in background thread
+    # Run in background thread (with a cooldown to avoid competing with the
+    # main agent turn for the HTTPS connection pool — simultaneous requests
+    # to api.deepseek.com trigger rate-limit connect drops).
     def _bg_consolidate() -> None:
         nonlocal existing_memory
+        # Wait a few seconds so the main turn's API call finishes first.
+        # Without this, the consolidation and main turn hit DeepSeek at
+        # the same time, both get ConnectTimeoutError, and the app freezes.
+        time.sleep(3.0)
         if not _CONSOLIDATION_LOCK.acquire(blocking=False):
             return
         try:

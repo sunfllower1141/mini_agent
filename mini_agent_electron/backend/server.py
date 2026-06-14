@@ -275,19 +275,28 @@ class AgentRunner:
 
     def _turn_loop(self) -> None:
         """Sequential turn-processing loop: drain queue, run turn, repeat."""
-        while True:
-            with self._input_lock:
-                if not self._input_queue:
-                    return  # all queued messages processed
-                texts = list(self._input_queue)
-                self._input_queue.clear()
+        try:
+            while True:
+                with self._input_lock:
+                    if not self._input_queue:
+                        return  # all queued messages processed
+                    texts = list(self._input_queue)
+                    self._input_queue.clear()
 
-            text = "\n\n".join(texts)
-            self._cancel_event.clear()
-            self._run_turn(text)
+                text = "\n\n".join(texts)
+                self._cancel_event.clear()
+                self._run_turn(text)
+        finally:
+            # Always send idle when the turn loop exits, so the renderer
+            # knows to reset the running indicator / cancel button.
+            send_msg({"type": "idle"})
 
     def _run_turn(self, text: str) -> None:
         """Execute a single agent turn."""
+        # Notify the renderer that a turn is starting, so it can show
+        # the running indicator / cancel button.
+        send_msg({"type": "turn_start"})
+
         # Belt-and-suspenders: sub-agents may mutate config.stream when they
         # share the same config object.  Force it back to True for the
         # orchestrator so streaming always works.

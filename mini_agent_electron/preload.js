@@ -138,6 +138,8 @@ contextBridge.exposeInMainWorld('miniAgent', {
       'stream:subagent_thought',
       'backend:status',
       'backend:response',
+      'backend:turn_start',
+      'backend:idle',
     ];
     if (validChannels.includes(channel)) {
       const subscription = (_event, data) => callback(data);

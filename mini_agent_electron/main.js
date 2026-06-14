@@ -164,6 +164,50 @@ let _restartWindowStart = 0;
 const _MAX_RESTARTS = 3;
 const _RESTART_WINDOW_MS = 30000;
 
+// Watchdog: if the backend sends no messages for 120 seconds (e.g. hung
+// API call, stuck subprocess, deadlocked thread), force-kill and restart.
+// This prevents the "freeze mid-run" bug where the UI goes blank because
+// the backend is alive (proc.on('close') never fires) but unresponsive.
+let _watchdogTimer = null;
+const _WATCHDOG_TIMEOUT_MS = 120_000;
+
+function _clearWatchdog() {
+  if (_watchdogTimer) { clearTimeout(_watchdogTimer); _watchdogTimer = null; }
+}
+
+function _resetWatchdog() {
+  _clearWatchdog();
+  if (_shuttingDown) return;
+  const watchedProc = pythonProcess;  // capture the specific backend instance
+  _watchdogTimer = setTimeout(() => {
+    // Only act if the backend we were watching is STILL the current one
+    if (pythonProcess !== watchedProc) return;
+    console.error('[main] WATCHDOG: backend unresponsive for 120s — force-killing and restarting');
+    const win = BrowserWindow.getAllWindows()[0];
+    if (win) win.webContents.send('stream:error', { message: 'Backend appears hung. Restarting...' });
+    _killPythonProcessTree();
+    pythonReady = false;
+    pythonProcess = null;
+    _clearWatchdog();
+    if (!_shuttingDown) {
+      pythonProcess = spawnPythonBackend(workspacePath);
+    }
+  }, _WATCHDOG_TIMEOUT_MS);
+}
+
+function _killPythonProcessTree() {
+  // Kill the backend process tree on Windows (taskkill /T kills children).
+  // On Unix, send SIGKILL to the process group.
+  if (!pythonProcess || pythonProcess.killed) return;
+  try {
+    if (process.platform === 'win32') {
+      require('child_process').execSync(`taskkill /F /T /PID ${pythonProcess.pid}`, { timeout: 5000 });
+    } else {
+      pythonProcess.kill('SIGKILL');
+    }
+  } catch (e) { /* best-effort */ }
+}
+
 function spawnPythonBackend(workspacePath) {
   const backendScript = path.join(__dirname, 'backend', 'server.py');
   
@@ -229,10 +273,15 @@ function spawnPythonBackend(workspacePath) {
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 
+  // Start the watchdog immediately — the backend must produce stdout
+  // (e.g. the 'ready' message) within the timeout window or it's killed.
+  _resetWatchdog();
+
   // Buffer for incomplete JSON lines from stdout
   let stdoutBuffer = '';
 
   proc.stdout.on('data', (data) => {
+    _resetWatchdog();  // backend is alive — reset the hang watchdog
     stdoutBuffer += data.toString();
     const lines = stdoutBuffer.split('\n');
     // Keep the last potentially incomplete line in the buffer
@@ -250,6 +299,7 @@ function spawnPythonBackend(workspacePath) {
   });
 
   proc.stderr.on('data', (data) => {
+    _resetWatchdog();  // stderr output also means backend is alive
     // Log Python stderr to Electron console only -- not the tools panel.
     // HF warnings, tqdm bars, etc. are noise in the UI.
     const text = data.toString().trim();
@@ -264,6 +314,7 @@ function spawnPythonBackend(workspacePath) {
   });
 
   proc.on('close', (code) => {
+    _clearWatchdog();  // backend exited — clear watchdog
     console.log(`Python backend exited with code ${code}`);
     pythonReady = false;
     pythonProcess = null;
@@ -341,14 +392,20 @@ function sendToPython(msg) {
     _stdinQueue.push(msg);
     return;
   }
-  _stdinLock = true;
-  _stdinWriteUnlocked(msg);
-  _stdinLock = false;
-  // Drain any queued messages
-  while (_stdinQueue.length > 0) {
+  try {
     _stdinLock = true;
-    _stdinWriteUnlocked(_stdinQueue.shift());
+    _stdinWriteUnlocked(msg);
+  } finally {
     _stdinLock = false;
+  }
+  // Drain any queued messages (with try/finally on each)
+  while (_stdinQueue.length > 0) {
+    try {
+      _stdinLock = true;
+      _stdinWriteUnlocked(_stdinQueue.shift());
+    } finally {
+      _stdinLock = false;
+    }
   }
 }
 
@@ -399,6 +456,14 @@ function handlePythonMessage(msg) {
 
     case 'turn_complete':
       win.webContents.send('stream:turn_complete', data);
+      break;
+
+    case 'turn_start':
+      win.webContents.send('backend:turn_start', data);
+      break;
+
+    case 'idle':
+      win.webContents.send('backend:idle', data);
       break;
 
     case 'error':

@@ -19,16 +19,16 @@ const MAX_RENDERED_TOOL_LINES = 400;
 
 // Theme registry -- name, data-theme value, status-bar icon
 const THEMES = [
-  { name: 'Dark',         id: 'dark',         icon: '[MOON]' },
-  { name: 'Light',        id: 'light',        icon: '?' },
-  { name: 'Dracula',      id: 'dracula',      icon: '?' },
-  { name: 'Nord',         id: 'nord',         icon: '?' },
-  { name: 'Catppuccin',   id: 'catppuccin',   icon: '?' },
-  { name: 'Rose Pine',    id: 'rose-pine',    icon: '?' },
-  { name: 'Gruvbox',      id: 'gruvbox',      icon: '?' },
-  { name: 'Solarized',    id: 'solarized',    icon: '?' },
-  { name: 'Tokyo Night',  id: 'tokyo-night',  icon: '?' },
-  { name: 'Monokai',      id: 'monokai',      icon: '?' },
+  { name: 'Dark',         id: 'dark',         icon: '☾' },
+  { name: 'Light',        id: 'light',        icon: '☀' },
+  { name: 'Dracula',      id: 'dracula',      icon: '🧛' },
+  { name: 'Nord',         id: 'nord',         icon: '❄️' },
+  { name: 'Catppuccin',   id: 'catppuccin',   icon: '🐱' },
+  { name: 'Rose Pine',    id: 'rose-pine',    icon: '🌹' },
+  { name: 'Gruvbox',      id: 'gruvbox',      icon: '🪵' },
+  { name: 'Solarized',    id: 'solarized',    icon: '☯️' },
+  { name: 'Tokyo Night',  id: 'tokyo-night',  icon: '🌆' },
+  { name: 'Monokai',      id: 'monokai',      icon: '🎨' },
 ];
 
 function setThemeDom(id) {
@@ -77,6 +77,8 @@ function AppShell() {
   const [inputValue, setInputValue] = useState('');
   const [theme, setTheme] = useState(() => localStorage.getItem('mini_agent_theme') || 'dark');
   const [themePickerOpen, setThemePickerOpen] = useState(false);
+  const themeToggleRef = useRef(null);
+  const [dropdownPos, setDropdownPos] = useState(null);
 
   const themeIndex = THEMES.findIndex((t) => t.id === theme);
   const themeEntry = THEMES[themeIndex] || THEMES[0];
@@ -103,6 +105,25 @@ function AppShell() {
     };
     document.addEventListener('click', close);
     return () => document.removeEventListener('click', close);
+  }, [themePickerOpen]);
+
+  // Position the theme dropdown relative to the toggle icon
+  useEffect(() => {
+    if (!themePickerOpen || !themeToggleRef.current) {
+      setDropdownPos(null);
+      return;
+    }
+    const rect = themeToggleRef.current.getBoundingClientRect();
+    const dropdownW = 190;
+    let right = window.innerWidth - rect.right;
+    // Clamp so dropdown doesn't overflow right edge
+    if (right + dropdownW > window.innerWidth - 8) {
+      right = Math.max(4, window.innerWidth - dropdownW - 8);
+    }
+    setDropdownPos({
+      bottom: window.innerHeight - rect.top + 4,
+      right,
+    });
   }, [themePickerOpen]);
 
   // Helper to add a line to any log
@@ -254,9 +275,10 @@ function AppShell() {
         setTokenCountVal(tok >= 1000 ? `${(tok / 1000).toFixed(1)}k` : String(tok));
       }
       if (data.turn_count) setTurnCountVal(data.turn_count);
-      setIsLive(false);
-      setInputDisabled(false);
-      inputRef.current?.focus();
+      // NOTE: Do NOT set isLive=false here.  The agent may start another
+      // turn immediately (sub-agent auto-report, tool continuations, etc.).
+      // Only the 'idle' message (sent when _turn_loop truly drains the
+      // queue) should reset isLive.
     }));
 
     unsubs.push(api.on('stream:error', (data) => {
@@ -275,6 +297,23 @@ function AppShell() {
           setChatLines((prev) => [...prev, { id: nextLineId(), text: line, cls: 'msg-status' }]);
         }
       }
+    }));
+
+    // --- Turn lifecycle: start / idle ---
+    // The backend sends turn_start at the beginning of each turn and idle
+    // when the sequential turn-loop truly exits (input queue drained).
+    // These provide a reliable running/cancel indicator that doesn't flicker
+    // between turns.
+    unsubs.push(api.on('backend:turn_start', () => {
+      setIsLive(true);
+      setInputDisabled(true);
+    }));
+
+    unsubs.push(api.on('backend:idle', () => {
+      clearTimeout(submitTimeoutRef.current);
+      setIsLive(false);
+      setInputDisabled(false);
+      inputRef.current?.focus();
     }));
 
     // --- Sub-agent events ---
@@ -439,9 +478,10 @@ function AppShell() {
 
     window.miniAgent.submit(text);
 
-    // Safety timeout -- re-enable after 120s
+    // Safety timeout -- re-enable input after 120s in case the backend
+    // hangs or crashes.  The idle message handles normal completion;
+    // this is a last-resort fallback.
     submitTimeoutRef.current = setTimeout(() => {
-      setIsLive(false);
       setInputDisabled(false);
       inputRef.current?.focus();
     }, 120_000);
@@ -629,34 +669,34 @@ function AppShell() {
       {/* Status bar */}
       <div id="status-bar" className="status-bar dim">
         <span id="git-status">
-          {gitBranch && `? ${gitBranch}${gitDirty ? '*' : ''}`}
+          {gitBranch && `⎇ ${gitBranch}${gitDirty ? '*' : ''}`}
         </span>
         {isLive && (
           <span id="live-indicator" onClick={handleCancel} title="Cancel"> *</span>
         )}
-        <span id="theme-toggle" onClick={() => setThemePickerOpen((p) => !p)} title={`Theme: ${themeEntry.name}`}>
+        <span id="theme-toggle" ref={themeToggleRef} onClick={() => setThemePickerOpen((p) => !p)} title={`Theme: ${themeEntry.name}`}>
           {themeEntry.icon}
+          {themePickerOpen && dropdownPos && (
+            <div className="theme-dropdown" style={dropdownPos} onClick={(e) => e.stopPropagation()}>
+              {THEMES.map((t) => (
+                <div
+                  key={t.id}
+                  className={`theme-dropdown-item${t.id === theme ? ' theme-current' : ''}`}
+                  onClick={(e) => { e.stopPropagation(); applyTheme(t.id); }}
+                >
+                  <span className="theme-icon">{t.icon}</span>
+                  <span className="theme-name">{t.name}</span>
+                  {t.id === theme && <span className="theme-check">\u2713</span>}
+                </div>
+              ))}
+            </div>
+          )}
         </span>
-        {themePickerOpen && (
-          <div className="theme-dropdown">
-            {THEMES.map((t) => (
-              <div
-                key={t.id}
-                className={`theme-dropdown-item${t.id === theme ? ' theme-current' : ''}`}
-                onClick={() => applyTheme(t.id)}
-              >
-                <span className="theme-icon">{t.icon}</span>
-                <span className="theme-name">{t.name}</span>
-                {t.id === theme && <span className="theme-check">V</span>}
-              </div>
-            ))}
-          </div>
-        )}
         {turnCountVal != null && (
-          <span id="turn-counter"> ? turn <span id="turn-count">{turnCountVal}</span></span>
+          <span id="turn-counter">{'↻'} turn <span id="turn-count">{turnCountVal}</span></span>
         )}
         {tokenCountVal != null && (
-          <span id="token-counter"> ? <span id="token-count">{tokenCountVal}</span> tok</span>
+          <span id="token-counter">{'⊙'} <span id="token-count">{tokenCountVal}</span> tok</span>
         )}
         <div className="status-right">
           {restoredCount != null && (
