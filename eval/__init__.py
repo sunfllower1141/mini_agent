@@ -10,6 +10,8 @@ Usage::
     print(result.success)
 """
 
+from __future__ import annotations
+
 from eval.runner import (
     EvalTask,
     EvalResult,

@@ -4,6 +4,8 @@ This __init__.py is intentionally minimal to avoid circular imports.
 Import specific submodules directly (e.g. ``from memory.memory import MemoryStore``).
 """
 
+from __future__ import annotations
+
 
 def __getattr__(name):
     """Lazy import to avoid circular dependencies at package-init time."""

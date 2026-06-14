@@ -5,6 +5,8 @@ Run this directly (not via pytest) to avoid asyncio conflicts:
     python3 tests/browser_validation.py
 """
 
+from __future__ import annotations
+
 import http.server
 import os
 import socketserver

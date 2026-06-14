@@ -1,5 +1,5 @@
 # mini_agent Architecture State
-# Last updated: 2026-06-14 (self-improvement: tiered cache, adaptive thresholds, two-tier pruning, prompt cache key, dead-tool pruning)
+# Last updated: 2026-06-14 (code audit: circular import fix, module map update, __future__ annotations, agent_ops split, constants consolidation)
 #
 # This file is the agent's map of the codebase. Update it after every
 # completed change. The agent reads this at session start for context.
@@ -7,6 +7,8 @@
 ## Module Map
 
 ### Core Orchestration
+- `core/constants.py` -- shared constants (MEMORY_FILENAME, HTTP_CONNECT_TIMEOUT, SKIP_DIRS, etc.).
+  Zero internal project imports — safe to import from anywhere. (expanded 2026-06-14)
 - `core/bootstrap.py` -- entry point, session init, workspace setup
 - `core/llm.py` -- main agent loop: turn management, tool dispatch, API calls (825 lines)
 - `core/codebase_map.py` -- structural codebase map: AST-based symbol extraction,
@@ -15,7 +17,8 @@
 - `core/context_inject.py` -- per-turn context injection (handoff, state, tasks, scratchpad, git diff,
   orchestration, progress checks, circuit breaker, conversation compaction, edit risk briefing, pattern rules) (1250 lines)
 - `core/prompt.py` -- system prompt assembly, startup context (file tree, codebase map, git log)
-- `core/config.py` -- TOML config loading, provider settings (718 lines)
+- `core/config.py` -- TOML config loading, provider settings (718 lines). Constants now imported
+  from core.constants and re-exported for backward compatibility.
 - `core/tree_sitter_parser.py` -- multi-language (Python/JS/TS) source parsing via tree-sitter
   with regex/AST fallback. Extracts defs, calls, and imports for codebase_map and knowledge_graph.
 - `core/knowledge_graph.py` -- entity-relationship graph (calls, imports, inherits, defines) with
@@ -55,7 +58,12 @@
 - `tools/file_ops.py` -- read_file, write_file, edit_file, list_directory, file_info (1157 lines)
 - `tools/shell_ops.py` -- run_shell, search_files, run_tests, verify, git (1145 lines)
 - `tools/search_ops.py` -- find_symbol, find_usages, semantic_search, web_search (980 lines)
-- `tools/agent_ops.py` -- sub-agent lifecycle tools: spawn, collect, extend, cancel (1274 lines)
+- `tools/agent_ops.py` -- agent lifecycle + utility tools: extend, cancel, wait, restore,
+  session_stats, recall_turn, remember, read_image (~1330 lines; split 2026-06-14)
+- `tools/agent_spawn.py` -- sub-agent spawning: spawn_agent, _spawn_one (extracted from
+  agent_ops.py 2026-06-14, ~1070 lines)
+- `tools/agent_collect.py` -- sub-agent status/collection: agent_status, collect_agent,
+  collect_any (extracted from agent_ops.py 2026-06-14, ~860 lines)
 - `tools/agent_messages.py` -- sub-agent typed messaging inbox/read (614 lines)
 - `tools/agent_patterns.py` -- parallel orchestration patterns: fan_out, pipeline, barrier (932 lines)
 - `tools/agent_todos.py` -- per-agent todo tracking
@@ -312,6 +320,21 @@
     response messages (slash-command output, model switch errors, etc.) to be silently
     dropped. Removed the guard — responses are now shown in the chat panel as
     ``msg-status`` lines. (Also affected ``/stats``, ``/session``, ``/workspace`` commands.)
+
+43. **Constants consolidated in core/constants.py (2026-06-14)**: ``MEMORY_FILENAME``,
+    ``HTTP_CONNECT_TIMEOUT``, ``HTTP_READ_TIMEOUT``, and related constants moved
+    from ``core/config.py`` to ``core/constants.py`` to break the circular import
+    ``core.config <-> memory.session``. ``core/config.py`` re-exports them for
+    backward compatibility. ``memory/session.py`` now imports ``MEMORY_FILENAME``
+    from ``core.constants`` (no project imports, zero circular risk).
+
+44. **tools/agent_ops.py split (2026-06-14)**: The 3,880-line monolith was split into:
+    - ``tools/agent_spawn.py`` (~1,070 lines): spawn_agent, _spawn_one, parse_max_turns
+    - ``tools/agent_collect.py`` (~860 lines): agent_status, collect_agent, collect_any
+    - ``tools/agent_ops.py`` (~1,330 lines): extend, cancel, wait, restore, session_stats,
+      recall_turn, remember, read_image
+    Cross-references in ``agent_patterns.py``, ``test_comprehensive.py``,
+    ``test_sub_agent.py``, and ``test_agent_patterns_extended.py`` updated.
 
 ## Known Issues
 - `_json_rpc_shared.py` -- shared drain_stderr() utility used by lsp.py and mcp_client.py

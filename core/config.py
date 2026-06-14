@@ -18,13 +18,15 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
-# Constants
+# Constants (canonical definitions in core.constants — imported & re-exported
+# here for backward compatibility)
 # ---------------------------------------------------------------------------
 
-CONFIG_FILENAME = ".mini_agent.toml"
-MEMORY_FILENAME = ".mini_agent_memory.db"
-
-DEFAULT_API_PROVIDER = "deepseek"  # "deepseek", "claude", "xai", "openrouter", or "ollama"
+from .constants import (  # noqa: F401  — re-exported
+    CONFIG_FILENAME,
+    MEMORY_FILENAME,
+    DEFAULT_API_PROVIDER,
+)
 
 # ---------------------------------------------------------------------------
 # Provider defaults registry
@@ -169,13 +171,17 @@ DEFAULT_EXA_API_KEY = ""  # set via EXA_API_KEY env var or .mini_agent.toml
 DEFAULT_OPENAI_API_KEY = ""  # set via OPENAI_API_KEY env var or .mini_agent.toml
 
 # Truncation / timeout / connection-pool constants
-TREE_TRUNCATION_LINES   = 60   # max lines in workspace tree before truncating
-GIT_LOG_TIMEOUT         = 5    # seconds to wait for git log
-GIT_LOG_COUNT            = 5    # number of recent commits to show on startup
-HTTP_CONNECT_TIMEOUT    = 30   # seconds to establish HTTP connection
-HTTP_READ_TIMEOUT       = 120  # seconds to read HTTP response
-HTTP_POOL_CONNECTIONS   = 2    # max connections per host
-HTTP_POOL_MAXSIZE       = 4    # max total pool size
+# (canonical definitions in core.constants — imported & re-exported)
+
+from .constants import (  # noqa: F401  — re-exported
+    TREE_TRUNCATION_LINES,
+    GIT_LOG_TIMEOUT,
+    GIT_LOG_COUNT,
+    HTTP_CONNECT_TIMEOUT,
+    HTTP_READ_TIMEOUT,
+    HTTP_POOL_CONNECTIONS,
+    HTTP_POOL_MAXSIZE,
+)
 
 # Environment variable names used during config loading
 ENV_DEEPSEEK_API_KEY = "DEEPSEEK_API_KEY"

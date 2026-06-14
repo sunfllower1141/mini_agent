@@ -16,8 +16,8 @@ class TestFanOut(unittest.TestCase):
     """fan_out spawns N workers from a list of task descriptions."""
 
     @patch("tools._TOOL_CONTEXT")
-    @patch("tools.agent_ops._spawn_one")
-    @patch("tools.agent_ops._MAX_CONCURRENT", 10)
+    @patch("tools.agent_spawn._spawn_one")
+    @patch("tools.agent_spawn._MAX_CONCURRENT", 10)
     def test_fan_out_two_descriptions(self, mock_spawn_one, mock_ctx):
         """fan_out with 2 descs spawns 2 agents and returns their task_ids."""
         mock_runtime = MagicMock(spec=AgentRuntime)
@@ -48,8 +48,8 @@ class TestFanOut(unittest.TestCase):
         self.assertEqual(call_args_1[0][5], 10)
 
     @patch("tools._TOOL_CONTEXT")
-    @patch("tools.agent_ops._spawn_one")
-    @patch("tools.agent_ops._MAX_CONCURRENT", 10)
+    @patch("tools.agent_spawn._spawn_one")
+    @patch("tools.agent_spawn._MAX_CONCURRENT", 10)
     def test_fan_out_respects_max_concurrent(self, mock_spawn_one, mock_ctx):
         """fan_out stops spawning when active_count >= _MAX_CONCURRENT."""
         mock_runtime = MagicMock(spec=AgentRuntime)

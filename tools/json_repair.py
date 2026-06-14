@@ -4,6 +4,8 @@ Handles common malformations: trailing commas, single quotes, unquoted keys.
 Used by execute_tool() before parsing tool call arguments.
 """
 
+from __future__ import annotations
+
 import json
 import re
 

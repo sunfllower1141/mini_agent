@@ -5,6 +5,8 @@ Provides all 8 checker types and the run_checks() orchestrator.
 Each checker runs against a workspace directory after the agent finishes.
 """
 
+from __future__ import annotations
+
 import os
 import re
 import shlex

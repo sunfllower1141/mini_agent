@@ -444,7 +444,7 @@ class TestSubAgentRecursion(unittest.TestCase):
 
     def test_sub_agent_can_spawn_child(self):
         """A sub-agent with depth < max_depth can spawn a child agent."""
-        from tools.agent_ops import _spawn_one
+        from tools.agent_spawn import _spawn_one
 
         parent_id = _spawn_one(
             "Parent task", self.config, self.runtime,
@@ -456,7 +456,7 @@ class TestSubAgentRecursion(unittest.TestCase):
 
     def test_max_depth_enforced(self):
         """At max_depth, spawning should still not crash."""
-        from tools.agent_ops import _spawn_one
+        from tools.agent_spawn import _spawn_one
 
         child_id = _spawn_one(
             "Deep child", self.config, self.runtime,

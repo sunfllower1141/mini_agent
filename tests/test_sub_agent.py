@@ -958,7 +958,7 @@ class TestIdentityCleanup:
     def test_task_id_restored_after_spawn(self, configured_context):
         """After spawn_agent completes, _agent_task_id must be empty (not leak sub ID)."""
         from tools import _TOOL_CONTEXT
-        from tools.agent_ops import _spawn_one
+        from tools.agent_spawn import _spawn_one
 
         parent_id_before = getattr(_TOOL_CONTEXT, "_agent_task_id", "")
         assert parent_id_before == ""
@@ -988,7 +988,7 @@ class TestIdentityCleanup:
     def test_depth_restored_after_spawn(self, configured_context):
         """After spawn_agent completes, _agent_depth must be 0."""
         from tools import _TOOL_CONTEXT
-        from tools.agent_ops import _spawn_one
+        from tools.agent_spawn import _spawn_one
 
         depth_before = getattr(_TOOL_CONTEXT, "_agent_depth", 0)
         assert depth_before == 0

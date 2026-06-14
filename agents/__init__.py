@@ -6,4 +6,6 @@ Note: run_sub_agent is NOT imported here to avoid a circular import chain:
 Import it directly: ``from agents.sub_agent import run_sub_agent``.
 """
 
+from __future__ import annotations
+
 from .agent_runtime import AgentRuntime, SubAgentResult

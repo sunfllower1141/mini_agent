@@ -6,6 +6,8 @@ Provides run_task(), run_suite(), load_tasks(), and the CLI entry point
 callbacks -- zero changes to core modules.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import shutil

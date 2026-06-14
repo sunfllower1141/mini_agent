@@ -19,40 +19,51 @@
 - Use `from __future__ import annotations` in every module.
 
 ## Module Map
-# prompt.py          — system prompt, personality rules
-# config.py          — AgentConfig (TOML + env + CLI), startup context
-# llm.py             — API calls, turn orchestration, tool piping
-# memory.py          — SQLite conversation persistence + pruning
-# safety.py          — workspace read/write gates (SafetyResult dataclass)
-# agent_runtime.py   — sub-agent lifecycle, inboxes, file reservations
-# api.py             — LLM API calls (call_deepseek), message cache
-# sub_agent.py       — sub-agent engine, turn budget, pruning, Pro model
-# agent_runtime.py   — sub-agent lifecycle, inboxes, file reservations
-# interject.py       — thread-safe user interjection queue
-# terminal.py        — ANSI colour helpers
-# retry.py           — HTTP retry with jitter and backoff
-# stream.py          — SSE stream parser
-# tools/             — tool implementations
-#   __init__.py      — dispatch, cache, ToolResult, JSON repair
-#   schema.py        — TOOLS definitions sent to LLM
-#   file_ops.py      — read/write/edit/list/info/scratchpad/diff/plan
-#   shell_ops.py     — run_shell, run_tests, search_files, git, task_status, verify
-#   search_ops.py    — find_symbol, find_usages, semantic_search, web_search, recall_turn
-#   agent_ops.py     — spawn/status/collect/message/read/extend/handoff/inbox/subscribe/cancel
-#   agent_messages.py — typed message registry, validation, routing
-#   agent_patterns.py — fan_out, fan_in, pipeline, barrier, scatter_gather
-#   lsp.py           — LSP client (pylsp integration)
-#   mcp_client.py    — MCP client (stdio JSON-RPC tool discovery)
-#   semantic_cache.py — semantic response cache (cosine-sim match, 15-25% cost reduction)
-# STATE.txt          — architecture decisions, current state (consult before major changes)
-# HANDOFF.md         — session handoff (read at startup, write at session end)
-# CHANGELOG.md       — self-modification audit trail (update after significant changes)
+# core/                    — core orchestration
+#   constants.py           — shared constants (no project imports, safe for any module)
+#   prompt.py              — system prompt, personality rules
+#   config.py              — AgentConfig (TOML + env + CLI), startup context
+#   llm.py                 — API calls, turn orchestration, tool piping
+#   safety.py              — workspace read/write gates (SafetyResult dataclass)
+#   bootstrap.py           — session init, workspace setup
+#   context_inject.py      — per-turn context injection (handoff, state, git diff, etc.)
+#   codebase_map.py        — AST-based symbol extraction for startup context
+#   knowledge_graph.py     — entity-relationship graph (calls, imports, defs)
+#   tree_sitter_parser.py  — multi-language source parsing (Python/JS/TS)
+# memory/                  — SQLite persistence
+#   memory.py              — MemoryStore: conversations, knowledge, scratchpad
+#   memory_prune.py        — content-aware compression, orphan stripping
+#   session.py             — session lifecycle
+# agents/                  — multi-agent orchestration
+#   agent_runtime.py       — sub-agent lifecycle, inboxes, file reservations
+#   sub_agent.py           — sub-agent engine, turn budget, pruning, Pro model
+# api.py                   — LLM API calls, message cache
+# interject.py             — thread-safe user interjection queue
+# terminal.py              — ANSI colour helpers
+# retry.py                 — HTTP retry with jitter and backoff
+# stream.py                — SSE stream parser
+# logging_setup.py         — structured logging
+# tools/                   — tool implementations
+#   __init__.py            — dispatch, cache, ToolResult, JSON repair
+#   schema.py              — TOOLS definitions sent to LLM
+#   file_ops.py            — read/write/edit/list/info/scratchpad/diff/plan
+#   shell_ops.py           — run_shell, run_tests, search_files, git, task_status, verify
+#   search_ops.py          — find_symbol, find_usages, semantic_search, web_search, recall_turn
+#   agent_ops.py           — spawn/status/collect/message/read/extend/handoff/inbox/subscribe/cancel
+#   agent_messages.py      — typed message registry, validation, routing
+#   agent_patterns.py      — fan_out, fan_in, pipeline, barrier, scatter_gather
+#   lsp.py                 — LSP client (pylsp integration)
+#   mcp_client.py          — MCP client (stdio JSON-RPC tool discovery)
+#   semantic_cache.py      — semantic response cache (cosine-sim match, 15-25% cost reduction)
+# STATE.txt                — architecture decisions, current state (consult before major changes)
+# HANDOFF.md               — session handoff (read at startup, write at session end)
+# CHANGELOG.md             — self-modification audit trail (update after significant changes)
 
 ## Testing
 - Test files live at root: `test_<module>.py`. Use unittest.TestCase.
 - Tests with supporting files (mock servers, fixtures) may live in `tests/` subdirectory.
 - Run relevant tests after every code change (use `run_tests` tool with path).
-- 827 tests currently, all must pass. Do not stack speculative fixes — verify each.
+- ~1100 tests currently, all must pass. Do not stack speculative fixes — verify each.
 - Use tempfile.mkdtemp for test workspaces; clean up in tearDown.
 
 ## Logging

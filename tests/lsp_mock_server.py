@@ -16,6 +16,8 @@ Reads line-delimited JSON from stdin, writes responses to stdout.
 No external dependencies.
 """
 
+from __future__ import annotations
+
 import json
 import sys
 

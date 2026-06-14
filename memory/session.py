@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
-from core.config import MEMORY_FILENAME
+from core.constants import MEMORY_FILENAME
 from core.prompt import build_startup_context, build_session_header
 
 if TYPE_CHECKING:

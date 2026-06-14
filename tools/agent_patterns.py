@@ -55,7 +55,7 @@ def fan_out(
         List of task_id strings.
     """
     from tools import _TOOL_CONTEXT
-    from tools.agent_ops import _spawn_one, _MAX_CONCURRENT
+    from tools.agent_spawn import _spawn_one, _MAX_CONCURRENT
 
     if runtime is None:
         runtime = getattr(_TOOL_CONTEXT, "_agent_runtime", None)
@@ -145,7 +145,7 @@ def pipeline(
     Returns the final stage's SubAgentResult, or None if any stage fails.
     """
     from tools import _TOOL_CONTEXT
-    from tools.agent_ops import _spawn_one
+    from tools.agent_spawn import _spawn_one
 
     if runtime is None:
         runtime = getattr(_TOOL_CONTEXT, "_agent_runtime", None)
@@ -348,7 +348,7 @@ def audit_parallel(
         List of task_id strings.
     """
     from tools import _TOOL_CONTEXT
-    from tools.agent_ops import _spawn_one, _MAX_CONCURRENT
+    from tools.agent_spawn import _spawn_one, _MAX_CONCURRENT
 
     if runtime is None:
         runtime = getattr(_TOOL_CONTEXT, "_agent_runtime", None)

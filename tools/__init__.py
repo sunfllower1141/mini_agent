@@ -23,6 +23,8 @@ Submodules:
 
 """
 
+from __future__ import annotations
+
 import json
 import re
 import sqlite3
@@ -717,21 +719,29 @@ def tool_summary(tc: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Import submodules to trigger @_register / @_summarize side effects
+# Import submodules to trigger @_register / @_summarize side effects.
+#
+# These imports run at package-load time to populate _TOOL_DISPATCH (dispatch
+# handlers) and _TOOL_SUMMARIES (compact log summaries).  The skills system
+# separately controls which tool *schemas* are sent to the LLM — so
+# skill-gated tools have registered dispatch handlers but their schemas
+# won't appear in TOOLS until the skill is activated via use_skill.
 # ---------------------------------------------------------------------------
 
-from tools import file_ops    # noqa: E402, F401
-from tools import shell_ops   # noqa: E402, F401
-from tools import search_ops  # noqa: E402, F401
-from tools import browser_ops  # noqa: E402, F401  # browser automation tools
-from tools import desktop_ops # noqa: E402, F401  # desktop automation tools
-from tools import macos_ops   # noqa: E402, F401  # intensive macOS API integrations
-from tools import agent_ops   # noqa: E402, F401
-from tools import memory_core  # noqa: E402, F401
-from tools import agent_todos  # noqa: E402, F401
-from tools import agent_patterns  # noqa: E402, F401
-from tools import agent_messages  # noqa: E402, F401
-from tools import lsp         # noqa: E402, F401
+from tools import file_ops        # noqa: E402, F401  -- read_file, write_file, edit_file, etc.
+from tools import shell_ops       # noqa: E402, F401  -- run_shell, search_files, run_tests, etc.
+from tools import search_ops      # noqa: E402, F401  -- find_symbol, web_search, semantic_search
+from tools import browser_ops     # noqa: E402, F401  -- browser automation (web skill)
+from tools import desktop_ops     # noqa: E402, F401  -- desktop automation (desktop skill)
+from tools import macos_ops       # noqa: E402, F401  -- macOS-specific APIs (desktop skill)
+from tools import agent_spawn     # noqa: E402, F401  -- spawn_agent (agents skill)
+from tools import agent_collect   # noqa: E402, F401  -- agent_status, collect_agent, collect_any
+from tools import agent_ops       # noqa: E402, F401  -- agent_extend, agent_cancel, wait_for_agent, etc.
+from tools import memory_core     # noqa: E402, F401  -- memory_core, session_search (core)
+from tools import agent_todos     # noqa: E402, F401  -- todo_write, todo_read (planning skill)
+from tools import agent_patterns  # noqa: E402, F401  -- fan_out, pipeline, barrier (agents skill)
+from tools import agent_messages  # noqa: E402, F401  -- typed inter-agent messaging (agents skill)
+from tools import lsp             # noqa: E402, F401  -- LSP tools (lsp skill)
 from tools.search_ops import build_symbol_index  # noqa: E402, F401
 from tools.mcp_client import get_mcp_manager, init_mcp_servers, shutdown_mcp  # noqa: E402, F401
 
