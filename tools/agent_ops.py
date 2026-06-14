@@ -2410,7 +2410,12 @@ def _diff(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
     try:
 
 
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        env = os.environ.copy()
+        env.setdefault("GIT_TERMINAL_PROMPT", "0")
+        kwargs: dict = dict(capture_output=True, text=True, timeout=10, env=env)
+        if platform.system() == "Windows":
+            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
+        r = subprocess.run(cmd, **kwargs)
 
 
         if r.returncode != 0:

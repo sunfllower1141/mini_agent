@@ -220,12 +220,18 @@ _TOOL_SUMMARIES["write_session_handoff"] = (
 )
 
 # -- use_skill gate: lazy tool loading --
-from tools.skills import USE_SKILL_SCHEMA, _use_skill  # noqa: E402
+from tools.skills import USE_SKILL_SCHEMA, SKILL_LIST_SCHEMA, SKILL_VIEW_SCHEMA, _use_skill, _skill_list, _skill_view  # noqa: E402
 
 _TOOL_DISPATCH["use_skill"] = _use_skill
 _TOOL_SUMMARIES["use_skill"] = lambda args: f"use_skill({args.get('name', '?')})"
-# Inject schema so it's always in TOOLS (it's a core tool, always visible)
+_TOOL_DISPATCH["skill_list"] = _skill_list
+_TOOL_SUMMARIES["skill_list"] = lambda args: "skill_list()"
+_TOOL_DISPATCH["skill_view"] = _skill_view
+_TOOL_SUMMARIES["skill_view"] = lambda args: f"skill_view({args.get('name', '?')})"
+# Inject schemas so they're always in TOOLS (core tools, always visible)
 TOOLS.append(USE_SKILL_SCHEMA)
+TOOLS.append(SKILL_LIST_SCHEMA)
+TOOLS.append(SKILL_VIEW_SCHEMA)
 
 
 def clear_tool_cache() -> None:

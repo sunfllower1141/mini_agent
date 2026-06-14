@@ -1,0 +1,10 @@
+f=open('mini_agent_electron/renderer/src/App.jsx','rb')
+data=f.read()
+f.close()
+idx = data.find(b'theme-check')
+chunk = data[idx:idx+30]
+out=open('hex_out.txt','w',encoding='ascii',errors='replace')
+out.write(f'hex: {chunk.hex(" ")}\n')
+out.write(f'repr: {repr(chunk.decode("utf-8", errors="replace"))}\n')
+out.close()
+print('done')

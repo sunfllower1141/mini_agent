@@ -318,3 +318,17 @@
 - No semantic search across past sessions (current recall is session-only)
 - Core packages (`core/`, `agents/`, `memory/`) use lazy `__getattr__` in `__init__.py` to
   break circular imports. Adding new public symbols requires updating the `__getattr__` chain.
+
+42. **Hermes-style skill architecture (2026-06-14)**: ``tools/skills.py`` now implements
+    the Hermes Agent skills pattern: skills are defined as SKILL.md files with YAML
+    frontmatter + markdown body, discovered from disk (workspace ``skills/`` then
+    ``~/.mini_agent/skills/``), with progressive disclosure (compact catalog at startup,
+    full content injected on ``use_skill``). Supports ``skill_list()`` (cached catalog),
+    ``skill_view(name)`` (full docs), ``get_active_skill_content()`` (injection-ready
+    content for newly activated skills, once per session per skill), and
+    ``reload_skills()`` (force re-discovery after writes). Backward-compatible
+    ``SKILLS`` dict maintained via lazy init. ``_parse_frontmatter()`` is a zero-
+    dependency YAML-like parser supporting inline lists, block lists, booleans, and
+    comments. 10 SKILL.md files created in ``skills/``: git, test, lsp, web, agents,
+    search, tasks, image, desktop, bootstrap. 25 new tests in
+    ``tests/test_skills_hermes.py``.

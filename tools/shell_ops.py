@@ -1047,17 +1047,19 @@ def _verify_summary(args: dict) -> str:
 # git
 # ---------------------------------------------------------------------------
 
-_GIT_SAFE: set[str] = {"status", "diff", "log", "init", "add", "commit", "show", "restore", "blame", "log_p", "branch_diff"}
+_GIT_SAFE: set[str] = {"status", "diff", "log", "init", "add", "commit", "show", "restore", "blame", "log_p", "branch_diff", "push"}
 
 
 def _git_run(cwd: str, *args: str) -> tuple[int, str, str]:
-    result = subprocess.run(
-        ["git", *args],
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        timeout=30,
+    env = os.environ.copy()
+    env.setdefault("GIT_TERMINAL_PROMPT", "0")   # prevent credential prompt hangs
+    env.setdefault("GCM_INTERACTIVE", "Never")     # disable Git Credential Manager
+    kwargs: dict = dict(
+        cwd=cwd, capture_output=True, text=True, timeout=30, env=env,
     )
+    if platform.system() == "Windows":
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
+    result = subprocess.run(["git", *args], **kwargs)
     return result.returncode, result.stdout, result.stderr
 
 
@@ -1221,6 +1223,19 @@ def _git(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
         if files:
             return ToolResult(success=True, content=f"Restored: {files}")
         return ToolResult(success=True, content="Restored (no changes to revert).")
+
+    elif sub == "push":
+        # Push current branch to remote. Optional args: remote and branch.
+        # Uses --force-with-lease for safety (blocks overwriting upstream changes).
+        parts = extra.strip().split() if extra.strip() else []
+        cmd = ["push"]
+        if not any(p.startswith("--force") for p in parts):
+            cmd.append("--force-with-lease")  # safe force-push by default
+        cmd.extend(parts) if parts else cmd.append("origin")
+        rc, out, err = _git_run(cwd, *cmd)
+        if rc != 0:
+            return ToolResult(success=False, content=err or out)
+        return ToolResult(success=True, content=out.strip() or "Pushed successfully.")
 
 
 @_summarize("git")

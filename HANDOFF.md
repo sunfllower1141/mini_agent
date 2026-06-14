@@ -1,7 +1,7 @@
 # Session Handoff
 # Auto-generated at session end. Read at next session start for continuity.
 
-## Last Session: 2026-06-14 04:50 UTC
+## Last Session: 2026-06-14 05:32 UTC
 
 ### What I Changed
 (no git changes detected)
@@ -10,12 +10,10 @@
 (none recorded)
 
 ### Plan Progress
-Plan (5/5 complete):
-  [V] 1. Redesign model picker into DIRECT API and OPENROUTER sections in App.jsx
-  [V] 2. Fix OpenRouter model prefixes (moonshotai/ → moonshot/), add Gemini models, update free models
-  [V] 3. Update _MODEL_TO_PROVIDER mapping in server.py for missing models
-  [V] 4. Verify provider endpoints in config.py are correct
-  [V] 5. Run syntax check and test the config
+Plan (3/3 complete):
+  [V] 1. Add tests for Skill dataclass, frontmatter parser, disk discovery, skill_view, skill_list, get_active_skill_content
+  [V] 2. Run broader test suite to verify no regressions
+  [V] 3. Update STATE.txt, CHANGELOG.md, HANDOFF.md
 
 ### Modified Files
 (none tracked)

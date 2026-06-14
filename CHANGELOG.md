@@ -2,6 +2,25 @@
 
 Self-modification audit trail -- what the agent changed and why.
 
+## 2026-06-14 -- Hermes-Style Skill Architecture
+### Added
+- **skills/ directory** with 10 SKILL.md files (git, test, lsp, web, agents, search, tasks, image, desktop, bootstrap)
+- **SKILL.md format**: YAML frontmatter (name, description, version, author, category, tools) + markdown body
+- **`Skill` dataclass** in `tools/skills.py` with `to_catalog_entry()` and `to_full_doc()`
+- **`_parse_frontmatter()`**: zero-dependency YAML-like frontmatter parser (inline lists, block lists, booleans, comments)
+- **`_discover_skills()`**: scans `skills/` in workspace, then `~/.mini_agent/skills/` for SKILL.md files
+- **`skill_list()`**: compact catalog of all skills (cached), injected at session start
+- **`skill_view(name)`**: full SKILL.md documentation for a specific skill
+- **`get_active_skill_content()`**: returns concatenated body of newly activated skills for prompt injection (once per session per skill)
+- **`reload_skills()`**: force re-discovery after skill file writes
+- **`_use_skill` now returns full skill documentation** in its result so the agent can immediately learn how to use unlocked tools
+- **`tests/test_skills_hermes.py`**: 25 new tests covering Skill dataclass, frontmatter parsing, disk discovery, skill_list, skill_view, active content injection
+### Changed
+- **`tools/skills.py`**: rewritten from simple dict-based skill list to full Hermes-style disk-based architecture
+- Backward-compatible `SKILLS` dict maintained via `_get_skills_compat()` lazy init
+- `USE_SKILL_SCHEMA` now dynamically built with available skill names from disk
+- All 36 existing skills tests still pass
+
 ## 2026-06-14 -- Fix OpenRouter Kimi Model ID Prefix (moonshot -> moonshotai)
 ### Fixed
 - **App.jsx**: Changed `moonshot/kimi-k2.7-code` -> `moonshotai/kimi-k2.7-code` and
