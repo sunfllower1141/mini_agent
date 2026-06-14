@@ -242,6 +242,9 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
 
     # Reset skill gates -- start each session with core tools only
     reset_skills()
+    # Reset per-session tool usage tracking for dead-tool pruning
+    from tools import reset_tool_usage
+    reset_tool_usage()
 
     # Initialize multi-agent runtime
     runtime = AgentRuntime()

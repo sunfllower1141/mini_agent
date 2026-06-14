@@ -209,6 +209,7 @@ from .memory_prune import (  # noqa: F401 -- re-exported for backward compatibil
     _CHARS_PER_TOKEN,
     _MIN_TOKEN_ESTIMATE,
     _COMPRESSION_KEEP_RECENT,
+    _COMPRESSION_GENTLE_RECENT,
     _COMPRESSION_MAX_LINES,
     _COMPRESSION_MAX_FIRST_LINE,
     _SUMMARY_PREVIEW_LENGTH,
@@ -942,7 +943,10 @@ class MemoryStore:
         """
         _clear_message_caches()
         cleaned = _clean_messages(messages)
-        cleaned, compressed = _compress_tool_results(cleaned, keep_recent=_COMPRESSION_KEEP_RECENT)
+        cleaned, compressed = _compress_tool_results(
+            cleaned, keep_recent=_COMPRESSION_KEEP_RECENT,
+            gentle_recent=_COMPRESSION_GENTLE_RECENT,
+        )
 
         # Incremental token accounting: only count new messages since last save.
         new_start = min(self._last_saved_count, len(cleaned))

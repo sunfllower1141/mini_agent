@@ -1,5 +1,5 @@
 # mini_agent Architecture State
-# Last updated: 2026-06-14 (fix: python -c diagnostic hints for # comments and compound statements)
+# Last updated: 2026-06-14 (self-improvement: tiered cache, adaptive thresholds, two-tier pruning, prompt cache key, dead-tool pruning)
 #
 # This file is the agent's map of the codebase. Update it after every
 # completed change. The agent reads this at session start for context.
@@ -279,15 +279,15 @@
     initialized before try/except. (b) ``break`` on productive turn killed failure/miss
     counting for earlier messages -- replaced with ``_stopped_read_only`` flag.
 
-39. **Semantic response cache (2026-06-12)**: ``tools/semantic_cache.py``: new module
-    implementing an in-memory semantic cache using the shared ``all-MiniLM-L6-v2``
-    SentenceTransformer model (zero additional memory footprint). Caches non-tool-call
-    LLM responses keyed by cosine similarity (threshold: 0.92) of the last user
-    message embedding. Bounded to 128 entries with 1-hour TTL. Integrated into
-    ``call_llm()`` in ``api.py`` -- cache lookup before API call, storage after
-    successful plain-text response. Stats tracked on ``_TOOL_CONTEXT._semantic_cache_stats``.
-    Cleared on session reset. Industry consensus: 15-25% cost reduction with zero
-    quality risk.
+39. **Semantic response cache (2026-06-12, upgraded 2026-06-14)**: ``tools/semantic_cache.py``:
+    Two-tier cache: Tier 1 exact SHA-256 hash dict lookup (~0ms), Tier 2 cosine
+    similarity via shared SentenceTransformer model (CodeSearchNet). Per-entry
+    adaptive thresholds with online feedback loop (``report_feedback()``): successful
+    verified hits lower entry threshold by 0.005 (min 0.75), false positives raise
+    by 0.03. VCache-inspired per-embedding optimization. Stats expanded with
+    exact_hits, semantic_hits, avg_adaptive_threshold, feedback_correct/wrong.
+    Bounded to 128 entries with 1-hour TTL. Integrated into ``call_llm()`` in
+    ``api.py``. Cleared on session reset.
 
 40. **Multi-provider fallback chain (2026-06-12)**: ``api.py``: ``call_llm()`` now
     supports automatic failover to fallback providers on 429/5xx errors. Configured
@@ -332,3 +332,19 @@
     comments. 10 SKILL.md files created in ``skills/``: git, test, lsp, web, agents,
     search, tasks, image, desktop, bootstrap. 25 new tests in
     ``tests/test_skills_hermes.py``.
+
+43. **Two-tier memory pruning (2026-06-14)**: ``memory/memory_prune.py``:
+    ``_compress_tool_results()`` now supports opt-in two-tier compression
+    (``gentle_recent`` parameter, default None for backward compat). Gentle
+    zone (last 7-20 msgs) uses hard truncation only at 16K chars / 20 lines
+    instead of type-aware trimming. Aggressive zone (21+) uses existing
+    per-tool-type compression. System prompt (index 0) is NEVER compressed
+    or pruned — critical for API prompt caching. ``_prune_by_tokens()``
+    now preserves the system prompt even under tight token budgets.
+    ``memory/memory.py`` enables two-tier mode with ``gentle_recent=20``.
+
+44. **Prompt cache key for DeepSeek (2026-06-14)**: ``api.py``:
+    ``_build_payload()`` now sets ``prompt_cache_key`` for DeepSeek
+    provider to improve KV cache routing stickiness. Requests with the
+    same key + prefix are more likely to land on the same inference
+    engine, reusing cached KV state. Key is ``mini_agent-v1-{tool_count}``.

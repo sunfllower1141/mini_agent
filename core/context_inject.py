@@ -39,6 +39,12 @@ from collections import Counter
 _CIRCUIT_WINDOW: int = 6
 _CIRCUIT_THRESHOLD: int = 3
 
+# Dead-tool pruning: after this many turns, deactivate skills whose tools
+# have never been used.  Reduces API payload by ~500-2000 tokens and
+# stabilizes the KV-cache prefix (tool definitions stop changing).
+_DEAD_TOOL_PRUNE_TURN: int = 5
+_MIN_PRUNE_COUNT: int = 3  # must have at least this many unused tools to prune
+
 def _tool_call_key(tc: dict) -> str:
     """Stable hash key for a tool call: name + normalized args."""
     fn = tc["function"]
@@ -1407,6 +1413,51 @@ def _inject_experience_context(
         pass
 
 
+def _inject_dead_tool_pruning(
+    messages: list[dict],
+    turn_count: int,
+) -> None:
+    """Prune unused tools after the dead-tool threshold turn.
+
+    After _DEAD_TOOL_PRUNE_TURN turns, any skill whose tools have never
+    been used is deactivated.  This shrinks the API payload (fewer tool
+    definitions) and stabilizes the KV-cache prefix (tool definitions
+    stop changing mid-session).
+
+    A transient message is injected so the agent is aware of the change.
+    Only runs once per session (at exactly the threshold turn).
+    """
+    if turn_count != _DEAD_TOOL_PRUNE_TURN:
+        return
+
+    try:
+        from tools import get_unused_tools
+        from tools.skills import prune_unused_skills, active_skills
+        unused = get_unused_tools(min_turns=_DEAD_TOOL_PRUNE_TURN)
+        if len(unused) < _MIN_PRUNE_COUNT:
+            return
+        pruned = prune_unused_skills(unused)
+        if pruned > 0:
+            remaining = active_skills()
+            msg = (
+                f"TOOL PRUNING: After {turn_count} turns, {pruned} skill(s) were "
+                f"deactivated because none of their tools were used. "
+                f"Remaining active skills: {', '.join(sorted(remaining)) if remaining else 'none'}. "
+                f"This reduces API payload and stabilizes the cache prefix."
+            )
+            messages.append({
+                "role": "user",
+                "content": msg,
+                "_transient": True,
+            })
+            _log.info(
+                "dead_tool_pruning turn=%d pruned=%d unused_count=%d remaining=%d",
+                turn_count, pruned, len(unused), len(remaining),
+            )
+    except Exception:
+        _log.warning("dead_tool_pruning failed", exc_info=True)
+
+
 def _inject_pre_execution_context(
     messages: list[dict],
     pending_tool_calls: list[dict],
@@ -1563,6 +1614,7 @@ def _inject_context(
     _inject_confidence_web_search_nudge(messages, turn_count=turn_count)
     _inject_tool_graph_context(messages)
     _inject_experience_context(messages, memory_store=memory_store)
+    _inject_dead_tool_pruning(messages, turn_count=turn_count)
     _inject_post_edit_verification(messages)
 
     # Context-quality defences (research-backed: 25% fill degrades quality)

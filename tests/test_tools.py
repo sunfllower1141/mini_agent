@@ -726,7 +726,49 @@ class TestToolCache(unittest.TestCase):
         # is a no-op -- results persist across turns until a write happens.
         self.assertIs(r1, r2)
 
-    def test_write_tools_are_not_cached(self):
+    def test_cache_ttl_expiry(self):
+        """Cached entries expire after _TOOL_CACHE_TTL seconds."""
+        from tools import _TOOL_CACHE, _TOOL_CACHE_TTL
+
+        path = os.path.join(self.workspace, "ttl_test.txt")
+        with open(path, "w") as f:
+            f.write("fresh content\n")
+
+        tc = _make_tool_call("read_file", path=path)
+        r1 = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertTrue(r1.success)
+
+        # Artificially age the cached entry past TTL
+        cache_key = json.dumps(["read_file", {"path": path}], sort_keys=True)
+        if cache_key in _TOOL_CACHE:
+            ts, _result = _TOOL_CACHE[cache_key]
+            _TOOL_CACHE[cache_key] = (ts - _TOOL_CACHE_TTL - 1.0, _result)
+
+        r2 = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertTrue(r2.success)
+        # Should be a fresh read (different object) since cache expired
+        self.assertIsNot(r1, r2)
+
+    def test_write_invalidates_path_in_cache(self):
+        """Editing a file evicts its cached read results."""
+        path = os.path.join(self.workspace, "inval_test.txt")
+        with open(path, "w") as f:
+            f.write("v1\n")
+
+        tc = _make_tool_call("read_file", path=path)
+        r1 = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertTrue(r1.success)
+
+        # Write to the file
+        wtc = _make_tool_call("write_file", path=path, content="v2\n")
+        wresult = execute_tool(wtc, self.write_gate, self.read_gate)
+        self.assertTrue(wresult.success)
+
+        # Re-read -- should be a fresh read (cache invalidated by write)
+        r2 = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertTrue(r2.success)
+        self.assertNotEqual(r1.content, r2.content)
+        self.assertIsNot(r1, r2)
         """write_file results are never cached."""
         path = os.path.join(self.workspace, "no_cache.txt")
 

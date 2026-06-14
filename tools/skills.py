@@ -27,6 +27,10 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
+from logging_setup import get_logger
+
+_log = get_logger("skills")
+
 if TYPE_CHECKING:
     from tools import ToolResult
 
@@ -366,6 +370,30 @@ def deactivate_skill(name: str) -> tuple[bool, str]:
     _active_skills.discard(name)
     _skill_content_injected.discard(name)
     return True, f"Deactivated '{name}'."
+
+
+def prune_unused_skills(unused_tools: set[str]) -> int:
+    """Deactivate skills whose tools are all unused.
+
+    Returns the number of skills deactivated.  Called after the dead-tool
+    pruning threshold is reached (default: turn 5).  This shrinks the
+    API payload and stabilizes the KV-cache prefix by keeping tool
+    definitions constant for the remainder of the session.
+    """
+    if not unused_tools:
+        return 0
+    tool_map = _get_skills_tool_map()
+    pruned = 0
+    for skill_name, skill_tools in tool_map.items():
+        if skill_name not in _active_skills:
+            continue
+        # A skill is "dead" if ALL its tools are unused
+        if all(t in unused_tools for t in skill_tools):
+            ok, _msg = deactivate_skill(skill_name)
+            if ok:
+                _log.info("pruned_unused_skill skill=%s tools=%s", skill_name, skill_tools)
+                pruned += 1
+    return pruned
 
 
 def list_skills() -> dict[str, list[str]]:

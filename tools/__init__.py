@@ -29,6 +29,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass
 
 from core.safety import ReadSafetyGate, WriteSafetyGate
@@ -117,15 +118,68 @@ from tools.context import (  # noqa: E402, F401
 # Session-level cache for read-only tools.  Persists across turns within a
 # session, invalidated when files are modified.  Caps at _TOOL_CACHE_MAX_SIZE.
 # Key: json.dumps([name, args], sort_keys=True).
-_TOOL_CACHE: dict[str, "ToolResult"] = {}
+# Value: (timestamp, ToolResult) with 30-second TTL.
+_TOOL_CACHE: dict[str, tuple[float, "ToolResult"]] = {}
 _TOOL_CACHE_MAX_SIZE = 256
+_TOOL_CACHE_TTL: float = 3600.0  # seconds (1 hour) -- safety net; primary invalidation is write-driven
 _TOOL_CACHE_PATH_MAP: dict[str, set[str]] = {}  # file path -> set of cache keys
+_TOOL_CACHE_HITS: int = 0
+_TOOL_CACHE_MISSES: int = 0
+
+def get_tool_cache_stats() -> dict:
+    """Return cache hit/miss/size stats for observability."""
+    return {
+        "size": len(_TOOL_CACHE),
+        "max_size": _TOOL_CACHE_MAX_SIZE,
+        "ttl_s": _TOOL_CACHE_TTL,
+        "hits": _TOOL_CACHE_HITS,
+        "misses": _TOOL_CACHE_MISSES,
+        "hit_rate": (_TOOL_CACHE_HITS / max(_TOOL_CACHE_HITS + _TOOL_CACHE_MISSES, 1)),
+    }
 
 # Files modified by write/edit -- used by verify
 _MODIFIED_FILES: set[str] = set()
 _MODIFIED_FILES_LOCK = threading.Lock()
 
 _TASK_REGISTRY: dict[str, subprocess.Popen] = {}  # background shell task registry
+
+# Per-session tool usage tracking for dead-tool pruning.
+# Incremented in execute_tool(); reset each session via reset_tool_usage().
+# Dead-tool pruning drops tools with zero usage after a threshold turn,
+# shrinking the API payload and stabilizing the KV-cache prefix.
+_TOOL_USAGE_COUNT: dict[str, int] = {}
+_TOOL_USAGE_LOCK = threading.Lock()
+
+def reset_tool_usage() -> None:
+    """Reset per-session tool usage counters (called at session init)."""
+    with _TOOL_USAGE_LOCK:
+        _TOOL_USAGE_COUNT.clear()
+
+def get_tool_usage() -> dict[str, int]:
+    """Return a snapshot of tool usage counts (thread-safe)."""
+    with _TOOL_USAGE_LOCK:
+        return dict(_TOOL_USAGE_COUNT)
+
+def get_unused_tools(min_turns: int = 5) -> set[str]:
+    """Return tool names that have never been called after *min_turns* turns.
+
+    Only meaningful after the agent has had enough turns to establish patterns.
+    Tools in CORE_TOOLS that are essential (read_file, write_file, etc.) are
+    excluded from pruning.
+    """
+    from tools.skills import get_active_tool_names
+    active = frozenset(get_active_tool_names())
+    with _TOOL_USAGE_LOCK:
+        used = frozenset(_TOOL_USAGE_COUNT)
+    # Never prune these — they're essential scaffolding
+    _UNPRUNABLE = frozenset({
+        "read_file", "write_file", "edit_file", "run_shell",
+        "search_files", "list_directory", "file_info", "find_symbol",
+        "remember", "memory_core", "use_skill", "plan", "plan_status",
+        "todo_write", "todo_read", "write_scratchpad",
+    })
+    unused = active - used - _UNPRUNABLE
+    return unused
 
 # ---------------------------------------------------------------------------
 # File reservation system -- extracted to tools/reservations.py
@@ -402,8 +456,21 @@ def execute_tool(
     cache_key = ""
     if on_output is None and name in _CACHEABLE:
         cache_key = json.dumps([name, args], sort_keys=True)
-        if cache_key in _TOOL_CACHE:
-            return _TOOL_CACHE[cache_key]
+        cached = _TOOL_CACHE.get(cache_key)
+        if cached is not None:
+            ts, result = cached
+            if time.monotonic() - ts < _TOOL_CACHE_TTL:
+                global _TOOL_CACHE_HITS
+                _TOOL_CACHE_HITS += 1
+                return result
+            # Expired -- evict from cache and path map
+            _TOOL_CACHE.pop(cache_key, None)
+            for p, keys in list(_TOOL_CACHE_PATH_MAP.items()):
+                keys.discard(cache_key)
+                if not keys:
+                    del _TOOL_CACHE_PATH_MAP[p]
+        global _TOOL_CACHE_MISSES
+        _TOOL_CACHE_MISSES += 1
 
     # --- schema validation: check parameter names against tool definition ---
     if isinstance(args, dict):
@@ -614,16 +681,21 @@ def execute_tool(
             _log.warning("auto-verify LSP diagnostics failed for %s", file_path, exc_info=True)
 
     # Cache successful read-only results (only when not streaming).
-    # Session-level LRU: evict oldest entry when over _TOOL_CACHE_MAX_SIZE.
+    # Session-level LRU with TTL: evict oldest entry when over _TOOL_CACHE_MAX_SIZE.
     if cache_key and result.success:
         if cache_key not in _TOOL_CACHE and len(_TOOL_CACHE) >= _TOOL_CACHE_MAX_SIZE:
             # Evict oldest entry (Python 3.7+ dicts are insertion-ordered)
             _TOOL_CACHE.pop(next(iter(_TOOL_CACHE)), None)
-        _TOOL_CACHE[cache_key] = result
+        _TOOL_CACHE[cache_key] = (time.monotonic(), result)
         # Track file-path-to-cache-key mapping for targeted invalidation
         file_path = args.get("path", "") if isinstance(args, dict) else ""
         if file_path:
             _TOOL_CACHE_PATH_MAP.setdefault(file_path, set()).add(cache_key)
+
+    # Increment per-session tool usage counter for dead-tool pruning
+    # (count even failed calls — they indicate the agent tried to use the tool)
+    with _TOOL_USAGE_LOCK:
+        _TOOL_USAGE_COUNT[name] = _TOOL_USAGE_COUNT.get(name, 0) + 1
 
     return result
 

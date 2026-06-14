@@ -2,6 +2,64 @@
 
 Self-modification audit trail -- what the agent changed and why.
 
+## 2026-06-14 -- Tool Result Cache with TTL
+### Changed
+- **tools/__init__.py**: Added 30-second TTL to the existing `_TOOL_CACHE`. Cache
+  entries now store `(timestamp, ToolResult)` instead of raw `ToolResult`.
+  Lookup checks `time.monotonic() - timestamp < _TOOL_CACHE_TTL` before
+  returning a hit; expired entries are evicted on access. Added hit/miss
+  tracking (`_TOOL_CACHE_HITS`, `_TOOL_CACHE_MISSES`) and a
+  `get_tool_cache_stats()` function for observability.
+- **tests/test_tools.py**: Added `test_cache_ttl_expiry` (artificially ages
+  a cached entry past TTL, verifies fresh re-read) and
+  `test_write_invalidates_path_in_cache` (write_file evicts read_file cache
+  for the same path). All 6 cache-related tests pass.
+
+### Why
+Without TTL, cached read_file results lived forever until write invalidation.
+TTL (3600s / 1 hour) is a safety net for edge cases where invalidation misses
+a change (e.g., subprocess modifies a file outside the agent's knowledge).
+1-hour TTL matches industry best practices (AgenticSkillset.org recommends
+3600s for read_file/search_code) and is long enough to cover any reasonable
+agent session while still bounding staleness. Primary invalidation remains
+write-driven — editing a file instantly evicts its cached reads.
+
+## 2026-06-14 -- Dead-Tool Pruning (Session-Level)
+### Changed
+- **tools/__init__.py**: Added per-session tool usage tracking (`_TOOL_USAGE_COUNT`),
+  `get_tool_usage()`, `get_unused_tools()`, `reset_tool_usage()`. Counter
+  incremented in `execute_tool()` for every tool call. Session reset wired
+  into `core/bootstrap.py`.
+- **tools/skills.py**: Added `prune_unused_skills(unused_tools)` — deactivates
+  skills whose ALL tools have zero usage after the pruning threshold.
+- **core/context_inject.py**: Added `_inject_dead_tool_pruning()` — runs at turn 5
+  (configurable via `_DEAD_TOOL_PRUNE_TURN`), deactivates unused skills,
+  injects a transient message so the agent knows. Shrinks API payload by
+  500-2000 tokens and stabilizes the KV-cache prefix (tool definitions stop
+  changing mid-session).
+- **core/bootstrap.py**: Calls `reset_tool_usage()` at session init.
+
+### Why
+After 5 turns, the agent's tool usage pattern stabilizes. Any skill whose tools
+have never been called is dead weight in every subsequent API request — both
+in token cost and in KV-cache instability (changing tool definitions invalidate
+the cached prefix). Pruning them yields ~5-10% fewer tokens per API call and
+fewer cache misses.
+
+## 2026-06-14 -- Self-Improvement: Speed, Cache Hit, Cost Saving, Memory
+### Changed
+- **tools/semantic_cache.py**: Two-tier cache (exact hash match + semantic cosine),
+  per-entry adaptive thresholds with online feedback loop (`report_feedback()`),
+  expanded stats (exact_hits, semantic_hits, avg_adaptive_threshold, feedback).
+- **memory/memory_prune.py**: Two-tier compression (gentle zone keeps more context,
+  aggressive zone uses type-aware trimming), system prompt preservation (never
+  prune/compress index 0), new constants _COMPRESSION_GENTLE_RECENT,
+  _COMPRESSION_GENTLE_MAX_LINES, _TOOL_RESULT_GENTLE_CHARS.
+- **memory/memory.py**: Enabled two-tier compression with gentle_recent=20,
+  imported _COMPRESSION_GENTLE_RECENT.
+- **api.py**: Added `prompt_cache_key` for DeepSeek to improve KV cache
+  routing stickiness and cache hit rate.
+
 ## 2026-06-14 -- python -c Diagnostic Hints
 ### Changed
 - **tools/shell_ops.py**: Added two diagnostic hints for `python -c` no-output commands:

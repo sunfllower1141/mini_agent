@@ -1,7 +1,7 @@
 # Session Handoff
 # Auto-generated at session end. Read at next session start for continuity.
 
-## Last Session: 2026-06-14 10:21 UTC
+## Last Session: 2026-06-14 11:19 UTC
 
 ### What I Changed
 (no git changes detected)
@@ -10,10 +10,10 @@
 (none recorded)
 
 ### Plan Progress
-Plan (1/3 complete):
-  [o] 1. Remove SentenceTransformer warmup from daemon warmup thread (it preempts _sem_preload causing the preload to no-op)
-  [o] 2. Make main-thread ST encode warmup unconditional (remove _sem_preload_event gate)
-  [V] 3. Run syntax check and tests
+Plan (3/3 complete):
+  [V] 1. Implement tool result cache (session-level TTL) in tools/__init__.py
+  [V] 2. Implement dead tool pruning (leverage ToolGraph stats) in tools/skills.py or context injection
+  [V] 3. Implement context reordering for KV cache prefix maximization in memory/memory.py
 
 ### Modified Files
 (none tracked)

@@ -41,9 +41,12 @@ _MIN_TOKEN_ESTIMATE = 1              # floor for token count estimates
 
 # Tool result compression
 _COMPRESSION_KEEP_RECENT = 6         # messages at the tail left uncompressed
+_COMPRESSION_GENTLE_RECENT = 20      # messages kept with only hard-truncation
 _COMPRESSION_MAX_LINES = 5           # lines before a tool result is compressed
+_COMPRESSION_GENTLE_MAX_LINES = 20   # lines for gentle-tier compression
 _COMPRESSION_MAX_FIRST_LINE = 500    # max length of the first line kept
 _TOOL_RESULT_MAX_CHARS = 8000        # per-result size budget before hard truncation
+_TOOL_RESULT_GENTLE_CHARS = 16000    # per-result size budget for gentle-tier
 
 # Conversation summarization
 _SUMMARY_PREVIEW_LENGTH = 120        # character limit for content previews
@@ -237,16 +240,17 @@ def _find_tool_call_args(messages: list[dict], tool_idx: int) -> dict:
 def _compress_tool_results(
     messages: list[dict],
     keep_recent: int = _COMPRESSION_KEEP_RECENT,
+    gentle_recent: int | None = None,
 ) -> tuple[list[dict], bool]:
     """Shorten old tool results with content-aware compression.
 
-    Tool results within the last *keep_recent* messages are left intact.
-    Older ones are trimmed based on their tool type:
+    When *gentle_recent* is None (default), uses single-tier mode:
+    everything older than *keep_recent* gets type-aware compression.
 
-    - **read_file**: keep lines around the offset/limit range requested.
-    - **search_files**: keep lines with actual matches (``file:line:`` pattern).
-    - **run_shell**: keep the last 20 lines (exit code + tail).
-    - **default**: keep the first 5 lines + truncation marker.
+    When *gentle_recent* is set, uses two-tier mode:
+    - **Untouched** (last *keep_recent* msgs): left intact.
+    - **Gentle** (next *gentle_recent*-*keep_recent*): hard truncation only.
+    - **Aggressive** (older): type-aware compression.
 
     Returns (messages, changed) -- *changed* is True if at least one
     message was compressed in-place.
@@ -267,11 +271,22 @@ def _compress_tool_results(
                 if tcid and tname:
                     _tool_id_to_name[tcid] = tname
 
-    # Messages that are "recent" (within the tail window) stay untouched
-    cutoff = len(messages) - keep_recent
+    # Determine zone: gentle (two-tier mode only) or aggressive
+    if gentle_recent is not None and gentle_recent > keep_recent:
+        gentle_cutoff = len(messages) - gentle_recent
+        two_tier = True
+    else:
+        gentle_cutoff = -1  # never gentle
+        two_tier = False
+    agg_cutoff = len(messages) - keep_recent
     for i, m in enumerate(messages):
-        if i >= cutoff:
-            break
+        if i >= agg_cutoff:
+            break  # untouched zone
+
+        # Never compress the system prompt (critical for API prompt caching)
+        if i == 0 and m.get("role") == "system":
+            continue
+
         if m.get("role") != "tool":
             continue
         text = _get_tool_content(m)
@@ -286,12 +301,16 @@ def _compress_tool_results(
 
         lines = text.split("\n")
 
-        # ACI upgrade: per-result size budget.  Huge tool results consume
-        # context and confuse the model -- hard-truncate anything over budget.
-        if len(text) > _TOOL_RESULT_MAX_CHARS:
-            truncated = text[:_TOOL_RESULT_MAX_CHARS]
+        # Determine zone: gentle or aggressive
+        is_gentle = two_tier and i >= gentle_cutoff
+        budget = _TOOL_RESULT_GENTLE_CHARS if is_gentle else _TOOL_RESULT_MAX_CHARS
+        max_lines = _COMPRESSION_GENTLE_MAX_LINES if is_gentle else _COMPRESSION_MAX_LINES
+
+        # Hard truncation for oversized results (both zones)
+        if len(text) > budget:
+            truncated = text[:budget]
             truncated += (
-                f"\n... (result truncated at {_TOOL_RESULT_MAX_CHARS} chars "
+                f"\n... (result truncated at {budget} chars "
                 f"out of {len(text)} total. Use read_file with offset to see "
                 f"specific sections if needed.)"
             )
@@ -302,7 +321,23 @@ def _compress_tool_results(
             changed = True
             continue
 
-        # Detect tool type from the forward-built map (P0.3: O(1) lookup)
+        # Gentle tier: only hard truncation (keep more context)
+        if is_gentle and len(lines) <= max_lines:
+            continue  # short enough -- skip type-aware compression
+
+        if is_gentle:
+            # Gentle: keep first N lines instead of type-aware trimming
+            if len(lines) > max_lines:
+                kept = "\n".join(lines[:max_lines])
+                kept += f"\n... (gentle truncation: {len(lines) - max_lines} lines omitted)"
+                data["content"] = kept
+                m["content"] = json.dumps(data)
+                _TOOL_PARSE_CACHE.pop(id(m), None)
+                _TOKEN_EST_CACHE.pop(id(m), None)
+                changed = True
+            continue
+
+        # --- Aggressive tier: type-aware compression ---
         tcid = m.get("tool_call_id", "")
         tool_name = _tool_id_to_name.get(tcid, "")
 
@@ -706,9 +741,23 @@ def _prune_by_tokens(
     boundaries: cuts only at ``user`` message boundaries, so tool-call
     sequences are never split.  *max_messages* is a hard cap applied
     first, then *max_tokens* is the soft budget.
+
+    The system prompt (index 0, role=\"system\") is NEVER pruned -- it is
+    critical for API-side prompt caching and must remain intact.
     """
     if not messages:
         return [], []
+
+    # Pin the system prompt if present
+    sys_msg_start = 0
+    sys_prompt: list[dict] = []
+    if messages and messages[0].get("role") == "system":
+        sys_prompt = [messages[0]]
+        sys_msg_start = 1
+        messages = messages[1:]  # work on the rest; re-attach at end
+
+    if not messages:
+        return sys_prompt, []
 
     # 1. Hard cap by message count
     if len(messages) > max_messages:
@@ -747,5 +796,6 @@ def _prune_by_tokens(
     if start > 0:
         messages = messages[start:]
 
-    return messages, pruned
+    # Re-attach system prompt
+    return sys_prompt + messages, pruned
 

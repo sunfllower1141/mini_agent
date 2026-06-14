@@ -161,6 +161,11 @@ def _build_payload(
         # Enable thinking mode for DeepSeek V4 at full reasoning depth.
         payload["thinking"] = {"type": "enabled"}
         payload["reasoning_effort"] = "high"
+        # Prompt cache key: improves routing stickiness for higher cache hit
+        # rate. Requests with the same key + prefix are more likely to land
+        # on the same inference engine, reusing cached KV state.
+        _cache_seed = str(len(tools)) if tools else "0"
+        payload["prompt_cache_key"] = f"mini_agent-v1-{_cache_seed}"
 
     elif provider == "claude":
         # Claude OpenAI-compat: no temperature, top_p, freq/presence penalties,
