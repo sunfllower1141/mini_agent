@@ -51,6 +51,7 @@ def _parse_stream(response: requests.Response, on_token: Callable[[str], None] |
     tool_calls_by_index: dict[int, dict] = {}  # index -> accumulated tc dict
     fired_indices: set[int] = set()
     reasoning_header_printed = False
+    thinking_ended = False
     usage: dict | None = None
 
     if not on_token:
@@ -85,6 +86,7 @@ def _parse_stream(response: requests.Response, on_token: Callable[[str], None] |
                         # First content token after reasoning -- signal end of thinking
                         if on_token:
                             on_token(THINKING_END)
+                        thinking_ended = True
                     full_content += delta["content"]
                     if on_token:
                         on_token(delta["content"])
@@ -162,6 +164,12 @@ def _parse_stream(response: requests.Response, on_token: Callable[[str], None] |
 
     if full_content and not on_token:
         print(flush=True)  # final newline after streamed text
+
+    # If thinking was opened but never closed (e.g. reasoning-only response
+    # with tool calls and no text content), close it now so subsequent tokens
+    # in this turn don't get stuck in the thinking panel.
+    if full_reasoning and not thinking_ended and on_token:
+        on_token(THINKING_END)
 
     msg: dict = {"role": "assistant", "content": full_content}
     if full_reasoning:
