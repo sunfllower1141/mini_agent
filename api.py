@@ -168,6 +168,17 @@ def _build_payload(
         _cache_seed = str(len(tools)) if tools else "0"
         payload["prompt_cache_key"] = f"mini_agent-v1-{_cache_seed}"
 
+    elif provider == "mimo":
+        # MiMo V2.5 Pro through OpenRouter: enable reasoning via OpenRouter's
+        # unified reasoning parameter (different from DeepSeek's "thinking" key).
+        # OpenRouter routes the effort level to Xiaomi's reasoning API.
+        payload["reasoning"] = {"effort": "high"}
+
+    elif provider == "openrouter":
+        # Generic OpenRouter: enable reasoning for reasoning-capable models.
+        # Harmless for non-reasoning models (they ignore it).
+        payload["reasoning"] = {"effort": "high"}
+
     elif provider == "claude":
         # Claude OpenAI-compat: no temperature, top_p, freq/presence penalties,
         # or response_format. Claude 4.x models reject top_p + temperature combos,
@@ -367,6 +378,7 @@ def call_llm(
             fb_payload.pop("cache_control", None)
             fb_payload.pop("thinking", None)
             fb_payload.pop("reasoning_effort", None)
+            fb_payload.pop("reasoning", None)
             fb_payload.pop("frequency_penalty", None)
             fb_payload.pop("presence_penalty", None)
             fb_payload.pop("response_format", None)

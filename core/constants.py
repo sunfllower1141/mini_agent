@@ -21,7 +21,7 @@ MEMORY_FILENAME = ".mini_agent_memory.db"
 # Provider defaults
 # ---------------------------------------------------------------------------
 
-DEFAULT_API_PROVIDER = "deepseek"  # "deepseek", "claude", "xai", "openrouter", or "ollama"
+DEFAULT_API_PROVIDER = "deepseek"  # "deepseek", "claude", "xai", "openrouter", "mimo", or "ollama"
 
 # ---------------------------------------------------------------------------
 # Truncation / timeout / connection-pool constants

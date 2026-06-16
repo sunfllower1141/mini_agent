@@ -37,6 +37,12 @@ DEEPSEEK_PRICING: dict[str, dict[str, float]] = {
         "inputCacheMiss": 0.14,
         "output": 0.28,
     },
+    # OpenRouter models (cost tracking for session_stats)
+    "xiaomi/mimo-v2.5-pro": {
+        "inputCacheHit": 0.435,  # MiMo V2.5 Pro: no cache-hit discount via OpenRouter
+        "inputCacheMiss": 0.435,  # $0.435 / 1M input tokens
+        "output": 0.87,           # $0.87 / 1M output tokens
+    },
 }
 
 # Fallback for unknown models — use v4-flash pricing

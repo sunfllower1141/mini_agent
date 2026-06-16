@@ -7,7 +7,10 @@
    --------------------------------------------------------------------------- */
 :root {
   --font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Cascadia Code',
-                  'Menlo', 'Consolas', 'DejaVu Sans Mono', monospace;
+                  'Menlo', 'Consolas', 'DejaVu Sans Mono',
+                  'Noto Sans Mono CJK SC', 'Source Han Mono SC',
+                  'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB',
+                  'WenQuanYi Micro Hei', monospace;
   --font-size: 13px;
   --line-height: 1.5;
 }
@@ -1228,7 +1231,9 @@ html, body {
   padding: 10px 14px;
   border-radius: 6px;
   overflow-x: auto;
-  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', 'Menlo', monospace;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', 'Menlo',
+               'Noto Sans Mono CJK SC', 'Source Han Mono SC',
+               'Microsoft YaHei', 'PingFang SC', monospace;
   line-height: 1.5;
   tab-size: 4;
 }

@@ -99,6 +99,16 @@ PROVIDER_DEFAULTS: dict[str, ProviderDefaults] = {
         context_window=256_000,  # Kimi K2.7 native context length
         fallback_providers=("deepseek", "claude"),  # fall back to native keys on OpenRouter outage
     ),
+    "mimo": ProviderDefaults(
+        model="xiaomi/mimo-v2.5-pro",  # Xiaomi MiMo V2.5 Pro via OpenRouter
+        sub_agent_model="deepseek/deepseek-v4-flash",  # cheap worker model for sub-agents
+        api_url="https://openrouter.ai/api/v1/chat/completions",
+        max_tokens=131_072,  # MiMo V2.5 Pro max completion tokens
+        context_window=1_048_576,  # MiMo 1M context window
+        fallback_providers=("deepseek", "claude"),  # fall back to native keys on OpenRouter outage
+        input_price=0.435,       # $0.435 / 1M input tokens
+        output_price=0.87,       # $0.87 / 1M output tokens
+    ),
     "moonshot": ProviderDefaults(
         model="kimi-k2.7-code",  # Kimi K2.7 Code (latest)
         sub_agent_model="kimi-k2.6",  # cheaper worker for sub-agents
@@ -199,6 +209,9 @@ ENV_OLLAMA_API_KEY   = "OLLAMA_API_KEY"
 ENV_OPENROUTER_MODEL = "OPENROUTER_MODEL"
 ENV_OPENROUTER_API_URL = "OPENROUTER_API_URL"
 ENV_OPENROUTER_API_KEY = "OPENROUTER_API_KEY"
+ENV_MIMO_API_KEY  = "MIMO_API_KEY"
+ENV_MIMO_API_URL  = "MIMO_API_URL"
+ENV_MIMO_MODEL    = "MIMO_MODEL"
 ENV_MOONSHOT_API_KEY  = "MOONSHOT_API_KEY"
 ENV_MOONSHOT_API_URL  = "MOONSHOT_API_URL"
 ENV_MOONSHOT_MODEL    = "MOONSHOT_MODEL"
@@ -212,7 +225,7 @@ ENV_GEMINI_MODEL      = "GEMINI_MODEL"
 ENV_GEMINI_API_URL    = "GEMINI_API_URL"
 ENV_OPENAI_MODEL      = "OPENAI_MODEL"
 ENV_OPENAI_API_URL    = "OPENAI_API_URL"
-ENV_API_PROVIDER     = "API_PROVIDER"  # "deepseek", "claude", "xai", "openrouter", "moonshot", "qwen", "gemini", "openai", or "ollama" -- overrides auto-detection
+ENV_API_PROVIDER     = "API_PROVIDER"  # "deepseek", "claude", "xai", "openrouter", "mimo", "moonshot", "qwen", "gemini", "openai", or "ollama" -- overrides auto-detection
 ENV_AGENT_WORKSPACE  = "AGENT_WORKSPACE"
 ENV_EXA_API_KEY      = "EXA_API_KEY"
 ENV_OPENAI_API_KEY   = "OPENAI_API_KEY"
@@ -434,6 +447,7 @@ _PROVIDER_KEY_ENV: dict[str, str] = {
     "xai": ENV_XAI_API_KEY,
     "ollama": ENV_OLLAMA_API_KEY,
     "openrouter": ENV_OPENROUTER_API_KEY,
+    "mimo": ENV_OPENROUTER_API_KEY,  # MiMo routes through OpenRouter
     "moonshot": ENV_MOONSHOT_API_KEY,
     "qwen": ENV_DASHSCOPE_API_KEY,
     "gemini": ENV_GEMINI_API_KEY,
@@ -446,6 +460,7 @@ _PROVIDER_URL_ENV: dict[str, str] = {
     "xai": ENV_XAI_API_URL,
     "ollama": ENV_OLLAMA_API_URL,
     "openrouter": ENV_OPENROUTER_API_URL,
+    "mimo": ENV_OPENROUTER_API_URL,  # MiMo routes through OpenRouter
     "moonshot": ENV_MOONSHOT_API_URL,
     "qwen": ENV_QWEN_API_URL,
     "gemini": ENV_GEMINI_API_URL,
@@ -457,6 +472,7 @@ _PROVIDER_MODEL_ENV: dict[str, str] = {
     "xai": ENV_XAI_MODEL,
     "ollama": ENV_OLLAMA_MODEL,
     "openrouter": ENV_OPENROUTER_MODEL,
+    "mimo": ENV_MIMO_MODEL,
     "moonshot": ENV_MOONSHOT_MODEL,
     "qwen": ENV_QWEN_MODEL,
     "gemini": ENV_GEMINI_MODEL,
@@ -464,7 +480,7 @@ _PROVIDER_MODEL_ENV: dict[str, str] = {
 }
 
 # Auto-detection priority order (first provider with an available key wins).
-_AUTO_DETECT_ORDER = ["deepseek", "moonshot", "claude", "xai", "qwen", "gemini", "openai", "ollama", "openrouter"]
+_AUTO_DETECT_ORDER = ["deepseek", "moonshot", "claude", "xai", "qwen", "gemini", "openai", "mimo", "ollama", "openrouter"]
 
 
 def _switch_to_provider(config: "AgentConfig", provider: str) -> str | None:

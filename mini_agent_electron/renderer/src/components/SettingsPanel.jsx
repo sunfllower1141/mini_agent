@@ -11,8 +11,13 @@ const PROVIDERS = [
   { value: 'deepseek',   label: 'DeepSeek',              keyEnv: 'DEEPSEEK_API_KEY' },
   { value: 'claude',     label: 'Claude (Anthropic)',    keyEnv: 'CLAUDE_API_KEY' },
   { value: 'xai',        label: 'xAI (Grok)',            keyEnv: 'XAI_API_KEY' },
-  { value: 'ollama',     label: 'Ollama (local)',        keyEnv: 'OLLAMA_API_KEY' },
+  { value: 'openai',     label: 'OpenAI',                keyEnv: 'OPENAI_API_KEY' },
+  { value: 'gemini',     label: 'Gemini (Google)',       keyEnv: 'GEMINI_API_KEY' },
+  { value: 'moonshot',   label: 'Moonshot',              keyEnv: 'MOONSHOT_API_KEY' },
+  { value: 'qwen',       label: 'Qwen (DashScope)',      keyEnv: 'DASHSCOPE_API_KEY' },
+  { value: 'mimo',       label: 'MiMo (via OpenRouter)', keyEnv: 'OPENROUTER_API_KEY' },
   { value: 'openrouter', label: 'OpenRouter',            keyEnv: 'OPENROUTER_API_KEY' },
+  { value: 'ollama',     label: 'Ollama (local)',        keyEnv: 'OLLAMA_API_KEY' },
 ];
 
 export default function SettingsPanel({ onSaved }) {

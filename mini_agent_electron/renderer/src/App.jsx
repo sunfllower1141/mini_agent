@@ -75,6 +75,9 @@ const DIRECT_MODEL_GROUPS = [
 ];
 
 const OPENROUTER_MODEL_GROUPS = [
+  { group: 'Xiaomi / MiMo', models: [
+    { id: 'xiaomi/mimo-v2.5-pro', label: 'MiMo V2.5 Pro' },
+  ]},
   { group: 'Kimi / Moonshot', models: [
     { id: 'moonshotai/kimi-k2.7-code', label: 'Kimi K2.7 Code' },
     { id: 'moonshotai/kimi-k2.6',      label: 'Kimi K2.6' },

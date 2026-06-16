@@ -113,6 +113,9 @@ const PROVIDER_KEY_ENV = {
   ollama: 'OLLAMA_API_KEY',
   openrouter: 'OPENROUTER_API_KEY',
   qwen: 'DASHSCOPE_API_KEY',
+  gemini: 'GEMINI_API_KEY',
+  openai: 'OPENAI_API_KEY',
+  mimo: 'OPENROUTER_API_KEY',
 };
 
 function detectApiKey() {
@@ -226,8 +229,10 @@ function _startBot(script) {
   // Collect stderr AND stdout for error diagnostics
   let _stderr = '';
   let _stdout = '';
-  proc.stdout.on('data', (chunk) => { _stdout += chunk.toString(); });
-  proc.stderr.on('data', (chunk) => { _stderr += chunk.toString(); });
+  const _botStdoutDec = new TextDecoder('utf-8', { fatal: false, stream: true });
+  const _botStderrDec = new TextDecoder('utf-8', { fatal: false, stream: true });
+  proc.stdout.on('data', (chunk) => { _stdout += _botStdoutDec.decode(chunk, { stream: true }); });
+  proc.stderr.on('data', (chunk) => { _stderr += _botStderrDec.decode(chunk, { stream: true }); });
   proc.on('error', (err) => {
     console.error(`[bot] ${bot.name} spawn error:`, err.message);
     delete _botProcesses[bot.name];
@@ -424,10 +429,14 @@ function spawnPythonBackend(workspacePath) {
 
   // Buffer for incomplete JSON lines from stdout
   let stdoutBuffer = '';
+  // TextDecoder with stream:true preserves incomplete multi-byte UTF-8
+  // sequences (e.g. em-dash U+2114 = 3 bytes E2 80 94) across Buffer chunks.
+  // Plain data.toString() would garble characters split at chunk boundaries.
+  const utf8Decoder = new TextDecoder('utf-8', { fatal: false, stream: true });
 
   proc.stdout.on('data', (data) => {
     _resetWatchdog();  // backend is alive -- reset the hang watchdog
-    stdoutBuffer += data.toString();
+    stdoutBuffer += utf8Decoder.decode(data, { stream: true });
     const lines = stdoutBuffer.split('\n');
     // Keep the last potentially incomplete line in the buffer
     stdoutBuffer = lines.pop() || '';
@@ -443,18 +452,22 @@ function spawnPythonBackend(workspacePath) {
     }
   });
 
+  // Separate decoder for stderr -- sharing state with stdout's decoder
+  // could corrupt multi-byte sequences if chunks interleave.
+  const stderrDecoder = new TextDecoder('utf-8', { fatal: false, stream: true });
+
   proc.stderr.on('data', (data) => {
     _resetWatchdog();  // stderr output also means backend is alive
     // Log Python stderr to Electron console only -- not the tools panel.
     // HF warnings, tqdm bars, etc. are noise in the UI.
-    const text = data.toString().trim();
+    const text = stderrDecoder.decode(data, { stream: true }).trim();
     if (text) {
       // Suppress known-harmless multiprocess shutdown traceback (Python 3.12+)
       // multiprocess 0.70.x resource_tracker hits AttributeError on _recursion_count
       if (text.includes('multiprocess/resource_tracker.py') && text.includes('_recursion_count')) {
         return;
       }
-      console.log(`[python:stderr] ${data}`);
+      console.log(`[python:stderr] ${text}`);
     }
   });
 

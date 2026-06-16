@@ -58,6 +58,13 @@ def _parse_stream(response: requests.Response, on_token: Callable[[str], None] |
         print(flush=True)  # separate streaming output from the prompt line
 
     try:
+        # Force UTF-8 on the response before iterating lines.
+        # If the API sends Content-Type without charset=utf-8 (common with
+        # text/event-stream), requests defaults to ISO-8859-1 per RFC 2616.
+        # That decodes multi-byte UTF-8 sequences as individual Latin-1 chars,
+        # turning em-dash (E2 80 94) into â\u0080\u0094 mojibake in the UI.
+        response.encoding = 'utf-8'
+
         # NOTE: iter_lines has no per-line timeout.  If the server stalls
         # mid-stream (TCP open but no data), this blocks indefinitely.
         # Callers should set requests-level (connect, read) timeouts on the
@@ -96,18 +103,22 @@ def _parse_stream(response: requests.Response, on_token: Callable[[str], None] |
                         print(delta["content"], end="", file=sys.stderr, flush=True)
 
                 # Reasoning content (thinking mode) -- forward via on_token or print
-                if "reasoning_content" in delta and delta["reasoning_content"]:
+                # OpenRouter returns this as delta["reasoning"] for some models,
+                # while DeepSeek's native API uses delta["reasoning_content"].
+                # Check both field names.
+                _reason_text = (delta.get("reasoning_content") or delta.get("reasoning") or "")
+                if _reason_text:
                     if not reasoning_header_printed and not full_content:
                         if on_token:
                             on_token(THINKING_START)
                         else:
                             print(c("  thinking...", DIM), file=sys.stderr, flush=True)
                         reasoning_header_printed = True
-                    full_reasoning += delta["reasoning_content"]
+                    full_reasoning += _reason_text
                     if on_token:
-                        on_token(delta["reasoning_content"])
+                        on_token(_reason_text)
                     else:
-                        print(c(delta["reasoning_content"], GREEN), end="", file=sys.stderr, flush=True)
+                        print(c(_reason_text, GREEN), end="", file=sys.stderr, flush=True)
 
                 # Tool calls -- accumulate fragments by index and detect completion
                 if "tool_calls" in delta:
