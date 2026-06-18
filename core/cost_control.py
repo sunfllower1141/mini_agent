@@ -19,6 +19,11 @@ Three mechanisms:
 
 Also provides a compact_if_needed() function that can be called
 at turn boundaries.
+
+Budget hard-stop: ``check_budget_limit()`` estimates cumulative cost
+from token counts and raises ``BudgetExceeded`` when the configured
+``budget_limit`` (in USD) is exceeded.  This prevents runaway agent
+loops from draining API balances.
 """
 
 from __future__ import annotations
@@ -210,3 +215,90 @@ def _emergency_compact(messages: list[dict], context_limit: int) -> int:
     messages[:] = [system_msg] + [{"role": "user", "content": summary}] + kept
 
     return len(old)
+
+
+# ---------------------------------------------------------------------------
+# Budget hard-stop
+# ---------------------------------------------------------------------------
+
+
+class BudgetExceeded(Exception):
+    """Raised when the estimated API cost exceeds the configured budget limit."""
+
+    def __init__(self, estimated_cost: float, budget_limit: float) -> None:
+        self.estimated_cost = estimated_cost
+        self.budget_limit = budget_limit
+        super().__init__(
+            f"Budget exceeded: estimated ${estimated_cost:.4f} > "
+            f"limit ${budget_limit:.2f}"
+        )
+
+
+# Thread-safe accumulator for estimated cost.
+# Keyed by thread ID so sub-agents don't interfere with the parent.
+import threading as _threading
+_budget_accumulator: dict[int, float] = {}
+_budget_lock = _threading.Lock()
+
+
+def _get_provider_pricing(config: Any) -> tuple[float, float]:
+    """Return (input_price_per_1M, output_price_per_1M) for the current provider.
+
+    Falls back to DeepSeek V4 Pro pricing if the provider is unknown.
+    """
+    provider = getattr(config, "api_provider", "deepseek")
+    try:
+        from core.config import PROVIDER_DEFAULTS
+        pd = PROVIDER_DEFAULTS.get(provider)
+        if pd:
+            return pd.input_price, pd.output_price
+    except Exception:
+        pass
+    # Fallback: DeepSeek V4 Pro promo pricing
+    return 0.435, 0.87
+
+
+def reset_budget_tracker() -> None:
+    """Reset the budget accumulator for the current thread."""
+    tid = _threading.get_ident()
+    with _budget_lock:
+        _budget_accumulator.pop(tid, None)
+
+
+def track_api_cost(input_tokens: int, output_tokens: int, config: Any) -> float:
+    """Estimate and accumulate the cost of one API call.
+
+    Args:
+        input_tokens: number of prompt tokens sent.
+        output_tokens: number of completion tokens received.
+        config: AgentConfig (or mock) with api_provider field.
+
+    Returns:
+        The estimated cost of this call in USD.
+    """
+    input_price, output_price = _get_provider_pricing(config)
+    cost = (input_tokens / 1_000_000) * input_price + \
+          (output_tokens / 1_000_000) * output_price
+    tid = _threading.get_ident()
+    with _budget_lock:
+        _budget_accumulator[tid] = _budget_accumulator.get(tid, 0.0) + cost
+    return cost
+
+
+def check_budget_limit(config: Any) -> None:
+    """Check if the accumulated cost exceeds the configured budget limit.
+
+    Raises ``BudgetExceeded`` if the limit (in USD) is exceeded.
+    No-op when ``config.budget_limit`` is 0 (disabled).
+
+    Call this at turn boundaries (before making the next API call)
+    to prevent runaway agent loops.
+    """
+    budget_limit = getattr(config, "budget_limit", 0.0) or 0.0
+    if budget_limit <= 0.0:
+        return
+    tid = _threading.get_ident()
+    with _budget_lock:
+        accumulated = _budget_accumulator.get(tid, 0.0)
+    if accumulated > budget_limit:
+        raise BudgetExceeded(accumulated, budget_limit)

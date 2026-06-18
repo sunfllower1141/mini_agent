@@ -119,7 +119,8 @@ class TestAllToolsDispatchable(unittest.TestCase):
         """Sanity check: verify core tool count (schema.py + use_skill injection)."""
         import tools  # noqa: F401
         from tools.schema import TOOLS
-        # Base count from schema.py (static) + 1 for use_skill injected by __init__.py
+        # Base count from schema.py (static) + 3 skill schemas injected by __init__.py
+        # (use_skill, skill_list, skill_view).
         # MCP schemas are injected dynamically by init_session() if MCP servers configured.
         # So we assert a minimum, not an exact count.
         min_expected = 78  # static TOOLS from schema.py + use_skill + skill_list + skill_view

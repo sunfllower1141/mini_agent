@@ -37,6 +37,9 @@ class _MockConfig:
         self.stop_sequences = overrides.get("stop_sequences", None)
         self.response_format = overrides.get("response_format", None)
         self.sub_agent_max_turns = overrides.get("sub_agent_max_turns", 25)
+        self.tool_choice = overrides.get("tool_choice", "")
+        self.use_strict_function_calling = overrides.get("use_strict_function_calling", False)
+        self.budget_limit = overrides.get("budget_limit", 0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +183,39 @@ class TestCleanMessage(unittest.TestCase):
         result = _clean_message(msg, 0)
         self.assertEqual(result["role"], "assistant")
         self.assertEqual(result["content"], "here is the answer")
+
+    def test_reasoning_content_survives_cleaning(self):
+        """reasoning_content should round-trip through _clean_message.
+
+        DeepSeek V4 exposes ``reasoning_content`` in the API response.  When
+        the next turn sends messages back, the assistant message must retain
+        ``reasoning_content`` so the model can pick up where it left off,
+        saving 40-60% on reasoning tokens (loop-deepseek pattern).
+        """
+        msg = {
+            "role": "assistant",
+            "content": "The answer is 42.",
+            "reasoning_content": "I need to compute the meaning of life...",
+        }
+        result = _clean_message(msg, 0, provider="deepseek")
+        self.assertEqual(result["role"], "assistant")
+        self.assertEqual(result["content"], "The answer is 42.")
+        self.assertEqual(
+            result["reasoning_content"],
+            "I need to compute the meaning of life...",
+        )
+
+    def test_reasoning_content_preserved_across_providers(self):
+        """reasoning_content must survive cleaning regardless of provider."""
+        msg = {
+            "role": "assistant",
+            "content": "Done.",
+            "reasoning_content": "Step-by-step reasoning...",
+        }
+        for provider in ("deepseek", "claude", "xai"):
+            result = _clean_message(msg, 0, provider=provider)
+            self.assertEqual(result["reasoning_content"], "Step-by-step reasoning...",
+                            f"reasoning_content stripped for {provider}")
 
 
 # ---------------------------------------------------------------------------
@@ -335,9 +371,71 @@ class TestBuildPayload(unittest.TestCase):
         self.assertIn("stream", payload)
         self.assertIn("max_tokens", payload)
 
+    def test_deepseek_tool_choice_unset_by_default(self):
+        """tool_choice should not be in payload when config.tool_choice is empty."""
+        config = _MockConfig(api_provider="deepseek", tool_choice="")
+        with patch("api.get_active_tools", return_value=[]):
+            payload = _build_payload(config, [], [])
+        self.assertNotIn("tool_choice", payload)
+
+    def test_deepseek_tool_choice_required(self):
+        """tool_choice='required' must appear in payload."""
+        config = _MockConfig(api_provider="deepseek", tool_choice="required")
+        with patch("api.get_active_tools", return_value=[]):
+            payload = _build_payload(config, [], [])
+        self.assertEqual(payload["tool_choice"], "required")
+
+    def test_deepseek_tool_choice_none(self):
+        """tool_choice='none' disables tool calls."""
+        config = _MockConfig(api_provider="deepseek", tool_choice="none")
+        with patch("api.get_active_tools", return_value=[]):
+            payload = _build_payload(config, [], [])
+        self.assertEqual(payload["tool_choice"], "none")
+
+    def test_deepseek_strict_function_calling_injects_strict(self):
+        """When use_strict_function_calling=True, each tool gets strict:true."""
+        config = _MockConfig(
+            api_provider="deepseek",
+            use_strict_function_calling=True,
+        )
+        sample_tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_weather",
+                    "description": "Get weather",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            },
+        ]
+        with patch("api.get_active_tools", return_value=sample_tools):
+            payload = _build_payload(config, [], [])
+        self.assertIn("tools", payload)
+        self.assertTrue(payload["tools"][0]["function"]["strict"])
+
+    def test_deepseek_strict_function_calling_off_by_default(self):
+        """When use_strict_function_calling=False, tools stay unchanged."""
+        config = _MockConfig(
+            api_provider="deepseek",
+            use_strict_function_calling=False,
+        )
+        sample_tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_weather",
+                    "description": "Get weather",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            },
+        ]
+        with patch("api.get_active_tools", return_value=sample_tools):
+            payload = _build_payload(config, [], [])
+        self.assertNotIn("strict", payload["tools"][0]["function"])
+
 
 # ---------------------------------------------------------------------------
-# clear_api_cache
+# _inject_strict_tools
 # ---------------------------------------------------------------------------
 
 class TestClearAPICache(unittest.TestCase):

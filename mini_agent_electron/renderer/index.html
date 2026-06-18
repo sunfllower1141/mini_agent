@@ -2,10 +2,15 @@
 <html lang="en" data-theme="dark">
 <head>
 <script>
-  // Apply persisted theme before paint to avoid FOUC
+  // Apply persisted theme before paint to avoid FOUC.
+  // Validate against known theme IDs to guard against corrupted storage.
   (function() {
-    var t = localStorage.getItem('mini_agent_theme') || 'dark';
+    var VALID_THEMES = ['dark','light','dracula','nord','catppuccin','rose-pine','gruvbox','solarized','tokyo-night','monokai'];
+    var t = localStorage.getItem('mini_agent_theme');
+    if (!t || VALID_THEMES.indexOf(t) === -1) t = 'dark';
     document.documentElement.setAttribute('data-theme', t);
+    // Store back the validated value so React picks up a clean theme id
+    localStorage.setItem('mini_agent_theme', t);
   })();
 </script>
   <meta charset="UTF-8">

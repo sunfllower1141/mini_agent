@@ -1,8 +1,16 @@
 # mini_agent Architecture Map
-# Last updated: 2026-06-15 (file consolidation)
+# Last updated: 2026-06-16 (hash-anchored editing + storm-breaker)
 #
 # This file is the agent's map of the codebase. Update it after completed changes.
 # Behavioral rules live in AGENTS.md. Long-term facts live in core memory.
+
+## Active Decisions
+
+- **Hash-anchored editing (2026-06-16)** — edit_lines with 3-char SHA-256 validation per Akay/Howard Chen pattern
+- **Storm-breaker (2026-06-16)** — after 3 consecutive identical failures, synthesize explanation instead of silent loop
+- **Self-modifying architecture** — agent observes, diagnoses, and improves its own codebase via STATE.txt/CHANGELOG.md/HANDOFF.md
+- **Context injection ZONE model** — ZONE 1 (immutable prefix), ZONE 2 (append-only log), ZONE 3 (volatile scratch)
+- **Read-before-edit enforcement** — all .py edits require prior read_file this session; syntax validated via compile()
 
 ## Module Map
 
@@ -66,6 +74,8 @@
 - `tools/mcp_client.py` -- MCP client (stdio JSON-RPC)
 - `tools/semantic_cache.py` -- two-tier response cache: exact SHA-256 + cosine similarity.
   Adaptive per-entry thresholds. 128 entries, 1-hour TTL.
+- `tools/failure_learning.py` -- failure pattern store (SQLite), self-critique (MistakeNotebook),
+  experience context injection. Tracks tool failures, learns fix strategies.
 - `tools/browser_ops.py` -- Playwright headless browser
 - `tools/desktop_ops.py` -- desktop automation
 - `tools/macos_ops.py` -- macOS-specific desktop ops
@@ -114,6 +124,31 @@
 - _inject_confidence_web_search_nudge(): monitors 3 triggers (search misses, tool failures,
   read-only turns) with 4-turn cooldown. Constants: _CONFIDENCE_NO_RESULT_THRESHOLD=3,
   _CONFIDENCE_FAILURE_THRESHOLD=2, _CONFIDENCE_NUDGE_COOLDOWN_TURNS=4.
+
+### Hash-Anchored Editing (2026-06-16)
+- `tools/file_ops.py`: `_line_hash()`, `_compute_line_hashes()` -- 3-char SHA-256 hash per line
+- `read_file(hash_lines=True)`: returns `lineno:hash| content` format for constructing edit_lines calls
+- `edit_lines(path, edits[{from, from_hash, to, to_hash, new_text}])`: hash-validated line-range edits
+  All hashes validated before any edit applied; batch rejected on any mismatch with precise error.
+  Edits applied bottom-up (reverse line order) to preserve pre-edit line numbers.
+  Pattern from Akay/Howard Chen hashlines design. Reduces retries ~50% and output tokens 30-40%.
+- Schema: `tools/schema.py` -- `hash_lines` param on `read_file`, full `edit_lines` tool definition
+- Tests: `tests/test_file_ops_extended.py::TestHashlines` (11 tests)
+
+### Storm-Breaker (2026-06-16)
+- `core/llm.py`: `_STORM_FAILURES` deque, `_check_storm_breaker()`, `_synthesize_storm_breaker_message()`
+  After 3 consecutive identical failed tool calls (same name + error fingerprint), synthesizes
+  an assistant-role message explaining the failure instead of silently continuing.
+  Pattern from Howard Chen's cwcode: "don't crash, talk."
+- Injected in `run_agent_turn()` after `_tool_execution_phase()`
+- Tests: `tests/test_file_ops_extended.py::TestStormBreaker` (6 tests)
+
+## Known Issues
+
+- No known critical bugs as of 2026-06-18. Minor issues:
+  - test_bash_diag.py parametrize fixture issue (non-functional test harness)
+  - Some Windows path handling edge cases with MSYS2 bash wrappers
+  - Desktop app WebSocket reconnection on network change needs improvement
 
 ## Task-to-File Quick Reference
 

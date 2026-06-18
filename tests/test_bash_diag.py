@@ -5,7 +5,7 @@ import time
 
 BASH = r"C:\Program Files\Git\bin\bash.exe"
 
-def test(label, cmd, stdin_mode, timeout=5):
+def _run_diag(label, cmd, stdin_mode, timeout=5):
     print(f"[{label}] bash -c {cmd!r} stdin={stdin_mode} ...", flush=True)
     t0 = time.time()
     try:
@@ -47,7 +47,7 @@ tests = [
 
 results = []
 for label, cmd, stdin_mode in tests:
-    ok = test(label, cmd, stdin_mode)
+    ok = _run_diag(label, cmd, stdin_mode)
     results.append((label, ok))
 
 print()

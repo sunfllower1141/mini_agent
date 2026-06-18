@@ -52,4 +52,5 @@ Cross-platform desktop automation (macOS, Windows, Linux). Use for:
 ## Best Practices
 - Use `desktop_snapshot` before interacting to understand the UI state
 - Prefer accessibility-based interaction over coordinate-based
-- On macOS, uses AppleScript + atomacos; on Windows, uses UI Automation
+- On macOS, uses AppleScript + atomacos; on Windows, uses UI Automation + PowerShell
+- All 16 desktop tools now work on both macOS and Windows

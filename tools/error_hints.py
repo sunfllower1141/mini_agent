@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from tools.result import ToolResult
+from tools.result import ToolResult, ErrorClass
 from tools.schema import TOOLS
 from logging_setup import get_logger
 
@@ -149,6 +149,103 @@ def _fingerprint_error(name: str, content: str) -> str:
         if "fail" in cl or "FAILED" in cl:
             return "failures"
     return content[:60].strip().lower()
+
+
+# ---------------------------------------------------------------------------
+# Error class mapping: fingerprint -> ErrorClass + retryable + retry_after_ms
+# ---------------------------------------------------------------------------
+# Used by execute_tool() to annotate ToolResult failures with structured
+# error semantics so the LLM can choose the right recovery strategy without
+# guessing.  Keyed by (tool_name, fingerprint).
+
+_ERROR_CLASS_MAP: dict[str, dict[str, tuple[ErrorClass, bool, int]]] = {
+    "edit_file": {
+        "not found": (ErrorClass.NOT_FOUND, False, 0),
+        "whitespace": (ErrorClass.VALIDATION, True, 0),
+        "ambiguous": (ErrorClass.VALIDATION, True, 0),
+        "count": (ErrorClass.VALIDATION, True, 0),
+    },
+    "write_file": {
+        "blocked": (ErrorClass.AUTHORIZATION, False, 0),
+        "exists": (ErrorClass.VALIDATION, True, 0),
+    },
+    "read_file": {
+        "not found": (ErrorClass.NOT_FOUND, False, 0),
+        "offset": (ErrorClass.VALIDATION, True, 0),
+    },
+    "run_shell": {
+        "not found": (ErrorClass.NOT_FOUND, False, 0),
+        "blocked": (ErrorClass.AUTHORIZATION, False, 0),
+        "timed out": (ErrorClass.TRANSIENT, True, 2000),
+    },
+    "search_files": {
+        "not found": (ErrorClass.NOT_FOUND, False, 0),
+        "invalid regex": (ErrorClass.VALIDATION, True, 0),
+    },
+    "find_symbol": {
+        "not found": (ErrorClass.NOT_FOUND, False, 0),
+    },
+    "find_usages": {
+        "not found": (ErrorClass.NOT_FOUND, False, 0),
+    },
+    "run_tests": {
+        "failures": (ErrorClass.PARTIAL_SUCCESS, False, 0),
+    },
+    "verify": {
+        "failures": (ErrorClass.PARTIAL_SUCCESS, False, 0),
+    },
+}
+
+
+def _error_class_for(name: str, fingerprint: str) -> tuple[ErrorClass, bool, int] | None:
+    """Return (error_class, retryable, retry_after_ms) for a (tool, fingerprint)."""
+    tool_map = _ERROR_CLASS_MAP.get(name)
+    if tool_map is None:
+        return None
+    return tool_map.get(fingerprint)
+
+
+def _classify_result(result: ToolResult, tool_name: str) -> None:
+    """Annotate *result* in-place with error_class, retryable, retry_after_ms.
+
+    Called by execute_tool() on every non-success result.  Uses fingerprint
+    matching first, then falls back to heuristics from content.
+    """
+    if result.success:
+        return
+    if result.error_class is not None:
+        return  # already classified
+
+    content = (result.content or "").lower()
+    fingerprint = _fingerprint_error(tool_name, result.content or "")
+
+    # Try the explicit map first
+    classified = _error_class_for(tool_name, fingerprint)
+    if classified is not None:
+        result.error_class, result.retryable, result.retry_after_ms = classified
+        return
+
+    # Fallback heuristics from content
+    if any(kw in content for kw in ("timeout", "timed out", "connection", "network", "unreachable")):
+        result.error_class = ErrorClass.TRANSIENT
+        result.retryable = True
+        result.retry_after_ms = 2000
+    elif any(kw in content for kw in ("not found", "no such file", "does not exist", "no match")):
+        result.error_class = ErrorClass.NOT_FOUND
+        result.retryable = False
+    elif any(kw in content for kw in ("blocked", "safety", "permission denied", "unauthorized", "forbidden")):
+        result.error_class = ErrorClass.AUTHORIZATION
+        result.retryable = False
+    elif any(kw in content for kw in ("rate limit", "too many requests", "429")):
+        result.error_class = ErrorClass.RATE_LIMIT
+        result.retryable = True
+        result.retry_after_ms = 5000
+    elif any(kw in content for kw in ("invalid", "malformed", "bad", "unknown parameter", "missing")):
+        result.error_class = ErrorClass.VALIDATION
+        result.retryable = True
+    else:
+        result.error_class = ErrorClass.PERMANENT
+        result.retryable = False
 
 
 # Mapping of (tool_name, fingerprint) -> recovery hint injected on repeated failure.

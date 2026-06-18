@@ -159,6 +159,7 @@ def make_mock_config(**overrides) -> object:
         "max_tokens": 200000,
         "exa_api_key": "",
         "openai_api_key": "",
+        "tool_choice": "",
     }
     defaults.update(overrides)
 

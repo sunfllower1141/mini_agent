@@ -813,6 +813,9 @@ def _macos_notify(title: str, message: str = "", sound: bool = False) -> ToolRes
 def _desktop_apps(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
     """List running desktop applications."""
     if PLATFORM != "Darwin":
+        if PLATFORM == "Windows":
+            from tools.win_ops import _win_list_apps
+            return _win_list_apps()
         return _mac_only()
     return _macos_list_apps()
 
@@ -821,6 +824,12 @@ def _desktop_apps(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> Tool
 def _desktop_launch(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
     """Launch an application by name or bundle ID."""
     if PLATFORM != "Darwin":
+        if PLATFORM == "Windows":
+            from tools.win_ops import _win_launch_app
+            name = args.get("name", "").strip()
+            if not name:
+                return ToolResult(success=False, content="Missing required parameter: 'name'.")
+            return _win_launch_app(name)
         return _mac_only()
     name = args.get("name", "").strip()
     if not name:
@@ -832,6 +841,12 @@ def _desktop_launch(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> To
 def _desktop_quit(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
     """Quit an application by name or PID."""
     if PLATFORM != "Darwin":
+        if PLATFORM == "Windows":
+            from tools.win_ops import _win_quit_app
+            name = args.get("name", "").strip()
+            if not name:
+                return ToolResult(success=False, content="Missing required parameter: 'name'.")
+            return _win_quit_app(name)
         return _mac_only()
     name = args.get("name", "").strip()
     if not name:
@@ -843,6 +858,12 @@ def _desktop_quit(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> Tool
 def _desktop_focus(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
     """Bring an application window to the foreground."""
     if PLATFORM != "Darwin":
+        if PLATFORM == "Windows":
+            from tools.win_ops import _win_focus_app
+            name = args.get("name", "").strip()
+            if not name:
+                return ToolResult(success=False, content="Missing required parameter: 'name'.")
+            return _win_focus_app(name)
         return _mac_only()
     name = args.get("name", "").strip()
     if not name:
@@ -854,6 +875,11 @@ def _desktop_focus(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> Too
 def _desktop_clipboard(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
     """Read from or write to the system clipboard."""
     if PLATFORM != "Darwin":
+        if PLATFORM == "Windows":
+            from tools.win_ops import _win_clipboard
+            action = args.get("action", "read").strip().lower()
+            text = args.get("text", "")
+            return _win_clipboard(action, text)
         return _mac_only()
     action = args.get("action", "read").strip().lower()
     text = args.get("text", "")
@@ -864,6 +890,9 @@ def _desktop_clipboard(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) ->
 def _desktop_windows(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
     """List all visible windows across all applications."""
     if PLATFORM != "Darwin":
+        if PLATFORM == "Windows":
+            from tools.win_ops import _win_list_windows
+            return _win_list_windows()
         return _mac_only()
     return _macos_list_windows()
 
@@ -872,6 +901,9 @@ def _desktop_windows(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> T
 def _desktop_system_info(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
     """Gather system metrics: CPU, memory, disk, battery, thermal, uptime."""
     if PLATFORM != "Darwin":
+        if PLATFORM == "Windows":
+            from tools.win_ops import _win_system_info
+            return _win_system_info()
         return _mac_only()
     return _macos_system_info()
 
@@ -880,6 +912,12 @@ def _desktop_system_info(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) 
 def _desktop_key(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
     """Press a key combination (e.g. 'cmd+c', 'cmd+tab', 'escape')."""
     if PLATFORM != "Darwin":
+        if PLATFORM == "Windows":
+            from tools.win_ops import _win_press_keys
+            combo = args.get("combo", "").strip()
+            if not combo:
+                return ToolResult(success=False, content="Missing required parameter: 'combo'.")
+            return _win_press_keys(combo)
         return _mac_only()
     combo = args.get("combo", "").strip()
     if not combo:
@@ -891,6 +929,12 @@ def _desktop_key(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolR
 def _desktop_open(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
     """Open a file, folder, or URL in the default application."""
     if PLATFORM != "Darwin":
+        if PLATFORM == "Windows":
+            from tools.win_ops import _win_open
+            target = args.get("target", "").strip()
+            if not target:
+                return ToolResult(success=False, content="Missing required parameter: 'target'.")
+            return _win_open(target)
         return _mac_only()
     target = args.get("target", "").strip()
     if not target:
@@ -902,6 +946,12 @@ def _desktop_open(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> Tool
 def _desktop_reveal(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
     """Reveal a file in Finder."""
     if PLATFORM != "Darwin":
+        if PLATFORM == "Windows":
+            from tools.win_ops import _win_reveal
+            path = args.get("path", "").strip()
+            if not path:
+                return ToolResult(success=False, content="Missing required parameter: 'path'.")
+            return _win_reveal(path)
         return _mac_only()
     path = args.get("path", "").strip()
     if not path:
@@ -913,6 +963,14 @@ def _desktop_reveal(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> To
 def _desktop_notify(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
     """Post a system notification."""
     if PLATFORM != "Darwin":
+        if PLATFORM == "Windows":
+            from tools.win_ops import _win_notify
+            title = args.get("title", "").strip()
+            message = args.get("message", "").strip()
+            sound = args.get("sound", False)
+            if not title:
+                return ToolResult(success=False, content="Missing required parameter: 'title'.")
+            return _win_notify(title, message, sound)
         return _mac_only()
     title = args.get("title", "").strip()
     message = args.get("message", "").strip()

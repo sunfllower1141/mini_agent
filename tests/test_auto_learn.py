@@ -8,9 +8,9 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from tools import _TOOL_CONTEXT
-from tools.__init__ import (
+from tools import (
     _FAILURE_PATTERNS,
+    _TOOL_CONTEXT,
     _fingerprint_error,
     _learn_from_failure,
     ToolResult,
