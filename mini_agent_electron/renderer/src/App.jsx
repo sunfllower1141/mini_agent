@@ -2,6 +2,9 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import useSmoothStream from './hooks/useSmoothStream';
 import LogLine from './components/LogLine';
 import CodeBlock from './components/CodeBlock';
+import SearchResults from './components/SearchResults';
+import ReadFileResult from './components/ReadFileResult';
+import ShellResults from './components/ShellResults';
 import LogPanel from './components/LogPanel';
 import AgentTree from './components/AgentTree';
 import RoundedFrame from './components/RoundedFrame';
@@ -106,10 +109,88 @@ function setThemeDom(id) {
   localStorage.setItem('mini_agent_theme', id);
 }
 
+// Strip ANSI escape codes from backend diff_preview
+function stripAnsi(text) {
+  if (!text) return '';
+  var ESC = String.fromCharCode(27);
+  return text.replace(new RegExp(ESC + '\\[[0-9;]*m', 'g'), '');
+}
+
+// Parse a unified-diff hunk header like "@@ -1,6 +1,9 @@" into human-readable form.
+// Returns e.g. "Line 1  (+3 lines)" or "Line 5" for a pure-context hunk.
+function formatHunkHeader(raw) {
+  const m = raw.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/);
+  if (!m) return raw;
+  const oldStart = parseInt(m[1]), oldCount = m[2] ? parseInt(m[2]) : 1;
+  const newStart = parseInt(m[3]), newCount = m[4] ? parseInt(m[4]) : 1;
+  const delta = newCount - oldCount;
+  if (delta > 0) return '\u2500 Line ' + newStart + ' (+' + delta + ' line' + (delta !== 1 ? 's' : '') + ')';
+  if (delta < 0) return '\u2500 Line ' + newStart + ' (' + delta + ' line' + (delta !== -1 ? 's' : '') + ')';
+  return '\u2500 Line ' + newStart;  // pure context change (0 net lines)
+}
+
+// Render a unified diff with colored lines (red for removed, green for added).
+// Header lines (--- file, +++ file) are skipped -- the file path is already in the status line.
+// Hunk headers (@@ ... @@) are translated to human-readable form.
+function DiffView({ diff }) {
+  const clean = stripAnsi(diff);
+  const lines = clean.split('\n').filter(l =>
+    !l.startsWith('--- ') && !l.startsWith('+++ ')
+  );
+  return (
+    <div className="diff-view" style={{
+      fontFamily: 'var(--font-family)', fontSize: '0.75em',
+      lineHeight: '1.4',
+    }}>
+      {lines.map((line, i) => {
+        let color = 'var(--dim)';
+        let display = line;
+        if (line.startsWith('@@')) {
+          color = 'var(--yellow)';
+          display = formatHunkHeader(line);
+        } else if (line.startsWith('+')) {
+          color = 'var(--green)';
+        } else if (line.startsWith('-')) {
+          color = 'var(--red)';
+        }
+        const ln = String(i + 1).padStart(4, '\u00A0');
+        return (
+          <div key={i} style={{ color, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            <span style={{ color: '#555', userSelect: 'none', display: 'inline-block', minWidth: '3em', textAlign: 'right', marginRight: '0.5em' }}>
+              {ln}
+            </span>
+            {display}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 
 // ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
+// Web Audio notification chime -- short ascending two-tone beep
+function playNotificationSound() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const now = ctx.currentTime;
+    const gain = ctx.createGain();
+    gain.connect(ctx.destination);
+    gain.gain.setValueAtTime(0.12, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+    [660, 880].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      osc.connect(gain);
+      osc.start(now + i * 0.1);
+      osc.stop(now + i * 0.1 + 0.12);
+    });
+  } catch (_) { /* audio not available -- silent fallback */ }
+}
+
 function AppShell() {
   // Log state -- arrays of { text, cls?, html?, icon? }
   const [toolsLines, setToolsLines] = useState([]);
@@ -182,6 +263,7 @@ function AppShell() {
   const [theme, setTheme] = useState(() => localStorage.getItem('mini_agent_theme') || 'dark');
   const [themePickerOpen, setThemePickerOpen] = useState(false);
   const themeToggleRef = useRef(null);
+  const [soundEnabled, setSoundEnabled] = useState(() => localStorage.getItem('mini_agent_sound') !== '0');
   const [dropdownPos, setDropdownPos] = useState(null);
 
   // Model picker
@@ -425,17 +507,46 @@ function AppShell() {
       const entry = toolOutputStack.current.pop() || { lines: [], toolName: '' };
       const bufCode = entry.lines.join('\n').trim();
       const code = bufCode || (data.content || '').trim();
-      // When output is present, show it with syntax highlighting
-      if (code) {
-        const isSingleLine = !code.includes('\n');
-        if (isSingleLine) {
-          addToolLine({ text: `  ${status}  ${code}`, cls });
-        } else {
+      // When diff_preview is present, render colored diff (edit_file, write_file)
+      if (data.diff_preview) {
+        addToolLine({ text: `  ${status}`, cls });
+        addToolLine({
+          component: <DiffView diff={data.diff_preview} />,
+          cls: '',
+        });
+      } else if (code) {
+        const isSearch = /^search_files\(|^find_symbol\(/.test(entry.toolName || '');
+        const isReadFile = /^read_file\(/.test(entry.toolName || '');
+        const isShell = /^run_shell\(/.test(entry.toolName || '');
+        if (isSearch) {
           addToolLine({ text: `  ${status}`, cls });
           addToolLine({
-            component: <CodeBlock code={code} fontSize="0.75em" toolName={entry.toolName} />,
+            component: <SearchResults content={code} />,
+            cls: 'msg-search-results',
+          });
+        } else if (isReadFile) {
+          addToolLine({ text: `  ${status}`, cls });
+          addToolLine({
+            component: <ReadFileResult content={code} toolName={entry.toolName} />,
             cls: '',
           });
+        } else if (isShell) {
+          addToolLine({ text: `  ${status}`, cls });
+          addToolLine({
+            component: <ShellResults content={code} ok={data.ok} />,
+            cls: '',
+          });
+        } else {
+          const isSingleLine = !code.includes('\n');
+          if (isSingleLine) {
+            addToolLine({ text: `  ${status}  ${code}`, cls });
+          } else {
+            addToolLine({ text: `  ${status}`, cls });
+            addToolLine({
+              component: <CodeBlock code={code} fontSize="0.75em" toolName={entry.toolName} wrap={true} />,
+              cls: '',
+            });
+          }
         }
       } else {
         addToolLine({ text: `  ${status} ${data.detail}`, cls });
@@ -540,6 +651,7 @@ function AppShell() {
       setIsLive(false);
       setInputDisabled(false);
       inputRef.current?.focus();
+      if (soundEnabled) playNotificationSound();
     }));
 
     // --- Sub-agent events ---
@@ -694,7 +806,7 @@ function AppShell() {
     setChatLines((prev) => [
       ...prev,
       ...(prev.length > 0 ? [{ id: nextLineId(), text: '', cls: 'msg-separator' }] : []),
-      { id: nextLineId(), text, cls: 'msg-user' },
+      { id: nextLineId(), text: `> ${text}`, cls: 'msg-user' },
       { id: nextLineId(), text: '', cls: 'msg-separator' },
       { id: nextLineId(), text: '', cls: 'msg-agent-pending' },
     ]);
@@ -870,7 +982,21 @@ function AppShell() {
             </span>
           )}
         </span>
-        <span className="dim"> mini_agent -- </span>
+        {/* Center: app title */}
+        <span className="header-title">mini_agent</span>
+        {/* Right: sound toggle + model */}
+        <span className="header-right">
+        <span
+          className="sound-toggle clickable"
+          onClick={() => { const next = !soundEnabled; setSoundEnabled(next); localStorage.setItem('mini_agent_sound', next ? '1' : '0'); }}
+          title={soundEnabled ? 'Sound on  click to mute' : 'Sound off  click to unmute'}
+        >
+          {soundEnabled ? (
+            <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" overflow="visible"><path d="M1.5 5.5h3l4-3.5v12l-4-3.5h-3a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1z"/><path d="M12 3.5a5 5 0 0 1 0 9M14 1.5a8 8 0 0 1 0 13"/></svg>
+          ) : (
+            <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" overflow="visible"><path d="M1.5 5.5h3l4-3.5v12l-4-3.5h-3a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1z"/><line x1="13" y1="3" x2="13" y2="13"/><line x1="10" y1="6" x2="16" y2="6"/></svg>
+          )}
+        </span>
         <span
           id="header-model"
           className="text clickable"
@@ -878,6 +1004,8 @@ function AppShell() {
           onClick={() => setModelPickerOpen((p) => !p)}
           title="Click to switch model"
         >{modelName}</span>
+        </span>
+        
         {modelPickerOpen && modelDropdownPos && (
           <div className="model-dropdown" style={modelDropdownPos} onClick={(e) => e.stopPropagation()}>
             {/* DIRECT API section */}

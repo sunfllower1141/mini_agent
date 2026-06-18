@@ -19,14 +19,11 @@ const markdownComponents = {
  * Security: We NEVER use dangerouslySetInnerHTML for LLM-generated content.
  */
 
-// Simple HTML-escape for plain-text content
+// React auto-escapes content inside {}, so we only need to coerce to string.
+// Manual HTML-escaping (the old version) caused double-escaping: " -> &quot;.
 function escapeHtml(text) {
   if (!text) return '';
-  return String(text)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+  return String(text);
 }
 
 const LogLine = memo(function LogLine({ line }) {

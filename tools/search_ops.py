@@ -1138,7 +1138,7 @@ def _web_search(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRe
     if not query:
         return ToolResult(success=False, content="Missing required parameter: 'query'.")
     num = min(args.get("num_results", 5), 20)
-    stype = args.get("search_type", "auto")
+    stype = args.get("search_type", "deep")
     api_key = _TOOL_CONTEXT.exa_api_key or os.environ.get("EXA_API_KEY", "")
 
     if not api_key:

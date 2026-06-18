@@ -59,6 +59,11 @@ def switch_session(
                          max_tokens=current_config.context_window)
     saved = memory.load()
     if saved:
+        # ---- strip stale pruned-summary messages from prior sessions ----
+        saved = [m for m in saved if not (
+            isinstance(m.get("content"), str)
+            and m["content"].startswith("Earlier in this conversation:")
+        )]
         from memory.memory import _compress_tool_results, _prune_by_tokens, _summarize_pruned
         saved, _ = _compress_tool_results(saved, keep_recent=20)
         saved, pruned = _prune_by_tokens(saved, current_config.context_window, current_config.max_messages)

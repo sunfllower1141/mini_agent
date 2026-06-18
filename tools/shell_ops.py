@@ -630,6 +630,12 @@ def _search_single_file(
         msg = f"No matches for '{pattern}' in {filepath}"
         if offset:
             msg += f" (offset={offset})"
+        if not use_regex and '|' in pattern:
+            msg += (
+                "\nHint: your pattern contains '|' but regex is not enabled."
+                "  The '|' is matched literally.  Try again with regex: true"
+                " to treat '|' as alternation."
+            )
         return ToolResult(success=True, content=msg)
     return ToolResult(success=True, content="\n".join(results))
 
@@ -653,7 +659,14 @@ def _search_with_rg(root_dir: str, pattern: str, use_regex: bool, ignore_case: b
             return ToolResult(success=False, content=f"Invalid regex: {err}")
         lines = result.stdout.splitlines()
         if not lines:
-            return ToolResult(success=True, content=f"No matches for '{pattern}' in {root_dir}")
+            msg = f"No matches for '{pattern}' in {root_dir}"
+            if not use_regex and '|' in pattern:
+                msg += (
+                    "\nHint: your pattern contains '|' but regex is not enabled."
+                    "  The '|' is matched literally.  Try again with regex: true"
+                    " to treat '|' as alternation."
+                )
+            return ToolResult(success=True, content=msg)
         if offset > 0:
             lines = lines[offset:]
         output = "\n".join(lines[:_SEARCH_MAX_RESULTS])
@@ -758,6 +771,15 @@ def _search_files(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolR
         msg = f"No matches for '{pattern}' in {safety_result.resolved_path}"
         if offset:
             msg += f" (offset={offset})"
+        # Hint: if the pattern contains '|' but regex wasn't enabled, the '|'
+        # is treated as a literal pipe character.  Remind the AI to retry with
+        # regex: true for alternation patterns.
+        if not use_regex and '|' in pattern:
+            msg += (
+                "\nHint: your pattern contains '|' but regex is not enabled."
+                "  The '|' is matched literally.  Try again with regex: true"
+                " to treat '|' as alternation."
+            )
         return ToolResult(success=True, content=msg)
     output = "\n".join(results)
     if len(results) >= _SEARCH_MAX_RESULTS:

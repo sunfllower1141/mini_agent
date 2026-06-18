@@ -433,7 +433,7 @@ TOOLS = [
                     },
                     "search_type": {
                         "type": "string",
-                        "description": "Search depth: 'auto' (default, balanced), 'fast', 'deep'. 'auto' works for most queries."
+                        "description": "Search depth: 'auto', 'fast', 'deep' (default). 'deep' returns the most comprehensive results."
                     }
                 },
                 "required": [

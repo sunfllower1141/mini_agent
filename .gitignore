@@ -52,8 +52,8 @@ node_modules/
 package-lock.json
 
 # Temp / scratch files
-_*.py
-_*.bat
+_[!_]*.py
+_[!_]*.bat
 nul
 list_pkgs_temp.py
 _cleanup_temp.py

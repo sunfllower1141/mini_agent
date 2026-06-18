@@ -25,6 +25,7 @@ Submodules:
 
 from __future__ import annotations
 
+import html
 import json
 import re
 import sqlite3
@@ -378,6 +379,22 @@ def clear_tool_cache() -> None:
     pass  # session-level cache -- invalidation is write-driven, not turn-driven
 
 
+def _unescape_values(obj: object) -> object:
+    """Recursively unescape HTML entities in all string values.
+
+    LLMs (especially DeepSeek) sometimes HTML-escape content like ``&amp;`` → ``&``
+    inside JSON string values.  The JSON parses fine but the values carry
+    spurious entities.  This walks the parsed object and fixes them.
+    """
+    if isinstance(obj, str):
+        return html.unescape(obj)
+    if isinstance(obj, dict):
+        return {k: _unescape_values(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_unescape_values(v) for v in obj]
+    return obj
+
+
 def _repair_json(raw: str) -> tuple[object, bool]:
     """Attempt to repair common LLM-generated JSON malformations.
 
@@ -467,6 +484,16 @@ def _repair_json(raw: str) -> tuple[object, bool]:
         except (json.JSONDecodeError, ValueError):
             continue
 
+    # HTML-entity fallback: LLMs (especially DeepSeek) sometimes HTML-escape
+    # content inside JSON string values (e.g. &amp; -> &).  Try unescaping
+    # the raw string and reparsing before giving up.
+    unescaped = html.unescape(raw)
+    if unescaped != raw:
+        try:
+            return json.loads(unescaped), True
+        except (json.JSONDecodeError, ValueError):
+            pass
+
     # Last resort: try the original
     return json.loads(raw), False
 
@@ -522,6 +549,11 @@ def execute_tool(
             content=f"Malformed JSON in tool arguments: {exc}",
             hint=hint,
         )
+
+    # Post-parse: recursively unescape HTML entities in string values.
+    # LLMs (especially DeepSeek) sometimes HTML-escape content like &amp; -> &
+    # inside JSON string values.  The JSON parses fine but the values are wrong.
+    args = _unescape_values(args)
 
     # --- strip _pipe meta-field before validation AND cache check (tool piping) ---
     # Must happen BEFORE cache key is computed, otherwise piped calls

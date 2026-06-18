@@ -12,12 +12,10 @@ import { useRef, useEffect } from 'react';
  *   agents: object { [task_id]: { name, desc, toolCalls, thoughts, output, ok } }
  */
 
+// React auto-escapes content inside {}, so we only need to coerce to string.
 function escapeHtml(text) {
   if (!text) return '';
-  return String(text)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+  return String(text);
 }
 
 function SubAgentSection({ agent }) {
