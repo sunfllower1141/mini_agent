@@ -17,7 +17,7 @@ from __future__ import annotations
 # ---------------------------------------------------------------------------
 SUB_AGENT_TOOLS: set[str] = {
     # File & directory
-    "read_file", "write_file", "edit_file", "list_directory", "file_info",
+    "read_file", "write_file", "edit_file", "edit_lines", "list_directory", "file_info",
     "restore_file",
     # Search & navigation
     "search_files", "find_symbol", "find_usages", "semantic_search",
@@ -162,13 +162,18 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "read_file",
-            "description": "Read the contents of a file at the given path. Use offset and limit for line-range reads on large files.",
+            "description": "Read the contents of one or more files at the given path(s). Use offset and limit for line-range reads on large files. Supports single 'path' (string) or multi-file 'paths' (array of strings, batches into one roundtrip). When a file hasn't changed since last read, returns a short hash confirmation instead of re-sending full content -- this is NOT an error, just acknowledge it and use your existing knowledge of the file.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Path to the file to read"
+                        "description": "Path to a single file to read. Use 'paths' (array) for multiple files in one call."
+                    },
+                    "paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional: array of file paths to read in a single roundtrip. Preferred over multiple read_file calls."
                     },
                     "offset": {
                         "type": "integer",
@@ -181,11 +186,13 @@ TOOLS = [
                     "line_numbers": {
                         "type": "boolean",
                         "description": "Optional: prefix each line with its line number (e.g. '42: content'). Default: false."
+                    },
+                    "hash_lines": {
+                        "type": "boolean",
+                        "description": "Optional: prefix each line with line number and word anchor in the gutter (e.g. ' 42 Apex│ content'). Use this before edit_lines to get persistent anchors. Default: true."
                     }
                 },
-                "required": [
-                    "path"
-                ]
+                "required": []
             }
         }
     },
@@ -217,41 +224,77 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "edit_file",
-            "description": "Edit a file by replacing a specific string with another. Replaces first occurrence by default; use count=-1 for all. When preview=True, returns a unified diff without writing. Use 'paths' (list) for batch multi-file edits.",
+            "description": "Edit a file using word-anchored line ranges. Use read_file(hash_lines=True) first to get anchor-prefixed output, then construct edits with {from, from_hash, to, to_hash, new_text}. All anchors are validated before any edit is applied -- any mismatch rejects the entire batch with a precise error. Edits are applied bottom-up so line numbers refer to the pre-edit file. When preview=True, returns a unified diff without writing. Set edit_type='insert_after' or 'insert_before' to insert at an anchor line (only from/from_hash needed).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Path to the file to edit (required for single-file edit; ignored if 'paths' is provided)"
+                        "description": "Path to the file to edit."
                     },
-                    "paths": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Optional: list of file paths to apply the same old->new edit to (batch edit). When set, 'path' is ignored."
-                    },
-                    "old_string": {
-                        "type": "string",
-                        "description": "Exact string to find and replace"
-                    },
-                    "new_string": {
-                        "type": "string",
-                        "description": "String to replace it with"
-                    },
-                    "count": {
+                    "from": {
                         "type": "integer",
-                        "description": "Optional: number of occurrences to replace (1 = first only, -1 = all). Default: 1."
+                        "description": "Starting line number (1-indexed, inclusive)."
+                    },
+                    "from_hash": {
+                        "type": "string",
+                        "description": "Expected word anchor of the 'from' line from read_file(hash_lines=True)"
+                    },
+                    "to": {
+                        "type": "integer",
+                        "description": "Optional: ending line number (1-indexed, inclusive). Defaults to same as 'from' for single-line edits."
+                    },
+                    "to_hash": {
+                        "type": "string",
+                        "description": "Optional: expected word anchor of the 'to' line. Defaults to same as from_hash."
+                    },
+                    "new_text": {
+                        "type": "string",
+                        "description": "Optional: replacement text (can be multiple lines)."
                     },
                     "preview": {
                         "type": "boolean",
-                        "description": "Optional: if true, skip the write and return a unified diff (lines starting with - for old, + for new). Default: false."
+                        "description": "Optional: if true, skip the write and return a unified diff. Default: false."
+                    },
+                    "edit_type": {
+                        "type": "string",
+                        "description": "Optional: 'replace' (default), 'insert_after', or 'insert_before'. Insert types only need from/from_hash."
                     }
                 },
-                "required": [
-                    "path",
-                    "old_string",
-                    "new_string"
-                ]
+                "required": ["path", "from", "from_hash"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "edit_lines",
+            "description": "Edit a file by replacing line ranges with word anchors for reliable matching or inserting before/after a line. Use read_file(hash_lines=True) first to get anchor-prefixed output, then construct edits with {from, from_hash, to, to_hash, new_text, edit_type}. For 'insert_after'/'insert_before' edit_type, only from/from_hash/new_text are needed (to/to_hash ignored). All anchors are validated before any edit is applied -- any mismatch rejects the entire batch with a precise error. Edits are applied bottom-up so line numbers refer to the pre-edit file.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Path to the file to edit"
+                    },
+                    "edits": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "from": {"type": "integer", "description": "Starting line number (1-indexed, inclusive)"},
+                                "from_hash": {"type": "string", "description": "Expected word anchor of the 'from' line"},
+                                "to": {"type": "integer", "description": "Ending line number (1-indexed, inclusive). Not needed for insert_after/insert_before."},
+                                "to_hash": {"type": "string", "description": "Expected word anchor of the 'to' line. Not needed for insert_after/insert_before."},
+                                "new_text": {"type": "string", "description": "Replacement text (can be multiple lines). For insert types, text is inserted at the anchor."},
+                                "edit_type": {"type": "string", "description": "Optional: 'replace' (default), 'insert_after', or 'insert_before'. Insert types only need from/from_hash."}
+                            },
+                            "required": ["from", "from_hash", "new_text"]
+                        },
+                        "description": "List of edits to apply"
+                    }
+                },
+                "required": ["path", "edits"]
             }
         }
     },
@@ -1633,6 +1676,140 @@ TOOLS = [
                     }
                 },
                 "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_file_skeleton",
+            "description": "Reads the structural outline of one or more files by extracting the lines where classes, functions, and methods are defined (including nested definitions) while stripping all implementation logic. Use this to quickly understand multiple files' structures and APIs before requesting specific functions.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "An array of relative paths to the source files."
+                    },
+                    "include_anchors": {
+                        "type": "boolean",
+                        "description": "Optional. When true, returns source lines prefixed with stable hash anchors usable by edit_file. Defaults to true."
+                    }
+                },
+                "required": ["paths"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_function",
+            "description": "Extracts the complete implementation of one or more functions or methods from one or more files. Use this to inspect specific functions' logic without reading the entire files. You can specify multiple files and multiple functions, it will return an all-to-all lookup result. Use dot-separated path to the function (e.g. 'MyClass.method_name'). Supports Python, TypeScript, and JavaScript.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "An array of relative paths to the source files."
+                    },
+                    "function_names": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "An array of function/method names to extract. Supports 'ClassName.method' syntax."
+                    },
+                    "include_anchors": {
+                        "type": "boolean",
+                        "description": "Optional. When true, returns source lines prefixed with stable hash anchors usable by edit_file. Defaults to true."
+                    }
+                },
+                "required": ["paths", "function_names"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "condense",
+            "description": "Suggests to condense the conversation to free up context window space. Use when you notice the conversation is getting long and important early context may be truncated. The tool will compact oversized tool results and summarize older conversation turns.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "context": {
+                        "type": "string",
+                        "description": "Optional: brief description of what the conversation is about and why condensation would help."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "replace_symbol",
+            "description": "Replaces one or more symbols (functions, methods, or classes) in one or more files with new code using AST-precise byte ranges. This is more robust and token-efficient than edit_file because it targets specific AST nodes directly. IMPORTANT: You MUST provide the complete and correct replacement for each symbol, including all its associated JSDoc, comments, decorators, and export keywords. The tool will replace the entire original range of the symbol and its metadata with your provided text.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "replacements": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "path": {"type": "string", "description": "Relative path to the source file."},
+                                "symbol": {"type": "string", "description": "The dot-separated path to the symbol to replace (e.g. 'MyClass.method_name')."},
+                                "text": {"type": "string", "description": "The complete new code for the symbol including all decorators, JSDoc, comments, and export keywords."},
+                                "type": {"type": "string", "description": "Optional: 'function', 'method', or 'class'."}
+                            },
+                            "required": ["path", "symbol", "text"]
+                        },
+                        "description": "An array of replacement objects. Use this for batch symbol replacements."
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Relative path to the source file (legacy single replacement)."
+                    },
+                    "symbol": {
+                        "type": "string",
+                        "description": "Name of the symbol to replace. Supports 'ClassName.method' syntax (legacy single replacement)."
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "Complete replacement text including all decorators, comments, JSDoc, export keywords (legacy single replacement)."
+                    },
+                    "type": {
+                        "type": "string",
+                        "description": "Optional: 'function', 'method', or 'class'. Default: 'function' (legacy single replacement)."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_symbol_range",
+            "description": "Gets the precise byte offset range (startIndex and endIndex) and startLine of a specific symbol in a source file for use with replace_symbol. This is a pre-processing step that allows you to verify symbol locations before replacement. The range includes any preceding JSDoc comments, decorators, annotations, and export keywords.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Relative path to the source file containing the symbol."
+                    },
+                    "symbol": {
+                        "type": "string",
+                        "description": "The dot-separated name of the symbol to locate (e.g. 'MyClass.method_name')."
+                    },
+                    "type": {
+                        "type": "string",
+                        "description": "Optional: 'function', 'method', or 'class'."
+                    }
+                },
+                "required": ["path", "symbol"]
             }
         }
     },

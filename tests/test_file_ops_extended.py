@@ -188,11 +188,14 @@ class TestRestoreFile(unittest.TestCase):
         path = self._write("editme.txt", "initial text")
         # Must read before editing (read-before-edit enforcement)
         execute_tool(
-            _make_tool_call("read_file", path=path),
+            _make_tool_call("read_file", path=path, hash_lines=True),
             self.write_gate, self.read_gate,
         )
+        from core.anchor_manager import AnchorStateManager
+        anchors = AnchorStateManager.get_anchors(path)
         execute_tool(
-            _make_tool_call("edit_file", path=path, old_string="initial", new_string="changed"),
+            _make_tool_call("edit_file", path=path,
+                            **{"from": 1, "from_hash": anchors[0], "new_text": "changed"}),
             self.write_gate, self.read_gate,
         )
         r = execute_tool(
@@ -886,6 +889,364 @@ class TestWriteScratchpad(unittest.TestCase):
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertTrue(result.success)
         self.assertTrue(_TOOL_CONTEXT._scratchpad_updated)
+
+
+# ---------------------------------------------------------------------------
+# Hashlines -- hash-anchored editing (Hashlines pattern)
+# ---------------------------------------------------------------------------
+
+class TestHashlines(unittest.TestCase):
+    """Tests for word-anchor read_file(hash_lines=True) and edit_lines tool."""
+
+    def setUp(self):
+        self.workspace = tempfile.mkdtemp()
+        self.write_gate, self.read_gate = _gates(self.workspace)
+        set_context(workspace=self.workspace)
+        # Clear cross-test state
+        from tools import file_ops, _TOOL_CACHE
+        from tools.idempotency import clear_idempotent
+        file_ops._READ_FILES.clear()
+        file_ops._FILE_CACHE.clear()
+        _TOOL_CACHE.clear()
+        clear_idempotent()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.workspace, ignore_errors=True)
+
+    def _write(self, name, content):
+        path = os.path.join(self.workspace, name)
+        with open(path, "w") as f:
+            f.write(content)
+        return path
+
+    def test_read_file_hash_lines(self):
+        """read_file(hash_lines=True) outputs gutter with word-anchor lines."""
+        self._write("test.py", "import os\nimport sys\n")
+        tc = _make_tool_call("read_file", path="test.py", hash_lines=True)
+        result = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertTrue(result.success)
+        # Check format: "1 Anchor\u2502 import os" (gutter: right-aligned lineno + anchor + box-draw)
+        self.assertIn("1 ", result.content)
+        self.assertIn("\u2502 import os", result.content)
+        self.assertIn("2 ", result.content)
+        self.assertIn("\u2502 import sys", result.content)
+
+    def test_read_file_hash_lines_vs_plain(self):
+        """hash_lines=True and line_numbers=True output different prefixes."""
+        self._write("test.py", "hello\nworld")
+        tc_hash = _make_tool_call("read_file", path="test.py", hash_lines=True)
+        tc_num = _make_tool_call("read_file", path="test.py", line_numbers=True, hash_lines=False)
+        r_hash = execute_tool(tc_hash, self.write_gate, self.read_gate)
+        r_num = execute_tool(tc_num, self.write_gate, self.read_gate)
+        self.assertTrue(r_hash.success)
+        self.assertTrue(r_num.success)
+        # hash_lines has gutter "1 Anchor│", line_numbers has "1 hello" (no pipe)
+        self.assertIn("\u2502", r_hash.content)
+        self.assertNotEqual(r_hash.content, r_num.content)
+
+    def test_edit_lines_single_edit(self):
+        """Single edit with correct anchors succeeds."""
+        self._write("test.py", "import os\nimport sys\n")
+        execute_tool(_make_tool_call("read_file", path="test.py", hash_lines=True),
+                    self.write_gate, self.read_gate)
+
+        # Get word anchors that were assigned by read_file
+        from core.anchor_manager import AnchorStateManager
+        with open(os.path.join(self.workspace, "test.py")) as f:
+            lines = [l.rstrip("\n") for l in f]
+        anchors = AnchorStateManager.get_anchors(
+            os.path.join(self.workspace, "test.py"))
+        self.assertIsNotNone(anchors, "Anchors should be set after read_file")
+
+        tc = _make_tool_call("edit_lines", path="test.py", edits=[{
+            "from": 1, "from_hash": anchors[0],
+            "to": 1, "to_hash": anchors[0],
+            "new_text": "import os.path"
+        }])
+        result = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertTrue(result.success, f"Got: {result.content}")
+
+        with open(os.path.join(self.workspace, "test.py")) as f:
+            self.assertEqual(f.read(), "import os.path\nimport sys\n")
+
+    def test_edit_lines_range_edit(self):
+        """Multi-line range edit succeeds."""
+        self._write("test.py", "line1\nline2\nline3\n")
+        execute_tool(_make_tool_call("read_file", path="test.py", hash_lines=True),
+                    self.write_gate, self.read_gate)
+
+        from core.anchor_manager import AnchorStateManager
+        anchors = AnchorStateManager.get_anchors(
+            os.path.join(self.workspace, "test.py"))
+        self.assertIsNotNone(anchors)
+
+        tc = _make_tool_call("edit_lines", path="test.py", edits=[{
+            "from": 1, "from_hash": anchors[0],
+            "to": 2, "to_hash": anchors[1],
+            "new_text": "lineA\nlineB"
+        }])
+        result = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertTrue(result.success, f"Got: {result.content}")
+
+        with open(os.path.join(self.workspace, "test.py")) as f:
+            self.assertEqual(f.read(), "lineA\nlineB\nline3\n")
+
+    def test_edit_lines_hash_mismatch_rejected(self):
+        """Wrong hash rejects entire batch with clean error (no hash values exposed)."""
+        self._write("test.py", "line1\nline2\nline3\n")
+        execute_tool(_make_tool_call("read_file", path="test.py", hash_lines=True),
+                    self.write_gate, self.read_gate)
+
+        tc = _make_tool_call("edit_lines", path="test.py", edits=[{
+            "from": 1, "from_hash": "bad",
+            "to": 1, "to_hash": "bad",
+            "new_text": "nope"
+        }])
+        result = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertFalse(result.success)
+        self.assertIn("anchor mismatch", result.content)
+        self.assertIn("has changed since you read the file", result.content)
+        # Must show the stale claimed anchor and re-read instruction
+        self.assertIn("Claimed anchor", result.content)
+        self.assertIn("stale", result.content)
+        self.assertIn("Re-run", result.content)
+        self.assertIn("read_file(hash_lines=True)", result.content)
+        # Must NOT expose the actual hash or current line content
+        self.assertNotIn("Actual hash", result.content)
+        self.assertNotIn("Current line", result.content)
+
+        # File should be unchanged
+        with open(os.path.join(self.workspace, "test.py")) as f:
+            self.assertEqual(f.read(), "line1\nline2\nline3\n")
+
+    def test_edit_lines_out_of_range_rejected(self):
+        """Line numbers beyond file bounds are rejected."""
+        self._write("test.py", "line1\nline2")
+        execute_tool(_make_tool_call("read_file", path="test.py", hash_lines=True),
+                    self.write_gate, self.read_gate)
+
+        tc = _make_tool_call("edit_lines", path="test.py", edits=[{
+            "from": 5, "from_hash": "xxx",
+            "to": 5, "to_hash": "xxx",
+            "new_text": "nope"
+        }])
+        result = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertFalse(result.success)
+        self.assertIn("out of range", result.content)
+
+    def test_edit_lines_multiple_edits(self):
+        """Multiple edits are applied bottom-up correctly."""
+        self._write("test.py", "line1\nline2\nline3\nline4\nline5")
+        execute_tool(_make_tool_call("read_file", path="test.py", hash_lines=True),
+                    self.write_gate, self.read_gate)
+
+        from core.anchor_manager import AnchorStateManager
+        anchors = AnchorStateManager.get_anchors(
+            os.path.join(self.workspace, "test.py"))
+        self.assertIsNotNone(anchors)
+
+        tc = _make_tool_call("edit_lines", path="test.py", edits=[
+            {"from": 5, "from_hash": anchors[4],
+            "to": 5, "to_hash": anchors[4],
+            "new_text": "line5-new"},
+            {"from": 2, "from_hash": anchors[1],
+            "to": 2, "to_hash": anchors[1],
+            "new_text": "line2-new"},
+        ])
+        result = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertTrue(result.success, f"Got: {result.content}")
+
+        with open(os.path.join(self.workspace, "test.py")) as f:
+            content = f.read()
+        self.assertEqual(content, "line1\nline2-new\nline3\nline4\nline5-new")
+
+    def test_edit_lines_read_before_edit_guard(self):
+        """edit_lines rejects edits if file hasn't been read first."""
+        self._write("test.py", "content")
+        tc = _make_tool_call("edit_lines", path="test.py", edits=[{
+            "from": 1, "from_hash": "xxx",
+            "to": 1, "to_hash": "xxx",
+            "new_text": "nope"
+        }])
+        result = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertFalse(result.success)
+        self.assertIn("has not been read", result.content)
+
+    def test_edit_lines_insert_lines(self):
+        """edit_lines can insert lines (to=from, replacing one line with several)."""
+        self._write("test.py", "line1\nline2")
+        execute_tool(_make_tool_call("read_file", path="test.py", hash_lines=True),
+                    self.write_gate, self.read_gate)
+
+        from core.anchor_manager import AnchorStateManager
+        anchors = AnchorStateManager.get_anchors(
+            os.path.join(self.workspace, "test.py"))
+        self.assertIsNotNone(anchors)
+
+        # Replace line 2 with 3 lines (effectively insert)
+        tc = _make_tool_call("edit_lines", path="test.py", edits=[{
+            "from": 2, "from_hash": anchors[1],
+            "to": 2, "to_hash": anchors[1],
+            "new_text": "line2a\nline2b\nline2c"
+        }])
+        result = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertTrue(result.success, f"Got: {result.content}")
+
+        with open(os.path.join(self.workspace, "test.py")) as f:
+            content = f.read()
+        self.assertEqual(content, "line1\nline2a\nline2b\nline2c")
+
+    def test_word_anchors_persist_across_edits(self):
+        """E2E: read -> edit line 2 -> re-read -> anchors preserved on unchanged lines."""
+        self._write("test.py", "line1\nline2\nline3\nline4\nline5")
+        
+        # First read: get word anchors
+        r1 = execute_tool(
+            _make_tool_call("read_file", path="test.py", hash_lines=True),
+            self.write_gate, self.read_gate)
+        self.assertTrue(r1.success)
+        
+        from core.anchor_manager import AnchorStateManager
+        resolved = os.path.join(self.workspace, "test.py")
+        anchors1 = AnchorStateManager.get_anchors(resolved)
+        self.assertIsNotNone(anchors1)
+        self.assertEqual(len(anchors1), 5)
+        
+        # Edit line 2 only
+        result = execute_tool(_make_tool_call("edit_lines", path="test.py", edits=[{
+            "from": 2, "from_hash": anchors1[1],
+            "to": 2, "to_hash": anchors1[1],
+            "new_text": "line2-CHANGED"
+        }]), self.write_gate, self.read_gate)
+        self.assertTrue(result.success, f"Got: {result.content}")
+        
+        # Re-read: unchanged lines keep SAME anchors
+        r2 = execute_tool(
+            _make_tool_call("read_file", path="test.py", hash_lines=True),
+            self.write_gate, self.read_gate)
+        self.assertTrue(r2.success)
+        
+        anchors2 = AnchorStateManager.get_anchors(resolved)
+        self.assertIsNotNone(anchors2)
+        
+        # Lines 1, 3, 4, 5 should have same anchors as before
+        self.assertEqual(anchors1[0], anchors2[0], "Line 1 anchor should persist")
+        self.assertEqual(anchors1[2], anchors2[2], "Line 3 anchor should persist")
+        self.assertEqual(anchors1[3], anchors2[3], "Line 4 anchor should persist")
+        self.assertEqual(anchors1[4], anchors2[4], "Line 5 anchor should persist")
+        
+        # Line 2 should have a DIFFERENT anchor (content changed)
+        self.assertNotEqual(anchors1[1], anchors2[1], "Changed line should get new anchor")
+        
+        # Verify file content
+        with open(resolved) as f:
+            self.assertEqual(f.read(), "line1\nline2-CHANGED\nline3\nline4\nline5")
+
+    def test_chain_edits_without_rereading(self):
+        """E2E: two edits in one batch without re-reading between them."""
+        self._write("test.py", "AAAA\nBBBB\nCCCC\nDDDD")
+        
+        # First read
+        execute_tool(
+            _make_tool_call("read_file", path="test.py", hash_lines=True),
+            self.write_gate, self.read_gate)
+        
+        from core.anchor_manager import AnchorStateManager
+        resolved = os.path.join(self.workspace, "test.py")
+        anchors = AnchorStateManager.get_anchors(resolved)
+        self.assertIsNotNone(anchors)
+        
+        # Two edits in one batch (non-overlapping)
+        result = execute_tool(_make_tool_call("edit_lines", path="test.py", edits=[
+            {"from": 1, "from_hash": anchors[0],
+             "to": 1, "to_hash": anchors[0],
+             "new_text": "AAAA-modified"},
+            {"from": 4, "from_hash": anchors[3],
+             "to": 4, "to_hash": anchors[3],
+             "new_text": "DDDD-modified"},
+        ]), self.write_gate, self.read_gate)
+        self.assertTrue(result.success, f"Got: {result.content}")
+        
+        with open(resolved) as f:
+            self.assertEqual(f.read(), "AAAA-modified\nBBBB\nCCCC\nDDDD-modified")
+
+
+# ---------------------------------------------------------------------------
+# Storm-breaker
+# ---------------------------------------------------------------------------
+
+class TestStormBreaker(unittest.TestCase):
+    """Tests for the storm-breaker synthesized response on repeated failures."""
+
+    def test_check_storm_breaker_no_failures(self):
+        """No failures -> not triggered."""
+        from core.llm import _check_storm_breaker, _STORM_FAILURES, _STORM_LOCK
+        with _STORM_LOCK:
+            _STORM_FAILURES.clear()
+        triggered, name, error = _check_storm_breaker()
+        self.assertFalse(triggered)
+
+    def test_check_storm_breaker_one_failure(self):
+        """One failure -> not triggered."""
+        from core.llm import _check_storm_breaker, _STORM_FAILURES, _STORM_LOCK
+        with _STORM_LOCK:
+            _STORM_FAILURES.clear()
+            _STORM_FAILURES.append(("read_file", "path is empty"))
+        triggered, name, error = _check_storm_breaker()
+        self.assertFalse(triggered)
+
+    def test_check_storm_breaker_three_same_failures(self):
+        """Three identical failures -> triggered."""
+        from core.llm import _check_storm_breaker, _STORM_FAILURES, _STORM_LOCK, _STORM_THRESHOLD
+        with _STORM_LOCK:
+            _STORM_FAILURES.clear()
+            for _ in range(_STORM_THRESHOLD):
+                _STORM_FAILURES.append(("read_file", "path is empty"))
+        triggered, name, error = _check_storm_breaker()
+        self.assertTrue(triggered)
+        self.assertEqual(name, "read_file")
+        self.assertIn("path is empty", error)
+        # Queue should be cleared after trigger
+        self.assertEqual(len(_STORM_FAILURES), 0)
+
+    def test_check_storm_breaker_mixed_failures(self):
+        """Different failures -> not triggered."""
+        from core.llm import _check_storm_breaker, _STORM_FAILURES, _STORM_LOCK
+        with _STORM_LOCK:
+            _STORM_FAILURES.clear()
+            _STORM_FAILURES.append(("read_file", "path is empty"))
+            _STORM_FAILURES.append(("edit_file", "not found"))
+            _STORM_FAILURES.append(("read_file", "path is empty"))
+        triggered, name, error = _check_storm_breaker()
+        self.assertFalse(triggered)
+
+    def test_synthesize_storm_breaker_message(self):
+        """Message is coherent and includes tool name + error."""
+        from core.llm import _synthesize_storm_breaker_message
+        msg = _synthesize_storm_breaker_message("read_file", "path argument is empty")
+        self.assertIn("read_file", msg)
+        self.assertIn("path argument is empty", msg)
+        self.assertIn("unable to continue", msg.lower())
+        self.assertIn("```", msg)  # error is formatted in code block
+
+    def test_storm_breaker_appended_to_messages(self):
+        """When triggered, an assistant message is appended."""
+        from core.llm import _check_storm_breaker, _synthesize_storm_breaker_message
+        from core.llm import _STORM_FAILURES, _STORM_LOCK, _STORM_THRESHOLD
+
+        # Simulate 3 identical failures
+        with _STORM_LOCK:
+            _STORM_FAILURES.clear()
+            for _ in range(_STORM_THRESHOLD):
+                _STORM_FAILURES.append(("run_shell", "command not found"))
+
+        triggered, name, error = _check_storm_breaker()
+        self.assertTrue(triggered)
+
+        msg = _synthesize_storm_breaker_message(name, error)
+        self.assertIsInstance(msg, str)
+        self.assertGreater(len(msg), 50)
 
 
 if __name__ == "__main__":

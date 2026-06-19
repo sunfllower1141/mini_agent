@@ -475,6 +475,7 @@ CORE_TOOLS: list[str] = [
     "read_file",
     "write_file",
     "edit_file",
+    "edit_lines",
     "run_shell",
     "search_files",
     "list_directory",
@@ -491,6 +492,11 @@ CORE_TOOLS: list[str] = [
     "todo_read",
     "plan",
     "plan_status",
+    # AST-native tools (precise code operations)
+    "get_file_skeleton",
+    "get_function",
+    "replace_symbol",
+    "get_symbol_range",
 ]
 
 

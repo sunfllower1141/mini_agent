@@ -748,8 +748,20 @@ def execute_tool(
     if not result.success:
         log_tool_failure(name, result.content)
         _learn_from_failure(name, result)
+        # Dirac-style mistake tracking
+        try:
+            from core.context_inject import record_mistake
+            record_mistake()
+        except Exception:
+            pass
     else:
         log_tool_success(name)
+        # Dirac-style: reset mistake count on successful action
+        try:
+            from core.context_inject import reset_mistake_count
+            reset_mistake_count()
+        except Exception:
+            pass
         # Only record success when this tool has known failure patterns;
         # skips unnecessary DB queries for the vast majority of successful calls.
         in_memory = _TOOL_CONTEXT.__dict__.get("_failure_patterns", {})
@@ -767,7 +779,7 @@ def execute_tool(
     # instead of clearing the entire cache.  This preserves session-level
     # caching for unmodified files across turns while ensuring fresh reads
     # for just-edited files.  Also covers restore_file.
-    _WRITE_TOOLS = frozenset({"write_file", "edit_file", "restore_file"})
+    _WRITE_TOOLS = frozenset({"write_file", "edit_file", "edit_lines", "restore_file"})
     if result.success and name in _WRITE_TOOLS:
         file_path = args.get("path", "") if isinstance(args, dict) else ""
         if file_path and file_path in _TOOL_CACHE_PATH_MAP:
@@ -852,6 +864,8 @@ from tools import agent_messages  # noqa: E402, F401  -- typed inter-agent messa
 from tools import lsp             # noqa: E402, F401  -- LSP tools (lsp skill)
 from tools.search_ops import build_symbol_index  # noqa: E402, F401
 from tools.mcp_client import get_mcp_manager, init_mcp_servers, shutdown_mcp  # noqa: E402, F401
+from tools.ast_ops import *      # noqa: E402, F401 -- get_file_skeleton, get_function, replace_symbol
+from tools.condense_ops import *  # noqa: E402, F401 -- condense tool + proactive warning
 
 # ---------------------------------------------------------------------------
 # mcp_discover / mcp_call -- MCP client tools

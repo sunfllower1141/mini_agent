@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -67,7 +68,7 @@ from stream import THINKING_START, THINKING_END
 from core.safety import ReadSafetyGate, WriteSafetyGate
 from core.prompt import build_system_prompt, build_startup_context, build_session_header
 from core.balance import fetch_balance
-from core.cost_tracking import SessionCost, format_cost_cny
+from core.cost_tracking import SessionCost, format_cost_usd
 from api import clear_api_cache
 
 
@@ -171,6 +172,13 @@ class StreamCallbacks:
         send_msg({"type": "tool_start", "summary": summary, "parallel": parallel})
 
     def on_tool_end(self, ok: bool, detail: str, turn_id: int = 0, diff_preview=None, content: str = "") -> None:
+        # Strip ANSI escape codes from all string fields so the Electron
+        # frontend doesn't render raw ESC sequences — all fields now stripped.
+        _strip_ansi = lambda s: re.sub(r'\x1b\[[0-9;]*m', '', s) if s else s
+        if diff_preview:
+            diff_preview = _strip_ansi(diff_preview)
+        detail = _strip_ansi(detail)
+        content = _strip_ansi(content)
         send_msg({"type": "tool_end", "ok": ok, "detail": detail, "content": content, "diff_preview": diff_preview})
 
     def on_tool_output(self, line: str, turn_id: int = 0) -> None:
@@ -287,12 +295,12 @@ class AgentRunner:
 
         # Cost
         sc = self._session_cost
-        status["session_cost"] = format_cost_cny(sc.total_cost)
+        status["session_cost"] = format_cost_usd(sc.total_cost)
         status["session_turns"] = sc.turn_count
         status["session_tokens"] = sc.total_prompt_tokens + sc.total_completion_tokens
         status["cache_hit_rate"] = round(sc.cache_hit_rate * 100) if sc.cache_hit_rate is not None else None
         if sc.last_turn:
-            status["turn_cost"] = format_cost_cny(sc.last_turn.total_cost)
+            status["turn_cost"] = format_cost_usd(sc.last_turn.total_cost)
             status["turn_tokens"] = sc.last_turn.prompt_tokens + sc.last_turn.completion_tokens
             last_rate = sc.last_cache_hit_rate
             status["turn_cache_hit_rate"] = round(last_rate * 100) if last_rate is not None else None
@@ -551,8 +559,8 @@ class AgentRunner:
             "total_tokens": self._total_tokens,
             "prompt_tokens": sc.last_turn.prompt_tokens if sc.last_turn else 0,
             "completion_tokens": sc.last_turn.completion_tokens if sc.last_turn else 0,
-            "turn_cost": format_cost_cny(sc.last_turn.total_cost) if sc.last_turn else "-",
-            "session_cost": format_cost_cny(sc.total_cost),
+            "turn_cost": format_cost_usd(sc.last_turn.total_cost) if sc.last_turn else "-",
+            "session_cost": format_cost_usd(sc.total_cost),
             "session_turns": sc.turn_count,
             "cache_hit_rate": round(sc.cache_hit_rate * 100) if sc.cache_hit_rate is not None else None,
             "subagent_running": self._running_subagent_count,
@@ -603,7 +611,7 @@ class AgentRunner:
                 "lines": [
                     f"Model: {self.config.model}  |  Session: {sc.turn_count} turns, "
                     f"{sc.total_prompt_tokens + sc.total_completion_tokens} tokens, "
-                    f"cost: {format_cost_cny(sc.total_cost)}{bal}",
+                    f"cost: {format_cost_usd(sc.total_cost)}{bal}",
                     f"Cache hit: {round(sc.cache_hit_rate * 100) if sc.cache_hit_rate is not None else 'N/A'}%  |  "
                     f"Sub-agents: {self._total_subagents} total, {self._running_subagent_count} running",
                 ]

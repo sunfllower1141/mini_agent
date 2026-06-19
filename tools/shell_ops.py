@@ -16,7 +16,7 @@ import uuid
 import threading
 
 from core.safety import ReadSafetyGate, WriteSafetyGate
-from tools import _register, _summarize, ToolResult, _TASK_REGISTRY
+from tools import _register, _summarize, ToolResult, _TASK_REGISTRY, get_modified_files
 
 _WINDOWS = platform.system() == "Windows"
 _WINDOWS_POPEN_KWARGS = {"creationflags": subprocess.CREATE_NO_WINDOW} if _WINDOWS else {}
@@ -811,7 +811,7 @@ def _run_tests(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
     _retried = False
 
     def _build_cmd() -> list[str]:
-        cmd = _get_python_cmd() + ["-m", "pytest", "-q", "--ignore=venv", "--ignore=eval", "--ignore=tests"]
+        cmd = _get_python_cmd() + ["-m", "pytest", "-q", "--ignore=venv", "--ignore=.venv", "--ignore=eval", "--ignore=tests", "--ignore=node_modules"]
         if target:
             cmd.append(target)
         return cmd
@@ -927,151 +927,30 @@ def _run_tests_summary(args: dict) -> str:
 def _verify(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
     """Run lint + relevant tests for files modified this session.
 
-    Uses _MODIFIED_FILES tracked by write_file and edit_file to determine
-    which test files to run.  Falls back to running all tests if nothing
-    has been modified yet.
+    DISABLED on Windows due to process explosion risk (pytest scanning
+    entire workspace without --ignore flags exhausts paging file).
+    Use run_shell with targeted test paths instead.
     """
     from tools import _TOOL_CONTEXT
     if getattr(_TOOL_CONTEXT, '_agent_depth', 0) > 0:
         return ToolResult(success=False, content="verify is restricted to the orchestrator. Sub-agents must not run tests.")
-    import subprocess
-    import os as _os
-    root = rg.workspace_root
-
+    import py_compile
+    modified = get_modified_files()
     results: list[str] = []
-
-    # Step 0: dead import detection (ruff if available, else pyflakes)
-    import shutil
-    if shutil.which("ruff"):
-        try:
-            r = subprocess.run(
-                ["ruff", "check", "--select", "F401,F811",
-                 "--output-format", "concise", root],
-                capture_output=True, text=True, timeout=10,
-                **(_WINDOWS_POPEN_KWARGS if _WINDOWS else {}),
-            )
-            if r.returncode == 0 and not r.stdout.strip():
-                results.append("ruff: no unused/redefined imports found")
-            elif r.stdout.strip():
-                out = r.stdout.strip()[:500]
-                results.append(f"ruff found issues:\n{out}")
-        except subprocess.TimeoutExpired:
-            results.append("ruff: timed out")
-    elif shutil.which("pyflakes"):
-        try:
-            r = subprocess.run(
-                ["pyflakes", root],
-                capture_output=True, text=True, timeout=10,
-                **(_WINDOWS_POPEN_KWARGS if _WINDOWS else {}),
-            )
-            stdout = r.stdout
-            if (r.returncode == 0
-                    and "undefined" not in stdout
-                    and "unused import" not in stdout):
-                results.append("pyflakes: no dead imports found")
-            elif stdout.strip():
-                out = stdout.strip()[:500]
-                results.append(f"pyflakes found issues:\n{out}")
-        except subprocess.TimeoutExpired:
-            results.append("pyflakes: timed out")
-
-    # Step 1: tests for modified files
-    from tools import get_modified_files
-    test_targets: list[str] = []
-    mod_files = get_modified_files()
-    if mod_files:
-        seen = set()
-        for fpath in mod_files:
-            base = _os.path.basename(fpath)
-            if base.startswith("test_"):
-                test_targets.append(base)
+    if not modified:
+        results.append("No files modified this session. Use run_shell to run specific tests directly.")
+        return ToolResult(success=True, content="\n".join(results))
+    for fpath in modified:
+        if fpath.endswith(".py"):
+            try:
+                py_compile.compile(fpath, doraise=True)
+            except py_compile.PyCompileError as e:
+                results.append(f"Syntax error in {fpath}: {e}")
             else:
-                name = _os.path.splitext(base)[0]
-                candidates = [
-                    f"test_{name}.py",
-                    f"tests/test_{name}.py",
-                    f"test/test_{name}.py",
-                ]
-                parent = _os.path.basename(_os.path.dirname(fpath))
-                if parent and parent != root:
-                    candidates.append(f"test_{parent}.py")
-                    candidates.append(f"tests/test_{parent}.py")
-                for candidate in candidates:
-                    if candidate not in seen:
-                        if _os.path.exists(_os.path.join(root, candidate)):
-                            seen.add(candidate)
-                            test_targets.append(candidate)
-                            break
-
-    if not test_targets:
-        test_targets.append(".")
-
-    # Run lint + all test targets in parallel
-    jobs: list = []
-    # Lint job
-    lint_cmd = _get_python_cmd() + ["-m", "flake8", "--count", "--select=E,F,W",
-                 "--exclude=.git,__pycache__,venv,.venv,.egg-info,node_modules,build,dist", "."]
-    try:
-        lint_proc = subprocess.Popen(
-            lint_cmd, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            **(_WINDOWS_POPEN_KWARGS if _WINDOWS else {}),
-        )
-        jobs.append(("lint", lint_proc))
-    except Exception as e:
-        results.append(f"Lint: error ({e})")
-
-    # Test jobs
-    for target in test_targets:
-        try:
-            proc = subprocess.Popen(
-                _get_python_cmd() + ["-m", "pytest", target, "-q"],
-                cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                **(_WINDOWS_POPEN_KWARGS if _WINDOWS else {}),
-            )
-            jobs.append(("test", (target, proc)))
-        except Exception as e:
-            results.append(f"Tests ({target}): error ({e})")
-
-    # Wait for all jobs (ordered: lint first, then tests)
-    for kind, payload in jobs:
-        if kind == "lint":
-            proc = payload
-            try:
-                out, err = proc.communicate(timeout=10)
-                out = (out or "").strip()
-                err = (err or "").strip()
-                if proc.returncode == 0:
-                    results.append("Lint: passed")
-                elif "No module named" in err or "No module named" in out:
-                    results.append("Lint: skipped (flake8 not installed)")
-                else:
-                    last = out.split("\n")[-1] if out else err.split("\n")[-1] if err else "failed"
-                    results.append(f"Lint: {last}")
-            except subprocess.TimeoutExpired:
-                proc.kill(); proc.communicate()
-                results.append("Lint: timed out")
-        else:
-            target, proc = payload
-            try:
-                out, err = proc.communicate(timeout=120)
-                out = (out + err).strip()
-                # Persist to DB
-                _persist_test_output(out)
-                summary, _ = _parse_pytest_output(out, proc.returncode)
-                results.append(f"Tests ({target}): {summary}")
-            except subprocess.TimeoutExpired:
-                proc.kill(); proc.communicate()
-                results.append(f"Tests ({target}): timed out")
-
-    # Step 3: modified files summary
-    if get_modified_files():
-        results.append(f"Modified files: {len(get_modified_files())} files")
-
-    all_ok = all("failed" not in r.lower() for r in results if "Tests" in r)
-    return ToolResult(
-        success=all_ok,
-        content="\n".join(results),
-    )
+                results.append(f"Syntax OK: {fpath}")
+    results.append("Lint + tests skipped (verify disabled). Use run_shell to run tests manually.")
+    all_ok = all("Syntax error" not in r for r in results)
+    return ToolResult(success=all_ok, content="\n".join(results))
 
 
 @_summarize("verify")

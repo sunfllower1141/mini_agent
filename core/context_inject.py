@@ -1089,7 +1089,7 @@ def _inject_self_critique(messages: list[dict], *, turn_count: int) -> None:
             if all(name == first_name and not success for name, success in recent_failures[:_CONSECUTIVE_FAILURE_THRESHOLD]):
                 if first_name in _CRITICAL_FAILURE_TOOLS:
                     tool_hints = {
-                        "edit_file": "STOP using edit_file. Use read_file FIRST to see the exact text, then copy-paste the exact old_string. You're editing blind.",
+                        "edit_file": "STOP using edit_file. Use read_file(hash_lines=True) FIRST to get anchors, then use from/from_hash/new_text. You're editing blind.",
                         "write_file": "STOP using write_file repeatedly. Verify the file path and content before retrying.",
                         "run_shell": "STOP retrying the same shell command. It's failing consistently. Try a different approach or diagnose the error output.",
                     }
@@ -1640,35 +1640,255 @@ def _inject_context(
     _inject_dead_tool_pruning(messages, turn_count=turn_count)
     _inject_post_edit_verification(messages)
 
+    # Auto-context enrichment (Dirac-style): pre-load skeletons for mentioned files
+    _inject_auto_file_skeletons(messages, read_gate=read_gate)
+
+    # Mistake count tracking (Dirac-style): inject if agent is flailing
+    _inject_mistake_count_context(messages)
+
+    # Proactive condensation warning (Dirac-style)
+    _inject_condensation_warning(messages)
+
     # Context-quality defences (research-backed: 25% fill degrades quality)
     _compress_stale_tool_results(messages)
     _inject_system_reminder(messages, turn_count=turn_count)
 
 
 # ---------------------------------------------------------------------------
-# Mid-session conversation compaction
+# Mid-session conversation compaction (Dirac-style half / quarter truncation)
 # ---------------------------------------------------------------------------
 
-# Compaction threshold: fraction of context window at which we compact
-_COMPACTION_THRESHOLD = 0.80
-# Target fraction after compaction (leave room for turn growth)
-_COMPACTION_TARGET = 0.70
-# Minimum number of messages at the tail to keep intact (preserve recent context)
-_COMPACTION_KEEP_RECENT = 20
+# Only compact when AT the context window limit (Dirac triggers on
+# totalTokens >= maxAllowedSize, not proactively at 80%).
+_COMPACTION_THRESHOLD = 1.0
+
+# Minimum conversation messages before compaction is meaningful.
+# Must be at least 2 + enough pairs to halve.
+_COMPACTION_MIN_MESSAGES = 8
+
+# ---------------------------------------------------------------------------
+# Auto-context enrichment (Dirac-style): pre-load skeletons for mentioned files
+# ---------------------------------------------------------------------------
+
+# Maximum number of auto-enriched skeletons per turn
+_MAX_AUTO_SKELETONS = 3
+# Maximum total lines for all auto-skeletons
+_MAX_AUTO_SKELETON_LINES = 20
+
+
+def _inject_auto_file_skeletons(
+    messages: list[dict], *,
+    read_gate: ReadSafetyGate | None = None,
+) -> None:
+    """
+    Auto-detect file paths mentioned in recent user messages and inject
+    their file skeletons for context.
+
+    Mirrors Dirac's ContextLoader auto-symbol/skeleton enrichment.
+    """
+    if read_gate is None:
+        return
+
+    workspace = getattr(read_gate, "workspace_root", "")
+    if not workspace:
+        return
+
+    # Check if we've already injected auto-skeletons this session
+    if getattr(_TOOL_CONTEXT, "_auto_skeletons_injected", False):
+        return
+
+    # Only inject on turn 1 (session start)
+    turn = getattr(_TOOL_CONTEXT, "_turn_count", 0)
+    if turn > 1:
+        return
+
+    _TOOL_CONTEXT._auto_skeletons_injected = True
+
+    # Scan the last user message for file paths
+    user_msgs = [m for m in messages if m.get("role") == "user" and not m.get("_transient")]
+    if not user_msgs:
+        return
+
+    last_user_content = user_msgs[-1].get("content", "")
+    if not isinstance(last_user_content, str):
+        return
+
+    # Simple file path detection: look for strings that look like file paths
+    import re as _re
+    import os as _os
+
+    # Pattern: word chars, dots, slashes, common extensions
+    file_pattern = _re.compile(
+        r'(?:(?:^|\s)[\w./-]+\.(?:py|ts|js|tsx|jsx|json|toml|yaml|yml|md|txt|cfg|ini|env|sh|bat|ps1|sql|html|css|rs|go|java|cpp|c|h|hpp))',
+        _re.MULTILINE,
+    )
+    candidates = file_pattern.findall(last_user_content)
+    candidate_paths = [c.strip() for c in candidates if c.strip()]
+
+    if not candidate_paths:
+        return
+
+    skeletons_added = 0
+    skeleton_lines: list[str] = []
+    skeleton_lines.append(
+        "Note: The following file skeletons were automatically included "
+        "because file paths were mentioned in your message:"
+    )
+
+    seen = set()
+    for cpath in candidate_paths[:5]:  # cap at 5 candidates
+        if cpath in seen:
+            continue
+        seen.add(cpath)
+
+        if skeletons_added >= _MAX_AUTO_SKELETONS:
+            break
+
+        try:
+            full_path = _os.path.join(workspace, cpath)
+            if not _os.path.isfile(full_path):
+                continue
+
+            from tools.ast_ops import get_file_skeleton as _gfs
+            skeleton = _gfs(full_path, include_anchors=False, show_call_graph=False)
+            if skeleton and "No definitions found" not in skeleton and "Unsupported" not in skeleton:
+                skeleton_line_count = len(skeleton.split("\n"))
+                if skeleton_line_count <= _MAX_AUTO_SKELETON_LINES:
+                    skeleton_lines.append(
+                        f"\n<file_skeleton path=\"{cpath}\">\n{skeleton}\n</file_skeleton>"
+                    )
+                    skeletons_added += 1
+        except Exception:
+            continue
+
+    if skeletons_added > 0:
+        messages.append({
+            "role": "user",
+            "content": "\n".join(skeleton_lines),
+            "_transient": True,
+        })
+
+
+# ---------------------------------------------------------------------------
+# Mistake count tracking (Dirac-style)
+# ---------------------------------------------------------------------------
+
+def _inject_mistake_count_context(messages: list[dict]) -> None:
+    """
+    Inject a warning if the agent has made consecutive mistakes.
+
+    Mirrors Dirac's consecutiveMistakeCount pattern.
+    """
+    mistake_count = getattr(_TOOL_CONTEXT, "_consecutive_mistake_count", 0)
+
+    if mistake_count >= 2:
+        severity = "critical" if mistake_count >= 4 else "warning"
+        messages.append({
+            "role": "user",
+            "content": (
+                f"{severity.upper()}: You have made {mistake_count} consecutive mistakes. "
+                f"Stop and re-evaluate your approach. "
+                f"Read the error messages carefully. "
+                f"If you're calling the same tool with the same arguments, STOP -- "
+                f"try a completely different approach."
+            ),
+            "_transient": True,
+        })
+
+
+def record_mistake() -> None:
+    """Increment the consecutive mistake counter."""
+    current = getattr(_TOOL_CONTEXT, "_consecutive_mistake_count", 0)
+    _TOOL_CONTEXT._consecutive_mistake_count = current + 1
+
+
+def reset_mistake_count() -> None:
+    """Reset the consecutive mistake counter after a successful action."""
+    _TOOL_CONTEXT._consecutive_mistake_count = 0
+
+
+# ---------------------------------------------------------------------------
+# Proactive condensation warning (Dirac-style)
+# ---------------------------------------------------------------------------
+
+def _inject_condensation_warning(messages: list[dict]) -> None:
+    """
+    Inject a warning if context window is filling up.
+
+    Uses the condense_ops module for threshold-based detection.
+    """
+    try:
+        from tools.condense_ops import inject_condensation_warning as _icw
+        config = getattr(_TOOL_CONTEXT, "_agent_config", None)
+        context_window = getattr(config, "context_window", 128000) if config else 128000
+        _icw(messages, context_limit=context_window)
+    except ImportError:
+        pass
+
+
+def _strip_orphaned_tool_results(messages: list[dict]) -> int:
+    """Remove tool messages whose tool_call_id no longer exists.
+
+    After compaction removes the middle of the conversation, some tool result
+    messages (role="tool") may be orphaned -- their corresponding tool_call
+    in a deleted assistant message no longer exists.  The model would see
+    tool results without the preceding tool call, which breaks the
+    conversation structure and confuses the model.
+
+    Returns the count of orphaned tool messages stripped.
+    """
+    # Collect all valid tool_call IDs from surviving assistant messages
+    valid_ids: set[str] = set()
+    for msg in messages:
+        if msg.get("role") == "assistant":
+            for tc in msg.get("tool_calls", []) or []:
+                tid = tc.get("id")
+                if tid:
+                    valid_ids.add(tid)
+
+    if not valid_ids:
+        return 0  # no tool calls at all, nothing to orphan
+
+    # Filter out orphaned tool messages (O(n) in-place via replace)
+    stripped = 0
+    keep = []
+    for msg in messages:
+        if msg.get("role") == "tool":
+            if msg.get("tool_call_id") not in valid_ids:
+                stripped += 1
+                continue
+        keep.append(msg)
+
+    if stripped:
+        messages.clear()
+        messages.extend(keep)
+        _log.debug(
+            "Stripped %d orphaned tool result(s) after compaction "
+            "(tool_call_id not found in surviving assistant messages)",
+            stripped,
+        )
+
+    return stripped
+
 
 
 def _compact_if_needed(messages: list[dict]) -> None:
-    """Compact conversation when approaching the context window limit.
+    """Dirac-style half / quarter truncation of conversation history.
 
-    Uses the existing _prune_by_tokens to drop oldest messages and
-    _summarize_pruned_rules to inject a summary, keeping the model
-    aware of earlier context.  Preserves system prompt + startup
-    context (first 2 messages) and the most recent messages.
+    When total tokens reach the context window limit, remove the middle
+    50% (half strategy) or 75% (quarter strategy) of conversation messages.
+    Always preserves the first 2 messages (system prompt + first user
+    context) and maintains user / assistant alternation.
 
-    Called before context injection each turn to ensure fresh context
-    messages aren't immediately pruned.
+    Unlike the previous summary-based approach, this is a pure deletion
+    strategy -- no summary is injected.  The model sees a shorter but
+    structurally correct conversation.  Research shows models handle
+    truncated history well when the most recent turns are intact.
+
+    Called before context injection each turn so fresh context messages
+    are not immediately pruned.
     """
-    from memory.memory_prune import _total_tokens, _prune_by_tokens, _summarize_pruned
+    from memory.memory_prune import _total_tokens
 
     config = getattr(_TOOL_CONTEXT, "_agent_config", None)
     if config is None:
@@ -1677,46 +1897,69 @@ def _compact_if_needed(messages: list[dict]) -> None:
     if context_window <= 0:
         return
 
-    # Only compact if over threshold
+    # Dirac-style headroom: compact at max(context_window - 40k, 80% of window).
+    # This leaves breathing room for the response and prevents API 400 errors
+    # from imprecise token estimation.  Without headroom, a single estimation
+    # error can cause the API to reject the request outright.
+    max_allowed = max(context_window - 40_000, int(context_window * 0.80))
     current_tokens = _total_tokens(messages)
-    threshold = int(context_window * _COMPACTION_THRESHOLD)
-    if current_tokens <= threshold:
+    if current_tokens < max_allowed:
         return
 
-    # Preserve system prompt + startup context (first 2 messages)
-    if len(messages) <= _COMPACTION_KEEP_RECENT + 2:
-        return  # Not enough to compact meaningfully
+    if len(messages) <= _COMPACTION_MIN_MESSAGES:
+        return  # not enough to compact meaningfully
 
+    # Dirac always preserves the first user-assistant pairing (indices 0, 1)
+    # and truncates from the middle.  This keeps the system prompt intact
+    # (critical for API-side prompt caching) and the initial task context.
     system_msgs = messages[:2]
     conversation = messages[2:]
 
-    # Prune to target fraction of context window
-    target = int(context_window * _COMPACTION_TARGET)
-    kept, pruned = _prune_by_tokens(
-        conversation, target, max_messages=len(conversation),
-    )
+    if len(conversation) < 6:
+        return  # need at least a few pairs for truncation to be meaningful
 
-    if not pruned:
-        return
+    # --- Strategy selection (Dirac logic) ---
+    # half:  keep the last 50% of conversation messages (remove oldest 50%)
+    # quarter: keep only the last 25% (remove oldest 75%)
+    #
+    # Dirac chooses quarter when totalTokens / 2 > maxAllowedSize,
+    # i.e. when even after removing half we'd still be over the window.
+    # We approximate with a token-based heuristic.
+    half_count = max(4, len(conversation) // 2)
+    if half_count % 2 != 0:
+        half_count -= 1  # keep even number (user / assistant pairs)
 
-    # Build summary of what was pruned
-    summary = _summarize_pruned(pruned)
+    # Estimate tokens in the kept portion assuming roughly uniform distribution
+    kept_estimated = int(current_tokens * (2 + half_count) / len(messages))
+    if kept_estimated >= max_allowed:
+        # quarter strategy: keep only 1/4 of conversation
+        half_count = max(4, len(conversation) // 4)
+        if half_count % 2 != 0:
+            half_count -= 1
 
-    # Rebuild: system + summary + kept conversation
+    if half_count >= len(conversation):
+        return  # nothing to remove
+
+    kept = conversation[-half_count:]
+    removed_count = len(conversation) - len(kept)
+
+    # Rebuild: system prefix + truncated conversation tail
     messages.clear()
     messages.extend(system_msgs)
-    if summary:
-        messages.append({
-            "role": "user",
-            "content": summary,
-            "_transient": True,
-        })
     messages.extend(kept)
 
+    # Dirac-style cleanup: strip orphaned tool messages whose tool_call
+    # no longer exists after trimming the middle of the conversation.
+    # Without this, the model sees tool results without matching tool calls,
+    # which breaks the conversation structure.
+    _strip_orphaned_tool_results(messages)
+
     _log.info(
-        "Compacted conversation: %d -> %d messages (%d pruned)",
+        "Dirac compaction: %d -> %d messages (%d middle messages removed, "
+        "keeping last %d conversation messages)",
         len(system_msgs) + len(conversation),
         len(messages),
-        len(pruned),
+        removed_count,
+        half_count,
     )
 

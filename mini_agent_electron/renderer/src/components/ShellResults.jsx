@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import AnsiBlock from './AnsiBlock';
 
 // -- styles ------------------------------------------------------------------
 
@@ -78,7 +79,7 @@ export default function ShellResults({ content, ok }) {
         return (
           <div key={i} style={isDim ? DIM_LINE_STYLE : OUTPUT_LINE_STYLE}>
             <span style={LINE_NO_SPAN}>{lineNum}  </span>
-            {line || '\u00A0'}
+            {line ? <AnsiBlock text={line} /> : '\u00A0'}
           </div>
         );
       })}

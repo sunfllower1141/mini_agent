@@ -183,7 +183,8 @@ def _extract_with_tree_sitter(
     except Exception:
         return _extract_with_fallback(source, "", ext)
 
-    captures = query.captures(tree.root_node)
+    query_cursor = tree_sitter.QueryCursor(query)
+    captures = query_cursor.captures(tree.root_node)
 
     definitions: list[dict] = []
     calls: list[dict] = []
@@ -195,35 +196,36 @@ def _extract_with_tree_sitter(
     # Walk the tree to build a line->function mapping
     line_to_func: dict[int, str] = {}
 
-    for node, tag in captures:
-        start_line = node.start_point[0] + 1
+    for tag, nodes in captures.items():
+        for node in nodes:
+            start_line = node.start_point[0] + 1
 
-        if tag in ("function.name", "class.name"):
-            name = node.text.decode("utf-8") if node.text else ""
-            if name and name not in seen_defs:
-                kind = "class" if "class" in tag else "def"
-                definitions.append({"kind": kind, "name": name, "line": start_line})
-                seen_defs.add(name)
-        elif tag == "function.def":
-            # Track the line range of this function for call attribution
-            name_node = None
-            for child in node.children:
-                if child.type in ("identifier", "property_identifier"):
-                    name_node = child
-                    break
-            if name_node:
-                func_name = name_node.text.decode("utf-8") if name_node.text else ""
-                end_line = node.end_point[0] + 1
-                for ln in range(start_line, end_line + 1):
-                    line_to_func[ln] = func_name
-        elif tag == "call.target":
-            callee = node.text.decode("utf-8") if node.text else ""
-            if callee:
-                key = (start_line, callee)
-                if key not in seen_calls:
-                    caller = line_to_func.get(start_line)
-                    calls.append({"caller": caller, "callee": callee, "line": start_line})
-                    seen_calls.add(key)
+            if tag in ("function.name", "class.name"):
+                name = node.text.decode("utf-8") if node.text else ""
+                if name and name not in seen_defs:
+                    kind = "class" if "class" in tag else "def"
+                    definitions.append({"kind": kind, "name": name, "line": start_line})
+                    seen_defs.add(name)
+            elif tag == "function.def":
+                # Track the line range of this function for call attribution
+                name_node = None
+                for child in node.children:
+                    if child.type in ("identifier", "property_identifier"):
+                        name_node = child
+                        break
+                if name_node:
+                    func_name = name_node.text.decode("utf-8") if name_node.text else ""
+                    end_line = node.end_point[0] + 1
+                    for ln in range(start_line, end_line + 1):
+                        line_to_func[ln] = func_name
+            elif tag == "call.target":
+                callee = node.text.decode("utf-8") if node.text else ""
+                if callee:
+                    key = (start_line, callee)
+                    if key not in seen_calls:
+                        caller = line_to_func.get(start_line)
+                        calls.append({"caller": caller, "callee": callee, "line": start_line})
+                        seen_calls.add(key)
 
     return definitions, calls, imports
 

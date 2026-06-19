@@ -587,6 +587,8 @@ class LspConnection:
         for diag in diagnostics:
             start = diag.get("range", {}).get("start", {})
             line_num = start.get("line", "?")
+            if isinstance(line_num, int):
+                line_num = line_num + 1     # LSP is 0-based; display as 1-based
             col = start.get("character", "?")
             severity = _severity_name(diag.get("severity", 0))
             message = diag.get("message", "")
@@ -687,6 +689,8 @@ def _location_to_line(loc: dict) -> str:
     path = uri_to_path(uri)
     start = range_info.get("start", {})
     line = start.get("line", "?")
+    if isinstance(line, int):
+        line = line + 1          # LSP is 0-based; display as 1-based
     col = start.get("character", "?")
     return f"{path}:{line}:{col}"
 

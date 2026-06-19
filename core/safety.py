@@ -110,6 +110,7 @@ class WriteSafetyGate:
     _RESET = "\033[0m"
     _BOLD = "\033[1m"
 
+
     def __init__(self, workspace_root: str, *, allow_overwrites: bool = False,
                  unrestricted: bool = False) -> None:
         self._root = os.path.realpath(os.path.abspath(workspace_root))
@@ -162,25 +163,32 @@ class WriteSafetyGate:
                 return DiffPreview(preview_text=diff_text, changed=bool(content))
 
         elif tool_name == "edit_file":
-            old = args.get("old_string", "")
-            new = args.get("new_string", "")
-            if exists:
+            from_line = args.get("from")
+            new_text = args.get("new_text", "")
+            if exists and from_line is not None:
                 try:
                     with open(resolved, "r") as f:
                         original = f.read()
                 except OSError:
                     original = ""
-                # Apply the edit to show the post-edit diff
-                count = args.get("count", 1)
-                if count == -1:
-                    edited = original.replace(old, new)
+                # Compute diff from line ranges (hash-anchored mode)
+                to_line = args.get("to", from_line)
+                lines = original.split("\n")
+                new_lines = new_text.split("\n") if new_text else []
+                from_idx = from_line - 1
+                to_idx = to_line - 1
+                if 0 <= from_idx < len(lines):
+                    if to_idx >= len(lines):
+                        to_idx = len(lines) - 1
+                    updated_lines = lines[:from_idx] + new_lines + lines[to_idx + 1:]
+                    edited = "\n".join(updated_lines)
                 else:
-                    edited = original.replace(old, new, 1)
+                    edited = original
                 diff_text = self._format_diff(resolved, original, edited)
                 return DiffPreview(preview_text=diff_text, changed=original != edited)
-            else:
-                diff_text = self._format_new_file(resolved, new)
-                return DiffPreview(preview_text=diff_text, changed=bool(new))
+            elif not exists:
+                diff_text = self._format_new_file(resolved, new_text)
+                return DiffPreview(preview_text=diff_text, changed=bool(new_text))
 
         return DiffPreview(preview_text="", changed=False)
 

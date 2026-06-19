@@ -74,9 +74,17 @@ def idempotency_key_for(tool_name: str, args: dict) -> str:
         material = f"wf:{path}:{content}"
     elif tool_name == "edit_file":
         path = str(args.get("path", ""))
-        old = str(args.get("old_string", ""))[:256]
-        new = str(args.get("new_string", ""))[:256]
-        material = f"ef:{path}:{old}:{new}"
+        from_line = args.get("from")
+        from_hash = args.get("from_hash")
+        if from_line is not None and from_hash is not None:
+            to_line = args.get("to", from_line)
+            to_hash = args.get("to_hash", from_hash)
+            new_text = str(args.get("new_text", ""))[:256]
+            material = f"ef:hash:{path}:{from_line}:{from_hash}:{to_line}:{to_hash}:{new_text}"
+        else:
+            old = str(args.get("old_string", ""))[:256]
+            new = str(args.get("new_string", ""))[:256]
+            material = f"ef:{path}:{old}:{new}"
     elif tool_name == "edit_lines":
         path = str(args.get("path", ""))
         # edit_lines uses an "edits" array; hash the whole thing

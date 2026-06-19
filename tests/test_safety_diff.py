@@ -122,74 +122,73 @@ class TestGenerateDiff(unittest.TestCase):
         self.assertIn("-hello", result.preview_text)
 
     # ------------------------------------------------------------------
-    # edit_file -- existing file
+    # edit_file -- existing file (hash-anchored mode)
     # ------------------------------------------------------------------
 
-    def test_edit_identical_strings(self):
-        """Edit with old==new: no change."""
+    def test_edit_identical_lines(self):
+        """Edit with new_text == current line: no change."""
         self._write("f.txt", "hello\nworld\n")
         result = self._result("edit_file", {
-            "path": "f.txt", "old_string": "hello\n", "new_string": "hello\n"
+            "path": "f.txt", "from": 1, "to": 1, "new_text": "hello"
         })
         self.assertFalse(result.changed)
 
     def test_edit_add_line(self):
-        """Edit replaces part, effectively adding a line."""
+        """Edit replaces one line with two, effectively adding a line."""
         self._write("f.txt", "hello\nworld\n")
         result = self._result("edit_file", {
-            "path": "f.txt", "old_string": "hello\n", "new_string": "hello\nmid\n"
+            "path": "f.txt", "from": 1, "to": 1, "new_text": "hello\nmid"
         })
         self.assertTrue(result.changed)
         self.assertIn("+mid", result.preview_text)
 
     def test_edit_remove_line(self):
-        """Edit removes a line."""
+        """Edit removes a line by replacing two lines with one."""
         self._write("f.txt", "hello\nmid\nworld\n")
         result = self._result("edit_file", {
-            "path": "f.txt", "old_string": "hello\nmid\n", "new_string": "hello\n"
+            "path": "f.txt", "from": 1, "to": 2, "new_text": "hello"
         })
         self.assertTrue(result.changed)
         self.assertIn("-mid", result.preview_text)
 
     def test_edit_single_char_change(self):
-        """Edit a single character."""
+        """Edit a full line to change a character."""
         self._write("f.txt", "abc\n")
         result = self._result("edit_file", {
-            "path": "f.txt", "old_string": "a", "new_string": "X"
+            "path": "f.txt", "from": 1, "to": 1, "new_text": "Xbc"
         })
         self.assertTrue(result.changed)
         preview = result.preview_text
-        self.assertIn("-a", preview)
-        self.assertIn("+X", preview)
+        self.assertIn("-abc", preview)
+        self.assertIn("+Xbc", preview)
 
-    def test_edit_empty_old_string(self):
-        """Edit with empty old_string (prepend)."""
+    def test_edit_insert_before(self):
+        """Edit with insert_before: prepend a line."""
         self._write("f.txt", "world\n")
         result = self._result("edit_file", {
-            "path": "f.txt", "old_string": "", "new_string": "hello\n"
+            "path": "f.txt", "from": 1, "edit_type": "insert_before", "new_text": "hello"
         })
         self.assertTrue(result.changed)
         preview = result.preview_text
         self.assertIn("+hello", preview)
 
-    def test_edit_empty_new_string(self):
-        """Edit with empty new_string (deletion)."""
+    def test_edit_delete_line(self):
+        """Edit a line to empty (deletion)."""
         self._write("f.txt", "hello\nworld\n")
         result = self._result("edit_file", {
-            "path": "f.txt", "old_string": "hello\n", "new_string": ""
+            "path": "f.txt", "from": 1, "to": 1, "new_text": ""
         })
         self.assertTrue(result.changed)
         self.assertIn("-hello", result.preview_text)
 
-    def test_edit_count_all(self):
-        """Edit with count=-1 replaces all occurrences."""
+    def test_edit_replace_whole_line(self):
+        """Edit replaces entire line content."""
         self._write("f.txt", "x x x\n")
         result = self._result("edit_file", {
-            "path": "f.txt", "old_string": "x", "new_string": "y", "count": -1
+            "path": "f.txt", "from": 1, "to": 1, "new_text": "y y y"
         })
         self.assertTrue(result.changed)
         preview = result.preview_text
-        # unified diff shows the whole line: -x x x  ->  +y y y
         self.assertIn("-x x x", preview)
         self.assertIn("+y y y", preview)
 
@@ -198,18 +197,18 @@ class TestGenerateDiff(unittest.TestCase):
     # ------------------------------------------------------------------
 
     def test_edit_new_file(self):
-        """edit_file on a non-existent file: treated as new file with new_string."""
+        """edit_file on a non-existent file: treated as new file with new_text."""
         result = self._result("edit_file", {
-            "path": "new.txt", "old_string": "old", "new_string": "hello\n"
+            "path": "new.txt", "from": 1, "new_text": "hello"
         })
         self.assertTrue(result.changed)
         self.assertIn("--- /dev/null", result.preview_text)
         self.assertIn("+hello", result.preview_text)
 
     def test_edit_new_file_empty(self):
-        """edit_file on non-existent file with empty new_string."""
+        """edit_file on non-existent file with empty new_text."""
         result = self._result("edit_file", {
-            "path": "new.txt", "old_string": "old", "new_string": ""
+            "path": "new.txt", "from": 1, "new_text": ""
         })
         self.assertFalse(result.changed)
         self.assertIn("--- /dev/null", result.preview_text)
@@ -300,10 +299,11 @@ class TestGenerateDiff(unittest.TestCase):
         os.mkdir(d)
         result = self._result("edit_file", {
             "path": "no_read.txt",
-            "old_string": "old",
-            "new_string": "new",
+            "from": 1,
+            "new_text": "new",
         })
         # OSError causes original="" so content differs from new -> changed=True
+
         self.assertTrue(result.changed)
 
     # ------------------------------------------------------------------

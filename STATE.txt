@@ -1,12 +1,16 @@
 # mini_agent Architecture Map
-# Last updated: 2026-06-16 (hash-anchored editing + storm-breaker)
+# Last updated: 2026-06-19 (old_string fallback removed -- hash-anchored editing is the only mode)
 #
 # This file is the agent's map of the codebase. Update it after completed changes.
 # Behavioral rules live in AGENTS.md. Long-term facts live in core memory.
 
 ## Active Decisions
 
-- **Hash-anchored editing (2026-06-16)** — edit_lines with 3-char SHA-256 validation per Akay/Howard Chen pattern
+- **old_string fallback removed (2026-06-19)** \u2014 edit_file now requires hash-anchored mode exclusively.\n  Removed `_apply_single_edit`, `_EditResult`, `old_string`/`new_string`/`count`/`paths` params.\n  Schema updated: `from` and `from_hash` are now required. `generate_diff` uses line-range diffs.\n- **Dirac-style half/quarter compaction (2026-06-19)** \u2014 replaced summary-based compaction with Dirac's pure-deletion approach.\n  Triggers only at 100% context fill (not 80%). Removes 50% of middle messages (half strategy),\n  75% if still overflowing (quarter strategy). No summary injected. Compounding deletion saves ~50%+ tokens.\n  Keeps `_compress_stale_tool_results` as secondary optimization on surviving messages.
+- **Dirac-style anchor tracking (2026-06-18)** — AnchorStateManager with FNV-1a hashing, Myers diff, word anchor pool.
+  Persistently tracks anchor words across edits so unchanged lines keep the same anchor.
+  Bug fix: `_TrackedDocument` init param corrected from `available_pool` to `pool` in `reconcile()`.
+  51 tests in `tests/test_anchor_manager.py` — all passing.
 - **Storm-breaker (2026-06-16)** — after 3 consecutive identical failures, synthesize explanation instead of silent loop
 - **Self-modifying architecture** — agent observes, diagnoses, and improves its own codebase via STATE.txt/CHANGELOG.md/HANDOFF.md
 - **Context injection ZONE model** — ZONE 1 (immutable prefix), ZONE 2 (append-only log), ZONE 3 (volatile scratch)
@@ -23,6 +27,9 @@
   Injected into startup context (~2K tokens). Incremental cache via update_file_in_map().
 - `core/context_inject.py` -- per-turn context injection (handoff, state, tasks, scratchpad,
   git diff, orchestration, circuit breaker, compaction, edit risk, pattern rules) (1250 lines)
+- `core/anchor_manager.py` -- Dirac-style persistent anchor state (FNV-1a hash, Myers diff,
+  word anchor pool). Tracks anchors across edits so unchanged lines keep the same anchor.
+  51 tests in `tests/test_anchor_manager.py`.
 - `core/prompt.py` -- system prompt assembly, startup context
 - `core/config.py` -- TOML config loading, provider settings (718 lines). Re-exports from constants.
 - `core/tree_sitter_parser.py` -- multi-language (Python/JS/TS) symbol extraction via tree-sitter
@@ -126,14 +133,17 @@
   _CONFIDENCE_FAILURE_THRESHOLD=2, _CONFIDENCE_NUDGE_COOLDOWN_TURNS=4.
 
 ### Hash-Anchored Editing (2026-06-16)
-- `tools/file_ops.py`: `_line_hash()`, `_compute_line_hashes()` -- 3-char SHA-256 hash per line
-- `read_file(hash_lines=True)`: returns `lineno:hash| content` format for constructing edit_lines calls
+- `tools/file_ops.py`: `_line_hash()`, `_compute_line_hashes()` -- replaced by word anchors from `AnchorStateManager`
+- `read_file(hash_lines=True)`: returns `lineno Anchor│ content` format (word anchors) for constructing edit_lines calls
 - `edit_lines(path, edits[{from, from_hash, to, to_hash, new_text}])`: hash-validated line-range edits
   All hashes validated before any edit applied; batch rejected on any mismatch with precise error.
   Edits applied bottom-up (reverse line order) to preserve pre-edit line numbers.
   Pattern from Akay/Howard Chen hashlines design. Reduces retries ~50% and output tokens 30-40%.
 - Schema: `tools/schema.py` -- `hash_lines` param on `read_file`, full `edit_lines` tool definition
-- Tests: `tests/test_file_ops_extended.py::TestHashlines` (11 tests)
+- AST tools: `tools/ast_ops.py` -- `get_file_skeleton`, `get_function`, `get_symbol_range`, `replace_symbol`
+  now default to `include_anchors=True` (hash-anchored output matching read_file format). Schema and dispatch
+  wrappers in `tools/file_ops.py` both updated. Same `lineno Anchor│ content` format for seamless piping to edit_lines.
+- Tests: `tests/test_file_ops_extended.py::TestHashlines` (12 tests)
 
 ### Storm-Breaker (2026-06-16)
 - `core/llm.py`: `_STORM_FAILURES` deque, `_check_storm_breaker()`, `_synthesize_storm_breaker_message()`

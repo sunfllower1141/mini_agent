@@ -327,15 +327,31 @@ html, body {
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }
+.statusbar-balance .statusbar-metric-icon {
+  color: var(--green);
+  opacity: 0.8;
+}
 .statusbar-balance .statusbar-metric-value {
   color: var(--green);
   font-weight: 600;
 }
+.statusbar-cache .statusbar-metric-icon {
+  color: var(--accent);
+  opacity: 0.8;
+}
 .statusbar-cache .statusbar-metric-value {
   color: var(--accent);
 }
+.statusbar-turn-cost .statusbar-metric-icon {
+  color: var(--accent);
+  opacity: 0.8;
+}
 .statusbar-turn-cost .statusbar-metric-value {
   color: var(--accent);
+}
+.statusbar-session-cost .statusbar-metric-icon {
+  color: var(--accent);
+  opacity: 0.8;
 }
 .statusbar-session-cost .statusbar-metric-value {
   color: var(--accent);

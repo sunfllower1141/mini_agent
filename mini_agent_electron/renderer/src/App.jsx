@@ -5,6 +5,8 @@ import CodeBlock from './components/CodeBlock';
 import SearchResults from './components/SearchResults';
 import ReadFileResult from './components/ReadFileResult';
 import ShellResults from './components/ShellResults';
+import AstResult from './components/AstResult';
+
 import LogPanel from './components/LogPanel';
 import AgentTree from './components/AgentTree';
 import RoundedFrame from './components/RoundedFrame';
@@ -134,35 +136,52 @@ function formatHunkHeader(raw) {
 // Hunk headers (@@ ... @@) are translated to human-readable form.
 function DiffView({ diff }) {
   const clean = stripAnsi(diff);
-  const lines = clean.split('\n').filter(l =>
-    !l.startsWith('--- ') && !l.startsWith('+++ ')
-  );
+  const rawLines = clean.split('\n');
+  const rows = [];
+  let oldLn = 0, newLn = 0;
+  for (const line of rawLines) {
+    if (line.startsWith('--- ') || line.startsWith('+++ ')) {
+      rows.push({ display: line, color: 'var(--dim)', ln: '' });
+      continue;
+    }
+    const hunkMatch = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)/);
+    if (hunkMatch) {
+      oldLn = parseInt(hunkMatch[1], 10);
+      newLn = parseInt(hunkMatch[3], 10);
+      rows.push({ display: formatHunkHeader(line), color: 'var(--yellow)', ln: '·' });
+      continue;
+    }
+    let color = 'var(--dim)';
+    let ln = '';
+    if (line.startsWith('+')) {
+      color = 'var(--green)';
+      ln = String(newLn);
+      newLn++;
+    } else if (line.startsWith('-')) {
+      color = 'var(--red)';
+      ln = String(oldLn);
+      oldLn++;
+    } else {
+      // context line — old and new are in sync, show either
+      ln = String(newLn);
+      oldLn++;
+      newLn++;
+    }
+    rows.push({ display: line, color, ln });
+  }
   return (
     <div className="diff-view" style={{
       fontFamily: 'var(--font-family)', fontSize: '0.75em',
       lineHeight: '1.4',
     }}>
-      {lines.map((line, i) => {
-        let color = 'var(--dim)';
-        let display = line;
-        if (line.startsWith('@@')) {
-          color = 'var(--yellow)';
-          display = formatHunkHeader(line);
-        } else if (line.startsWith('+')) {
-          color = 'var(--green)';
-        } else if (line.startsWith('-')) {
-          color = 'var(--red)';
-        }
-        const ln = String(i + 1).padStart(4, '\u00A0');
-        return (
-          <div key={i} style={{ color, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-            <span style={{ color: '#555', userSelect: 'none', display: 'inline-block', minWidth: '3em', textAlign: 'right', marginRight: '0.5em' }}>
-              {ln}
-            </span>
-            {display}
-          </div>
-        );
-      })}
+      {rows.map((row, i) => (
+        <div key={i} style={{ color: row.color, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          <span style={{ color: '#555', userSelect: 'none', display: 'inline-block', minWidth: '4em', textAlign: 'right', marginRight: '0.5em' }}>
+            {row.ln}
+          </span>
+          {row.display}
+        </div>
+      ))}
     </div>
   );
 }
@@ -510,6 +529,11 @@ function AppShell() {
       // When diff_preview is present, render colored diff (edit_file, write_file)
       if (data.diff_preview) {
         addToolLine({ text: `  ${status}`, cls });
+        // Show the content line (hash verification, line counts) as plain text
+        if (code) {
+          addToolLine({ text: `  ${code}`, cls: '' });
+        }
+
         addToolLine({
           component: <DiffView diff={data.diff_preview} />,
           cls: '',
@@ -518,6 +542,7 @@ function AppShell() {
         const isSearch = /^search_files\(|^find_symbol\(/.test(entry.toolName || '');
         const isReadFile = /^read_file\(/.test(entry.toolName || '');
         const isShell = /^run_shell\(/.test(entry.toolName || '');
+        const isAst = /^get_file_skeleton\(|^get_function\(|^get_symbol_range\(|^replace_symbol\(/.test(entry.toolName || '');
         if (isSearch) {
           addToolLine({ text: `  ${status}`, cls });
           addToolLine({
@@ -534,6 +559,12 @@ function AppShell() {
           addToolLine({ text: `  ${status}`, cls });
           addToolLine({
             component: <ShellResults content={code} ok={data.ok} />,
+            cls: '',
+          });
+        } else if (isAst) {
+          addToolLine({ text: `  ${status}`, cls });
+          addToolLine({
+            component: <AstResult content={code} toolName={entry.toolName} />,
             cls: '',
           });
         } else {
@@ -966,12 +997,26 @@ function AppShell() {
         {/* Reasonix-style status bar items (left of model) */}
         <span className="statusbar-metrics">
           {balanceDisplay && balanceDisplay.available && (
-            <span className="statusbar-metric statusbar-balance" title="Wallet balance">
+            <span className="statusbar-metric statusbar-balance" title="DeepSeek wallet balance">
+              <span className="statusbar-metric-icon">💰</span>
               <span className="statusbar-metric-value">{balanceDisplay.display}</span>
+            </span>
+          )}
+          {sessionCost !== '-' && (
+            <span className="statusbar-metric statusbar-session-cost" title={`Session cost (${sessionCost})`}>
+              <span className="statusbar-metric-icon">∑</span>
+              <span className="statusbar-metric-value">{sessionCost}</span>
+            </span>
+          )}
+          {turnCost !== '-' && (
+            <span className="statusbar-metric statusbar-turn-cost" title={`Last turn cost: ${turnCost}`}>
+              <span className="statusbar-metric-icon">↻</span>
+              <span className="statusbar-metric-value">{turnCost}</span>
             </span>
           )}
           {cacheHitRate != null && (
             <span className="statusbar-metric statusbar-cache" title={`Cache hit rate: ${cacheHitRate}%`}>
+              <span className="statusbar-metric-icon">⚡</span>
               <span className="statusbar-metric-value">{cacheHitRate}%</span>
             </span>
           )}
@@ -1199,7 +1244,7 @@ function AppShell() {
           <span id="token-counter"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.5" className="icon-sm"><circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/></svg> <span id="token-count">{tokenCountVal}</span> tok</span>
         )}
         {turnCost !== '-' && (
-          <span id="turn-cost" title="Last turn cost">{turnCost}</span>
+          <span id="turn-cost" title={`Last turn cost: ${turnCost}`}>↻ {turnCost}</span>
         )}
         {subagentRunning > 0 && (
           <span id="subagent-count" title={`${subagentRunning} sub-agents running`}>\u2225{subagentRunning}</span>

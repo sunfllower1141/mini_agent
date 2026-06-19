@@ -3,9 +3,11 @@ import CodeBlock, { EXT_TO_LANG } from './CodeBlock';
 
 // -- parser ------------------------------------------------------------------
 
-// Read_file with line_numbers=true format:
-//   "     1: import ..."  or  "  42:  content"
-const READFILE_LINE_RE = /^\s*\d+:\s?/;
+// Read_file with line_numbers=true or hash_lines=true format:
+//   line_numbers:  "  42  content"
+//   hash_lines:    "  42 Vale1│ content"  (word anchor + box-drawing pipe)
+// Group 1 = line number, Group 2 = optional word-anchor hash
+const READFILE_HASHLINE_RE = /^\s*(\d+)(?:\s+(\w+)│)?\s?/;
 
 // Extract file path from tool summary like:
 //   read_file(E:\path\to\file.py)  — no quotes, just parens
@@ -57,15 +59,27 @@ const FILENAME_STYLE = {
 // -- component ---------------------------------------------------------------
 
 export default function ReadFileResult({ content, toolName }) {
-  const { source, filePath, lang } = useMemo(() => {
-    if (!content) return { source: '', filePath: null, lang: null };
+  const { source, filePath, lang, startLine, lineHashes } = useMemo(() => {
+    if (!content) return { source: '', filePath: null, lang: null, startLine: 1, lineHashes: [] };
     const path = extractPath(toolName);
-    // Strip line-number prefixes from each line
-    const stripped = content
-      .split('\n')
-      .map((line) => line.replace(READFILE_LINE_RE, ''))
+    // Parse line numbers and optional hash anchors before stripping prefixes
+    let startLine = 1;
+    const lines = content.split('\n');
+    const hashes = [];
+    const firstMatch = lines[0]?.match(READFILE_HASHLINE_RE);
+    if (firstMatch) {
+      startLine = parseInt(firstMatch[1], 10);
+    }
+    // Strip the full line-number (and hash) prefix from each line,
+    // collecting hashes for the gutter display.
+    const stripped = lines
+      .map((line) => {
+        const m = line.match(READFILE_HASHLINE_RE);
+        hashes.push(m ? m[2] || null : null);
+        return line.replace(READFILE_HASHLINE_RE, '');
+      })
       .join('\n');
-    return { source: stripped, filePath: path, lang: extToLang(path) };
+    return { source: stripped, filePath: path, lang: extToLang(path), startLine, lineHashes: hashes };
   }, [content, toolName]);
 
   if (!source.trim()) return null;
@@ -88,6 +102,8 @@ export default function ReadFileResult({ content, toolName }) {
         language={lang}
         highlight={true}
         lineNumbers={true}
+        startLine={startLine}
+        lineHashes={lineHashes}
         wrap={true}
       />
     </div>

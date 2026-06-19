@@ -15,6 +15,9 @@ Long-term facts and preferences go in core memory.
 ## Read/Write Guardrails (ACI)
 - **Read-before-edit**: MUST `read_file` any `.py` file before editing it. New files exempt.
   Tracked via `_READ_FILES` set. Rejects hallucinated edits to unseen code.
+- **Hash-anchored reads mandatory**: ALL `read_file` calls MUST use `hash_lines=True` as default.
+  Only fall back to normal `read_file` when you need raw content without hash prefixes (rare).
+  This ensures every read feeds directly into hash-anchored `edit_file` / `edit_lines` without a second read.
 - **Syntax validation**: EVERY `.py` write/edit passes through `compile()` first.
   SyntaxErrors are caught BEFORE disk write. Returns exact line number + pointer.
 - **Workspace isolation**: All reads/writes bounded to workspace directory.

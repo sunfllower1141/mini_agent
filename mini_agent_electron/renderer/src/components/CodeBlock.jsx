@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { createHighlighter, createJavaScriptRegexEngine } from 'shiki';
+import AnsiBlock from './AnsiBlock';
 
 // -- comprehensive language set ----------------------------------------------
 // Every language a coding agent realistically encounters.
@@ -167,6 +168,8 @@ export default function CodeBlock({
   fontSize,
   toolName,
   lineNumbers = false,
+  startLine = 1,
+  lineHashes = [],
   wrap = false,
 }) {
   const source = code ?? children;
@@ -186,6 +189,25 @@ export default function CodeBlock({
 
   // no highlighting -- plain block
   if (!highlight) {
+    // If content contains ANSI escape codes, render with color
+    if (source.indexOf('\x1b') !== -1) {
+      return (
+        <pre style={{
+          padding: '4px 0', margin: '4px 0',
+          overflowX: wrap ? 'hidden' : 'auto',
+          fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Code", monospace',
+          lineHeight: '1.55', maxWidth: '100%',
+          background: 'transparent',
+        }}>
+          <AnsiBlock text={source} style={{
+            color: '#ccc',
+            whiteSpace: wrap ? 'pre-wrap' : 'pre',
+            wordBreak: wrap ? 'break-word' : 'normal',
+            display: 'block',
+          }} />
+        </pre>
+      );
+    }
     return (
       <pre style={{
         padding: '4px 0', margin: '4px 0',
@@ -199,16 +221,18 @@ export default function CodeBlock({
           wordBreak: wrap ? 'break-word' : 'normal',
           display: 'block',
         }}>
-          {lineNumbers ? source.split('\n').map((l, i) =>
-            `${String(i + 1).padStart(5, ' ')}  ${l}`
-          ).join('\n') : source}
+          {lineNumbers ? source.split('\n').map((l, i) => {
+            const num = String(i + startLine).padStart(5, ' ');
+            const hashStr = lineHashes[i] ? `:${lineHashes[i]}` : '';
+            return `${num}${hashStr}  ${l}`;
+          }).join('\n') : source}
         </code>
       </pre>
     );
   }
 
   // Shiki highlighting -- async codeToHtml
-  return <ShikiBlock source={source} lang={lang} fontSize={fontSize} lineNumbers={lineNumbers} wrap={wrap} />;
+  return <ShikiBlock source={source} lang={lang} fontSize={fontSize} lineNumbers={lineNumbers} startLine={startLine} lineHashes={lineHashes} wrap={wrap} />;
 }
 
 // Strip the background color that shiki injects on the <pre>
@@ -220,7 +244,43 @@ function stripBg(html) {
 // -- ShikiBlock (handles the async highlighter lifecycle) --------------------
 
 // Plain-text fallback when Shiki doesn't know a language
-function PlainBlock({ source, fontSize, lineNumbers, wrap }) {
+function PlainBlock({ source, fontSize, lineNumbers, startLine = 1, lineHashes = [], wrap }) {
+  // If content contains ANSI escape codes, render with color
+  if (source.indexOf('\x1b') !== -1) {
+    const lines = source.split('\n');
+    return (
+      <pre style={{
+        padding: '4px 0', margin: '4px 0',
+        overflowX: wrap ? 'hidden' : 'auto',
+        fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Code", monospace',
+        fontSize: fontSize || 'inherit', lineHeight: '1.55',
+        background: 'transparent', borderRadius: '8px', maxWidth: '100%',
+      }}>
+        <code style={{
+          color: '#ccc',
+          whiteSpace: wrap ? 'pre-wrap' : 'pre',
+          wordBreak: wrap ? 'break-word' : 'normal',
+          display: 'block',
+        }}>
+          {lineNumbers
+            ? lines.map((l, i) => {
+                const num = String(i + startLine).padStart(4, '\u00A0');
+                const hashStr = lineHashes[i] ? `:${lineHashes[i]}` : '';
+                return (
+                  <div key={i}>
+                    <span className="shiki-ln" style={{ color:'#555', userSelect:'none', display:'inline-block', minWidth:'3em', textAlign:'right', marginRight:'0.5em' }}>
+                      {num}{hashStr}
+                    </span>
+                    <AnsiBlock text={l} />
+                  </div>
+                );
+              })
+            : <AnsiBlock text={source} />
+          }
+        </code>
+      </pre>
+    );
+  }
   const lines = source.split('\n');
   return (
     <pre style={{
@@ -237,16 +297,25 @@ function PlainBlock({ source, fontSize, lineNumbers, wrap }) {
         display: 'block',
       }}>
         {lineNumbers
-          ? lines.map((l, i) =>
-              `${String(i + 1).padStart(5, ' ')}  ${l}`
-            ).join('\n')
+          ? lines.map((l, i) => {
+              const num = String(i + startLine).padStart(4, '\u00A0');
+              const hashStr = lineHashes[i] ? `:${lineHashes[i]}` : '';
+              return (
+                <div key={i}>
+                  <span className="shiki-ln" style={{ color:'#555', userSelect:'none', display:'inline-block', minWidth:'3em', textAlign:'right', marginRight:'0.5em' }}>
+                    {num}{hashStr}
+                  </span>
+                  {l}
+                </div>
+              );
+            })
           : source}
       </code>
     </pre>
   );
 }
 
-function ShikiBlock({ source, lang, fontSize, lineNumbers, wrap }) {
+function ShikiBlock({ source, lang, fontSize, lineNumbers, startLine = 1, lineHashes = [], wrap }) {
   const [html, setHtml] = useState(null);
   const [failed, setFailed] = useState(false);
   const mountedRef = useRef(true);
@@ -282,22 +351,24 @@ function ShikiBlock({ source, lang, fontSize, lineNumbers, wrap }) {
   }, []);
 
   if (failed) {
-    return <PlainBlock source={source} fontSize={fontSize} lineNumbers={lineNumbers} wrap={wrap} />;
+    return <PlainBlock source={source} fontSize={fontSize} lineNumbers={lineNumbers} startLine={startLine} lineHashes={lineHashes} wrap={wrap} />;
   }
 
   if (!html) {
     // fallback while Shiki loads (first render only — highlighter is cached)
-    return <PlainBlock source={source} fontSize={fontSize} lineNumbers={lineNumbers} wrap={wrap} />;
+    return <PlainBlock source={source} fontSize={fontSize} lineNumbers={lineNumbers} startLine={startLine} lineHashes={lineHashes} wrap={wrap} />;
   }
 
-  // Inject line numbers into each <span class="line"> so they stay
-  // paired with their logical line even when the code wraps.
-  let htmlLineCounter = 0;
+  // Inject line numbers (and optional hash anchors) into each <span class="line">
+  // so they stay paired with their logical line even when the code wraps.
+  let htmlLineCounter = startLine - 1;
   const annotatedHtml = lineNumbers
     ? html.replace(/<span class="line"[^>]*>/g, (match) => {
-        const n = ++htmlLineCounter;
-        const num = String(n).padStart(4, '\u00A0');
-        return `${match}<span class="shiki-ln">${num}  </span>`;
+        const idx = ++htmlLineCounter - startLine;
+        const hash = lineHashes[idx] || '';
+        const hashStr = hash ? `<span class="shiki-hash">:${hash}</span>` : '';
+        const num = String(htmlLineCounter).padStart(4, '\u00A0');
+        return `${match}<span class="shiki-ln">${num}${hashStr}  </span>`;
       })
     : html;
 
@@ -307,7 +378,8 @@ function ShikiBlock({ source, lang, fontSize, lineNumbers, wrap }) {
         <style>{`.shiki-wrap pre { white-space: pre-wrap !important; overflow-x: hidden !important; word-break: break-word; }`}</style>
       )}
       {lineNumbers && (
-        <style>{`.shiki-ln { color:#555; user-select:none; display:inline-block; min-width:3em; text-align:right; margin-right:0.5em; }`}</style>
+        <style>{`.shiki-ln { color:#555; user-select:none; display:inline-block; min-width:3em; text-align:right; margin-right:0.5em; }
+.shiki-hash { color:#444; font-size:0.85em; }`}</style>
       )}
       <div
         style={{ overflowX: wrap ? 'hidden' : 'auto' }}

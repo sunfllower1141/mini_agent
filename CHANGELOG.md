@@ -2,6 +2,44 @@
 
 Self-modification audit trail -- what the agent changed and why.
 
+## 2026-06-19 -- old_string Fallback Removed from edit_file
+
+**Rationale:** Hash-anchored editing has proven reliable. Maintaining dual code paths
+(old_string substring matching and hash-anchored line-based editing) caused
+confusion and maintenance burden. Gutting the old_string system simplifies the
+codebase and forces consistent editor behavior.
+
+**Changes:**
+- `tools/file_ops.py`:
+  - Removed `_apply_single_edit` function (~180 lines) -- no remaining callers
+  - Removed `_EditResult` type alias
+  - `_edit_file`: old_string/paths/count fallback replaced with error directing to hash anchors
+  - `_edit_file_summary`: removed old_string fallback path
+- `tools/schema.py`: edit_file definition simplified -- removed `old_string`, `new_string`,
+  `count`, `paths` params. `from` and `from_hash` now required.
+- `core/safety.py`: `generate_diff` for edit_file now uses line-range diffing instead of
+  old_string/new_string substitution.
+- `core/context_inject.py`: updated critical-failure hint for edit_file.
+- Tests: 8+ tests updated from old_string to hash-anchored mode across
+  test_tools.py, test_safety_diff.py, test_resilience.py, test_post_edit_verify.py,
+  test_file_ops_extended.py.
+
+## 2026-06-19 -- AST Tools Default to Hash-Anchored Output
+
+### Changed
+- **`tools/file_ops.py`**: Changed `include_anchors` default from `False` to `True` in
+  `_get_file_skeleton` (line 1714) and `_get_function` (line 1766) dispatch wrappers.
+- **`tools/schema.py`**: Updated both `include_anchors` descriptions from
+  "Default false" to "Defaults to true" for `get_file_skeleton` and `get_function`.
+
+### Why
+AST-native tools (`get_file_skeleton`, `get_function`) are used as primary file-
+navigation primitives (instead of `read_file`). The core memory convention states
+that `read_file` should use `hash_lines=True` by default. The same must apply to
+AST tools so the output format is consistent and directly pipeable to `edit_lines`.
+Without anchors, editing requires a follow-up `read_file` call, cancelling the
+token savings AST tools provide.
+
 ## 2026-06-14 -- Workspace Organization Audit & Doc Drift Fix
 
 ### Changed

@@ -444,9 +444,11 @@ class TestEditFileDiff(unittest.TestCase):
             "type": "function",
             "function": {
                 "name": "read_file",
-                "arguments": json.dumps({"path": self.test_file}),
+                "arguments": json.dumps({"path": self.test_file, "hash_lines": True}),
             },
         }, self.wg, self.rg)
+        from core.anchor_manager import AnchorStateManager
+        anchors = AnchorStateManager.get_anchors(self.test_file)
         tc = {
             "id": "call_1",
             "type": "function",
@@ -454,14 +456,15 @@ class TestEditFileDiff(unittest.TestCase):
                 "name": "edit_file",
                 "arguments": json.dumps({
                     "path": self.test_file,
-                    "old_string": "hello world",
-                    "new_string": "goodbye world",
+                    "from": 1,
+                    "from_hash": anchors[0],
+                    "new_text": "goodbye world",
                 }),
             },
         }
         result = execute_tool(tc, self.wg, self.rg)
         self.assertTrue(result.success)
-        self.assertIn("OK: replaced 1 occurrence", result.content)
+        self.assertIn("OK: applied 1 edit", result.content)
         self.assertIn(self.test_file, result.content)
 
 

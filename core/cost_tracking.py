@@ -95,10 +95,23 @@ class SessionCost:
         # Cost = (cache-hit tokens / 1M) * cache-hit price
         #      + (cache-miss tokens / 1M) * cache-miss price
         #      + (completion tokens / 1M) * output price
-        input_cost = (
-            (cache_hit_tokens / 1_000_000) * pricing["inputCacheHit"]
-            + (cache_miss_tokens / 1_000_000) * pricing["inputCacheMiss"]
-        )
+        #
+        # When cache breakdown is available, use it for accurate pricing.
+        # When unavailable (e.g. OpenRouter, older APIs), fall back to
+        # charging all prompt tokens at the miss rate.
+        if cache_hit_tokens + cache_miss_tokens > 0:
+            input_cost = (
+                (cache_hit_tokens / 1_000_000) * pricing["inputCacheHit"]
+                + (cache_miss_tokens / 1_000_000) * pricing["inputCacheMiss"]
+            )
+            # Safety: any prompt tokens not covered by cache breakdown
+            # (shouldn't happen, but be defensive)
+            uncategorized = max(0, prompt_tokens - cache_hit_tokens - cache_miss_tokens)
+            if uncategorized > 0:
+                input_cost += (uncategorized / 1_000_000) * pricing["inputCacheMiss"]
+        else:
+            # No cache breakdown -- charge all prompt tokens at miss rate
+            input_cost = (prompt_tokens / 1_000_000) * pricing["inputCacheMiss"]
         output_cost = (completion_tokens / 1_000_000) * pricing["output"]
         total = input_cost + output_cost
 
@@ -155,6 +168,10 @@ def format_cost(amount: float | None, currency: str = "CNY") -> str:
     return f"{symbol}{amount:.2f}"
 
 
-def format_cost_cny(amount: float | None) -> str:
-    """Format cost with $ symbol (USD)."""
+def format_cost_usd(amount: float | None) -> str:
+    """Format cost in USD with $ symbol (DeepSeek pricing is in USD)."""
     return format_cost(amount, "USD")
+
+
+# Backwards-compatible alias — prefer format_cost_usd for clarity
+format_cost_cny = format_cost_usd

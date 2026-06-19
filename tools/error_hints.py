@@ -42,6 +42,8 @@ _ERROR_HINTS: dict[str, list[tuple[str, str]]] = {
     "edit_file": [
         ("blocked", "Edit blocked by safety layer. Use a path inside the workspace or enable unrestricted mode."),
         ("outside workspace", "Edit blocked -- path is outside the workspace. Try a path inside the workspace root."),
+        ("hash mismatch", "Hash mismatch -- the file content has changed since you read it. Re-run read_file(hash_lines=True) on this file to get the current hashes, then retry with the correct hash anchors."),
+        ("missing edit specification", "Missing edit specification. Provide hash anchor params (from, from_hash, to, to_hash, new_text) or fallback params (old_string, new_string)."),
     ],
     "run_shell": [
         ("not found", "Command not found. Check that it is installed and on your PATH."),
@@ -164,6 +166,8 @@ _ERROR_CLASS_MAP: dict[str, dict[str, tuple[ErrorClass, bool, int]]] = {
         "whitespace": (ErrorClass.VALIDATION, True, 0),
         "ambiguous": (ErrorClass.VALIDATION, True, 0),
         "count": (ErrorClass.VALIDATION, True, 0),
+        "hash mismatch": (ErrorClass.VALIDATION, True, 0),
+        "missing edit specification": (ErrorClass.VALIDATION, True, 0),
     },
     "write_file": {
         "blocked": (ErrorClass.AUTHORIZATION, False, 0),
@@ -256,6 +260,8 @@ _FAILURE_PATTERNS: dict[str, dict[str, str]] = {
         "whitespace": "Whitespace mismatch. Try copying the exact text from read_file output, including all leading/trailing spaces.",
         "ambiguous": "Multiple matches found. Use a more specific old_string or set count=-1 to replace all.",
         "count": "Invalid count value. Use count=1 (first only) or count=-1 (all occurrences).",
+        "hash mismatch": "Hash mismatch: the file has changed since you read it. Re-read with read_file(hash_lines=True) and retry with the correct hashes.",
+        "missing edit specification": "Provide hash anchor params (from, from_hash, to, to_hash, new_text) or fallback params (old_string, new_string).",
     },
     "write_file": {
         "blocked": "Use force=True to bypass overwrite protection, or write to a different path.",

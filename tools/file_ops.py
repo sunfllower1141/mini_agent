@@ -15,12 +15,15 @@ import subprocess
 import sys
 import time
 
-from core.safety import ReadSafetyGate, WriteSafetyGate
+from core.safety import DiffPreview, ReadSafetyGate, WriteSafetyGate
 from tools import clear_tool_cache
 from tools import _register, _summarize, ToolResult, _TOOL_CONTEXT
+from tools.ast_ops import get_file_skeleton, get_function, get_symbol_range, replace_symbol
 
 # Thread-local: current sub-agent task_id (set by agent_ops before tool execution)
 import threading
+
+from core.file_context_tracker import get_tracker
 _current_agent_id: threading.local = threading.local()
 
 _WINDOWS = platform.system() == "Windows"
@@ -110,34 +113,50 @@ def _read_file_windows_worker(
 
 def _read_file_direct(
     resolved: str, offset: int, limit: int, line_numbers: bool,
+    hash_lines: bool = False,
 ) -> ToolResult:
-    """Direct file read -- used on Unix and as fallback on Windows."""
+    """Direct file read -- used on Unix and as fallback on Windows.
+
+    When hash_lines=True, uses AnchorStateManager for Dirac-style word
+    anchors that persist across edits (unchanged lines keep their anchor).
+    """
     try:
         with open(resolved, "r", encoding="utf-8", errors="replace") as f:
-            collected: list[str] = []
-            total_lines = 0
-            for lineno, line in enumerate(f):
-                total_lines = lineno + 1
-                if lineno + 1 < offset:
-                    continue
-                if len(collected) < limit:
-                    stripped = line.rstrip("\n")
-                    if line_numbers:
-                        stripped = f"{total_lines}: {stripped}"
-                    collected.append(stripped)
-                if len(collected) >= limit and lineno + 1 >= offset + limit:
-                    break
+            all_lines = [line.rstrip("\n") for line in f]
     except Exception as e:
         hint = ""
         if isinstance(e, FileNotFoundError) or "No such file" in str(e):
             hint = "\nHint: Check the path spelling. Try list_directory to see available files."
         return ToolResult(success=False, content=f"Error reading '{resolved}': {e}{hint}")
 
-    if offset > total_lines:
+    total_lines = len(all_lines)
+
+    if offset > 0 and offset >= total_lines:
         return ToolResult(success=False, content=f"Offset {offset} exceeds file length ({total_lines} lines).")
 
-    full_content = "\n".join(collected)
-    lines_after_offset = total_lines - offset + 1
+    # --- Compute word anchors (Dirac-style persistent anchors) ---
+    anchors: list[str] | None = None
+    if hash_lines:
+        from core.anchor_manager import AnchorStateManager
+        task_id = getattr(_current_agent_id, "task_id", None)
+        anchors = AnchorStateManager.reconcile(resolved, all_lines, task_id)
+
+    # --- Slice and format ---
+    sliced = all_lines[offset:offset + limit]
+    collected: list[str] = []
+    gutter_width = max(len(str(total_lines)), 1)
+    for i, line in enumerate(sliced):
+        lineno = offset + i + 1  # 1-based
+        if hash_lines and anchors is not None:
+            anchor = anchors[offset + i]
+            collected.append(f"{lineno:>{gutter_width}} {anchor}\u2502 {line}")
+        elif line_numbers:
+            collected.append(f"{lineno:>{gutter_width}} {line}")
+        else:
+            collected.append(line)
+
+    # Actual lines remaining after offset
+    lines_after_offset = total_lines - offset
 
     if lines_after_offset > limit:
         truncated = "\n".join(collected[:limit])
@@ -147,6 +166,8 @@ def _read_file_direct(
             f"Use a higher limit or offset to see more.)"
         )
         return ToolResult(success=True, content=msg)
+
+    full_content = "\n".join(collected)
 
     return ToolResult(success=True, content=full_content)
 
@@ -267,6 +288,54 @@ _BACKUPS: dict[str, str] = {}  # resolved_path -> backup path
 # Capped at _FILE_CACHE_MAX entries; oldest entries are evicted (LRU via insertion order).
 _FILE_CACHE: dict[str, tuple[str, float]] = {}
 _FILE_CACHE_MAX = 50
+_CACHE_DISK_READS = 0  # Diagnostic: counts cache-miss disk reads in edit paths
+
+# Per-task file content hashes — used to short-circuit re-reads when content hasn't
+# changed since last read (Dirac pattern: "no changes since your last read").
+# Key: "{resolved_path}#anchored" or "{resolved_path}#plain", Value: content hash.
+_FILE_HASHES: dict[str, str] = {}
+
+# Maximum file size for full reads before warning (50KB). Larger files should be
+# read with offset/limit or via get_file_skeleton / get_function.
+_MAX_FILE_READ_SIZE = 50 * 1024
+
+def _cache_file_content(resolved_path: str, _source: str | None = None) -> None:
+    """Populate _FILE_CACHE with file content (LRU eviction).
+
+    Args:
+        resolved_path: Absolute file path (cache key).
+        _source: Pre-read file content. When provided, skips the disk read.
+    """
+    try:
+        if resolved_path in _FILE_CACHE:
+            return  # already cached
+        current_mtime = os.path.getmtime(resolved_path)
+        # Evict oldest if at capacity
+        if len(_FILE_CACHE) >= _FILE_CACHE_MAX:
+            _FILE_CACHE.pop(next(iter(_FILE_CACHE)), None)
+        if _source is not None:
+            _FILE_CACHE[resolved_path] = (_source, current_mtime)
+        else:
+            with open(resolved_path, "r", encoding="utf-8", errors="replace") as _f:
+                _FILE_CACHE[resolved_path] = (_f.read(), current_mtime)
+    except OSError:
+        pass
+
+
+def _get_cached_content(resolved_path: str) -> str | None:
+    """Return cached file content if mtime matches, otherwise None."""
+    cached = _FILE_CACHE.get(resolved_path)
+    if cached is None:
+        return None
+    content, cached_mtime = cached
+    try:
+        if os.path.getmtime(resolved_path) == cached_mtime:
+            return content
+    except OSError:
+        pass
+    # Stale cache -- evict and return None
+    _FILE_CACHE.pop(resolved_path, None)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -333,16 +402,28 @@ _ABSOLUTE_MAX_LINES = 1000
 
 @_register("read_file")
 def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
-    path = args["path"]
-    safety_result = rg.check(path)
-    if not safety_result.allowed:
+    """Read one or more files. Supports 'path' (single) and 'paths' (array, Dirac pattern).
+
+    Hash-based re-read shortcut: if a file content hasn't changed since last read,
+    returns a short "no changes" message instead of re-sending the full content to the API.
+    """
+    import hashlib
+
+    # Accept 'paths' (array) or 'path' (single string) — Dirac multi-file pattern
+    paths_raw = args.get("paths")
+    if paths_raw is not None and isinstance(paths_raw, list):
+        file_paths: list[str] = paths_raw
+        is_multi = len(file_paths) > 1
+    elif "path" in args:
+        file_paths = [args["path"]]
+        is_multi = False
+    else:
         return ToolResult(
             success=False,
-            content=f"Read blocked by safety layer: {safety_result.reason}",
+            content="Missing required parameter: provide either 'path' (string) or 'paths' (array of strings).",
+            hint="Valid parameters: path (string), paths (array), offset, limit, line_numbers, hash_lines",
         )
-    resolved = safety_result.resolved_path
 
-    # Apply offset and limit
     offset = args.get("offset", 0)
     if offset < 0:
         offset = 0
@@ -351,51 +432,118 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
         limit = _DEFAULT_READ_LINES
     limit = min(limit, _ABSOLUTE_MAX_LINES)
     line_numbers = args.get("line_numbers", False)
+    hash_lines = args.get("hash_lines", True)
 
-    # Cross-turn cache: if file mtime hasn't changed, return cached content directly.
-    # Only used when no offset/limit/line_numbers are specified (full reads).
-    if offset == 0 and limit == _DEFAULT_READ_LINES and not line_numbers:
+    results: list[str] = []
+    any_failed = False
+
+    for path in file_paths:
+        safety_result = rg.check(path)
+        if not safety_result.allowed:
+            results.append(f"--- {path} ---\n[BLOCKED] Read blocked by safety layer: {safety_result.reason}")
+            any_failed = True
+            continue
+        resolved = safety_result.resolved_path
+
+        # --- File size guard (Dirac: warn on >50KB full reads) ---
+        if offset == 0 and limit >= _DEFAULT_READ_LINES:
+            try:
+                fsize = os.path.getsize(resolved)
+                if fsize > _MAX_FILE_READ_SIZE:
+                    results.append(
+                        f"--- {path} ---\n"
+                        f"[WARNING] File is {fsize // 1024}KB, exceeds {_MAX_FILE_READ_SIZE // 1024}KB "
+                        f"limit for full reads. Use offset/limit to read ranges, "
+                        f"or get_file_skeleton / get_function for surgical reads."
+                    )
+                    continue
+            except OSError:
+                pass
+
+        # --- Hash-based re-read shortcut (Dirac: "no changes since your last read") ---
+        cache_key = f"{resolved}#{'anchored' if hash_lines else 'plain'}"
         try:
-            current_mtime = os.path.getmtime(resolved)
-            if resolved in _FILE_CACHE:
-                cached_content, cached_mtime = _FILE_CACHE[resolved]
-                if cached_mtime == current_mtime:
-                    return ToolResult(success=True, content=cached_content)
+            with open(resolved, "rb") as f:
+                raw = f.read()
+            current_hash = hashlib.md5(raw).hexdigest()
         except OSError:
-            pass  # fall through to normal read on stat error
+            current_hash = None
 
-    # On Windows, use the _worker subprocess to avoid kernel-filter hangs
-    if False:  # _WINDOWS bypassed - subprocess hangs on this system
-        result = _read_file_windows_worker(resolved, offset, limit, line_numbers)
-    else:
-        result = _read_file_direct(resolved, offset, limit, line_numbers)
+        if current_hash is not None:
+            last_hash = _FILE_HASHES.get(cache_key)
+            if last_hash == current_hash and offset == 0 and limit >= _DEFAULT_READ_LINES:
+                header = f"--- {path} ---\n" if is_multi else ""
+                results.append(f"{header}no changes have been made to the file since your last read (Hash: {current_hash})")
+                _READ_FILES.add(resolved)
+                continue
 
-    if not result.success:
-        return result
+        # --- Cross-turn mtime cache (disk I/O bypass) ---
+        if offset == 0 and limit == _DEFAULT_READ_LINES and not line_numbers and not hash_lines:
+            try:
+                current_mtime = os.path.getmtime(resolved)
+                if resolved in _FILE_CACHE:
+                    cached_content, cached_mtime = _FILE_CACHE[resolved]
+                    if cached_mtime == current_mtime:
+                        _FILE_HASHES[cache_key] = current_hash
+                        header = f"--- {path} ---\n" if is_multi else ""
+                        results.append(header + cached_content)
+                        _READ_FILES.add(resolved)
+                        continue
+            except OSError:
+                pass
 
-    full_content = result.content
+        # --- Actual read ---
+        if False:  # _WINDOWS bypassed
+            result = _read_file_windows_worker(resolved, offset, limit, line_numbers)
+        else:
+            result = _read_file_direct(resolved, offset, limit, line_numbers, hash_lines=hash_lines)
 
-    # Cache full file content for cross-turn reuse (only when reading from offset 0
-    # AND the read was not truncated -- avoid caching partial content).
-    if offset == 0 and "... (truncated at " not in full_content:
+        if not result.success:
+            header = f"--- {path} ---\n" if is_multi else ""
+            results.append(header + result.content)
+            any_failed = True
+            continue
+
+        full_content = result.content
+
+        # --- Update caches ---
+        if current_hash is not None:
+            _FILE_HASHES[cache_key] = current_hash
+
+        if offset == 0 and "... (truncated at " not in full_content and not hash_lines and not line_numbers:
+            try:
+                current_mtime = os.path.getmtime(resolved)
+                if len(_FILE_CACHE) >= _FILE_CACHE_MAX and resolved not in _FILE_CACHE:
+                    _FILE_CACHE.pop(next(iter(_FILE_CACHE)), None)
+                _FILE_CACHE[resolved] = (full_content, current_mtime)
+            except OSError:
+                pass
+
+        _READ_FILES.add(resolved)
+
+        # Track for stale-context detection (FileContextTracker)
         try:
-            current_mtime = os.path.getmtime(resolved)
-            # Evict oldest entry if at capacity
-            if len(_FILE_CACHE) >= _FILE_CACHE_MAX and resolved not in _FILE_CACHE:
-                _FILE_CACHE.pop(next(iter(_FILE_CACHE)), None)
-            _FILE_CACHE[resolved] = (full_content, current_mtime)
-        except OSError:
+            tracker = get_tracker(getattr(_current_agent_id, "task_id", ""))
+            tracker.mark_file_read(resolved)
+        except Exception:
             pass
 
-    # Track this file as read for read-before-edit enforcement
-    _READ_FILES.add(resolved)
+        header = f"--- {path} ---\n" if is_multi else ""
+        results.append(header + full_content)
 
-    return ToolResult(success=True, content=full_content)
+
+
+    return ToolResult(success=not any_failed, content="\n\n".join(results))
 
 
 @_summarize("read_file")
 def _read_file_summary(args: dict) -> str:
-    return f"read_file({args.get('path', '?')})"
+    paths = args.get("paths") or [args.get("path", "?")]
+    if isinstance(paths, list) and len(paths) <= 3:
+        return f"read_file({', '.join(paths)})"
+    elif isinstance(paths, list):
+        return f"read_file({len(paths)} files)"
+    return f"read_file({paths})"
 
 
 # ---------------------------------------------------------------------------
@@ -470,6 +618,12 @@ def _write_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
         clear_tool_cache()
         # Invalidate cross-turn file cache
         _FILE_CACHE.pop(safety_result.resolved_path, None)
+        # Invalidate anchor state for this file (Dirac-style)
+        try:
+            from core.anchor_manager import AnchorStateManager
+            AnchorStateManager.clear_state(safety_result.resolved_path)
+        except Exception:
+            pass
         # Track as read for read-before-edit enforcement (agent wrote it, knows content)
         _READ_FILES.add(safety_result.resolved_path)
         # Keep symbol index fresh for newly written .py files
@@ -503,8 +657,6 @@ def _write_file_summary(args: dict) -> str:
 # ---------------------------------------------------------------------------
 # edit_file
 # ---------------------------------------------------------------------------
-
-_EditResult = tuple[str, ToolResult]  # (path, result)
 
 
 def _normalize_line(s: str) -> str:
@@ -857,235 +1009,352 @@ def _line_match(content_lines, search_lines, trim, content=''):
     return (start_byte, end_byte)
 
 
-
-def _apply_single_edit(
-    path: str,
-    old: str,
-    new: str,
-    count: int,
-    preview: bool,
-    wg: WriteSafetyGate,
-    args: dict,
-) -> _EditResult:
-    """Apply an edit to a single file. Returns (path, ToolResult)."""
-    safety_result = wg.check(path)
-    if not safety_result.allowed:
-        return (path, ToolResult(
-            success=False,
-            content=f"Edit blocked by safety layer: {safety_result.reason}",
-        ))
-    # File reservation check -- prevent sub-agent collisions
-    agent_id = getattr(_current_agent_id, "task_id", None)
-    if agent_id is not None:
-        from tools import reserve_file
-        ok, msg = reserve_file(path, agent_id)
-        if not ok:
-            return (path, ToolResult(success=False, content=msg))
-    resolved = safety_result.resolved_path
-
-    # --- Read-before-edit enforcement ---
-    if resolved not in _READ_FILES:
-        return (path, ToolResult(
-            success=False,
-            content=(
-                f"Edit blocked: '{resolved}' has not been read yet in this session.\n"
-                f"Use read_file first to read the file before editing it.\n"
-                f"This ensures the model sees the current file content and can construct\n"
-                f"an accurate old_string for matching."
-            ),
-        ))
-
-    try:
-        with open(resolved, "r", encoding="utf-8", errors="replace") as f:
-            original = f.read()
-        diff = wg.generate_diff("edit_file", args)
-        _backup_before_write(resolved)
-        match = _fuzzy_find(original, old)
-        if match is None:
-            # Search for similar substrings to help the agent self-correct
-            candidates: list[str] = []
-            old_first_line = old.split("\n")[0].strip()
-            for lineno, line in enumerate(original.split("\n"), 1):
-                if old_first_line and old_first_line[:30] in line:
-                    candidates.append(f"  line {lineno}: {line.rstrip()[:120]}")
-                if len(candidates) >= 3:
-                    break
-            # Build diagnostic: find the closest matching lines and show diff
-            _old_lines = old.split('\n')
-            _content_lines = original.split('\n')
-            best_match = _find_closest_lines(_content_lines, _old_lines)
-            hint = (
-                f"Edit failed: old_string not found in '{resolved}'.\n"
-                f"Hint: The string must match exactly -- check whitespace, indentation, "
-                f"and line endings. Try read_file first to verify the exact text."
-            )
-            if best_match:
-                # Show confidence score for the closest match
-                n_search = len(_old_lines)
-                if n_search > 0 and best_match.get('match_ratio', 0) > 0:
-                    pct = int(best_match['match_ratio'] * 100)
-                    hint += (
-                        f"\n\nClosest match found at line {best_match['line']} "
-                        f"(confidence: {pct}%, {best_match.get('matched_lines', 0)}/{n_search} lines):"
-                    )
-                else:
-                    hint += f"\n\nClosest match found around line {best_match['line']}:"
-                hint += f"\n  Expected ({len(_old_lines)} lines):\n"
-                for ol in _old_lines[:10]:
-                    hint += f"    | {ol.rstrip()}\n"
-                if len(_old_lines) > 10:
-                    hint += f"    ... ({len(_old_lines) - 10} more lines omitted)\n"
-                hint += f"  Actual (file at line {best_match['line']}):\n"
-                for fl in best_match['lines'][:10]:
-                    hint += f"    | {fl.rstrip()}\n"
-                if len(best_match['lines']) > 10:
-                    hint += f"    ... ({len(best_match['lines']) - 10} more lines omitted)\n"
-                if best_match['diff_hint']:
-                    hint += f"\nDifferences: {best_match['diff_hint']}"
-            if candidates:
-                hint += "\nSimilar lines found (did you mean one of these?):\n" + "\n".join(candidates)
-            if old_first_line:
-                try:
-                    memory = getattr(_TOOL_CONTEXT, "_memory_store", None)
-                    if memory is not None:
-                        memory.add_knowledge(
-                            category="pattern",
-                            summary=f"edit_file mismatch: {old_first_line[:80]}",
-                            detail=f"File: {resolved}. Could not find exact match for old_string.",
-                        )
-                except Exception as exc:
-                    print(f"  WARNING: backup skipped: {exc}", file=sys.stderr, flush=True)
-            return (path, ToolResult(success=False, content=hint))
-
-        if count == -1:
-            occurrences = original.count(old)
-            updated = original.replace(old, new)
-            replaced = occurrences
-        elif count >= 1:
-            start, end = match
-            # --- Indentation preservation ---
-            # Capture the matched region from the original file and apply
-            # indentation preservation to the new_string to match the file's style.
-            matched_region = original[start:end]
-            preserved_new = _preserve_indentation(old, new, matched_region)
-            updated = original[:start] + preserved_new + original[end:]
-            replaced = 1
-        else:
-            return (path, ToolResult(success=False, content=f"Invalid count: {count}. Use a positive integer or -1 (all)."))
-
-        if preview:
-            raw_diff = wg._format_diff(resolved, original, updated)
-            return (path, ToolResult(
-                success=True,
-                content=f"Preview: proposed edit to {resolved}\n{raw_diff}",
-            ))
-
-        # --- ACI upgrade: syntax validation before applying edit ---
-        # Only gate if the file was already valid Python. If it doesn't even
-        # compile now (e.g. prose in a .py test fixture), skip the gate.
-        syntax_error = None
-        if resolved.endswith(".py"):
-            try:
-                compile(original, resolved, "exec")
-            except SyntaxError:
-                pass  # Existing content isn't valid Python -- skip gate
-            else:
-                syntax_error = _validate_python_syntax(updated, resolved)
-        if syntax_error:
-            return (path, ToolResult(
-                success=False,
-                content=(
-                    f"Syntax validation failed -- edit NOT applied to prevent broken code.\n"
-                    f"{syntax_error}\n"
-                    f"Revert your edit and fix the syntax issue. The file is unchanged."
-                ),
-            ))
-
-        with open(resolved, "w", encoding="utf-8") as f:
-            f.write(updated)
-
-        from tools import add_modified_file
-        add_modified_file(resolved)
-        clear_tool_cache()
-        _FILE_CACHE.pop(resolved, None)
-        # Keep symbol index fresh for edited .py files
-        if path.endswith(".py"):
-            from tools.search_ops import _reindex_file
-            _reindex_file(resolved, wg.workspace_root)
-
-        # Auto plan advancement (file path only -- old string is too noisy)
-        _auto_advance_plan(resolved)
-
-        added = updated.count("\n") - original.count("\n")
-        label = f"{replaced} occurrence(s)" if replaced > 1 else "1 occurrence"
-        return (path, ToolResult(
-            success=True,
-            content=(
-                f"OK: replaced {label} in {resolved}"
-                + (f" (+{added} lines)" if added > 0 else f" ({added} lines)" if added < 0 else "")
-            ),
-            diff_preview=diff.preview_text if diff.changed else None,
-        ))
-    except Exception as e:
-        return (path, ToolResult(
-            success=False,
-            content=f"Error editing '{resolved}': {e}",
-        ))
-
-
 @_register("edit_file")
 def _edit_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
-    old = args["old_string"]
-    new = args["new_string"]
-    count = args.get("count", 1)
-    preview = args.get("preview", False)
-    paths = args.get("paths", None)
-
-    if paths is not None:
-        # Batch edit: apply same old->new to all paths
-        if not isinstance(paths, list) or not paths:
-            return ToolResult(
-                success=False,
-                content="'paths' must be a non-empty list of file paths.",
-            )
-        results: list[_EditResult] = []
-        for p in paths:
-            result = _apply_single_edit(p, old, new, count, preview, wg, {**args, "path": p})
-            results.append(result)
-        all_ok = all(r.success for _, r in results)
-        lines: list[str] = []
-        failures: list[str] = []
-        for p, r in results:
-            first_line = r.content.split("\n")[0]
-            if r.success:
-                lines.append(f"  [OK] {p}: {first_line}")
-            else:
-                lines.append(f"  [FAIL] {p}: {first_line}")
-                failures.append(p)
-        summary = "Batch edit results:\n" + "\n".join(lines)
-        if all_ok:
-            return ToolResult(success=True, content=summary)
+    # --- Hash-anchored mode (primary) ---
+    from_line = args.get("from")
+    from_hash = args.get("from_hash")
+    if from_line is not None and from_hash is not None:
+        # Build a single-edit edit_lines call
+        edit_type = args.get("edit_type", "replace")
+        if edit_type in ("insert_after", "insert_before"):
+            to_line = from_line  # not used for insert; set same as from for validation
+            to_hash = from_hash
         else:
-            return ToolResult(
-                success=False,
-                content=summary + f"\n\nFailed paths: {failures}",
-            )
-    else:
+            to_line = args.get("to", from_line)
+            to_hash = args.get("to_hash", from_hash)
+        new_text = args.get("new_text", "")
+        preview = args.get("preview", False)
         path = args["path"]
-        result = _apply_single_edit(path, old, new, count, preview, wg, args)
-        return result[1]
+
+        edit_args = {
+            "path": path,
+            "edits": [{
+                "from": from_line,
+                "from_hash": from_hash,
+                "to": to_line,
+                "to_hash": to_hash,
+                "new_text": new_text,
+                "edit_type": edit_type,
+            }],
+        }
+        if preview:
+            edit_args["preview"] = preview
+
+        # Delegate to edit_lines for hash-anchored editing
+        return _edit_lines(edit_args, wg, _rg)
+
+    # --- Hash-anchored mode is now the only mode ---
+    return ToolResult(
+        success=False,
+        content=(
+            "edit_file: hash-anchored editing is now the only mode. "
+            "Provide (from, from_hash) at minimum. "
+            "Use read_file(hash_lines=True) first to get anchors. "
+            "Full params: (from, from_hash, to, to_hash, new_text, edit_type, preview)."
+        ),
+    )
 
 
 @_summarize("edit_file")
 def _edit_file_summary(args: dict) -> str:
     path = args.get("path", "?")
-    old = args.get("old_string", "")
-    old_preview = old[:40].replace("\n", "\\n")
-    if len(old) > 40:
-        old_preview += "..."
-    preview_flag = args.get("preview", False)
-    suffix = " [preview]" if preview_flag else ""
-    return f"edit_file({path}, \"{old_preview}\"){suffix}"
+    from_line = args.get("from")
+    from_hash = args.get("from_hash")
+    if from_line is not None and from_hash is not None:
+        to_line = args.get("to", from_line)
+        preview_flag = args.get("preview", False)
+        suffix = " [preview]" if preview_flag else ""
+        if from_line == to_line:
+            return f"edit_file({path}, line {from_line}, hash {from_hash}){suffix}"
+        else:
+            return f"edit_file({path}, lines {from_line}-{to_line}){suffix}"
+    return f"edit_file({path}, missing hash params)"
+
+
+# ---------------------------------------------------------------------------
+# edit_lines -- hash-anchored editing (Hashlines pattern from Akay/Howard Chen)
+# ---------------------------------------------------------------------------
+
+@_register("edit_lines")
+def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
+    """Replace line ranges using word anchors for reliable first-attempt edits.
+
+    Each edit specifies {from, from_hash, to, to_hash, new_text}.
+    The file is re-read fresh; word anchors are recomputed and validated
+    before any edit is applied.  Unchanged lines keep their anchors
+    across edits (Dirac-style persistence).  Edits are applied bottom-up
+    so line numbers in the edits array can refer to the pre-edit file.
+
+    On any anchor mismatch the ENTIRE batch is rejected with a precise error.
+    """
+    path = args["path"]
+    edits = args["edits"]
+
+    safety_result = wg.check(path)
+    if not safety_result.allowed:
+        return ToolResult(
+            success=False,
+            content=f"Edit blocked by safety layer: {safety_result.reason}",
+        )
+    resolved = safety_result.resolved_path
+
+    if not isinstance(edits, list) or not edits:
+        return ToolResult(success=False, content="'edits' must be a non-empty list.")
+
+    # --- Read-before-edit enforcement ---
+    if resolved not in _READ_FILES:
+        return ToolResult(
+            success=False,
+            content=(
+                f"Edit blocked: '{resolved}' has not been read yet in this session.\n"
+                f"Use read_file(hash_lines=True) first to see the current content "
+                f"with word anchors before constructing edit_lines calls."
+            ),
+        )
+
+    # File reservation check
+    agent_id = getattr(_current_agent_id, "task_id", None)
+    if agent_id is not None:
+        from tools import reserve_file
+        ok, msg = reserve_file(path, agent_id)
+        if not ok:
+            return ToolResult(success=False, content=msg)
+
+    # Always read raw file content from disk (never use _FILE_CACHE, which may
+    # contain formatted/anchor-prefixed content from hash_lines reads).
+    try:
+        with open(resolved, "r", encoding="utf-8", errors="replace") as f:
+            original = f.read()
+    except Exception as e:
+        return ToolResult(success=False, content=f"Error reading '{resolved}': {e}")
+
+
+    lines = original.split("\n")
+    # Use Dirac-style word anchors (persistent across edits)
+    from core.anchor_manager import AnchorStateManager
+    task_id = getattr(_current_agent_id, "task_id", None)
+    anchors = AnchorStateManager.reconcile(resolved, lines, task_id)
+
+    # --- Validate all word anchors first ---
+    for i, edit in enumerate(edits):
+        edit_type = edit.get("edit_type", "replace")
+        is_insert = edit_type in ("insert_after", "insert_before")
+        # For insert edits, only validate 'from' anchor; 'to' is ignored
+        endpoints = [("from", "from")] if is_insert else [("from", "from"), ("to", "to")]
+        for endpoint, label in endpoints:
+            line_num = edit.get(endpoint)
+            claimed_anchor = edit.get(f"{label}_hash")
+            if line_num is None or claimed_anchor is None:
+                return ToolResult(
+                    success=False,
+                    content=f"edit_lines: edit[{i}] missing '{endpoint}' or '{label}_hash'.",
+                )
+            # 1-indexed -> 0-indexed
+            idx = line_num - 1
+            if idx < 0 or idx >= len(lines):
+                return ToolResult(
+                    success=False,
+                    content=(
+                        f"edit_lines: edit[{i}] {label}={line_num} is out of range "
+                        f"(file has {len(lines)} lines)."
+                    ),
+                )
+            actual_anchor = anchors[idx]
+            # Strip content suffix if model provided "anchor│content" format
+            _BOX = "\u2502"
+            anchor_to_check = claimed_anchor
+            content_claim = ""
+            if _BOX in claimed_anchor:
+                delimiter_idx = claimed_anchor.index(_BOX)
+                anchor_to_check = claimed_anchor[:delimiter_idx]
+                content_claim = claimed_anchor[delimiter_idx + 1:].lstrip()
+            if anchor_to_check != actual_anchor:
+                return ToolResult(
+                    success=False,
+                    content=(
+                        f"edit_lines: edit[{i}] {label} line {line_num} {wg._BOLD}anchor mismatch{wg._RESET} -- "
+                        f"the content at line {line_num} has changed since you read the file.\n"
+                        f"  {wg._RED}Claimed anchor:{wg._RESET} {wg._RED}{anchor_to_check}{wg._RESET} (stale)\n"
+                        f"  Re-run {wg._BOLD}read_file(hash_lines=True){wg._RESET} to get current anchors, then retry."
+                    ),
+                )
+            # Content cross-check: if model provided content, verify it matches
+            if content_claim and content_claim != lines[idx]:
+                return ToolResult(
+                    success=False,
+                    content=(
+                        f"edit_lines: edit[{i}] {label} anchor \"{anchor_to_check}\" "
+                        f"exists, but the code line you provided does not match the file's content.\n"
+                        f"  Expected: \"{lines[idx]}\"\n"
+                        f"  Provided: \"{content_claim}\"\n"
+                        f"  Re-run {wg._BOLD}read_file(hash_lines=True){wg._RESET} to get current content."
+                    ),
+                )
+    # --- Capture edit positions for output (before any edits) ---
+    edit_details: list[dict] = []
+    for i, edit in enumerate(edits):
+        edit_type = edit.get("edit_type", "replace")
+        is_insert = edit_type in ("insert_after", "insert_before")
+        f = edit["from"] - 1
+        t = edit["to"] - 1
+        edit_details.append({
+            "from_line": edit["from"],
+            "to_line": edit["from"] if is_insert else edit["to"],
+            "from_anchor_actual": anchors[f],
+        })
+
+    # --- Apply edits bottom-up (reverse order by line number) ---
+    sorted_edits = sorted(enumerate(edits), key=lambda x: x[1]["from"], reverse=True)
+    updated_lines = list(lines)
+
+    for orig_idx, edit in sorted_edits:
+        edit_type = edit.get("edit_type", "replace")
+        from_line = edit["from"] - 1  # 0-indexed
+        to_line = edit["to"] - 1      # 0-indexed (same as from_line for inserts)
+        new_text = edit["new_text"]
+        new_lines = new_text.split("\n")
+
+        if edit_type == "insert_after":
+            # Insert after the anchor line
+            splice_at = from_line + 1
+            updated_lines[splice_at:splice_at] = new_lines
+        elif edit_type == "insert_before":
+            # Insert before the anchor line
+            splice_at = from_line
+            updated_lines[splice_at:splice_at] = new_lines
+        else:
+            # replace (default): validate and replace range
+            if from_line > to_line:
+                return ToolResult(
+                    success=False,
+                    content=(
+                        f"edit_lines: edit[{orig_idx}] from={from_line + 1} > to={to_line + 1}. "
+                        f"'from' must be <= 'to'."
+                    ),
+                )
+            updated_lines[from_line:to_line + 1] = new_lines
+    updated = "\n".join(updated_lines)
+
+    # --- Syntax validation for .py files ---
+    syntax_error = None
+    if resolved.endswith(".py"):
+        try:
+            compile(original, resolved, "exec")
+        except SyntaxError:
+            pass  # Existing content isn't valid Python -- skip gate
+        else:
+            syntax_error = _validate_python_syntax(updated, resolved)
+    if syntax_error:
+        return ToolResult(
+            success=False,
+            content=(
+                f"Syntax validation failed -- edit NOT applied to prevent broken code.\n"
+                f"{syntax_error}\n"
+                f"The file is unchanged."
+            ),
+        )
+
+    # --- Diff preview (compute before write so we have original vs updated) ---
+    from core.safety import DiffPreview
+    diff_text = wg._format_diff(resolved, original, updated)
+    diff = DiffPreview(preview_text=diff_text, changed=original != updated)
+
+    # --- Write ---
+    try:
+        _backup_before_write(resolved)
+        with open(resolved, "w", encoding="utf-8") as f:
+            f.write(updated)
+    except Exception as e:
+        return ToolResult(success=False, content=f"Error writing '{resolved}': {e}")
+
+    from tools import add_modified_file
+    add_modified_file(resolved)
+    clear_tool_cache()
+    # Update cache with new content so chained edits skip disk I/O
+    try:
+        _FILE_CACHE[resolved] = (updated, os.path.getmtime(resolved))
+    except OSError:
+        _FILE_CACHE.pop(resolved, None)
+
+    if path.endswith(".py"):
+        from tools.search_ops import _reindex_file
+        _reindex_file(resolved, wg.workspace_root)
+
+    _auto_advance_plan(resolved)
+
+    # --- Build compact output matching edit_file format with hash indicator ---
+
+    total_added = len(updated_lines) - len(lines)
+    edit_label = "edits" if len(edits) != 1 else "edit"
+
+    # Line range: use first edit's from_line; if multi-line show range
+    first_from = edit_details[0]["from_line"]
+    if len(edit_details) == 1 and edit_details[0]["from_line"] == edit_details[0]["to_line"]:
+        line_info = f" (line {first_from})"
+    else:
+        last_to = edit_details[-1]["to_line"]
+        if first_from == last_to:
+            line_info = f" (line {first_from})"
+        else:
+            line_info = f" (lines {first_from}\u2013{last_to})"
+
+    # Delta string (plain text)
+    delta_str = ""
+    if total_added > 0:
+        delta_str = f" (+{total_added} lines)"
+    elif total_added < 0:
+        delta_str = f" ({total_added} lines)"
+
+    # Anchor verification indicator (plain text)
+    anchor_label = "anchors" if len(edits) != 1 else "anchor"
+    first_anchor = edit_details[0]["from_anchor_actual"]
+    anchor_indicator = f"  [anchor \u2713: {first_anchor}]"
+    if len(edit_details) > 1:
+        last_anchor = edit_details[-1]["from_anchor_actual"]
+        anchor_indicator = f"  [anchors \u2713: {first_anchor}\u2026{last_anchor}]"
+
+    return ToolResult(
+        success=True,
+        content=(
+            f"OK: applied {len(edits)} {edit_label} to {resolved}"
+            f"{line_info}{delta_str}"
+            f"\n  {anchor_indicator.strip()}"
+            f"  [\u26a0 anchors preserved for unchanged lines \u2013 chain edits without re-reading]"
+        ),
+        diff_preview=diff.preview_text if diff.changed else None,
+    )
+
+
+@_summarize("edit_lines")
+def _edit_lines_summary(args: dict) -> str:
+    path = args.get("path", "?")
+    edits = args.get("edits", [])
+    if not edits:
+        return f"edit_lines({path}, 0 edits)"
+
+    parts = []
+    for edit in edits:
+        edit_type = edit.get("edit_type", "replace")
+        from_line = edit.get("from")
+        from_hash = edit.get("from_hash", "")
+        to_line = edit.get("to", from_line)
+        to_hash = edit.get("to_hash", "")
+        new_text = edit.get("new_text", "")
+        new_lines = new_text.count("\n")
+        plus = f" +{new_lines}L" if new_lines else ""
+
+        if edit_type in ("insert_after", "insert_before"):
+            dir_ = "↓" if edit_type == "insert_after" else "↑"
+            parts.append(f"{dir_}L{from_line}[{from_hash}]{plus}")
+        else:
+            if from_line == to_line:
+                parts.append(f"L{from_line}[{from_hash}]{plus}")
+            else:
+                parts.append(f"L{from_line}[{from_hash}]→L{to_line}[{to_hash}]{plus}")
+
+    details = ", ".join(parts)
+    return f"edit_lines({path}, {len(edits)} edit{'s' if len(edits) != 1 else ''}: {details})"
 
 
 # ---------------------------------------------------------------------------
@@ -1344,3 +1613,367 @@ def _init_rules(args: dict, _wg, read_gate: ReadSafetyGate) -> ToolResult:
             content=f"Initialized workspace: {', '.join(created)}.")
     except Exception as e:
         return ToolResult(success=False, content=f"/init failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# get_file_skeleton
+# ---------------------------------------------------------------------------
+
+@_register("get_file_skeleton")
+def _get_file_skeleton(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate,
+                      on_output=None, approve_callback=None, cancel_event=None) -> ToolResult:
+    """Extract the structural skeleton of one or more files."""
+    paths = args.get("paths", [])
+    if isinstance(paths, str):
+        paths = [paths]
+    if not paths:
+        return ToolResult(success=False, content="Error: Missing required parameter 'paths'.")
+
+    include_anchors = args.get("include_anchors", True)
+    is_subagent = getattr(_TOOL_CONTEXT, "_is_subagent", False)
+    task_id = getattr(_current_agent_id, "task_id", None)
+
+    results = []
+    for rel_path in paths:
+        safety = rg.check(rel_path)
+        if not safety.allowed:
+            results.append(f"--- {rel_path} ---\nAccess denied: {safety.reason}")
+            continue
+        try:
+            # Pre-read file content (one disk read) and cache it
+            try:
+                with open(safety.resolved_path, "r", encoding="utf-8", errors="replace") as _f:
+                    source = _f.read()
+                _cache_file_content(safety.resolved_path, _source=source)
+            except OSError:
+                source = None  # fall through; get_file_skeleton will read it
+            _READ_FILES.add(safety.resolved_path)
+            skeleton = get_file_skeleton(
+                safety.resolved_path,
+                include_anchors=include_anchors,
+                show_call_graph=True,
+                task_id=task_id,
+                _source=source,
+            )
+            # Detect "not found" / error cases from the skeleton text
+            error_prefixes = ("No definitions found", "Empty file", "Unsupported file type",
+                             "Could not read file", "Could not parse")
+            if skeleton.startswith(error_prefixes):
+                results.append(f"--- {rel_path} ---\nError: {skeleton}")
+            else:
+                results.append(f"--- {rel_path} ---\n{skeleton}")
+        except Exception as e:
+            results.append(f"--- {rel_path} ---\nError: {e}")
+
+    if not results:
+        return ToolResult(success=False, content=f"No definitions found in any of the provided files: {paths}")
+
+    # Check if all results are errors
+    all_errors = all(
+        "Error:" in r.split("\n", 1)[1] if "\n" in r else "Error:" in r
+        for r in results
+    ) if results else False
+
+    content = "\n\n".join(results)
+    if all_errors:
+        return ToolResult(success=False, content=content)
+    return ToolResult(success=True, content=content)
+
+
+@_summarize("get_file_skeleton")
+def _get_file_skeleton_summary(args: dict) -> str:
+    paths = args.get("paths", [])
+    if isinstance(paths, str):
+        paths = [paths]
+    if not paths:
+        return "get_file_skeleton(0 files)"
+    # Show first 3 paths, with count if more
+    shown = ", ".join(paths[:3])
+    if len(paths) <= 3:
+        return f"get_file_skeleton({shown})"
+    return f"get_file_skeleton({shown} +{len(paths)-3} more)"
+
+
+# ---------------------------------------------------------------------------
+# get_function
+# ---------------------------------------------------------------------------
+
+@_register("get_function")
+def _get_function(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate,
+                  on_output=None, approve_callback=None, cancel_event=None) -> ToolResult:
+    """Extract complete implementation of specific functions."""
+    paths = args.get("paths", [])
+    if isinstance(paths, str):
+        paths = [paths]
+    function_names = args.get("function_names", [])
+    if isinstance(function_names, str):
+        function_names = [function_names]
+
+    if not paths:
+        return ToolResult(success=False, content="Error: Missing required parameter 'paths'.")
+    if not function_names:
+        return ToolResult(success=False, content="Error: Missing required parameter 'function_names'.")
+
+    include_anchors = args.get("include_anchors", True)
+    task_id = getattr(_current_agent_id, "task_id", None)
+
+    results = []
+    all_found = []
+    for rel_path in paths:
+        safety = rg.check(rel_path)
+        if not safety.allowed:
+            results.append(f"--- {rel_path} ---\nAccess denied: {safety.reason}")
+            continue
+        try:
+            # Pre-read file content (one disk read) and cache it
+            try:
+                with open(safety.resolved_path, "r", encoding="utf-8", errors="replace") as _f:
+                    source = _f.read()
+                _cache_file_content(safety.resolved_path, _source=source)
+            except OSError:
+                source = None  # fall through; get_function will read it
+            _READ_FILES.add(safety.resolved_path)
+            content, found = get_function(
+                safety.resolved_path,
+                function_names,
+                include_anchors=include_anchors,
+                task_id=task_id,
+                _source=source,
+            )
+            # Separate "found" results from "not found" / error messages
+            if found:
+                if content:
+                    results.append(content)
+                all_found.extend(found)
+            else:
+                # No functions found in this file -- report as error line
+                results.append(f"--- {rel_path} ---\nError: {content}")
+        except Exception as e:
+            results.append(f"--- {rel_path} ---\nError: {e}")
+
+    if not results:
+        return ToolResult(
+            success=False,
+            content=f"No functions found matching {function_names} in any of the provided files."
+        )
+
+    # Check if all results are error lines (no functions found)
+    all_errors = all(
+        r.startswith("---") and "Error:" in r.split("\n", 1)[1] if "\n" in r else False
+        for r in results
+    ) if results else False
+
+    # Report which functions were NOT found (if any)
+    not_found = [fn for fn in function_names if fn not in all_found]
+    content = "\n\n".join(results)
+    if not_found:
+        content += f"\n\nNote: {len(not_found)} function(s) not found: {', '.join(not_found)}"
+
+    if all_errors:
+        return ToolResult(success=False, content=content)
+    return ToolResult(success=True, content=content)
+
+
+@_summarize("get_function")
+def _get_function_summary(args: dict) -> str:
+    paths = args.get("paths", [])
+    if isinstance(paths, str):
+        paths = [paths]
+    fns = args.get("function_names", [])
+    if isinstance(fns, str):
+        fns = [fns]
+    # Show paths + functions
+    path_str = ", ".join(paths[:3])
+    if len(paths) > 3:
+        path_str += f" +{len(paths)-3} more"
+    fn_str = ", ".join(fns[:5])
+    if len(fns) > 5:
+        fn_str += f" +{len(fns)-5} more"
+    return f"get_function({fn_str})" if not paths else f"get_function({fn_str} in {path_str})"
+
+
+# ---------------------------------------------------------------------------
+# replace_symbol
+# ---------------------------------------------------------------------------
+
+@_register("replace_symbol")
+def _replace_symbol(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate,
+                    on_output=None, approve_callback=None, cancel_event=None) -> ToolResult:
+    """Replace symbol(s) using AST-precise byte ranges. Supports both single and batch."""
+    replacements = args.get("replacements", [])
+    path = args.get("path", "")
+    symbol = args.get("symbol", "")
+    text = args.get("text", "")
+    sym_type = args.get("type", "function")
+
+    # Build replacement list: batch takes priority, then single
+    if replacements:
+        # Dirac-style batch replacements
+        if not isinstance(replacements, list):
+            return ToolResult(success=False, content="Error: 'replacements' must be an array.")
+    elif path and symbol and text:
+        # Legacy single replacement
+        replacements = [{"path": path, "symbol": symbol, "text": text, "type": sym_type}]
+    else:
+        return ToolResult(success=False, content="Error: Provide either 'replacements' array or 'path'+'symbol'+'text'.")
+
+    results = []
+    for i, repl in enumerate(replacements):
+        repl_path = repl.get("path", "")
+        repl_symbol = repl.get("symbol", "")
+        repl_text = repl.get("text", "")
+        repl_type = repl.get("type", "function")
+
+        if not repl_path or not repl_symbol or not repl_text:
+            results.append(f"[{i+1}/{len(replacements)}] Error: Missing required fields for '{repl_symbol or '?'}'")
+            continue
+
+        safety = wg.check(repl_path)
+        if not safety.allowed:
+            results.append(f"[{i+1}/{len(replacements)}] Access denied: {safety.reason}")
+            continue
+
+        # Read-before-edit enforcement
+        if safety.resolved_path not in _READ_FILES:
+            results.append(
+                f"[{i+1}/{len(replacements)}] Edit blocked: '{safety.resolved_path}' has not been read yet. "
+                f"Use read_file first."
+            )
+            continue
+
+        try:
+            _backup_before_write(safety.resolved_path)
+
+            # Read original for diff preview (use cache when available)
+            original = _get_cached_content(safety.resolved_path)
+            if original is None:
+                global _CACHE_DISK_READS
+                _CACHE_DISK_READS += 1
+                try:
+                    with open(safety.resolved_path, "r", encoding="utf-8", errors="replace") as f:
+                        original = f.read()
+                except OSError:
+                    original = ""
+
+            result_msg = replace_symbol(safety.resolved_path, repl_symbol, repl_text, symbol_type=repl_type)
+            clear_tool_cache()
+            # Cache will be updated after diff read below
+            if repl_path.endswith(".py"):
+                from tools.search_ops import _reindex_file
+                _reindex_file(safety.resolved_path, wg.workspace_root)
+            _auto_advance_plan(safety.resolved_path, repl_text)
+
+            # Generate diff preview
+            try:
+                with open(safety.resolved_path, "r", encoding="utf-8", errors="replace") as f:
+                    updated = f.read()
+            except OSError:
+                updated = repl_text
+
+            # Update cache with new content so chained edits skip disk I/O
+            try:
+                _FILE_CACHE[safety.resolved_path] = (updated, os.path.getmtime(safety.resolved_path))
+            except OSError:
+                _FILE_CACHE.pop(safety.resolved_path, None)
+
+            diff_text = wg._format_diff(safety.resolved_path, original, updated)
+            diff_changed = original != updated
+            diff_preview = diff_text if diff_changed else None
+
+            results.append({
+                "msg": f"[{i+1}/{len(replacements)}] {result_msg}",
+                "diff_preview": diff_preview,
+            })
+        except Exception as e:
+            results.append(f"[{i+1}/{len(replacements)}] Error replacing '{repl_symbol}': {e}")
+
+    # Build content string and combine diff previews
+    content_lines = []
+    combined_diffs = []
+    for r in results:
+        if isinstance(r, dict):
+            content_lines.append(r.get("msg", ""))
+            if r.get("diff_preview"):
+                combined_diffs.append(r["diff_preview"])
+        else:
+            content_lines.append(r)
+
+    content = "\n".join(content_lines)
+    diff_preview = "\n\n".join(combined_diffs) if combined_diffs else None
+    return ToolResult(success=True, content=content, diff_preview=diff_preview)
+
+
+@_summarize("replace_symbol")
+def _replace_symbol_summary(args: dict) -> str:
+    replacements = args.get("replacements", [])
+    if replacements:
+        # Batch mode — show symbol@path pairs
+        items = []
+        for r in replacements[:3]:
+            sym = r.get("symbol", "?")
+            p = r.get("path", "?")
+            items.append(f"{sym}@{p}")
+        shown = ", ".join(items)
+        if len(replacements) <= 3:
+            return f"replace_symbol({shown})"
+        return f"replace_symbol({shown} +{len(replacements)-3} more)"
+    # Legacy single mode
+    return f"replace_symbol({args.get('symbol', '?')}@{args.get('path', '?')})"
+
+
+# ---------------------------------------------------------------------------
+# get_symbol_range
+# ---------------------------------------------------------------------------
+
+
+@_register("get_symbol_range")
+def _get_symbol_range(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate,
+                    on_output=None, approve_callback=None, cancel_event=None) -> ToolResult:
+    """Get the precise AST byte range of a symbol."""
+    path = args.get("path", "")
+    symbol = args.get("symbol", "")
+    sym_type = args.get("type")
+
+    if not path or not symbol:
+        return ToolResult(
+            success=False,
+            content="Error: Missing required parameters 'path' and 'symbol'.",
+        )
+
+    safety = rg.check(path)
+    if not safety.allowed:
+        return ToolResult(success=False, content=f"Access denied: {safety.reason}")
+
+    try:
+        # Pre-read file content (one disk read) and cache it
+        try:
+            with open(safety.resolved_path, "r", encoding="utf-8", errors="replace") as _f:
+                source = _f.read()
+            _cache_file_content(safety.resolved_path, _source=source)
+        except OSError:
+            source = None  # fall through; get_symbol_range will read it
+        _READ_FILES.add(safety.resolved_path)
+        result = get_symbol_range(safety.resolved_path, symbol, type=sym_type, _source=source)
+        if result is None:
+            return ToolResult(
+                success=False,
+                content=f"Symbol '{symbol}' not found or unsupported file type in {path}.",
+            )
+
+        return ToolResult(
+            success=True,
+            content=(
+                f"--- {path} :: {result['nameText']} ---\n"
+                f"startIndex: {result['startIndex']}\n"
+                f"endIndex: {result['endIndex']}\n"
+                f"startLine: {result['startLine']}\n"
+                f"(Use these byte offsets with replace_symbol for precise replacement.)"
+            ),
+        )
+    except Exception as e:
+        return ToolResult(success=False, content=f"Error: {e}")
+
+
+@_summarize("get_symbol_range")
+def _get_symbol_range_summary(args: dict) -> str:
+    return f"get_symbol_range({args.get('symbol', '?')} in {args.get('path', '?')})"

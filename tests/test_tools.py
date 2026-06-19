@@ -274,32 +274,41 @@ class TestEditFile(unittest.TestCase):
             f.write(content)
         return full
 
-    def test_replaces_first_occurrence(self):
-        path = self._write("f.txt", "hello world hello")
+    def test_replaces_line_range(self):
+        path = self._write("f.txt", "hello world hello\n")
         # Must read before editing
-        execute_tool(_make_tool_call("read_file", path=path), self.write_gate, self.read_gate)
+        execute_tool(_make_tool_call("read_file", path=path, hash_lines=True), self.write_gate, self.read_gate)
+        from core.anchor_manager import AnchorStateManager
+        anchors = AnchorStateManager.get_anchors(path)
         tc = _make_tool_call("edit_file", path=path,
-                             old_string="hello", new_string="hi")
+                             **{"from": 1, "from_hash": anchors[0], "new_text": "hi world hello"})
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertTrue(result.success)
         with open(path) as f:
-            self.assertEqual(f.read(), "hi world hello")
+            self.assertEqual(f.read(), "hi world hello\n")
 
-    def test_old_string_not_found_returns_error(self):
-        path = self._write("f.txt", "abc")
-        execute_tool(_make_tool_call("read_file", path=path), self.write_gate, self.read_gate)
+    def test_anchor_mismatch_returns_error(self):
+        path = self._write("f.txt", "abc\n")
+        execute_tool(_make_tool_call("read_file", path=path, hash_lines=True), self.write_gate, self.read_gate)
         tc = _make_tool_call("edit_file", path=path,
-                             old_string="xyz", new_string="q")
+                             **{"from": 1, "from_hash": "WrongAnchor", "new_text": "q"})
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertFalse(result.success)
-        self.assertIn("not found", result.content)
+        self.assertIn("anchor mismatch", result.content)
 
     def test_outside_workspace_allowed(self):
         outside = tempfile.mkdtemp()
         try:
+            # Write and read a file outside workspace so we have anchors
+            outside_path = os.path.join(outside, "x.txt")
+            with open(outside_path, "w") as f:
+                f.write("a\n")
+            execute_tool(_make_tool_call("read_file", path=outside_path, hash_lines=True), self.write_gate, self.read_gate)
+            from core.anchor_manager import AnchorStateManager
+            anchors = AnchorStateManager.get_anchors(outside_path)
             tc = _make_tool_call("edit_file",
-                                 path=os.path.join(outside, "x.txt"),
-                                 old_string="a", new_string="b")
+                                 path=outside_path,
+                                 **{"from": 1, "from_hash": anchors[0], "new_text": "b"})
             result = execute_tool(tc, self.write_gate, self.read_gate)
             self.assertNotIn("blocked by safety layer", result.content)
         finally:
@@ -402,11 +411,11 @@ class TestToolSummary(unittest.TestCase):
 
     def test_edit_file_summary(self):
         tc = _make_tool_call("edit_file", path="f.txt",
-                             old_string="replace me", new_string="done")
+                             **{"from": 5, "from_hash": "Wave", "new_text": "done"})
         s = tool_summary(tc)
         self.assertIn("edit_file", s)
         self.assertIn("f.txt", s)
-        self.assertIn("replace me", s)
+        self.assertIn("Wave", s)
 
     def test_list_directory_summary(self):
         tc = _make_tool_call("list_directory", path="/tmp")
@@ -885,17 +894,16 @@ class TestErrorHints(unittest.TestCase):
             import shutil
             shutil.rmtree(outside, ignore_errors=True)
 
-    def test_edit_not_found_includes_hint(self):
+    def test_edit_anchor_mismatch_includes_hint(self):
         path = os.path.join(self.workspace, "f.txt")
         with open(path, "w") as f:
             f.write("original content\n")
-        execute_tool(_make_tool_call("read_file", path=path), self.write_gate, self.read_gate)
+        execute_tool(_make_tool_call("read_file", path=path, hash_lines=True), self.write_gate, self.read_gate)
         tc = _make_tool_call("edit_file", path=path,
-                             old_string="nonexistent", new_string="replacement")
+                             **{"from": 1, "from_hash": "WrongHash", "new_text": "replacement"})
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertFalse(result.success)
-        self.assertIn("Hint:", result.content)
-        self.assertIn("read_file", result.content.lower())
+        self.assertIn("anchor mismatch", result.content)
 
     def test_destructive_guard_removed(self):
         """Safety guards removed -- rm runs directly without force flag needed."""
@@ -1125,13 +1133,16 @@ class TestEditFileShortOutput(unittest.TestCase):
         f = os.path.join(self.workspace, "e.txt")
         with open(f, "w") as fh:
             fh.write("alpha\nbeta\ngamma\n")
-        execute_tool(_make_tool_call("read_file", path=f), self.write_gate, self.read_gate)
-        tc = _make_tool_call("edit_file", path=f, old_string="beta", new_string="delta")
+        execute_tool(_make_tool_call("read_file", path=f, hash_lines=True), self.write_gate, self.read_gate)
+        from core.anchor_manager import AnchorStateManager
+        anchors = AnchorStateManager.get_anchors(f)
+        tc = _make_tool_call("edit_file", path=f,
+                             **{"from": 2, "from_hash": anchors[1], "new_text": "delta"})
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertTrue(result.success)
-        self.assertIn("OK: replaced 1 occurrence", result.content)
+        self.assertIn("OK: applied 1 edit", result.content)
         self.assertIn("e.txt", result.content)
-        # Must NOT include a full unified diff
+        # Must NOT include a full unified diff in content
         self.assertNotIn("--- a/", result.content)
         self.assertNotIn("+++ b/", result.content)
 
@@ -1139,8 +1150,11 @@ class TestEditFileShortOutput(unittest.TestCase):
         f = os.path.join(self.workspace, "e2.txt")
         with open(f, "w") as fh:
             fh.write("one\ntwo\nthree\n")
-        execute_tool(_make_tool_call("read_file", path=f), self.write_gate, self.read_gate)
-        tc = _make_tool_call("edit_file", path=f, old_string="two", new_string="TWO")
+        execute_tool(_make_tool_call("read_file", path=f, hash_lines=True), self.write_gate, self.read_gate)
+        from core.anchor_manager import AnchorStateManager
+        anchors = AnchorStateManager.get_anchors(f)
+        tc = _make_tool_call("edit_file", path=f,
+                             **{"from": 2, "from_hash": anchors[1], "new_text": "TWO"})
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertTrue(result.success)
         with open(f) as fh:

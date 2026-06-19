@@ -54,12 +54,12 @@ class TestPostEditVerify(unittest.TestCase):
         }
 
     @staticmethod
-    def _edit_file_call(path="/tmp/test.py", old="a", new="b"):
+    def _edit_file_call(path="/tmp/test.py", from_line=1, from_hash="Test", new_text="b"):
         return {
             "function": {
                 "name": "edit_file",
                 "arguments": json.dumps(
-                    {"path": path, "old_string": old, "new_string": new}
+                    {"path": path, "from": from_line, "from_hash": from_hash, "new_text": new_text}
                 ),
             }
         }
