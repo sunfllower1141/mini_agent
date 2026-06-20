@@ -28,6 +28,7 @@ import time
 
 from core.safety import ReadSafetyGate, WriteSafetyGate
 from tools import _register, _summarize, ToolResult, _TOOL_CONTEXT
+from tools.error_hints import _err
 from tools.agent_collect import _format_collect_any
 from agents.agent_runtime import AgentRuntime, SubAgentResult
 
@@ -1315,7 +1316,7 @@ def _read_image(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolRes
     if not sr.allowed:
 
 
-        return ToolResult(success=False, content=f"Read blocked: {sr.reason}")
+        return ToolResult(success=False, content=_err("BLOCKED", sr.reason))
 
 
 
@@ -1333,7 +1334,7 @@ def _read_image(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolRes
     if not _os.path.isfile(resolved):
 
 
-        return ToolResult(success=False, content=f"File not found: {path}")
+        return ToolResult(success=False, content=_err("NOT_FOUND", path))
 
 
 
@@ -1384,7 +1385,7 @@ def _read_image(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolRes
     except Exception as e:
 
 
-        return ToolResult(success=False, content=f"Failed to read image: {e}")
+        return ToolResult(success=False, content=_err("IMAGE", str(e)))
 
 
 
@@ -1549,7 +1550,7 @@ def _read_image(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolRes
     except Exception as e:
 
 
-        return ToolResult(success=False, content=f"OpenAI API request failed: {e}")
+        return ToolResult(success=False, content=_err("API", str(e)))
 
 
 

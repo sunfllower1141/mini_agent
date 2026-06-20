@@ -1343,6 +1343,40 @@ html, body {
 /* shrink all lines inside the tools panel */
 #tools-log, .tools-log .log-line { font-size: 0.75em; }
 
+/* Scroll-to-bottom jump button -- appears on hover when not at bottom */
+.scroll-jump-btn {
+  position: sticky;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 18px;
+  cursor: pointer;
+  opacity: 0.85;
+  transition: opacity 0.15s, transform 0.15s;
+  z-index: 10;
+  pointer-events: auto;
+  user-select: none;
+  -webkit-app-region: no-drag;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+
+.scroll-jump-btn:hover {
+  opacity: 1;
+  transform: translateX(-50%) scale(1.1);
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}
+
 /* ---------------------------------------------------------------------------
    Markdown-rendered content (react-markdown) in agent messages
    --------------------------------------------------------------------------- */

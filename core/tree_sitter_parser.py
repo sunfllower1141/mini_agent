@@ -40,7 +40,18 @@ def _ensure_language(lang_name: str, pkg_name: str) -> bool:
         if lang_name not in _LANGUAGE_MODULES:
             mod = __import__(pkg_name, fromlist=["language"])
             _LANGUAGE_MODULES[lang_name] = mod
-        lang = tree_sitter.Language(_LANGUAGE_MODULES[lang_name].language())
+        mod = _LANGUAGE_MODULES[lang_name]
+        # Some packages use language() (python, javascript),
+        # others use language_<name>() (typescript -> language_typescript).
+        for attr in ("language", f"language_{lang_name}"):
+            try:
+                lang_fn = getattr(mod, attr)
+                lang = tree_sitter.Language(lang_fn())
+                break
+            except (AttributeError, TypeError):
+                continue
+        else:
+            return False
         parser = tree_sitter.Parser(lang)
         _PARSERS[lang_name] = parser
         return True
@@ -59,6 +70,16 @@ def _get_parser_for_ext(ext: str) -> Any | None:
         ".jsx": ("javascript", "tree_sitter_javascript"),
         ".ts": ("typescript", "tree_sitter_typescript"),
         ".tsx": ("typescript", "tree_sitter_typescript"),
+        ".c": ("c", "tree_sitter_c"),
+        ".h": ("c", "tree_sitter_c"),
+        ".cpp": ("cpp", "tree_sitter_cpp"),
+        ".cc": ("cpp", "tree_sitter_cpp"),
+        ".cxx": ("cpp", "tree_sitter_cpp"),
+        ".c++": ("cpp", "tree_sitter_cpp"),
+        ".hpp": ("cpp", "tree_sitter_cpp"),
+        ".hh": ("cpp", "tree_sitter_cpp"),
+        ".hxx": ("cpp", "tree_sitter_cpp"),
+        ".h++": ("cpp", "tree_sitter_cpp"),
     }
     pair = mapping.get(ext)
     if pair is None:

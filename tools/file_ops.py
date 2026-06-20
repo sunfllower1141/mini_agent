@@ -54,12 +54,12 @@ def _read_file_direct(
     except Exception as e:
         if isinstance(e, FileNotFoundError) or "No such file" in str(e):
             return ToolResult(success=False, content=_err("NOT_FOUND", f"{resolved}", "use list_directory"))
-        return ToolResult(success=False, content=f"Error reading '{resolved}': {e}")
+        return ToolResult(success=False, content=_err("READ", str(e)))
 
     total_lines = len(all_lines)
 
     if offset > 0 and offset >= total_lines:
-        return ToolResult(success=False, content=f"Offset {offset} exceeds file length ({total_lines} lines).")
+        return ToolResult(success=False, content=_err("RANGE", f"offset={offset} > {total_lines}"))
     # --- Populate file-content cache (so edit_file can skip disk read) ---
     try:
         current_mtime = os.path.getmtime(resolved)
@@ -404,7 +404,7 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
     for path in file_paths:
         safety_result = rg.check(path)
         if not safety_result.allowed:
-            results.append(f"--- {path} ---\n[BLOCKED] Read blocked by safety layer: {safety_result.reason}")
+            results.append(f"--- {path} ---\n{_err('BLOCKED', safety_result.reason)}")
             any_failed = True
             continue
         resolved = safety_result.resolved_path
@@ -586,13 +586,6 @@ def _write_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
             _reindex_file(safety_result.resolved_path, wg.workspace_root)
         # Auto plan advancement (file path only -- full content is too noisy)
         _auto_advance_plan(safety_result.resolved_path)
-        # Hot-reload: if this is a .py file in the workspace, tell the backend
-        # to reload the module so the fix takes effect without app restart.
-        try:
-            from core.hot_reload import reload_by_path
-            reload_by_path(safety_result.resolved_path)
-        except Exception:
-            pass
         # Diagnostic: detect write_file-as-fallback anti-pattern.
         # If edit_file just failed on this same file, warn that edit_file should
         # have been retried with fresh hash_lines=True instead.
@@ -1045,7 +1038,7 @@ def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
             with open(resolved, "r", encoding="utf-8", errors="replace") as f:
                 original = f.read()
         except Exception as e:
-            return ToolResult(success=False, content=f"Error reading '{resolved}': {e}")
+            return ToolResult(success=False, content=_err("READ", str(e)))
 
 
     lines = original.split("\n")
@@ -1137,10 +1130,18 @@ def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
         new_lines = new_text.split("\n")
 
         if edit_type == "insert_after":
+            # Dedup: if new_text's first line matches the anchor line, strip it.
+            # LLMs often include the anchor line in new_text for insert edits,
+            # which would duplicate it. This auto-corrects that common mistake.
+            if new_lines and new_lines[0] == lines[from_line]:
+                new_lines = new_lines[1:]
             # Insert after the anchor line
             splice_at = from_line + 1
             updated_lines[splice_at:splice_at] = new_lines
         elif edit_type == "insert_before":
+            # Dedup: if new_text's last line matches the anchor line, strip it.
+            if new_lines and new_lines[-1] == lines[from_line]:
+                new_lines = new_lines[:-1]
             # Insert before the anchor line
             splice_at = from_line
             updated_lines[splice_at:splice_at] = new_lines
@@ -1187,7 +1188,7 @@ def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
         with open(resolved, "w", encoding="utf-8") as f:
             f.write(updated)
     except Exception as e:
-        return ToolResult(success=False, content=f"Error writing '{resolved}': {e}")
+        return ToolResult(success=False, content=_err("WRITE", str(e)))
 
     from tools import add_modified_file
     add_modified_file(resolved)
@@ -1204,14 +1205,6 @@ def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
         _reindex_file(resolved, wg.workspace_root)
 
     _auto_advance_plan(resolved)
-
-    # Hot-reload: if this is a .py file in the workspace, tell the backend
-    # to reload the module so the fix takes effect without app restart.
-    try:
-        from core.hot_reload import reload_by_path
-        reload_by_path(resolved)
-    except Exception:
-        pass
 
     # --- Build compact output matching edit_file format with hash indicator ---
     # --- Build compact output matching edit_file format with hash indicator ---
@@ -1317,7 +1310,7 @@ def _list_directory(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> Too
             content = f"{safety_result.resolved_path}\n" + "\n".join(rows)
         return ToolResult(success=True, content=content)
     except Exception as e:
-        return ToolResult(success=False, content=f"Error listing '{safety_result.resolved_path}': {e}")
+        return ToolResult(success=False, content=_err("LIST", str(e)))
 
 
 @_summarize("list_directory")
@@ -1370,7 +1363,7 @@ def _file_info(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
     except FileNotFoundError:
         return ToolResult(success=True, content=f"path: {resolved}\nexists: no")
     except Exception as e:
-        return ToolResult(success=False, content=f"Error stating '{resolved}': {e}")
+        return ToolResult(success=False, content=_err("STAT", str(e)))
 
 
 @_summarize("file_info")
@@ -1547,7 +1540,7 @@ def _init_rules(args: dict, _wg, read_gate: ReadSafetyGate) -> ToolResult:
         return ToolResult(success=True,
             content=f"Initialized workspace: {', '.join(created)}.")
     except Exception as e:
-        return ToolResult(success=False, content=f"/init failed: {e}")
+        return ToolResult(success=False, content=_err("INIT", str(e)))
 
 
 # ---------------------------------------------------------------------------
@@ -1562,7 +1555,7 @@ def _get_file_skeleton(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate,
     if isinstance(paths, str):
         paths = [paths]
     if not paths:
-        return ToolResult(success=False, content="Error: Missing required parameter 'paths'.")
+        return ToolResult(success=False, content=_err("MISSING", "paths"))
 
     include_anchors = args.get("include_anchors", True)
     is_subagent = getattr(_TOOL_CONTEXT, "_is_subagent", False)
@@ -1572,7 +1565,7 @@ def _get_file_skeleton(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate,
     for rel_path in paths:
         safety = rg.check(rel_path)
         if not safety.allowed:
-            results.append(f"--- {rel_path} ---\nAccess denied: {safety.reason}")
+            results.append(f"--- {rel_path} ---\n{_err('BLOCKED', safety.reason)}")
             continue
         try:
             # Pre-read file content (one disk read) and cache it
@@ -1598,10 +1591,10 @@ def _get_file_skeleton(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate,
             else:
                 results.append(f"--- {rel_path} ---\n{skeleton}")
         except Exception as e:
-            results.append(f"--- {rel_path} ---\nError: {e}")
+            results.append(f"--- {rel_path} ---\n{_err('ERROR', str(e))}")
 
     if not results:
-        return ToolResult(success=False, content=f"No definitions found in any of the provided files: {paths}")
+        return ToolResult(success=False, content=_err("NOT_FOUND", "no definitions"))
 
     # Check if all results are errors
     all_errors = all(
@@ -1645,9 +1638,9 @@ def _get_function(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate,
         function_names = [function_names]
 
     if not paths:
-        return ToolResult(success=False, content="Error: Missing required parameter 'paths'.")
+        return ToolResult(success=False, content=_err("MISSING", "paths"))
     if not function_names:
-        return ToolResult(success=False, content="Error: Missing required parameter 'function_names'.")
+        return ToolResult(success=False, content=_err("MISSING", "function_names"))
 
     include_anchors = args.get("include_anchors", True)
     task_id = getattr(_current_agent_id, "task_id", None)
@@ -1657,7 +1650,7 @@ def _get_function(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate,
     for rel_path in paths:
         safety = rg.check(rel_path)
         if not safety.allowed:
-            results.append(f"--- {rel_path} ---\nAccess denied: {safety.reason}")
+            results.append(f"--- {rel_path} ---\n{_err('BLOCKED', safety.reason)}")
             continue
         try:
             # Pre-read file content (one disk read) and cache it
@@ -1684,12 +1677,12 @@ def _get_function(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate,
                 # No functions found in this file -- normal when searching across multiple files
                 results.append(f"--- {rel_path} ---\n{content}")
         except Exception as e:
-            results.append(f"--- {rel_path} ---\nError: {e}")
+            results.append(f"--- {rel_path} ---\n{_err('ERROR', str(e))}")
 
     if not results:
         return ToolResult(
             success=False,
-            content=f"No functions found matching {function_names} in any of the provided files."
+            content=_err("NOT_FOUND", f"functions {function_names}")
         )
 
     # Check if all results are error lines (no functions found)
@@ -1876,7 +1869,7 @@ def _get_symbol_range(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate,
 
     safety = rg.check(path)
     if not safety.allowed:
-        return ToolResult(success=False, content=f"Access denied: {safety.reason}")
+        return ToolResult(success=False, content=_err("BLOCKED", safety.reason))
 
     try:
         # Pre-read file content (one disk read) and cache it
@@ -1905,7 +1898,7 @@ def _get_symbol_range(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate,
             ),
         )
     except Exception as e:
-        return ToolResult(success=False, content=f"Error: {e}")
+        return ToolResult(success=False, content=_err("ERROR", str(e)))
 
 
 @_summarize("get_symbol_range")

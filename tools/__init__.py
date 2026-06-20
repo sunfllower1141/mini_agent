@@ -239,42 +239,7 @@ def _summarize(name: str):
     return decorator
 
 
-# ---------------------------------------------------------------------------
-def _write_session_handoff(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
-    """Auto-generate and write HANDOFF.md for session continuity."""
-    workspace = _TOOL_CONTEXT.workspace
-    if not workspace:
-        return ToolResult(False, "", "no workspace available")
-    start_head = getattr(_TOOL_CONTEXT, "_session_start_head", None)
-    pending = (args.get("pending") or "").strip()
-    notes = (args.get("notes") or "").strip()
 
-    store = getattr(_TOOL_CONTEXT, "_memory_store", None)
-    if store is None:
-        # Fallback: use static method directly
-        from memory.memory import MemoryStore
-        try:
-            path = MemoryStore.write_session_handoff(
-                workspace, start_head=start_head,
-                pending=pending, notes=notes,
-            )
-            return ToolResult(True, f"HANDOFF.md written to {path}")
-        except OSError as e:
-            return ToolResult(False, "", str(e))
-    try:
-        path = store.write_session_handoff(
-            workspace, start_head=start_head,
-            pending=pending, notes=notes,
-        )
-        return ToolResult(True, f"HANDOFF.md written to {path}")
-    except OSError as e:
-        return ToolResult(False, "", str(e))
-
-
-_TOOL_DISPATCH["write_session_handoff"] = _write_session_handoff
-_TOOL_SUMMARIES["write_session_handoff"] = (
-    lambda args: "write_session_handoff()"
-)
 
 # -- discord_search: search Discord server message history --
 def _discord_search(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:

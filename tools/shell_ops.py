@@ -215,11 +215,7 @@ def _check_dangerous_command(command: str, force: bool) -> str | None:
                     f"The 'force=True' flag was set, so this command WILL execute."
                 )
             else:
-                return (
-                    f"WARNING: DANGEROUS COMMAND BLOCKED: {explanation}\n"
-                    f"This command was NOT executed. If you are absolutely sure, "
-                    f"set force=True to bypass this safety check."
-                )
+                return _err("BLOCKED", explanation, "force=true")
     return None
 
 
@@ -436,7 +432,7 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
                     _unregister_proc(proc)
                     _TOOL_CONTEXT._active_proc = None
                     return ToolResult(success=False,
-                                      content=f"Command timed out after {timeout}s (process tree killed)")
+                                      content=_err("TIMEOUT", f"{timeout}s (killed)", "increase timeout or simplify"))
                 try:
                     proc.wait(timeout=5)
                 except subprocess.TimeoutExpired:
@@ -449,8 +445,7 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
                     t_out.join(timeout=2)
                     t_err.join(timeout=2)
                     _unregister_proc(proc)
-                    _TOOL_CONTEXT._active_proc = None
-                    return ToolResult(success=False, content=f"Command timed out after {timeout}s")
+                    return ToolResult(success=False, content=_err("TIMEOUT", f"{timeout}s", "increase timeout or simplify"))
                 finally:
                     _TOOL_CONTEXT._active_proc = None
 
@@ -476,17 +471,17 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
                     partial = getattr(exc, "output", None) or ""
                     if partial:
                         return ToolResult(success=False,
-                                          content=f"Command timed out after {timeout}s\n\n{partial}")
-                    return ToolResult(success=False, content=f"Command timed out after {timeout}s")
+                                          content=_err("TIMEOUT", f"{timeout}s", "increase timeout or simplify") + f"\n\n{partial}")
+                    return ToolResult(success=False, content=_err("TIMEOUT", f"{timeout}s", "increase timeout or simplify"))
             else:
                 try:
                     out, err = proc.communicate(timeout=timeout)
                 except subprocess.TimeoutExpired:
                     proc.kill()
                     out, err = proc.communicate()
-                    _unregister_proc(proc)
                     _TOOL_CONTEXT._active_proc = None
-                    return ToolResult(success=False, content=f"Command timed out after {timeout}s")
+                    _unregister_proc(proc)
+                    return ToolResult(success=False, content=_err("TIMEOUT", f"{timeout}s", "increase timeout or simplify"))
                 stdout = out
                 stderr = err
 
@@ -506,9 +501,9 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
             # Detect likely no-op patterns in python -c commands
             if "python" in command and " -c " in command:
                 if "#" in command:
-                    hint += _hint("# comments out rest; use script file instead")
+                    hint += _hint("# comments out rest; use script file")
                 elif any(kw in command for kw in (" if ", " try:", " for ", " while ", " with ", " def ", " class ")):
-                    hint += _hint("compound statements need script file, not -c")
+                    hint += _hint("use script file, not -c")
             parts.append(hint)
         if stderr:
             err_output = stderr.rstrip()
@@ -527,8 +522,7 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
         _unregister_proc(proc)
         return ToolResult(success=proc.returncode == 0, content=content_out)
     except Exception as e:
-        hint = " " + _hint("use --help or search_files for syntax")
-        return ToolResult(success=False, content=f"Error: {e}{hint}{_windows_cmd_note}")
+        return ToolResult(success=False, content=_err("ERROR", str(e)) + _windows_cmd_note)
 
 
 @_summarize("run_shell")
@@ -602,7 +596,7 @@ def _search_single_file(
         try:
             compiled = _re.compile(pattern, flags)
         except _re.error as e:
-            return ToolResult(success=False, content=f"Invalid regex: {e}")
+            return ToolResult(success=False, content=_err("INVALID", "regex", str(e)))
         match_fn = lambda line: compiled.search(line) is not None
     elif ignore_case:
         lower_pattern = pattern.lower()
@@ -623,14 +617,12 @@ def _search_single_file(
                     if len(results) >= _SEARCH_MAX_RESULTS:
                         break
     except (OSError, PermissionError) as e:
-        return ToolResult(success=False, content=f"Error reading '{filepath}': {e}")
+        return ToolResult(success=False, content=_err("READ", str(e)))
 
     if not results:
         msg = f"No matches for '{pattern}' in {filepath}"
         if offset:
             msg += f" (offset={offset})"
-        if not use_regex and '|' in pattern:
-            msg += " (enable regex=true for | alternation)"
         return ToolResult(success=True, content=msg)
     return ToolResult(success=True, content="\n".join(results))
 
@@ -651,12 +643,10 @@ def _search_with_rg(root_dir: str, pattern: str, use_regex: bool, ignore_case: b
         # Check for rg errors (regex parse errors, etc.)
         if result.returncode != 0 and result.stderr.strip():
             err = result.stderr.strip().split("\n")[0]
-            return ToolResult(success=False, content=f"Invalid regex: {err}")
+            return ToolResult(success=False, content=_err("INVALID", "regex", err))
         lines = result.stdout.splitlines()
         if not lines:
             msg = f"No matches for '{pattern}' in {root_dir}"
-            if not use_regex and '|' in pattern:
-                msg += " (enable regex=true for | alternation)"
             return ToolResult(success=True, content=msg)
         if offset > 0:
             lines = lines[offset:]
@@ -665,7 +655,7 @@ def _search_with_rg(root_dir: str, pattern: str, use_regex: bool, ignore_case: b
             output += f"\n... (capped at {_SEARCH_MAX_RESULTS}; use offset or narrow path)"
         return ToolResult(success=True, content=output)
     except (subprocess.TimeoutExpired, Exception):
-        return ToolResult(success=False, content="rg search failed or timed out")
+        return ToolResult(success=False, content=_err("TIMEOUT", "rg search"))
 
 
 @_register("search_files")
@@ -676,27 +666,26 @@ def _search_files(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolR
     use_regex = args.get("regex", False)
     ignore_case = args.get("ignore_case", False)
     offset = max(0, int(args.get("offset", 0)))
+    if not use_regex and '|' in pattern:
+        return ToolResult(success=True, content="please enable regex=true")
 
     if file_path:
         # Single-file mode: skip the directory safety check, only validate the file
         file_safety = rg.check(file_path)
         if not file_safety.allowed:
-            return ToolResult(
-                success=False,
-                content=f"Search blocked by safety layer: {file_safety.reason}",
-            )
+            return ToolResult(success=False,
+                              content=_err("BLOCKED", file_safety.reason))
         resolved = file_safety.resolved_path
+
         if not os.path.isfile(resolved):
-            return ToolResult(success=False, content=f"Not a file: {resolved}")
+            return ToolResult(success=False, content=_err("NOT_FOUND", resolved))
         return _search_single_file(resolved, pattern, use_regex, ignore_case, offset=offset)
 
     # Directory search mode: safety-check the search path
     safety_result = rg.check(path)
     if not safety_result.allowed:
-        return ToolResult(
-            success=False,
-            content=f"Search blocked by safety layer: {safety_result.reason}",
-        )
+        return ToolResult(success=False,
+                          content=_err("BLOCKED", safety_result.reason))
 
     # --- Ripgrep fast path: use rg if available ---
     import shutil as _shutil
@@ -709,7 +698,7 @@ def _search_files(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolR
         try:
             compiled = re.compile(pattern, flags)
         except re.error as e:
-            return ToolResult(success=False, content=f"Invalid regex: {e}")
+            return ToolResult(success=False, content=_err("INVALID", "regex", str(e)))
         match_fn = lambda line: compiled.search(line) is not None
     elif ignore_case:
         lower_pattern = pattern.lower()
@@ -760,11 +749,6 @@ def _search_files(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolR
         msg = f"No matches for '{pattern}' in {safety_result.resolved_path}"
         if offset:
             msg += f" (offset={offset})"
-        # Hint: if the pattern contains '|' but regex wasn't enabled, the '|'
-        # is treated as a literal pipe character.  Remind the AI to retry with
-        # regex: true for alternation patterns.
-        if not use_regex and '|' in pattern:
-            msg += " (enable regex=true for | alternation)"
         return ToolResult(success=True, content=msg)
     output = "\n".join(results)
     if len(results) >= _SEARCH_MAX_RESULTS:

@@ -411,19 +411,10 @@ class AgentRunner:
 
     def _run_turn(self, text: str) -> None:
         """Execute a single agent turn."""
+
         # Notify the renderer that a turn is starting, so it can show
         # the running indicator / cancel button.
         send_msg({"type": "turn_start"})
-
-        # Auto-reload any modules that changed since last turn.
-        # This means code fixes take effect on the NEXT user message without
-        # needing to restart the Electron app.
-        reloaded = reload_changed_modules()
-        if reloaded:
-            send_msg({"type": "response", "lines": [
-                f"[hot_reload] Reloaded {len(reloaded)} module(s): {', '.join(reloaded[:5])}"
-                + (f" ..." if len(reloaded) > 5 else "")
-            ]})
 
         # Check if the entry point (server.py) or other un-reloadable files
         # changed on disk -- the user needs to restart the Electron app.

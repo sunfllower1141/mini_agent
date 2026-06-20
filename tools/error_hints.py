@@ -45,12 +45,12 @@ _TOOL_PARAM_CACHE: dict[str, tuple[str, set[str]]] = {}
 # ---------------------------------------------------------------------------
 _ERROR_HINTS: dict[str, list[tuple[str, str]]] = {
     "read_file": [
-        ("not found", "file not found → list_directory to browse"),
-        ("No such file", "file not found → list_directory to browse"),
-        ("FileNotFoundError", "file not found → list_directory to browse"),
+        ("not found", "file not found → list_directory"),
+        ("No such file", "file not found → list_directory"),
+        ("FileNotFoundError", "file not found → list_directory"),
     ],
     "search_files": [
-        ("No matches", "no match → broaden with regex or shorter pattern"),
+        ("No matches", "no match → enable regex=true or shorten pattern"),
     ],
     "write_file": [
         ("blocked", "path blocked → use workspace path"),
@@ -59,13 +59,13 @@ _ERROR_HINTS: dict[str, list[tuple[str, str]]] = {
     "edit_file": [
         ("blocked", "path blocked → use workspace path"),
         ("outside workspace", "path outside workspace → use workspace path"),
-        ("hash mismatch", "stale anchors → re-read_file(hash_lines=True) then retry"),
-        ("missing edit specification", "no edit spec → provide from/from_hash/to/to_hash/new_text"),
+        ("hash mismatch", "stale anchors → re-read with hash_lines=True"),
+        ("missing edit specification", "provide from/from_hash"),
     ],
     "run_shell": [
-        ("not found", "cmd not found → check PATH / spelling"),
-        ("command not found", "cmd not found → check PATH / spelling"),
-        ("No such file or directory", "cmd not found → check PATH / spelling"),
+        ("not found", "cmd not found → check PATH/spelling"),
+        ("command not found", "cmd not found → check PATH/spelling"),
+        ("No such file or directory", "cmd not found → check PATH/spelling"),
     ],
 }
 
@@ -202,12 +202,15 @@ _ERROR_CLASS_MAP: dict[str, dict[str, tuple[ErrorClass, bool, int]]] = {
     "read_file": {
         "not_found": (ErrorClass.NOT_FOUND, False, 0),
         "missing": (ErrorClass.VALIDATION, True, 0),
+        "blocked": (ErrorClass.AUTHORIZATION, False, 0),
         "offset": (ErrorClass.VALIDATION, True, 0),
     },
+
     "run_shell": {
         "not_found": (ErrorClass.NOT_FOUND, False, 0),
         "blocked": (ErrorClass.AUTHORIZATION, False, 0),
         "timed_out": (ErrorClass.TRANSIENT, True, 2000),
+        "timeout": (ErrorClass.TRANSIENT, True, 2000),
     },
     "search_files": {
         "not_found": (ErrorClass.NOT_FOUND, False, 0),
@@ -283,39 +286,36 @@ def _classify_result(result: ToolResult, tool_name: str) -> None:
         result.retryable = False
 
 
-# Mapping of (tool_name, fingerprint) -> recovery hint injected on repeated failure.
-# Fingerprints come from _fingerprint_error() above.
-# Hints are kept compact: just the action to take.
 _FAILURE_PATTERNS: dict[str, dict[str, str]] = {
     "edit_file": {
         "not_found": "re-read with read_file(hash_lines=True) for current anchors",
         "guard": "read_file(path, hash_lines=True) first",
         "missing": "provide from/from_hash for each edit",
-        "range": "line out of range; re-read file to see current length",
-        "anchor": "re-read with read_file(hash_lines=True) for current anchors",
-        "content": "re-read with read_file(hash_lines=True) for current content",
+        "range": "re-read file to see current length",
+        "anchor": "re-read with read_file(hash_lines=True)",
+        "content": "re-read with read_file(hash_lines=True)",
         "whitespace": "copy exact whitespace from read_file output",
-        "ambiguous": "use a more specific string or count=-1",
+        "ambiguous": "use a more specific string",
         "count": "use count=1 or count=-1",
         "hash mismatch": "re-read with read_file(hash_lines=True)",
         "missing edit specification": "provide from/from_hash/to/to_hash/new_text",
     },
     "write_file": {
         "blocked": "use path inside workspace or force=True",
-        "guard": "read_file(path) first, then write",
+        "guard": "read_file(path) first",
         "exists": "use force=True to overwrite",
     },
     "read_file": {
-        "not_found": "check path with list_directory or file_info",
+        "not_found": "check path with list_directory",
         "offset": "reduce offset; use file_info to check size",
     },
     "run_shell": {
-        "not_found": "check command spelling and that it is installed",
-        "blocked": "use force=True or rephrase to safe operations",
+        "not_found": "check command spelling and PATH",
+        "blocked": "use force=True for safe operations",
         "timed_out": "break into smaller steps or increase timeout",
     },
     "search_files": {
-        "not_found": "broaden pattern or search parent directory",
+        "not_found": "broaden pattern or enable regex=true",
         "invalid_regex": "check escaping; use raw strings",
     },
     "find_symbol": {
@@ -325,10 +325,10 @@ _FAILURE_PATTERNS: dict[str, dict[str, str]] = {
         "not_found": "try search_files for substring match",
     },
     "run_tests": {
-        "failures": "use diagnose_failures, read failing files, fix",
+        "failures": "use diagnose_failures, fix, re-run",
     },
     "verify": {
-        "failures": "review lint output and test failures, fix, re-run",
+        "failures": "review failures, fix, re-run",
     },
     "replace_symbol": {
         "not_found": "check symbol name spelling",

@@ -365,23 +365,24 @@ def _collect_definitions(
 ) -> list[dict[str, Any]]:
     """Walk the AST and collect all top-level and nested definitions."""
     definitions: list[dict[str, Any]] = []
+    source_bytes = source.encode("utf-8")
 
     if ext in (".py", ".pyi"):
-        _collect_python_definitions(root, source, definitions, parent_name="")
-    elif ext in (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"):
-        _collect_ts_definitions(root, source, definitions, parent_name="")
+        _collect_python_definitions(root, source, source_bytes, definitions, parent_name="")
+    elif ext in (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".c", ".h", ".cpp", ".cc", ".cxx", ".c++", ".hpp", ".hh", ".hxx", ".h++"):
+        _collect_ts_definitions(root, source, source_bytes, definitions, parent_name="")
 
     return definitions
 
 
 def _collect_python_definitions(
-    node: Any, source: str, results: list[dict], parent_name: str = ""
+    node: Any, source: str, source_bytes: bytes, results: list[dict], parent_name: str = ""
 ) -> None:
     """Recursively collect Python function/class definitions."""
     if node.type == "function_definition":
         name_node = node.child_by_field_name("name")
         if name_node:
-            name = source[name_node.start_byte : name_node.end_byte]
+            name = source_bytes[name_node.start_byte : name_node.end_byte].decode("utf-8")
             body_node = node.child_by_field_name("body")
             params_node = node.child_by_field_name("parameters")
 
@@ -390,7 +391,7 @@ def _collect_python_definitions(
             sig_end = (
                 body_node.start_byte if body_node else node.end_byte
             )
-            signature = source[sig_start:sig_end].split("\n")[0].strip()
+            signature = source_bytes[sig_start:sig_end].decode("utf-8").split("\n")[0].strip()
 
             # Collect decorators
             decorators = []
@@ -423,17 +424,17 @@ def _collect_python_definitions(
                 "end_byte": node.end_byte,
                 "body_start_line": body_node.start_point[0] if body_node else node.start_point[0] + 1,
                 "body_end_line": body_node.end_point[0] + 1 if body_node else node.end_point[0] + 1,
-                "calls": _collect_calls(body_node, source) if body_node else [],
+                "calls": _collect_calls(body_node, source, source_bytes) if body_node else [],
             })
 
             # Recurse into body for nested definitions
             if body_node:
-                _collect_python_definitions(body_node, source, results, full_name)
+                _collect_python_definitions(body_node, source, source_bytes, results, full_name)
 
     elif node.type == "class_definition":
         name_node = node.child_by_field_name("name")
         if name_node:
-            name = source[name_node.start_byte : name_node.end_byte]
+            name = source_bytes[name_node.start_byte : name_node.end_byte].decode("utf-8")
             body_node = node.child_by_field_name("body")
             full_name = f"{parent_name}.{name}" if parent_name else name
 
@@ -448,7 +449,7 @@ def _collect_python_definitions(
                 "kind": "class",
                 "name": full_name,
                 "parent_name": parent_name,
-                "signature": source[node.start_byte : node.end_byte].split("\n")[0].strip(),
+                "signature": source_bytes[node.start_byte : node.end_byte].decode("utf-8").split("\n")[0].strip(),
                 "decorators": decorators,
                 "docstring": None,
                 "start_line": node.start_point[0],
@@ -462,22 +463,22 @@ def _collect_python_definitions(
 
             # Recurse into class body
             if body_node:
-                _collect_python_definitions(body_node, source, results, full_name)
+                _collect_python_definitions(body_node, source, source_bytes, results, full_name)
 
     else:
         # Recurse into children
         for child in node.named_children:
-            _collect_python_definitions(child, source, results, parent_name)
+            _collect_python_definitions(child, source, source_bytes, results, parent_name)
 
 
 def _collect_ts_definitions(
-    node: Any, source: str, results: list[dict], parent_name: str = ""
+    node: Any, source: str, source_bytes: bytes, results: list[dict], parent_name: str = ""
 ) -> None:
     """Recursively collect TypeScript/JavaScript function/class definitions."""
     if node.type in ("function_declaration", "method_definition"):
         name_node = node.child_by_field_name("name")
         if name_node:
-            name = source[name_node.start_byte : name_node.end_byte]
+            name = source_bytes[name_node.start_byte : name_node.end_byte].decode("utf-8")
             body_node = node.child_by_field_name("body")
             full_name = f"{parent_name}.{name}" if parent_name else name
 
@@ -494,7 +495,7 @@ def _collect_ts_definitions(
                 "kind": "function",
                 "name": full_name,
                 "parent_name": parent_name,
-                "signature": source[node.start_byte : body_node.start_byte if body_node else node.end_byte].split("\n")[0].strip(),
+                "signature": source_bytes[node.start_byte : (body_node.start_byte if body_node else node.end_byte)].decode("utf-8").split("\n")[0].strip(),
                 "decorators": [],
                 "docstring": None,
                 "start_line": node.start_point[0],
@@ -503,17 +504,17 @@ def _collect_ts_definitions(
                 "end_byte": node.end_byte,
                 "body_start_line": body_node.start_point[0] if body_node else node.start_point[0] + 1,
                 "body_end_line": body_node.end_point[0] + 1 if body_node else node.end_point[0] + 1,
-                "calls": _collect_calls(body_node, source) if body_node else [],
+                "calls": _collect_calls(body_node, source, source_bytes) if body_node else [],
                 "exported": is_exported,
             })
 
             if body_node:
-                _collect_ts_definitions(body_node, source, results, full_name)
+                _collect_ts_definitions(body_node, source, source_bytes, results, full_name)
 
     elif node.type == "class_declaration":
         name_node = node.child_by_field_name("name")
         if name_node:
-            name = source[name_node.start_byte : name_node.end_byte]
+            name = source_bytes[name_node.start_byte : name_node.end_byte].decode("utf-8")
             body_node = node.child_by_field_name("body")
             full_name = f"{parent_name}.{name}" if parent_name else name
 
@@ -521,7 +522,7 @@ def _collect_ts_definitions(
                 "kind": "class",
                 "name": full_name,
                 "parent_name": parent_name,
-                "signature": source[node.start_byte : node.end_byte].split("\n")[0].strip(),
+                "signature": source_bytes[node.start_byte : node.end_byte].decode("utf-8").split("\n")[0].strip(),
                 "decorators": [],
                 "docstring": None,
                 "start_line": node.start_point[0],
@@ -534,7 +535,7 @@ def _collect_ts_definitions(
             })
 
             if body_node:
-                _collect_ts_definitions(body_node, source, results, full_name)
+                _collect_ts_definitions(body_node, source, source_bytes, results, full_name)
 
     elif node.type == "arrow_function":
         # Variable declarator with arrow function
@@ -542,13 +543,13 @@ def _collect_ts_definitions(
         if parent and parent.type == "variable_declarator":
             name_node = parent.child_by_field_name("name")
             if name_node:
-                name = source[name_node.start_byte : name_node.end_byte]
+                name = source_bytes[name_node.start_byte : name_node.end_byte].decode("utf-8")
                 full_name = f"{parent_name}.{name}" if parent_name else name
                 results.append({
                     "kind": "function",
                     "name": full_name,
                     "parent_name": parent_name,
-                    "signature": source[parent.start_byte : node.start_byte].strip(),
+                    "signature": source_bytes[parent.start_byte : node.start_byte].decode("utf-8").strip(),
                     "decorators": [],
                     "docstring": None,
                     "start_line": parent.start_point[0],
@@ -557,30 +558,245 @@ def _collect_ts_definitions(
                     "end_byte": node.end_byte,
                     "body_start_line": node.start_point[0],
                     "body_end_line": node.end_point[0] + 1,
-                    "calls": _collect_calls(node, source),
+                    "calls": _collect_calls(node, source, source_bytes),
                 })
+
+    # === C/C++ definitions ===
+    elif node.type == "function_definition":
+        # C/C++ function — name is in the declarator field
+        name = _get_declarator_name(node.child_by_field_name("declarator"), source_bytes)
+        if name:
+            body_node = node.child_by_field_name("body")
+            full_name = f"{parent_name}.{name}" if parent_name else name
+
+            # Build a signature from the start to the body (or end)
+            sig_end = body_node.start_byte if body_node else node.end_byte
+            sig = source_bytes[node.start_byte:sig_end].decode("utf-8").split("\n")[0].strip()
+
+            results.append({
+                "kind": "function",
+                "name": full_name,
+                "parent_name": parent_name,
+                "signature": sig,
+                "decorators": [],
+                "docstring": None,
+                "start_line": node.start_point[0],
+                "end_line": node.end_point[0] + 1,
+                "start_byte": node.start_byte,
+                "end_byte": node.end_byte,
+                "body_start_line": body_node.start_point[0] if body_node else node.start_point[0] + 1,
+                "body_end_line": body_node.end_point[0] + 1 if body_node else node.end_point[0] + 1,
+                "calls": _collect_calls(body_node, source, source_bytes) if body_node else [],
+            })
+
+            if body_node:
+                _collect_ts_definitions(body_node, source, source_bytes, results, full_name)
+
+    elif node.type in ("struct_specifier", "union_specifier"):
+        name_node = node.child_by_field_name("name")
+        if name_node:
+            name = source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
+            body_node = node.child_by_field_name("body")
+            full_name = f"{parent_name}.{name}" if parent_name else name
+            kind = "struct" if node.type == "struct_specifier" else "union"
+            results.append({
+                "kind": kind,
+                "name": full_name,
+                "parent_name": parent_name,
+                "signature": source_bytes[node.start_byte:node.end_byte].decode("utf-8").split("\n")[0].strip(),
+                "decorators": [],
+                "docstring": None,
+                "start_line": node.start_point[0],
+                "end_line": node.end_point[0] + 1,
+                "start_byte": node.start_byte,
+                "end_byte": node.end_byte,
+                "body_start_line": body_node.start_point[0] if body_node else node.start_point[0] + 1,
+                "body_end_line": body_node.end_point[0] + 1 if body_node else node.end_point[0] + 1,
+                "calls": [],
+            })
+            if body_node:
+                _collect_ts_definitions(body_node, source, source_bytes, results, full_name)
+
+    elif node.type == "class_specifier":
+        # C++ class
+        name_node = node.child_by_field_name("name")
+        if name_node:
+            name = source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
+            body_node = node.child_by_field_name("body")
+            full_name = f"{parent_name}.{name}" if parent_name else name
+            results.append({
+                "kind": "class",
+                "name": full_name,
+                "parent_name": parent_name,
+                "signature": source_bytes[node.start_byte:node.end_byte].decode("utf-8").split("\n")[0].strip(),
+                "decorators": [],
+                "docstring": None,
+                "start_line": node.start_point[0],
+                "end_line": node.end_point[0] + 1,
+                "start_byte": node.start_byte,
+                "end_byte": node.end_byte,
+                "body_start_line": body_node.start_point[0] if body_node else node.start_point[0] + 1,
+                "body_end_line": body_node.end_point[0] + 1 if body_node else node.end_point[0] + 1,
+                "calls": [],
+            })
+            if body_node:
+                _collect_ts_definitions(body_node, source, source_bytes, results, full_name)
+
+    elif node.type == "enum_specifier":
+        name_node = node.child_by_field_name("name")
+        if name_node:
+            name = source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
+            full_name = f"{parent_name}.{name}" if parent_name else name
+            body_node = node.child_by_field_name("body")
+            results.append({
+                "kind": "enum",
+                "name": full_name,
+                "parent_name": parent_name,
+                "signature": source_bytes[node.start_byte:node.end_byte].decode("utf-8").split("\n")[0].strip(),
+                "decorators": [],
+                "docstring": None,
+                "start_line": node.start_point[0],
+                "end_line": node.end_point[0] + 1,
+                "start_byte": node.start_byte,
+                "end_byte": node.end_byte,
+                "body_start_line": body_node.start_point[0] if body_node else node.start_point[0] + 1,
+                "body_end_line": body_node.end_point[0] + 1 if body_node else node.end_point[0] + 1,
+                "calls": [],
+            })
+
+    elif node.type == "type_definition":
+        # C/C++ typedef
+        name_node = node.child_by_field_name("declarator")
+        if name_node:
+            name = source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
+            full_name = f"{parent_name}.{name}" if parent_name else name
+            results.append({
+                "kind": "typedef",
+                "name": full_name,
+                "parent_name": parent_name,
+                "signature": source_bytes[node.start_byte:node.end_byte].decode("utf-8").split("\n")[0].strip(),
+                "decorators": [],
+                "docstring": None,
+                "start_line": node.start_point[0],
+                "end_line": node.end_point[0] + 1,
+                "start_byte": node.start_byte,
+                "end_byte": node.end_byte,
+                "body_start_line": node.start_point[0],
+                "body_end_line": node.end_point[0] + 1,
+                "calls": [],
+            })
+
+    elif node.type == "namespace_definition":
+        # C++ namespace
+        name_node = node.child_by_field_name("name")
+        if name_node:
+            name = source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
+            body_node = node.child_by_field_name("body")
+            full_name = f"{parent_name}.{name}" if parent_name else name
+            results.append({
+                "kind": "namespace",
+                "name": full_name,
+                "parent_name": parent_name,
+                "signature": source_bytes[node.start_byte:node.end_byte].decode("utf-8").split("\n")[0].strip(),
+                "decorators": [],
+                "docstring": None,
+                "start_line": node.start_point[0],
+                "end_line": node.end_point[0] + 1,
+                "start_byte": node.start_byte,
+                "end_byte": node.end_byte,
+                "body_start_line": body_node.start_point[0] if body_node else node.start_point[0] + 1,
+                "body_end_line": body_node.end_point[0] + 1 if body_node else node.end_point[0] + 1,
+                "calls": [],
+            })
+            if body_node:
+                _collect_ts_definitions(body_node, source, source_bytes, results, full_name)
+
+    elif node.type == "template_declaration":
+        # C++ template — recurse into children to find the wrapped function/class
+        for child in node.named_children:
+            _collect_ts_definitions(child, source, source_bytes, results, parent_name)
+
+    elif node.type in ("preproc_def", "preproc_function_def"):
+        # C/C++ #define macro
+        name_node = node.child_by_field_name("name")
+        if name_node:
+            name = source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
+            full_name = f"{parent_name}.{name}" if parent_name else name
+            results.append({
+                "kind": "macro",
+                "name": full_name,
+                "parent_name": parent_name,
+                "signature": source_bytes[node.start_byte:node.end_byte].decode("utf-8").split("\n")[0].strip(),
+                "decorators": [],
+                "docstring": None,
+                "start_line": node.start_point[0],
+                "end_line": node.end_point[0] + 1,
+                "start_byte": node.start_byte,
+                "end_byte": node.end_byte,
+                "body_start_line": node.start_point[0],
+                "body_end_line": node.end_point[0] + 1,
+                "calls": [],
+            })
 
     else:
         for child in node.named_children:
-            _collect_ts_definitions(child, source, results, parent_name)
+            _collect_ts_definitions(child, source, source_bytes, results, parent_name)
+
+def _get_declarator_name(declarator_node: Any, source_bytes: bytes) -> str | None:
+    """Walk down a C/C++ declarator chain to find the terminal name.
+
+    Tree-sitter-c/cpp nest declarators deeply:
+      function_declarator -> declarator -> identifier
+      pointer_declarator -> declarator -> identifier
+      array_declarator -> declarator -> identifier
+      parenthesized_declarator -> declarator -> identifier
+    """
+    if declarator_node is None:
+        return None
+    # Terminal name nodes
+    if declarator_node.type in ("identifier", "field_identifier", "type_identifier"):
+        return source_bytes[declarator_node.start_byte:declarator_node.end_byte].decode("utf-8")
+    # qualified_identifier (C++: ClassName::methodName)
+    if declarator_node.type == "qualified_identifier":
+        name_node = declarator_node.child_by_field_name("name")
+        if name_node:
+            return source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
+    # Recurse into nested declarator
+    inner = declarator_node.child_by_field_name("declarator")
+    if inner:
+        return _get_declarator_name(inner, source_bytes)
+    # Fallback: walk named children
+    for child in declarator_node.named_children:
+        result = _get_declarator_name(child, source_bytes)
+        if result:
+            return result
+    return None
 
 
-def _collect_calls(node: Any, source: str) -> list[str]:
+def _collect_calls(node: Any, source: str, source_bytes: bytes) -> list[str]:
     """Collect function call names within a node."""
     calls: list[str] = []
     if node is None:
         return calls
 
     def _walk(n: Any) -> None:
-        if n.type == "call":
+        if n.type in ("call", "call_expression"):
             func_node = n.child_by_field_name("function")
             if func_node:
                 if func_node.type == "identifier":
-                    calls.append(source[func_node.start_byte : func_node.end_byte])
-                elif func_node.type == "attribute":
+                    calls.append(source_bytes[func_node.start_byte : func_node.end_byte].decode("utf-8"))
+                elif func_node.type in ("attribute", "field_expression"):
+                    # obj.method() — get the method name
                     attr_node = func_node.child_by_field_name("attribute")
+                    if attr_node is None:
+                        attr_node = func_node.child_by_field_name("field")
                     if attr_node:
-                        calls.append(source[attr_node.start_byte : attr_node.end_byte])
+                        calls.append(source_bytes[attr_node.start_byte : attr_node.end_byte].decode("utf-8"))
+                elif func_node.type == "qualified_identifier":
+                    # ns::func() — get the last component
+                    name_node = func_node.child_by_field_name("name")
+                    if name_node:
+                        calls.append(source_bytes[name_node.start_byte : name_node.end_byte].decode("utf-8"))
         for child in n.named_children:
             _walk(child)
 
@@ -654,8 +870,13 @@ def replace_symbol(
     start_byte = target["start_byte"]
     end_byte = target["end_byte"]
 
-    # Replace
-    new_source = source[:start_byte] + new_text + source[end_byte:]
+    # Replace using byte offsets (tree-sitter works on UTF-8 bytes)
+    source_bytes = source.encode("utf-8")
+    new_source = (
+        source_bytes[:start_byte].decode("utf-8")
+        + new_text
+        + source_bytes[end_byte:].decode("utf-8")
+    )
 
     try:
         with open(file_path, "w", encoding="utf-8") as f:
@@ -721,6 +942,7 @@ def get_symbol_range(
     except Exception:
         return None
 
+    source_bytes = source.encode("utf-8")
     definitions = _collect_definitions(tree.root_node, ext, source)
     target = _match_symbol(definitions, symbol, type)
     if target is None:
@@ -728,7 +950,7 @@ def get_symbol_range(
 
     # Compute extended range (include decorators, export wrappers, etc.)
     def_node = _find_definition_node(
-        tree.root_node, source, target.get("name", symbol),
+        tree.root_node, source, source_bytes, target.get("name", symbol),
         parent_name=target.get("parent_name", ""),
     )
 
@@ -780,8 +1002,14 @@ def _are_types_compatible(def_kind: str, req_type: Optional[str]) -> bool:
         return True
     if def_kind == req_type:
         return True
-    # Synonyms: function === method
+    # Synonyms: function === method; struct/union/enum/class are data_types
     if def_kind in ("function", "method") and req_type in ("function", "method"):
+        return True
+    # C/C++: struct, union, enum, class are all type definitions
+    if def_kind in ("struct", "union", "enum", "class") and req_type in ("struct", "union", "enum", "class", "type"):
+        return True
+    # typedef maps to type as well
+    if def_kind == "typedef" and req_type in ("typedef", "type"):
         return True
     return False
 
@@ -789,6 +1017,7 @@ def _are_types_compatible(def_kind: str, req_type: Optional[str]) -> bool:
 def _find_definition_node(
     root_node: Any,
     source: str,
+    source_bytes: bytes,
     name: str,
     parent_name: str = "",
 ) -> Any | None:
@@ -802,7 +1031,7 @@ def _find_definition_node(
         return None
 
     target_name = name.split(".")[-1]  # Last component
-    return _walk_for_def(root_node, source, target_name, parent_name, ext)
+    return _walk_for_def(root_node, source, source_bytes, target_name, parent_name, ext)
 
 
 def _guess_ext_from_tree(root_node: Any) -> str | None:
@@ -818,16 +1047,23 @@ def _guess_ext_from_tree(root_node: Any) -> str | None:
         "javascript": ".js",
         "typescript": ".ts",
         "tsx": ".tsx",
+        "c": ".c",
+        "cpp": ".cpp",
     }
     return lang_map.get(lang_name)
 
 
 def _walk_for_def(
-    node: Any, source: str, target_name: str, parent_name: str, ext: str,
+    node: Any, source: str, source_bytes: bytes, target_name: str, parent_name: str, ext: str,
 ) -> Any | None:
     """Recursively walk AST to find a definition matching target_name."""
     if ext in (".py", ".pyi"):
         def_types = ("function_definition", "class_definition")
+    elif ext in (".c", ".h", ".cpp", ".cc", ".cxx", ".c++", ".hpp", ".hh", ".hxx", ".h++"):
+        def_types = (
+            "function_definition", "struct_specifier", "union_specifier",
+            "enum_specifier", "class_specifier", "namespace_definition",
+        )
     else:
         def_types = (
             "function_declaration", "method_definition", "class_declaration",
@@ -837,10 +1073,19 @@ def _walk_for_def(
     for i in range(node.child_count):
         child = node.child(i)
         if child and child.type in def_types:
-            name_node = child.child_by_field_name("name")
-            if name_node:
-                child_name = source[name_node.start_byte:name_node.end_byte]
-                child_parent = _get_enclosing_class_name(child, source, ext)
+            # Get name: C/C++ uses declarator field, JS/TS uses name field
+            if ext in (".c", ".h", ".cpp", ".cc", ".cxx", ".c++", ".hpp", ".hh", ".hxx", ".h++"):
+                if child.type == "function_definition":
+                    child_name = _get_declarator_name(child.child_by_field_name("declarator"), source_bytes)
+                else:
+                    name_node = child.child_by_field_name("name")
+                    child_name = source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8") if name_node else None
+            else:
+                name_node = child.child_by_field_name("name")
+                child_name = source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8") if name_node else None
+
+            if child_name:
+                child_parent = _get_enclosing_class_name(child, source, source_bytes, ext)
                 full = f"{child_parent}.{child_name}" if child_parent else child_name
 
                 if full == f"{parent_name}.{target_name}" if parent_name else full == target_name:
@@ -849,26 +1094,28 @@ def _walk_for_def(
                 # Also check body for nested defs
                 body = child.child_by_field_name("body")
                 if body:
-                    result = _walk_for_def(body, source, target_name, full, ext)
+                    result = _walk_for_def(body, source, source_bytes, target_name, full, ext)
                     if result:
                         return result
 
     return None
 
 
-def _get_enclosing_class_name(node: Any, source: str, ext: str) -> str | None:
+def _get_enclosing_class_name(node: Any, source: str, source_bytes: bytes, ext: str) -> str | None:
     """Walk up from a node to find the enclosing class name."""
     if ext in (".py", ".pyi"):
-        class_type = "class_definition"
+        class_types = ("class_definition",)
+    elif ext in (".c", ".h", ".cpp", ".cc", ".cxx", ".c++", ".hpp", ".hh", ".hxx", ".h++"):
+        class_types = ("class_specifier", "struct_specifier", "namespace_definition")
     else:
-        class_type = "class_declaration"
+        class_types = ("class_declaration",)
 
     parent = node.parent
     while parent:
-        if parent.type == class_type:
+        if parent.type in class_types:
             name_node = parent.child_by_field_name("name")
             if name_node:
-                return source[name_node.start_byte:name_node.end_byte]
+                return source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
         parent = parent.parent
 
     return None

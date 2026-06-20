@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import useSmoothStream from './hooks/useSmoothStream';
+import useAutoScroll from './hooks/useAutoScroll';
 import LogLine from './components/LogLine';
 import CodeBlock from './components/CodeBlock';
 import SearchResults from './components/SearchResults';
@@ -250,6 +251,16 @@ function AppShell() {
   const inputRef = useRef(null);
   const thinkingLogRef = useRef(null);
   const chatLogRef = useRef(null);
+
+  // --- Auto-scroll hooks (depend on content deps) ---
+  const { isAtBottom: thinkingAtBottom, scrollToBottom: scrollThinking } =
+    useAutoScroll(thinkingLogRef, [thinking.displayedText]);
+  const { isAtBottom: chatAtBottom, scrollToBottom: scrollChat } =
+    useAutoScroll(chatLogRef, [chatLines, chatStream.displayedText]);
+
+  // --- Hover state for scroll-jump buttons ---
+  const [thinkingHover, setThinkingHover] = useState(false);
+  const [chatHover, setChatHover] = useState(false);
   const inThinkingRef = useRef(false);
   const submitTimeoutRef = useRef(null);
   const timerRef = useRef(null);
@@ -959,20 +970,7 @@ function AppShell() {
       setBotStatus((prev) => ({ ...prev, [botName]: current }));
     }
   }, [botStatus]);
-
-  // Auto-scroll thinking log
-  useEffect(() => {
-    if (thinkingLogRef.current) {
-      thinkingLogRef.current.scrollTop = thinkingLogRef.current.scrollHeight;
-    }
-  }, [thinking.displayedText]);
-
-  // Auto-scroll chat log
-  useEffect(() => {
-    if (chatLogRef.current) {
-      chatLogRef.current.scrollTop = chatLogRef.current.scrollHeight;
-    }
-  }, [chatLines, chatStream.displayedText]);
+  // (Auto-scroll is now handled by useAutoScroll hooks above)
 
   // Auto-focus input on mount
   useEffect(() => {
@@ -1111,7 +1109,9 @@ function AppShell() {
           <RoundedFrame id="left-pane">
             <LogPanel id="tools-log" className="scrollable dim" lines={toolsLines.slice(-MAX_RENDERED_TOOL_LINES)} />
             <div className="hr" />
-            <div id="thinking-log" ref={thinkingLogRef} className="log thinking-log thinking">
+            <div id="thinking-log" ref={thinkingLogRef} className="log thinking-log thinking"
+                 onMouseEnter={() => setThinkingHover(true)}
+                 onMouseLeave={() => setThinkingHover(false)}>
               {thinking.displayedText && (
                 <CharStream text={thinking.displayedText} className="msg-thinking" />
               )}
@@ -1120,6 +1120,11 @@ function AppShell() {
                   <DeferredMarkdown text={block} markdown={false} />
                 </div>
               ))}
+              {/* Scroll-to-bottom button */}
+              {thinkingHover && !thinkingAtBottom && (
+                <button className="scroll-jump-btn" onClick={scrollThinking}
+                        title="Scroll to latest" aria-label="Scroll to latest">↓</button>
+              )}
             </div>
           </RoundedFrame>
           {Object.keys(subagentData).length > 0 && (
@@ -1131,7 +1136,9 @@ function AppShell() {
 
         {/* Right pane: Chat */}
         <RoundedFrame id="right-pane">
-          <div id="chat-log" ref={chatLogRef} className="log scrollable text">
+          <div id="chat-log" ref={chatLogRef} className="log scrollable text"
+               onMouseEnter={() => setChatHover(true)}
+               onMouseLeave={() => setChatHover(false)}>
             {chatLines.slice(-MAX_RENDERED_CHAT_LINES).map((line) => {
               if (line.cls === 'msg-agent') {
                 return (
@@ -1146,6 +1153,11 @@ function AppShell() {
               <div className="msg-agent">
                 <StreamingMessage text={chatStream.displayedText} />
               </div>
+            )}
+            {/* Scroll-to-bottom button */}
+            {chatHover && !chatAtBottom && (
+              <button className="scroll-jump-btn" onClick={scrollChat}
+                      title="Scroll to latest" aria-label="Scroll to latest">↓</button>
             )}
           </div>
         </RoundedFrame>

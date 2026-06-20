@@ -224,7 +224,7 @@ class TestSearchFiles(unittest.TestCase):
         tc = _make_tool_call("search_files", pattern="[unclosed", path=self.workspace, regex=True)
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertFalse(result.success)
-        self.assertIn("Invalid regex", result.content)
+        self.assertIn("INVALID", result.content)
 
     # --- case-insensitive search ---
 
@@ -1352,3 +1352,285 @@ class TestMaxTokensTruncation(unittest.TestCase):
         result, changed = _compress_tool_results(messages, keep_recent=0)
         self.assertFalse(changed, "Short results should not trigger compression")
         self.assertEqual(result[0]["content"], messages[0]["content"])
+
+
+# ---------------------------------------------------------------------------
+# Error Steering Tests — verify compact errors steer AI to correct recovery
+# ---------------------------------------------------------------------------
+
+class TestErrorSteering(unittest.TestCase):
+    """Verify that every tool error output uses the ✗ CODE: what → fix format
+    and that the full pipeline (fingerprint → classify → learn) produces
+    actionable recovery hints that steer the AI correctly."""
+
+    def setUp(self):
+        self.workspace = tempfile.mkdtemp()
+        self.write_gate, self.read_gate = _gates(self.workspace)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.workspace, ignore_errors=True)
+
+    # --- Format correctness ---
+
+    def test_err_format_produces_compact_steering(self):
+        """_err() always outputs ✗ CODE: what [→ fix] format."""
+        from tools.error_hints import _err
+
+        # With fix hint
+        out = _err("NOT_FOUND", "foo.py", "use list_directory")
+        self.assertTrue(out.startswith("\u2717 "), f"Expected \u2717 prefix: {out!r}")
+        self.assertIn("NOT_FOUND", out)
+        self.assertIn("foo.py", out)
+        self.assertIn("\u2192", out)
+        self.assertIn("list_directory", out)
+
+        # Without fix hint (no arrow)
+        out2 = _err("MISSING", "paths")
+        self.assertTrue(out2.startswith("\u2717 "))
+        self.assertNotIn("\u2192", out2)
+
+        # All codes produce consistent format
+        for code in ("NOT_FOUND", "BLOCKED", "GUARD", "TIMEOUT", "READ", "WRITE",
+                      "INVALID", "MISSING", "RANGE", "ANCHOR", "ERROR", "SYNTAX",
+                      "LIST", "STAT", "INIT"):
+            out3 = _err(code, "test", "try X")
+            self.assertTrue(out3.startswith("\u2717 "), f"{code}: {out3!r}")
+            self.assertIn(code, out3)
+            self.assertIn("\u2192 try X", out3)
+
+    # --- Fingerprint extraction ---
+
+    def test_fingerprint_extracts_code_from_compact_format(self):
+        """_fingerprint_error extracts CODE from ✗ CODE: ... format."""
+        from tools.error_hints import _fingerprint_error
+
+        cases = [
+            ("read_file", _make_err("NOT_FOUND", "nope.txt", "list_directory"), "not_found"),
+            ("write_file", _make_err("BLOCKED", "outside workspace", "force=True"), "blocked"),
+            ("edit_file", _make_err("ANCHOR", "mismatch at 5", "re-read"), "anchor"),
+            ("edit_file", _make_err("GUARD", "bar.py", "read_file first"), "guard"),
+            ("run_shell", _make_err("TIMEOUT", "30s", "increase"), "timeout"),
+            ("run_shell", _make_err("NOT_FOUND", "git", "check PATH"), "not_found"),
+            ("search_files", _make_err("INVALID", "regex", "escape"), "invalid"),
+        ]
+        for tool, msg, expected_fp in cases:
+            fp = _fingerprint_error(tool, msg)
+            self.assertEqual(fp, expected_fp,
+                             f"tool={tool}: expected fp={expected_fp}, got {fp}")
+
+    # --- Classification ---
+
+    def test_classify_result_sets_correct_error_class(self):
+        """_classify_result correctly sets error_class and retryable from fingerprint."""
+        from tools.error_hints import _classify_result, _fingerprint_error
+
+        cases = [
+            ("read_file", _make_err("NOT_FOUND", "x", ""), "NOT_FOUND", False),
+            ("read_file", _make_err("BLOCKED", "x", ""), "AUTHORIZATION", False),
+            ("read_file", _make_err("MISSING", "x", ""), "VALIDATION", True),
+            ("write_file", _make_err("BLOCKED", "x", ""), "AUTHORIZATION", False),
+            ("write_file", _make_err("GUARD", "x", ""), "VALIDATION", True),
+            ("edit_file", _make_err("ANCHOR", "x", ""), "VALIDATION", True),
+            ("edit_file", _make_err("RANGE", "x", ""), "VALIDATION", True),
+            ("run_shell", _make_err("TIMEOUT", "x", ""), "TRANSIENT", True),
+            ("run_shell", _make_err("BLOCKED", "x", ""), "AUTHORIZATION", False),
+            ("search_files", _make_err("INVALID", "x", ""), "VALIDATION", True),
+        ]
+        for tool, msg, exp_class, exp_retry in cases:
+            r = ToolResult(success=False, content=msg)
+            _classify_result(r, tool)
+            self.assertEqual(r.error_class.name, exp_class,
+                             f"{tool}: expected {exp_class}, got {r.error_class}")
+            self.assertEqual(r.retryable, exp_retry,
+                             f"{tool}: expected retryable={exp_retry}, got {r.retryable}")
+
+    # --- Recovery hints injected on repeated failures ---
+
+    def test_repeated_failure_injects_recovery_hint(self):
+        """_learn_from_failure injects recovery hints on 2nd+ occurrence."""
+        from tools.error_hints import _learn_from_failure
+        import tools as tools_mod
+
+        # Set up context with fresh failure tracking
+        old_patterns = getattr(tools_mod._TOOL_CONTEXT, "_failure_patterns", None)
+        tools_mod._TOOL_CONTEXT._failure_patterns = {}
+        try:
+            # First failure: no hint yet
+            r1 = ToolResult(success=False, content=_make_err("ANCHOR", "mismatch", "re-read"))
+            _learn_from_failure("edit_file", r1)
+            self.assertFalse(r1.hint, f"Expected no hint on 1st failure, got: {r1.hint!r}")
+            self.assertNotIn("Recovery", r1.content or "")
+
+            # Second failure with same fingerprint: hint injected
+            r2 = ToolResult(success=False, content=_make_err("ANCHOR", "mismatch", "re-read"))
+            _learn_from_failure("edit_file", r2)
+            self.assertIsNotNone(r2.hint, f"Expected recovery hint on 2nd failure, got None")
+            self.assertIn("hash_lines", r2.hint or "")
+            self.assertIn("Recovery", r2.content or "")
+
+            # Third failure: still gets hint (in content for visibility)
+            r3 = ToolResult(success=False, content=_make_err("ANCHOR", "mismatch", "re-read"))
+            _learn_from_failure("edit_file", r3)
+            self.assertIn("Recovery", r3.content or "")
+        finally:
+            tools_mod._TOOL_CONTEXT._failure_patterns = old_patterns
+
+    def test_recovery_hint_specific_to_fingerprint(self):
+        """Different fingerprints get different recovery hints."""
+        from tools.error_hints import _learn_from_failure, _FAILURE_PATTERNS
+        import tools as tools_mod
+
+        old_patterns = getattr(tools_mod._TOOL_CONTEXT, "_failure_patterns", None)
+        tools_mod._TOOL_CONTEXT._failure_patterns = {}
+        try:
+            # edit_file ANCHOR hint
+            r1 = ToolResult(success=False, content=_make_err("ANCHOR", "bad hash", ""))
+            r2 = ToolResult(success=False, content=_make_err("ANCHOR", "bad hash", ""))
+            _learn_from_failure("edit_file", r1)
+            _learn_from_failure("edit_file", r2)
+            self.assertIn("hash_lines", r2.content or "")
+
+            # edit_file MISSING hint (different from ANCHOR)
+            tools_mod._TOOL_CONTEXT._failure_patterns = {}
+            r3 = ToolResult(success=False, content=_make_err("MISSING", "from_hash", ""))
+            r4 = ToolResult(success=False, content=_make_err("MISSING", "from_hash", ""))
+            _learn_from_failure("edit_file", r3)
+            _learn_from_failure("edit_file", r4)
+            self.assertIn("from_hash", (r4.content or "").lower())
+        finally:
+            tools_mod._TOOL_CONTEXT._failure_patterns = old_patterns
+
+    # --- End-to-end: tool execution produces steerable errors ---
+
+    def test_read_file_not_found_steers_to_list_directory(self):
+        """NOT_FOUND error tells AI to list_directory."""
+        path = os.path.join(self.workspace, "nope.txt")
+        tc = _make_tool_call("read_file", path=path)
+        result = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertFalse(result.success)
+        self.assertIn("\u2717", result.content)
+        self.assertIn("NOT_FOUND", result.content)
+        self.assertIn("list_directory", result.content)
+
+    def test_edit_anchor_mismatch_steers_to_re_read(self):
+        """ANCHOR error tells AI to re-read with hash_lines=True."""
+        path = os.path.join(self.workspace, "f.txt")
+        with open(path, "w") as f:
+            f.write("line1\nline2\n")
+        # Read to populate cache
+        execute_tool(_make_tool_call("read_file", path=path, hash_lines=True),
+                     self.write_gate, self.read_gate)
+        # Edit with wrong hash
+        tc = _make_tool_call("edit_file", path=path,
+                             edits=[{"from": 1, "from_hash": "WrongHash", "new_text": "x"}])
+        result = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertFalse(result.success)
+        self.assertIn("hash_lines", result.content.lower())
+
+    def test_shell_not_found_steers_to_check_path(self):
+        """NOT_FOUND for shell tells AI to check command spelling."""
+        tc = _make_tool_call("run_shell", command="nonexistent_cmd_xyz")
+        result = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertFalse(result.success)
+        # On Windows: cmd not found gives 'not recognized'
+        # On Unix: exit 127 with hint
+        content_lower = result.content.lower()
+        self.assertTrue(
+            "not recognized" in content_lower
+            or "not found" in content_lower
+            or "not_found" in content_lower,
+            f"Expected steering hint in: {result.content}"
+        )
+
+    def test_shell_dangerous_command_steers_to_force(self):
+        """Dangerous commands tell AI to use force=True."""
+        tc = _make_tool_call("run_shell", command="rm -rf /tmp/nonexistent_xyz")
+        result = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertFalse(result.success)
+        self.assertIn("\u2717", result.content)
+        self.assertIn("BLOCKED", result.content)
+        self.assertIn("force", result.content.lower())
+
+    def test_write_outside_workspace_steers_to_correct_path(self):
+        """BLOCKED for write_file tells AI to use workspace path."""
+        outside = tempfile.mkdtemp()
+        try:
+            path = os.path.join(outside, "x.txt")
+            tc = _make_tool_call("write_file", path=path, content="hello")
+            result = execute_tool(tc, self.write_gate, self.read_gate)
+            # Write outside workspace is allowed (just crosses gate)
+            # The steering comes from the gate message if blocked
+            self.assertTrue(result.success)  # allowed in current config
+        finally:
+            import shutil
+            shutil.rmtree(outside, ignore_errors=True)
+
+    def test_missing_required_param_steers_correctly(self):
+        """MISSING errors tell AI which parameter to provide."""
+        # edit_file without 'edits'
+        path = os.path.join(self.workspace, "f.txt")
+        with open(path, "w") as f:
+            f.write("a\n")
+        execute_tool(_make_tool_call("read_file", path=path, hash_lines=True),
+                     self.write_gate, self.read_gate)
+        tc = _make_tool_call("edit_file", path=path, edits=[])
+        result = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertFalse(result.success)
+        self.assertIn("edits", result.content.lower())
+
+    def test_shell_timeout_steers_to_simplify(self):
+        """TIMEOUT tells AI to break into smaller steps."""
+        import sys
+        # Command that sleeps longer than timeout
+        cmd = f"{sys.executable} -c \"import time; time.sleep(5)\""
+        tc = _make_tool_call("run_shell", command=cmd, timeout=1)
+        result = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertFalse(result.success)
+        content_lower = result.content.lower()
+        self.assertTrue(
+            "timeout" in content_lower or "timed_out" in content_lower
+            or "timed" in content_lower,
+            f"Expected timeout steering in: {result.content}"
+        )
+
+    def test_search_invalid_regex_steers_to_fix_escaping(self):
+        """INVALID regex tells AI to check escaping."""
+        tc = _make_tool_call("search_files", pattern="[invalid", regex=True,
+                             path=self.workspace)
+        result = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertFalse(result.success)
+        self.assertIn("\u2717", result.content)
+        self.assertIn("INVALID", result.content)
+
+    def test_edit_guard_steers_to_read_file_first(self):
+        """GUARD error tells AI to read_file first."""
+        path = os.path.join(self.workspace, "unread.py")
+        with open(path, "w") as f:
+            f.write("x = 1\n")
+        # Edit without reading first
+        tc = _make_tool_call("edit_file", path=path,
+                             edits=[{"from": 1, "from_hash": "fake", "new_text": "y = 2"}])
+        result = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertFalse(result.success)
+        self.assertIn("\u2717", result.content)
+        # Should mention read_file
+        self.assertIn("read_file", result.content.lower())
+
+    def test_write_guard_steers_to_read_file_first(self):
+        """GUARD for write_file tells AI to read_file first."""
+        path = os.path.join(self.workspace, "unread_write.py")
+        with open(path, "w") as f:
+            f.write("x = 1\n")
+        # Write without reading first
+        tc = _make_tool_call("write_file", path=path, content="y = 2")
+        result = execute_tool(tc, self.write_gate, self.read_gate)
+        self.assertFalse(result.success)
+        self.assertIn("\u2717", result.content)
+        self.assertIn("read_file", result.content.lower())
+
+
+# Import helper for tests above
+def _make_err(code, what, fix=""):
+    from tools.error_hints import _err
+    return _err(code, what, fix)

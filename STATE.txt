@@ -4,6 +4,17 @@
 # This file is the agent's map of the codebase. Update it after completed changes.
 # Behavioral rules live in AGENTS.md. Long-term facts live in core memory.
 
+- **Error steering verified (2026-06-20)** — Added `TestErrorSteering` (15 tests) verifying
+  the full error pipeline: `✗ CODE: what → fix` compact format, fingerprint extraction,
+  error classification, recovery hint injection on repeated failures, and end-to-end
+  steering correctness across all tool types. 111/111 tests pass.
+
+- **C/C++ AST-native tool support (2026-06-20)** — `get_file_skeleton`, `get_function`,
+  (`.cpp`, `.cc`, `.cxx`, `.hpp`, `.hh`, `.hxx`). Uses tree-sitter-c and tree-sitter-cpp.
+  Added `_get_declarator_name()` helper to traverse C/C++ declarator chains.
+  Supports functions, structs, unions, enums, classes (C++), typedefs, namespaces (C++),
+  templates (C++), and preprocessor macros. Call collection handles `call_expression` nodes.
+
 - **AST tools Python `ast` fallback (2026-06-20)** — `get_function`, `get_file_skeleton`,
   `replace_symbol`, `get_symbol_range` now fall back to Python's built-in `ast` module
   when tree-sitter is not installed. Previously returned "Unsupported file type: .py".

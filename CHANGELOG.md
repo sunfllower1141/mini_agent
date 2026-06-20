@@ -1,8 +1,84 @@
 # Changelog
+## 2026-06-20 -- Compact Error Messages Everywhere
+
+**Rationale:** Tool error outputs were verbose and inconsistent — some used the compact
+`✗ CODE: what → fix` format while others exposed raw exceptions (`Error: {e}`) or
+multi-line prose (`WARNING: DANGEROUS COMMAND BLOCKED: ...\nThis command was NOT
+executed. If you are absolutely sure, set force=True...`).
+
+### Changed
+- **test_tools.py:** Added `TestErrorSteering` (15 tests) that verify the full
+  error pipeline: compact format `✗ CODE: what → fix`, fingerprint extraction,
+  error classification (NOT_FOUND/TRANSIENT/VALIDATION/AUTHORIZATION), recovery
+  hint injection on repeated failures, and end-to-end steering correctness
+  (NOT_FOUND → list_directory, ANCHOR → re-read with hash_lines, BLOCKED →
+  force=true, TIMEOUT → simplify/break up, GUARD → read_file first, etc.).
+- **shell_ops.py:** All error messages converted to `_err()` compact format.
+  - `_check_dangerous_command`: 4-line block → `✗ BLOCKED: {reason} → force=true`
+  - Timeout messages: `Command timed out after {n}s` → `✗ TIMEOUT: {n}s → increase timeout or simplify`
+  - Safety blocked: `Search blocked by safety layer: {reason}` → `✗ BLOCKED: {reason}`
+  - Invalid regex: `Invalid regex: {err}` → `✗ INVALID: regex → {err}`
+  - File read error: `Error reading '{path}': {e}` → `✗ READ: {e}`
+  - Not a file: `Not a file: {path}` → `✗ NOT_FOUND: {path}`
+  - Generic error: `Error: {e} (hint: use --help or search_files)` → `✗ ERROR: {e}`
+- **file_ops.py:** All `Error reading/writing/listing/stating` → `✗ READ/WRITE/LIST/STAT: {e}`
+  - `Offset {n} exceeds file length ({m} lines)` → `✗ RANGE: offset={n} > {m}`
+  - `No definitions found in any of the provided files: {paths}` → `✗ NOT_FOUND: no definitions`
+  - All safety/access denied messages → `✗ BLOCKED: {reason}`
+- **agent_ops.py:** Added `_err` import; converted `Read blocked`, `File not found`,
+  `Failed to read image`, `OpenAI API request failed` to compact format.
+- **error_hints.py:** Added `timeout` fingerprint for run_shell; added `blocked`
+  fingerprint for read_file.
+
+### Result
+All tool errors now use the same `✗ CODE: what → fix` format, making them:
+- **Terse** — fits one line, no preamble
+- **Actionable** — the arrow points directly to the fix
+- **Consistent** — same format regardless of which tool failed
+
 
 Self-modification audit trail -- what the agent changed and why.
 
+## 2026-06-20 -- C/C++ AST-Native Tool Support
+
+**Rationale:** The 4 AST-native tools (`get_file_skeleton`, `get_function`,
+`replace_symbol`, `get_symbol_range`) only supported Python, JS, and TS.
+C/C++ is the most common compiled language family and needed support.
+
+### Changed
+- **`core/tree_sitter_parser.py`**: Added `.c`, `.h` → `c`/`tree_sitter_c` and
+  `.cpp`, `.cc`, `.cxx`, `.c++`, `.hpp`, `.hh`, `.hxx`, `.h++` → `cpp`/`tree_sitter_cpp`
+  to the extension-to-parser mapping.
+- **`tools/ast_ops.py`**: 
+  - Added `_get_declarator_name()` helper to traverse C/C++ nested declarator chains
+    (`function_declarator` → `declarator` → `identifier`/`field_identifier`).
+  - Extended `_collect_ts_definitions` with handlers for: `function_definition`,
+    `struct_specifier`, `union_specifier`, `class_specifier`, `enum_specifier`,
+    `type_definition` (typedef), `namespace_definition`, `template_declaration`,
+    `preproc_def`, `preproc_function_def`.
+  - Updated `_collect_calls` to handle C/C++ `call_expression` nodes (including
+    `field_expression` and `qualified_identifier` function targets).
+  - Updated `_walk_for_def` and `_get_enclosing_class_name` for C/C++ node types.
+  - Extended `_are_types_compatible` with C/C++ kind synonyms (struct/union/enum/
+    class/typedef/macro/namespace).
+  - Added `c` and `cpp` to `_guess_ext_from_tree` lang_map.
+  - Extended `_collect_definitions` routing to include C/C++ extensions.
+- **`requirements.txt`**: Added commented-out entries for `tree-sitter-c` and
+  `tree-sitter-cpp`.
+
+
 ## 2026-06-20 -- AST Tools Python `ast` Fallback (tree-sitter not installed)
+
+## 2026-06-20 -- Edit Insert Dedup (duplicate lines after edit_file)
+
+**Rationale:** When using `edit_file` with `edit_type: "insert_after"` or `"insert_before"`,
+the LLM often includes the anchor line itself in `new_text`, causing duplicate lines.
+The agent then wastes turns cleaning up these duplicates instead of doing real work.
+
+### Changed
+- **`tools/file_ops.py`**: Added dedup logic in `_edit_lines` insert path:
+  - `insert_after`: if `new_text`'s first line matches the anchor line, strip it
+  - `insert_before`: if `new_text`'s last line matches the anchor line, strip it
 
 **Rationale:** `get_function`, `get_file_skeleton`, `replace_symbol`, `get_symbol_range`
 all returned "Unsupported file type: .py" because `tree-sitter` packages are commented

@@ -29,6 +29,9 @@ pytest-timeout>=2.0         # prevents hanging tests (all platforms; especially 
 # tree-sitter>=0.21
 # tree-sitter-python
 # tree-sitter-javascript
+# tree-sitter-typescript
+# tree-sitter-c
+# tree-sitter-cpp
 
 # --- Browser automation (web skill, all platforms) ---
 # playwright>=1.40
