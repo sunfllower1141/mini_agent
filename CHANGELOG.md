@@ -2,6 +2,69 @@
 
 Self-modification audit trail -- what the agent changed and why.
 
+## 2026-06-20 -- AST Tools Python `ast` Fallback (tree-sitter not installed)
+
+**Rationale:** `get_function`, `get_file_skeleton`, `replace_symbol`, `get_symbol_range`
+all returned "Unsupported file type: .py" because `tree-sitter` packages are commented
+out in `requirements.txt` and `ast_ops.py` had no fallback to Python's built-in `ast`.
+This broke the "AST-NATIVE TOOLS" steering in the system prompt.
+
+### Changed
+- **`tools/ast_ops.py`**: Added `_ast_fallback_definitions(source)` using Python's built-in
+  `ast` module to extract function/class definitions with byte offsets, signatures, and
+  decorators. Added `_ast_fallback_skeleton`, `_ast_fallback_function`,
+  `_ast_fallback_replace`, `_ast_fallback_range` that use this fallback. All four
+  entry-point functions now attempt the Python `ast` fallback for `.py`/`.pyi` files
+  when tree-sitter is unavailable (+315 lines).
+## 2026-06-20 -- Eliminate Double-Read, Merge RAW_CACHE into FILE_CACHE, Remove Dead Code
+
+**Rationale:** The read_file path was reading files twice (once for hash, once for content),
+and RAW_CACHE duplicated FILE_CACHE's mtime semantics. Consolidating eliminates disk I/O
+and ~50 lines of redundant code.
+
+### Changed
+- **`tools/file_ops.py`**:
+  - Removed `_read_file_windows_worker` (~70 lines of dead code).
+  - `_read_file` now reads file once in text mode, computes MD5 hash from content,
+    passes `_content` to `_read_file_direct` (eliminating double-read).
+  - `_read_file_direct` accepts optional `_content` param; computes `all_lines`
+    from provided content instead of re-reading from disk.
+  - Merged RAW_CACHE into FILE_CACHE: `_get_cached_content` now serves both
+    read_file mtime caching and edit_lines disk-bypass, using same LRU cap.
+  - `_edit_lines` uses `_get_cached_content` first, falls back to disk read
+    (tracked by `_CACHE_DISK_READS`).
+  - Added file-not-found hint to error output (regression fix).
+  - Cleaned up extra blank lines.
+
+### Bug fixes
+- **`all_lines` undefined**: Fixed UnboundLocalError when `_content` param was passed
+  (computation was inside `else` block that only ran on disk-read path).
+- **Missing hint regression**: Restored "Hint: Check the path spelling" in read_file
+  error output (was lost when OSError handling moved from `_read_file_direct` to `_read_file`).
+
+### Tests
+- `tests/test_tools.py`: 96/96 pass
+- `tests/test_file_ops_extended.py`: 76/76 pass
+- Net: -47 lines in file_ops.py (89 added, 136 removed)
+
+## 2026-06-20 -- Raw-Content Cache for edit_file Speedup
+
+**Rationale:** `edit_file` / `_edit_lines` was always re-reading file content from disk
+even though `read_file` had just read the same file (seconds ago). Adding a parallel
+raw-content cache alongside the existing `_FILE_CACHE` eliminates redundant disk I/O.
+For single edits this saves ~0.5ms; for chained edits (edit→edit→edit) the win is larger.
+
+### Changed
+- **`tools/file_ops.py`**: Added `_RAW_CACHE` (plain-text content, LRU-capped at 50 entries)
+  with `_raw_cache_file()` and `_raw_cache_get()`. `read_file` (`_read_file_direct`) populates
+  the raw cache after reading. `_edit_lines` checks raw cache first, falls back to disk.
+  `_CACHE_HITS` and `_CACHE_DISK_READS` counters for diagnostics. Both caches updated
+  after successful edit.
+- **`_bench_edit_tools.py`**: Confirmed edit_lines is 5.2x–11.5x faster for bulk edits
+  (1 read + 1 write for N changes vs N reads + N writes).
+- **`_test_raw_cache.py`**: Smoke test for cache hit/miss on mtime change.
+
+
 ## 2026-06-20 -- edit_file Flat Args Removed + Schema Auto-Generation
 
 **Rationale:** The dual `edit_file` (flat args) / `edit_lines` (edits array) split caused

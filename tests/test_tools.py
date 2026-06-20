@@ -294,7 +294,7 @@ class TestEditFile(unittest.TestCase):
                              edits=[{"from": 1, "from_hash": "WrongAnchor", "new_text": "q"}])
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertFalse(result.success)
-        self.assertIn("anchor mismatch", result.content)
+        self.assertIn("ANCHOR", result.content)
 
     def test_outside_workspace_allowed(self):
         outside = tempfile.mkdtemp()
@@ -867,7 +867,7 @@ class TestErrorHints(unittest.TestCase):
         tc = _make_tool_call("read_file", path=path)
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertFalse(result.success)
-        self.assertIn("Hint:", result.content)
+        self.assertIn("NOT_FOUND", result.content)
         self.assertIn("list_directory", result.content.lower())
 
     def test_shell_streaming_stderr(self):
@@ -903,7 +903,7 @@ class TestErrorHints(unittest.TestCase):
                              edits=[{"from": 1, "from_hash": "WrongHash", "new_text": "replacement"}])
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertFalse(result.success)
-        self.assertIn("anchor mismatch", result.content)
+        self.assertIn("ANCHOR", result.content)
 
     def test_destructive_guard_removed(self):
         """Safety guards removed -- rm runs directly without force flag needed."""
@@ -915,10 +915,10 @@ class TestErrorHints(unittest.TestCase):
         tc = _make_tool_call("run_shell", command="nonexistent_cmd_xyz")
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertFalse(result.success)
-        # On Unix, a missing command returns code 127 and gets a "Hint:".
+        # On Unix, a missing command returns code 127 and gets a hint.
         # On Windows, the error is in stderr with exit code 1 (no hint prefix).
         if os.name != "nt":
-            self.assertIn("Hint:", result.content)
+            self.assertIn("ⓘ", result.content)
         else:
             self.assertIn("not recognized", result.content)
 

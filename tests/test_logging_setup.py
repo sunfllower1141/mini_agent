@@ -661,7 +661,7 @@ class TestEndToEndErrorPipeline(unittest.TestCase):
         try:
             log_tool_failure("edit_file",
                              "Error: old_string not found in '/path/to/file.py'\n"
-                             "Hint: The string must match exactly.",
+                             "The string must match exactly.",
                              fingerprint="not_found",
                              turn=1)
             entries = _get_log_entries(buf)

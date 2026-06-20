@@ -86,6 +86,15 @@ def get_file_skeleton(
     parser = _get_parser_for_ext(ext)
 
     if parser is None:
+        if ext in (".py", ".pyi") and _source is not None:
+            return _ast_fallback_skeleton(file_path, _source, include_anchors, show_call_graph, task_id)
+        if ext in (".py", ".pyi"):
+            try:
+                with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                    _source = f.read()
+            except (OSError, UnicodeDecodeError) as e:
+                return f"Could not read file: {e}"
+            return _ast_fallback_skeleton(file_path, _source, include_anchors, show_call_graph, task_id)
         return f"Unsupported file type: {ext}"
 
     if _source is not None:
@@ -203,6 +212,15 @@ def get_function(
     parser = _get_parser_for_ext(ext)
 
     if parser is None:
+        if ext in (".py", ".pyi") and _source is not None:
+            return _ast_fallback_function(file_path, _source, function_names, include_anchors, task_id)
+        if ext in (".py", ".pyi"):
+            try:
+                with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                    _source = f.read()
+            except (OSError, UnicodeDecodeError) as e:
+                return f"Could not read file: {e}", []
+            return _ast_fallback_function(file_path, _source, function_names, include_anchors, task_id)
         return f"Unsupported file type: {ext}", []
 
     if _source is not None:
@@ -600,6 +618,8 @@ def replace_symbol(
     parser = _get_parser_for_ext(ext)
 
     if parser is None:
+        if ext in (".py", ".pyi"):
+            return _ast_fallback_replace(file_path, symbol_name, new_text, symbol_type)
         return f"Unsupported file type: {ext}"
 
     try:
@@ -683,6 +703,8 @@ def get_symbol_range(
     ext = os.path.splitext(file_path)[1].lower()
     parser = _get_parser_for_ext(ext)
     if parser is None:
+        if ext in (".py", ".pyi"):
+            return _ast_fallback_range(file_path, symbol, type, _source)
         return None
 
     if _source is not None:
@@ -890,3 +912,318 @@ def _get_extended_range(
             break
 
     return start_index, end_index, start_line
+    return start_index, end_index, start_line
+
+
+# ---------------------------------------------------------------------------
+# Python ast fallback (when tree-sitter is not installed)
+# ---------------------------------------------------------------------------
+
+
+def _byte_offsets(source: str) -> list[int]:
+    """Compute cumulative byte offsets for the start of each line."""
+    offsets = [0]
+    for line in source.split("\n"):
+        offsets.append(offsets[-1] + len(line) + 1)  # +1 for \n
+    return offsets
+
+
+def _ast_fallback_definitions(source: str) -> list[dict[str, Any]]:
+    """Extract function/class definitions using Python's built-in ast."""
+    import ast as _ast
+
+    tree = _ast.parse(source)
+    offsets = _byte_offsets(source)
+    results: list[dict[str, Any]] = []
+
+    def _walk(body: list, parent_name: str = "") -> None:
+        for node in body:
+            if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                name = node.name
+                full_name = f"{parent_name}.{name}" if parent_name else name
+
+                # Signature: from start to body start
+                sig_start_byte = offsets[node.lineno - 1] + node.col_offset
+                body_first = node.body[0] if node.body else node
+                sig_end_byte = offsets[body_first.lineno - 1] + body_first.col_offset
+                signature = source[sig_start_byte:sig_end_byte].strip()
+                if signature.endswith(":"):
+                    signature = signature[:-1].strip()
+
+                # Decorators
+                decorators = []
+                for dec in node.decorator_list:
+                    decorators.append(dec.lineno - 1)
+
+                # Docstring
+                docstring_line = None
+                if (node.body and isinstance(node.body[0], _ast.Expr)
+                        and isinstance(node.body[0].value, _ast.Constant)
+                        and isinstance(node.body[0].value.value, str)):
+                    docstring_line = node.body[0].lineno - 1
+
+                start_line = node.lineno - 1
+                end_line = (node.end_lineno or node.lineno)
+                body_start_line = node.body[0].lineno - 1 if node.body else start_line + 1
+                body_end_line = (node.body[-1].end_lineno or node.body[-1].lineno) if node.body else end_line
+
+                kind = "method" if parent_name else "function"
+                results.append({
+                    "kind": kind,
+                    "name": full_name,
+                    "parent_name": parent_name or None,
+                    "signature": signature,
+                    "decorators": decorators,
+                    "docstring": docstring_line,
+                    "start_line": start_line,
+                    "end_line": end_line,
+                    "start_byte": sig_start_byte,
+                    "end_byte": offsets[end_line] if end_line < len(offsets) else len(source),
+                    "body_start_line": body_start_line,
+                    "body_end_line": body_end_line,
+                    "calls": [],
+                })
+
+            elif isinstance(node, _ast.ClassDef):
+                name = node.name
+                full_name = f"{parent_name}.{name}" if parent_name else name
+
+                sig_start_byte = offsets[node.lineno - 1] + node.col_offset
+                body_first = node.body[0] if node.body else node
+                sig_end_byte = offsets[body_first.lineno - 1] + body_first.col_offset
+                signature = source[sig_start_byte:sig_end_byte].strip()
+                if signature.endswith(":"):
+                    signature = signature[:-1].strip()
+
+                start_line = node.lineno - 1
+                end_line = (node.end_lineno or node.lineno)
+                body_start_line = node.body[0].lineno - 1 if node.body else start_line + 1
+                body_end_line = (node.body[-1].end_lineno or node.body[-1].lineno) if node.body else end_line
+
+                results.append({
+                    "kind": "class",
+                    "name": full_name,
+                    "parent_name": parent_name or None,
+                    "signature": signature,
+                    "decorators": [],
+                    "docstring": None,
+                    "start_line": start_line,
+                    "end_line": end_line,
+                    "start_byte": sig_start_byte,
+                    "end_byte": offsets[end_line] if end_line < len(offsets) else len(source),
+                    "body_start_line": body_start_line,
+                    "body_end_line": body_end_line,
+                    "calls": [],
+                })
+
+                # Recurse into class body
+                _walk(node.body, full_name)
+
+    _walk(tree.body)
+    return results
+
+
+def _ast_fallback_skeleton(
+    file_path: str, source: str,
+    include_anchors: bool = False,
+    show_call_graph: bool = False,
+    task_id: Optional[str] = None,
+) -> str:
+    """Build file skeleton using Python's built-in ast."""
+    defs = _ast_fallback_definitions(source)
+    if not defs:
+        return "No definitions found (empty file or no functions/classes)"
+
+    lines = source.split("\n")
+    gutter_width = max(len(str(len(lines))), 1)
+
+    # Anchors
+    anchors: list[str] | None = None
+    if include_anchors:
+        anchors = AnchorStateManager.reconcile(file_path, lines, task_id)
+
+    out_lines: list[str] = []
+    for defn in defs:
+        start_line = defn["start_line"]
+        end_line = defn["end_line"]
+        kind = defn["kind"]
+        name = defn.get("name", "?")
+        signature = defn.get("signature", "")
+
+        sig_line = lines[start_line].strip() if start_line < len(lines) else ""
+        if include_anchors and anchors and start_line < len(anchors):
+            anchor = anchors[start_line]
+            out_lines.append(_format_anchored(start_line + 1, gutter_width, anchor, sig_line))
+        else:
+            out_lines.append(f"{start_line + 1}: {sig_line}")
+
+        for d in defn.get("decorators", []):
+            dec_line = lines[d].strip() if d < len(lines) else ""
+            if include_anchors and anchors and d < len(anchors):
+                out_lines.insert(-1, _format_anchored(d + 1, gutter_width, anchors[d], dec_line))
+            else:
+                out_lines.insert(-1, f"{d + 1}: {dec_line}")
+
+        if defn.get("docstring") is not None:
+            ds_line = defn["docstring"]
+            if include_anchors and anchors and ds_line < len(anchors):
+                out_lines.append(_format_anchored(ds_line + 1, gutter_width, anchors[ds_line], lines[ds_line].strip()))
+            else:
+                out_lines.append(f"{ds_line + 1}: {lines[ds_line].strip()}")
+
+        body_start = defn.get("body_start_line", start_line + 1)
+        body_end = defn.get("body_end_line", end_line)
+        body_line_count = body_end - body_start
+        if body_line_count > 0:
+            out_lines.append(f"    ... ({body_line_count} implementation lines) ...")
+
+        out_lines.append("")
+
+    return "\n".join(out_lines)
+
+
+def _ast_fallback_function(
+    file_path: str, source: str,
+    function_names: list[str],
+    include_anchors: bool = False,
+    task_id: Optional[str] = None,
+) -> tuple[str, list[str]]:
+    """Extract specific functions using Python's built-in ast."""
+    defs = _ast_fallback_definitions(source)
+    lines = source.split("\n")
+    gutter_width = max(len(str(len(lines))), 1)
+
+    matched = [d for d in defs if d["name"] in function_names
+               or d["name"].split(".")[-1] in function_names]
+
+    if not matched:
+        return (
+            f"None of the requested functions ({', '.join(function_names)}) "
+            f"were found in {file_path}",
+            [],
+        )
+
+    found_names: list[str] = []
+    results: list[str] = []
+
+    for defn in matched:
+        name = defn["name"]
+        start_line = defn["start_line"]
+        end_line = defn["end_line"]
+
+        func_lines = lines[start_line:end_line]
+        func_source = "\n".join(func_lines)
+
+        func_hash = _hash_content(func_source)
+        hash_key = f"{file_path}::{name}#{'anchored' if include_anchors else 'plain'}"
+        old_hash = _FUNCTION_HASH_CACHE.get(hash_key)
+        _FUNCTION_HASH_CACHE[hash_key] = func_hash
+
+        header = f"--- {file_path} ---\n## {name}"
+        if old_hash == func_hash:
+            results.append(f"{header}\n[no changes since last read]")
+            found_names.append(name)
+            continue
+
+        if include_anchors:
+            anchors = AnchorStateManager.reconcile(file_path, lines, task_id)
+            anchored_body = "\n".join(
+                _format_anchored(start_line + i + 1, gutter_width, anchors[start_line + i], l)
+                for i, l in enumerate(func_lines)
+                if start_line + i < len(anchors)
+            )
+            func_hash_line = f"[Function Hash: {func_hash}]"
+            anchor_header = "All Hash Anchors below are stable and can be used with edit_file directly."
+            results.append(
+                f"{header}\n{func_hash_line}\n{anchor_header}\n{anchored_body}"
+            )
+        else:
+            results.append(f"{header}\n{func_source}")
+
+        found_names.append(name)
+
+    return "\n\n".join(results), found_names
+
+
+def _ast_fallback_replace(
+    file_path: str, symbol_name: str, new_text: str, symbol_type: str = "function",
+) -> str:
+    """Replace a symbol using Python's built-in ast."""
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            source = f.read()
+    except (OSError, UnicodeDecodeError) as e:
+        return f"Could not read file: {e}"
+
+    defs = _ast_fallback_definitions(source)
+
+    target = None
+    for defn in defs:
+        name = defn.get("name", "")
+        if "." in symbol_name:
+            if name == symbol_name:
+                target = defn
+                break
+        else:
+            if name == symbol_name or name.endswith(f".{symbol_name}"):
+                target = defn
+                break
+
+    if target is None:
+        return f"Symbol '{symbol_name}' not found in {file_path}"
+
+    start_byte = target["start_byte"]
+    end_byte = target["end_byte"]
+
+    new_source = source[:start_byte] + new_text + source[end_byte:]
+
+    try:
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(new_source)
+    except OSError as e:
+        return f"Error writing file: {e}"
+
+    AnchorStateManager.clear_state(file_path)
+    return (
+        f"Successfully replaced symbol '{symbol_name}' in {file_path}. "
+        f"Any existing hash anchors for this symbol are now stale."
+    )
+
+
+def _ast_fallback_range(
+    file_path: str, symbol: str, type: Optional[str] = None,
+    _source: Optional[str] = None,
+) -> dict[str, Any] | None:
+    """Get symbol byte range using Python's built-in ast."""
+    if _source is not None:
+        source = _source
+    else:
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                source = f.read()
+        except (OSError, UnicodeDecodeError):
+            return None
+
+    defs = _ast_fallback_definitions(source)
+
+    target = None
+    for defn in defs:
+        name = defn.get("name", "")
+        if "." in symbol:
+            if name == symbol:
+                target = defn
+                break
+        else:
+            if name == symbol or name.endswith(f".{symbol}"):
+                target = defn
+                break
+
+    if target is None:
+        return None
+
+    return {
+        "startIndex": target["start_byte"],
+        "endIndex": target["end_byte"],
+        "startLine": target["start_line"],
+        "nameText": target["name"],
+    }

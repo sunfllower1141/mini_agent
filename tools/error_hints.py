@@ -19,6 +19,23 @@ from logging_setup import get_logger
 
 _log = get_logger("error_hints")
 
+
+# ---------------------------------------------------------------------------
+# Compact error formatting -- token-efficient, action-steering errors
+# ---------------------------------------------------------------------------
+# Format: "✗ CODE: what → fix" or "✗ CODE: what"
+# The ✗ prefix signals failure; CODE is short (≤20 chars); → points to fix.
+
+def _err(code: str, what: str, fix: str = "") -> str:
+    """Build a compact, actionable error message."""
+    suffix = f" → {fix}" if fix else ""
+    return f"✗ {code}: {what}{suffix}"
+
+
+def _hint(fix: str) -> str:
+    """Build a compact hint suffix."""
+    return f"  ⓘ {fix}"
+
 # Cache: pre-built valid params strings for _build_error_hint (P0.2 perf)
 # Maps tool name -> (valid_params_str, required_set)
 _TOOL_PARAM_CACHE: dict[str, tuple[str, set[str]]] = {}
@@ -28,41 +45,40 @@ _TOOL_PARAM_CACHE: dict[str, tuple[str, set[str]]] = {}
 # ---------------------------------------------------------------------------
 _ERROR_HINTS: dict[str, list[tuple[str, str]]] = {
     "read_file": [
-        ("not found", "The file does not exist. Try list_directory to see available files."),
-        ("No such file", "The file does not exist. Try list_directory to see available files."),
-        ("FileNotFoundError", "The file does not exist. Try list_directory to explore the workspace."),
+        ("not found", "file not found → list_directory to browse"),
+        ("No such file", "file not found → list_directory to browse"),
+        ("FileNotFoundError", "file not found → list_directory to browse"),
     ],
     "search_files": [
-        ("No matches", "No matches found. Try find_symbol, or broaden your search with regex or a shorter/simpler pattern."),
+        ("No matches", "no match → broaden with regex or shorter pattern"),
     ],
     "write_file": [
-        ("blocked", "Write blocked by safety layer. Use a path inside the workspace or enable unrestricted mode."),
-        ("outside workspace", "Write blocked -- path is outside the workspace. Try a path inside the workspace root."),
+        ("blocked", "path blocked → use workspace path"),
+        ("outside workspace", "path outside workspace → use workspace path"),
     ],
     "edit_file": [
-        ("blocked", "Edit blocked by safety layer. Use a path inside the workspace or enable unrestricted mode."),
-        ("outside workspace", "Edit blocked -- path is outside the workspace. Try a path inside the workspace root."),
-        ("hash mismatch", "Hash mismatch -- the file content has changed since you read it. Re-run read_file(hash_lines=True) on this file to get the current hashes, then retry with the correct hash anchors."),
-        ("missing edit specification", "Missing edit specification. Provide hash anchor params (from, from_hash, to, to_hash, new_text) or fallback params (old_string, new_string)."),
+        ("blocked", "path blocked → use workspace path"),
+        ("outside workspace", "path outside workspace → use workspace path"),
+        ("hash mismatch", "stale anchors → re-read_file(hash_lines=True) then retry"),
+        ("missing edit specification", "no edit spec → provide from/from_hash/to/to_hash/new_text"),
     ],
     "run_shell": [
-        ("not found", "Command not found. Check that it is installed and on your PATH."),
-        ("command not found", "Command not found. Check that it is installed and on your PATH."),
-        ("No such file or directory", "Command not found. Check that it is installed and on your PATH, or check for typos."),
+        ("not found", "cmd not found → check PATH / spelling"),
+        ("command not found", "cmd not found → check PATH / spelling"),
+        ("No such file or directory", "cmd not found → check PATH / spelling"),
     ],
 }
 
 
 def _build_error_hint(name: str, exc: Exception = None, error_msg: str = "") -> str:
-    """Build a short self-correction hint for the LLM when a tool call fails.
+    """Build a compact self-correction hint for the LLM when a tool call fails.
 
-    Includes the tool name, the parse/execution error, the valid parameter
-    names, and heuristics for common failure patterns so the LLM can
-    immediately retry with corrected arguments.
+    Returns a single line: "retry → params: path (required), content (required)"
+    Only includes heuristics when the error isn't already self-explanatory.
     """
     error_text = error_msg or str(exc) if exc else ""
 
-    # 1. Check heuristic pattern hints
+    # 1. Check heuristic pattern hints (only for non-compact errors)
     heuristic: str | None = None
     name_lower = name.lower()
     if name_lower in _ERROR_HINTS:
@@ -71,17 +87,7 @@ def _build_error_hint(name: str, exc: Exception = None, error_msg: str = "") -> 
                 heuristic = suggestion
                 break
 
-    # 2. Build the hint message
-    hint_parts = []
-    if exc is not None:
-        hint_parts.append(f"Tool '{name}' failed: {exc}")
-    elif error_msg:
-        hint_parts.append(f"Tool '{name}' failed: {error_msg[:200]}")
-
-    if heuristic:
-        hint_parts.append(f"Hint: {heuristic}")
-
-    # P0.2: Pre-built cache avoids O(n) TOOLS scan on every failure
+    # 2. Build compact hint: "retry → params: ..."
     cached = _TOOL_PARAM_CACHE.get(name)
     if cached is None:
         valid_params_list: list[str] = []
@@ -91,31 +97,45 @@ def _build_error_hint(name: str, exc: Exception = None, error_msg: str = "") -> 
                 required = set(tool_def["function"].get("parameters", {}).get("required", []))
                 for pname, pinfo in props.items():
                     ptype = pinfo.get("type", "any")
-                    marker = " (required)" if pname in required else ""
-                    valid_params_list.append(f"{pname}: {ptype}{marker}")
+                    marker = "*" if pname in required else ""
+                    valid_params_list.append(f"{pname}{marker}:{ptype}")
                 _TOOL_PARAM_CACHE[name] = (", ".join(valid_params_list), required)
                 break
         else:
             _TOOL_PARAM_CACHE[name] = ("", set())
     valid_params_str, _required_set = _TOOL_PARAM_CACHE[name]
-    if valid_params_str:
-        hint_parts.append(f"Valid parameters: {valid_params_str}")
 
-    hint_parts.append("Please fix your tool call arguments and retry.")
-    return "\n".join(hint_parts)
+    parts = []
+    if valid_params_str:
+        parts.append(f"retry → {valid_params_str}")
+    if heuristic:
+        parts.append(heuristic)
+    return " | ".join(parts) if parts else "retry with corrected args"
 
 
 def _fingerprint_error(name: str, content: str) -> str:
     """Extract a stable, short fingerprint from a tool error message.
 
-    Returns one of: 'not found', 'whitespace', 'ambiguous', 'count',
-    'blocked', 'exists', 'offset', 'invalid regex', 'timed out',
-    'failures', or a truncated version of the first 60 chars of content.
+    Returns one of: 'not_found', 'guard', 'blocked', 'anchor', 'content',
+    'missing', 'range', 'whitespace', 'ambiguous', 'count', 'exists',
+    'offset', 'invalid_regex', 'timed_out', 'failures', 'not_found',
+    or a truncated version of the first 60 chars of content.
     """
     cl = content.lower()
+
+    # Compact format: "✗ CODE: ..." → extract CODE as fingerprint
+    if cl.startswith("✗ "):
+        try:
+            code = cl[2:].split(":", 1)[0].strip().lower()
+            if code:
+                return code
+        except (ValueError, IndexError):
+            pass
+
+    # Legacy / fallback substring matching
     if name == "edit_file":
-        if "not found" in cl or "does not exist" in cl:
-            return "not found"
+        if "not_found" in cl or "not found" in cl or "does not exist" in cl:
+            return "not_found"
         if "whitespace" in cl or "indentation" in cl or "tab" in cl or "trailing" in cl:
             return "whitespace"
         if "ambiguous" in cl or "multiple" in cl or "appears" in cl:
@@ -123,30 +143,30 @@ def _fingerprint_error(name: str, content: str) -> str:
         if "count" in cl or "invalid count" in cl:
             return "count"
     elif name == "write_file":
-        if "blocked" in cl or "safety" in cl:
-            return "blocked"
+        if "blocked" in cl or "safety" in cl or "guard" in cl:
+            return "guard" if "guard" in cl else "blocked"
         if "exists" in cl or "overwrite" in cl:
             return "exists"
     elif name == "read_file":
-        if "not found" in cl or "no such file" in cl:
-            return "not found"
+        if "not_found" in cl or "not found" in cl or "no such file" in cl:
+            return "not_found"
         if "offset" in cl or "exceeds" in cl:
             return "offset"
     elif name == "search_files":
         if "no matches" in cl or "not found" in cl:
-            return "not found"
+            return "not_found"
         if "invalid" in cl and "regex" in cl:
-            return "invalid regex"
+            return "invalid_regex"
     elif name == "run_shell":
-        if "not found" in cl or "command not found" in cl:
-            return "not found"
+        if "not_found" in cl or "not found" in cl or "command not found" in cl:
+            return "not_found"
         if "blocked" in cl or "destructive" in cl:
             return "blocked"
         if "timed out" in cl or "timeout" in cl:
-            return "timed out"
+            return "timed_out"
     elif name in ("find_symbol", "find_usages"):
         if "no match" in cl or "not found" in cl:
-            return "not found"
+            return "not_found"
     elif name in ("run_tests", "verify"):
         if "fail" in cl or "FAILED" in cl:
             return "failures"
@@ -162,7 +182,12 @@ def _fingerprint_error(name: str, content: str) -> str:
 
 _ERROR_CLASS_MAP: dict[str, dict[str, tuple[ErrorClass, bool, int]]] = {
     "edit_file": {
-        "not found": (ErrorClass.NOT_FOUND, False, 0),
+        "not_found": (ErrorClass.NOT_FOUND, False, 0),
+        "guard": (ErrorClass.VALIDATION, True, 0),
+        "missing": (ErrorClass.VALIDATION, True, 0),
+        "range": (ErrorClass.VALIDATION, True, 0),
+        "anchor": (ErrorClass.VALIDATION, True, 0),
+        "content": (ErrorClass.VALIDATION, True, 0),
         "whitespace": (ErrorClass.VALIDATION, True, 0),
         "ambiguous": (ErrorClass.VALIDATION, True, 0),
         "count": (ErrorClass.VALIDATION, True, 0),
@@ -171,32 +196,38 @@ _ERROR_CLASS_MAP: dict[str, dict[str, tuple[ErrorClass, bool, int]]] = {
     },
     "write_file": {
         "blocked": (ErrorClass.AUTHORIZATION, False, 0),
+        "guard": (ErrorClass.VALIDATION, True, 0),
         "exists": (ErrorClass.VALIDATION, True, 0),
     },
     "read_file": {
-        "not found": (ErrorClass.NOT_FOUND, False, 0),
+        "not_found": (ErrorClass.NOT_FOUND, False, 0),
+        "missing": (ErrorClass.VALIDATION, True, 0),
         "offset": (ErrorClass.VALIDATION, True, 0),
     },
     "run_shell": {
-        "not found": (ErrorClass.NOT_FOUND, False, 0),
+        "not_found": (ErrorClass.NOT_FOUND, False, 0),
         "blocked": (ErrorClass.AUTHORIZATION, False, 0),
-        "timed out": (ErrorClass.TRANSIENT, True, 2000),
+        "timed_out": (ErrorClass.TRANSIENT, True, 2000),
     },
     "search_files": {
-        "not found": (ErrorClass.NOT_FOUND, False, 0),
-        "invalid regex": (ErrorClass.VALIDATION, True, 0),
+        "not_found": (ErrorClass.NOT_FOUND, False, 0),
+        "invalid_regex": (ErrorClass.VALIDATION, True, 0),
     },
     "find_symbol": {
-        "not found": (ErrorClass.NOT_FOUND, False, 0),
+        "not_found": (ErrorClass.NOT_FOUND, False, 0),
     },
     "find_usages": {
-        "not found": (ErrorClass.NOT_FOUND, False, 0),
+        "not_found": (ErrorClass.NOT_FOUND, False, 0),
     },
     "run_tests": {
         "failures": (ErrorClass.PARTIAL_SUCCESS, False, 0),
     },
     "verify": {
         "failures": (ErrorClass.PARTIAL_SUCCESS, False, 0),
+    },
+    "replace_symbol": {
+        "not_found": (ErrorClass.NOT_FOUND, False, 0),
+        "guard": (ErrorClass.VALIDATION, True, 0),
     },
 }
 
@@ -229,22 +260,22 @@ def _classify_result(result: ToolResult, tool_name: str) -> None:
         result.error_class, result.retryable, result.retry_after_ms = classified
         return
 
-    # Fallback heuristics from content
-    if any(kw in content for kw in ("timeout", "timed out", "connection", "network", "unreachable")):
+    # Fallback heuristics from content (handles both compact ✗ CODE: and legacy formats)
+    if any(kw in content for kw in ("timeout", "timed out", "timed_out", "connection", "network", "unreachable")):
         result.error_class = ErrorClass.TRANSIENT
         result.retryable = True
         result.retry_after_ms = 2000
-    elif any(kw in content for kw in ("not found", "no such file", "does not exist", "no match")):
+    elif any(kw in content for kw in ("not_found", "not found", "no such file", "does not exist", "no match")):
         result.error_class = ErrorClass.NOT_FOUND
         result.retryable = False
-    elif any(kw in content for kw in ("blocked", "safety", "permission denied", "unauthorized", "forbidden")):
+    elif any(kw in content for kw in ("blocked", "guard", "safety", "permission denied", "unauthorized", "forbidden")):
         result.error_class = ErrorClass.AUTHORIZATION
         result.retryable = False
     elif any(kw in content for kw in ("rate limit", "too many requests", "429")):
         result.error_class = ErrorClass.RATE_LIMIT
         result.retryable = True
         result.retry_after_ms = 5000
-    elif any(kw in content for kw in ("invalid", "malformed", "bad", "unknown parameter", "missing")):
+    elif any(kw in content for kw in ("invalid", "malformed", "bad", "unknown parameter", "missing", "anchor", "content", "range")):
         result.error_class = ErrorClass.VALIDATION
         result.retryable = True
     else:
@@ -254,43 +285,54 @@ def _classify_result(result: ToolResult, tool_name: str) -> None:
 
 # Mapping of (tool_name, fingerprint) -> recovery hint injected on repeated failure.
 # Fingerprints come from _fingerprint_error() above.
+# Hints are kept compact: just the action to take.
 _FAILURE_PATTERNS: dict[str, dict[str, str]] = {
     "edit_file": {
-        "not found": "The string must match exactly -- check whitespace, indentation, and line endings. Try read_file first to see the exact text.",
-        "whitespace": "Whitespace mismatch. Try copying the exact text from read_file output, including all leading/trailing spaces.",
-        "ambiguous": "Multiple matches found. Use a more specific old_string or set count=-1 to replace all.",
-        "count": "Invalid count value. Use count=1 (first only) or count=-1 (all occurrences).",
-        "hash mismatch": "Hash mismatch: the file has changed since you read it. Re-read with read_file(hash_lines=True) and retry with the correct hashes.",
-        "missing edit specification": "Provide hash anchor params (from, from_hash, to, to_hash, new_text) or fallback params (old_string, new_string).",
+        "not_found": "re-read with read_file(hash_lines=True) for current anchors",
+        "guard": "read_file(path, hash_lines=True) first",
+        "missing": "provide from/from_hash for each edit",
+        "range": "line out of range; re-read file to see current length",
+        "anchor": "re-read with read_file(hash_lines=True) for current anchors",
+        "content": "re-read with read_file(hash_lines=True) for current content",
+        "whitespace": "copy exact whitespace from read_file output",
+        "ambiguous": "use a more specific string or count=-1",
+        "count": "use count=1 or count=-1",
+        "hash mismatch": "re-read with read_file(hash_lines=True)",
+        "missing edit specification": "provide from/from_hash/to/to_hash/new_text",
     },
     "write_file": {
-        "blocked": "Use force=True to bypass overwrite protection, or write to a different path.",
-        "exists": "File already exists. Use force=True to overwrite, or write to a different path.",
+        "blocked": "use path inside workspace or force=True",
+        "guard": "read_file(path) first, then write",
+        "exists": "use force=True to overwrite",
     },
     "read_file": {
-        "not found": "File does not exist. Check the path with list_directory or file_info first.",
-        "offset": "Offset exceeds file length. Use file_info to check the file size, then reduce offset.",
+        "not_found": "check path with list_directory or file_info",
+        "offset": "reduce offset; use file_info to check size",
     },
     "run_shell": {
-        "not found": "Command not found. Check the spelling and that it is installed.",
-        "blocked": "Command blocked by safety guard. Use force=True to bypass, or rephrase to use only safe operations.",
-        "timed out": "Command timed out. Try breaking the work into smaller steps, or increase timeout.",
+        "not_found": "check command spelling and that it is installed",
+        "blocked": "use force=True or rephrase to safe operations",
+        "timed_out": "break into smaller steps or increase timeout",
     },
     "search_files": {
-        "not found": "No matches found. Try broadening the search pattern, or search in a parent directory.",
-        "invalid regex": "Invalid regex pattern. Check escaping -- use raw strings or double-escape backslashes.",
+        "not_found": "broaden pattern or search parent directory",
+        "invalid_regex": "check escaping; use raw strings",
     },
     "find_symbol": {
-        "not found": "Symbol not found. Try find_usages instead, or search_files for the function name as text.",
+        "not_found": "try find_usages or search_files",
     },
     "find_usages": {
-        "not found": "No usages found. The symbol may not be referenced anywhere, or try search_files for a substring match.",
+        "not_found": "try search_files for substring match",
     },
     "run_tests": {
-        "failures": "Tests failed. Use diagnose_failures to get structured failure details, then read the failing test files and fix them.",
+        "failures": "use diagnose_failures, read failing files, fix",
     },
     "verify": {
-        "failures": "Verification found issues. Review the lint output and test failures above, fix them, then re-run verify.",
+        "failures": "review lint output and test failures, fix, re-run",
+    },
+    "replace_symbol": {
+        "not_found": "check symbol name spelling",
+        "guard": "read_file(path) first",
     },
 }
 

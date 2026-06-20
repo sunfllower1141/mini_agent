@@ -1,8 +1,13 @@
 # mini_agent Architecture Map
-# Last updated: 2026-06-20 (edit_file schema unified with edit_lines — flat args removed, edits[] array required)
+# Last updated: 2026-06-20 (AST tools now fall back to Python's built-in `ast` when tree-sitter unavailable)
 #
 # This file is the agent's map of the codebase. Update it after completed changes.
 # Behavioral rules live in AGENTS.md. Long-term facts live in core memory.
+
+- **AST tools Python `ast` fallback (2026-06-20)** — `get_function`, `get_file_skeleton`,
+  `replace_symbol`, `get_symbol_range` now fall back to Python's built-in `ast` module
+  when tree-sitter is not installed. Previously returned "Unsupported file type: .py".
+  Added `_ast_fallback_definitions` and four fallback functions (+315 lines in ast_ops.py).
 
 ## Active Decisions
 

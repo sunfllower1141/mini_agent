@@ -17,6 +17,7 @@ import threading
 
 from core.safety import ReadSafetyGate, WriteSafetyGate
 from tools import _register, _summarize, ToolResult, _TASK_REGISTRY, get_modified_files
+from tools.error_hints import _err, _hint
 
 _WINDOWS = platform.system() == "Windows"
 _WINDOWS_POPEN_KWARGS = {"creationflags": subprocess.CREATE_NO_WINDOW} if _WINDOWS else {}
@@ -501,13 +502,13 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
         elif proc.returncode == 0 and not stderr:
             # ACI upgrade: explicit empty-output message (SWE-agent pattern).
             # Silence is ambiguous -- the model needs to know the command ran OK.
-            hint = "OK (no output)"
+            hint = _hint("no output")
             # Detect likely no-op patterns in python -c commands
             if "python" in command and " -c " in command:
                 if "#" in command:
-                    hint += " Hint: '#' comments out rest in python -c. Use ';' or multi-line script."
+                    hint += _hint("# comments out rest; use script file instead")
                 elif any(kw in command for kw in (" if ", " try:", " for ", " while ", " with ", " def ", " class ")):
-                    hint += " Hint: Compound statements can't follow ';' in python -c. Use a script."
+                    hint += _hint("compound statements need script file, not -c")
             parts.append(hint)
         if stderr:
             err_output = stderr.rstrip()
@@ -522,11 +523,11 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
         if _windows_cmd_note:
             content_out += _windows_cmd_note
         if proc.returncode == 127:
-            content_out += "\nHint: command not found"
+            content_out += _hint("command not found")
         _unregister_proc(proc)
         return ToolResult(success=proc.returncode == 0, content=content_out)
     except Exception as e:
-        hint = " (use --help or search_files for correct syntax)"
+        hint = " " + _hint("use --help or search_files for syntax")
         return ToolResult(success=False, content=f"Error: {e}{hint}{_windows_cmd_note}")
 
 

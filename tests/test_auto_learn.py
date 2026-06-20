@@ -56,21 +56,21 @@ class TestFailurePatternsDict(unittest.TestCase):
         the fallback truncated-content fingerprint)."""
         # Tools covered by _fingerprint_error
         tests = [
-            ("edit_file", "not found in file", "not found"),
+            ("edit_file", "not found in file", "not_found"),
             ("edit_file", "whitespace mismatch", "whitespace"),
             ("edit_file", "ambiguous match", "ambiguous"),
             ("edit_file", "invalid count", "count"),
             ("write_file", "blocked by safety", "blocked"),
             ("write_file", "file already exists", "exists"),
-            ("read_file", "file not found", "not found"),
+            ("read_file", "file not found", "not_found"),
             ("read_file", "offset exceeds file", "offset"),
-            ("run_shell", "command not found", "not found"),
+            ("run_shell", "command not found", "not_found"),
             ("run_shell", "blocked: destructive", "blocked"),
-            ("run_shell", "timed out after 60s", "timed out"),
-            ("search_files", "no matches found", "not found"),
-            ("search_files", "invalid regex pattern", "invalid regex"),
-            ("find_symbol", "no matches found", "not found"),
-            ("find_usages", "no matches found", "not found"),
+            ("run_shell", "timed out after 60s", "timed_out"),
+            ("search_files", "no matches found", "not_found"),
+            ("search_files", "invalid regex pattern", "invalid_regex"),
+            ("find_symbol", "no matches found", "not_found"),
+            ("find_usages", "no matches found", "not_found"),
             ("run_tests", "FAILED", "failures"),
             ("verify", "FAILED", "failures"),
         ]
@@ -85,8 +85,8 @@ class TestFingerprintError(unittest.TestCase):
     """_fingerprint_error must return the correct fingerprint for each error type."""
 
     def test_edit_file_not_found(self) -> None:
-        self.assertEqual(_fingerprint_error("edit_file", "old_string not found in file"), "not found")
-        self.assertEqual(_fingerprint_error("edit_file", "file does not exist"), "not found")
+        self.assertEqual(_fingerprint_error("edit_file", "old_string not found in file"), "not_found")
+        self.assertEqual(_fingerprint_error("edit_file", "file does not exist"), "not_found")
 
     def test_edit_file_whitespace(self) -> None:
         self.assertEqual(_fingerprint_error("edit_file", "whitespace mismatch detected"), "whitespace")
@@ -112,39 +112,39 @@ class TestFingerprintError(unittest.TestCase):
         self.assertEqual(_fingerprint_error("write_file", "overwrite is disabled"), "exists")
 
     def test_read_file_not_found(self) -> None:
-        self.assertEqual(_fingerprint_error("read_file", "file not found"), "not found")
-        self.assertEqual(_fingerprint_error("read_file", "no such file or directory"), "not found")
+        self.assertEqual(_fingerprint_error("read_file", "file not found"), "not_found")
+        self.assertEqual(_fingerprint_error("read_file", "no such file or directory"), "not_found")
 
     def test_read_file_offset(self) -> None:
         self.assertEqual(_fingerprint_error("read_file", "offset exceeds file length"), "offset")
         self.assertEqual(_fingerprint_error("read_file", "offset 5000 exceeds"), "offset")
 
     def test_search_files_not_found(self) -> None:
-        self.assertEqual(_fingerprint_error("search_files", "no matches found"), "not found")
-        self.assertEqual(_fingerprint_error("search_files", "pattern not found"), "not found")
+        self.assertEqual(_fingerprint_error("search_files", "no matches found"), "not_found")
+        self.assertEqual(_fingerprint_error("search_files", "pattern not found"), "not_found")
 
     def test_search_files_invalid_regex(self) -> None:
-        self.assertEqual(_fingerprint_error("search_files", "invalid regex pattern"), "invalid regex")
+        self.assertEqual(_fingerprint_error("search_files", "invalid regex pattern"), "invalid_regex")
 
     def test_run_shell_not_found(self) -> None:
-        self.assertEqual(_fingerprint_error("run_shell", "command not found"), "not found")
-        self.assertEqual(_fingerprint_error("run_shell", "bash: thing: not found"), "not found")
+        self.assertEqual(_fingerprint_error("run_shell", "command not found"), "not_found")
+        self.assertEqual(_fingerprint_error("run_shell", "bash: thing: not found"), "not_found")
 
     def test_run_shell_blocked(self) -> None:
         self.assertEqual(_fingerprint_error("run_shell", "blocked by safety"), "blocked")
         self.assertEqual(_fingerprint_error("run_shell", "destructive command blocked"), "blocked")
 
     def test_run_shell_timed_out(self) -> None:
-        self.assertEqual(_fingerprint_error("run_shell", "command timed out"), "timed out")
-        self.assertEqual(_fingerprint_error("run_shell", "timeout after 60 seconds"), "timed out")
+        self.assertEqual(_fingerprint_error("run_shell", "command timed out"), "timed_out")
+        self.assertEqual(_fingerprint_error("run_shell", "timeout after 60 seconds"), "timed_out")
 
     def test_find_symbol_not_found(self) -> None:
-        self.assertEqual(_fingerprint_error("find_symbol", "no matches for symbol"), "not found")
-        self.assertEqual(_fingerprint_error("find_symbol", "not found"), "not found")
+        self.assertEqual(_fingerprint_error("find_symbol", "no matches for symbol"), "not_found")
+        self.assertEqual(_fingerprint_error("find_symbol", "not_found"), "not_found")
 
     def test_find_usages_not_found(self) -> None:
-        self.assertEqual(_fingerprint_error("find_usages", "no matches for usages"), "not found")
-        self.assertEqual(_fingerprint_error("find_usages", "not found"), "not found")
+        self.assertEqual(_fingerprint_error("find_usages", "no matches for usages"), "not_found")
+        self.assertEqual(_fingerprint_error("find_usages", "not_found"), "not_found")
 
     def test_run_tests_failures(self) -> None:
         self.assertEqual(_fingerprint_error("run_tests", "tests FAILED"), "failures")
@@ -211,7 +211,7 @@ class TestLearnFromFailure(unittest.TestCase):
             with patch.object(_TOOL_CONTEXT, '_memory_store', None):
                 _learn_from_failure("edit_file", result)
 
-        self.assertIn("Whitespace", result.hint,
+        self.assertIn("whitespace", result.hint,
                       f"Expected whitespace hint on 3rd failure, got: {result.hint!r}")
 
     def test_unclassified_pattern_generic_hint_on_third(self) -> None:
@@ -280,7 +280,7 @@ class TestLearnFromFailure(unittest.TestCase):
         result_b2 = self._make_result(success=False, content=content_b)
         with patch.object(_TOOL_CONTEXT, '_memory_store', None):
             _learn_from_failure("edit_file", result_b2)
-        self.assertIn("Whitespace", result_b2.hint)
+        self.assertIn("whitespace", result_b2.hint)
 
     def test_none_result_is_noop(self) -> None:
         """Passing None as the result should not raise."""
@@ -329,7 +329,7 @@ class TestLearnFromFailure(unittest.TestCase):
         with patch.object(_TOOL_CONTEXT, '_memory_store', None):
             _learn_from_failure("verify", result2)
 
-        self.assertIn("Verification", result2.hint)
+        self.assertIn("review lint", result2.hint)
 
     def test_write_file_blocked_hint(self) -> None:
         """Second write_file blocked failure injects the force=True hint."""

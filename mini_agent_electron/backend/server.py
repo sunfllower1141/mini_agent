@@ -70,6 +70,7 @@ from core.prompt import build_system_prompt, build_startup_context, build_sessio
 from core.balance import fetch_balance
 from core.cost_tracking import SessionCost, format_cost_usd
 from api import clear_api_cache
+from core.hot_reload import snapshot_modules, reload_changed_modules, get_restart_advisory
 
 
 # ---------------------------------------------------------------------------
@@ -233,6 +234,13 @@ class AgentRunner:
         self.messages: list[dict] = data["messages"]
         self.session = data["session"]
         self.workspace = workspace
+
+        # Snapshot module mtimes for live-reload detection.
+        # When source files change between turns, the next turn auto-reloads them.
+        n = snapshot_modules(self.workspace)
+        if n:
+            print(f"[server] Hot-reload tracking {n} workspace modules",
+                  file=sys.stderr, flush=True)
 
         self._cancel_event = threading.Event()
         self._turn_thread: threading.Thread | None = None
@@ -406,6 +414,22 @@ class AgentRunner:
         # Notify the renderer that a turn is starting, so it can show
         # the running indicator / cancel button.
         send_msg({"type": "turn_start"})
+
+        # Auto-reload any modules that changed since last turn.
+        # This means code fixes take effect on the NEXT user message without
+        # needing to restart the Electron app.
+        reloaded = reload_changed_modules()
+        if reloaded:
+            send_msg({"type": "response", "lines": [
+                f"[hot_reload] Reloaded {len(reloaded)} module(s): {', '.join(reloaded[:5])}"
+                + (f" ..." if len(reloaded) > 5 else "")
+            ]})
+
+        # Check if the entry point (server.py) or other un-reloadable files
+        # changed on disk -- the user needs to restart the Electron app.
+        advisories = get_restart_advisory()
+        if advisories:
+            send_msg({"type": "response", "lines": advisories})
 
         # Belt-and-suspenders: sub-agents may mutate config.stream when they
         # share the same config object.  Force it back to True for the
@@ -582,6 +606,20 @@ class AgentRunner:
     def handle_command(self, command: str) -> None:
         """Handle /slash commands."""
         cmd = command.lower().strip()
+
+        if cmd == "/reload":
+            reloaded = reload_changed_modules()
+            if reloaded:
+                send_msg({"type": "response", "lines": [
+                    f"Reloaded {len(reloaded)} module(s): {', '.join(reloaded)}"
+                ]})
+            else:
+                send_msg({"type": "response", "lines": ["No module changes detected."]})
+            # Always check for restart advisories on /reload
+            advisories = get_restart_advisory()
+            if advisories:
+                send_msg({"type": "response", "lines": advisories})
+            return
 
         if cmd == "/clear":
             self._cancel_event.set()

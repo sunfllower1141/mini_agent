@@ -7,7 +7,7 @@ Tools: read_file, write_file, edit_file, list_directory, file_info
 from __future__ import annotations
 
 import os
-import platform
+
 import re
 import stat as stat_module
 import shutil
@@ -20,119 +20,54 @@ from tools import clear_tool_cache
 from tools import _register, _summarize, ToolResult, _TOOL_CONTEXT
 from tools.ast_ops import get_file_skeleton, get_function, get_symbol_range, replace_symbol
 
+from tools.error_hints import _err, _hint
 # Thread-local: current sub-agent task_id (set by agent_ops before tool execution)
 import threading
 
 from core.file_context_tracker import get_tracker
 _current_agent_id: threading.local = threading.local()
 
-_WINDOWS = platform.system() == "Windows"
 
-# ---------------------------------------------------------------------------
-# Windows-safe file read via _worker subprocess
-# ---------------------------------------------------------------------------
-# On Windows, ``open()`` / ``CreateFileW`` can block indefinitely inside
-# kernel minifilter drivers (antivirus, backup agents, etc.).  Python
-# threads have no way to kill a thread stuck in a kernel I/O call.
-# The _worker subprocess isolates the I/O so the OS can kill it with
-# TerminateProcess if it doesn't respond within the timeout.
-
-_WORKER_READ_TIMEOUT = 30  # seconds for a single file read
-
-
-def _read_file_windows_worker(
-    resolved: str, offset: int, limit: int, line_numbers: bool,
-) -> ToolResult:
-    """Read a file via the _worker subprocess with a hard timeout.
-
-    Falls back to direct open() if the worker fails for non-hang reasons.
-
-    Uses _communicate_windows() on Windows to avoid proc.communicate() hangs.
-    """
-    if _WINDOWS:
-        try:
-            proc = subprocess.run(
-                [
-                    sys.executable, "-m", "tools._worker", "read",
-                    resolved, str(offset), str(limit), str(line_numbers),
-                ],
-                capture_output=True,
-                text=True,
-                timeout=_WORKER_READ_TIMEOUT,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-            stdout, stderr = proc.stdout, proc.stderr
-            import json
-            data = json.loads(stdout.strip())
-            if data.get("ok"):
-                return ToolResult(success=True, content=data["content"])
-            else:
-                return ToolResult(
-                    success=False,
-                    content=data.get("content", "Worker read failed"),
-                )
-        except subprocess.TimeoutExpired:
-            return ToolResult(
-                success=False,
-                content=f"File read timed out after {_WORKER_READ_TIMEOUT}s "
-                        f"(possibly blocked by antivirus or filter driver). "
-                        f"Try excluding the project directory from real-time scanning.",
-            )
-        except Exception:
-            pass
-    else:
-        try:
-            result = subprocess.run(
-                [
-                    sys.executable, "-m", "tools._worker", "read",
-                    resolved, str(offset), str(limit), str(line_numbers),
-                ],
-                capture_output=True, text=True, timeout=_WORKER_READ_TIMEOUT,
-            )
-            import json
-            data = json.loads(result.stdout.strip())
-            if data.get("ok"):
-                return ToolResult(success=True, content=data["content"])
-            else:
-                return ToolResult(
-                    success=False,
-                    content=data.get("content", "Worker read failed"),
-                )
-        except subprocess.TimeoutExpired:
-            return ToolResult(
-                success=False,
-                content=f"File read timed out after {_WORKER_READ_TIMEOUT}s "
-                        f"(possibly blocked by antivirus or filter driver). "
-                        f"Try excluding the project directory from real-time scanning.",
-            )
-        except Exception:
-            pass
-
-    # Fallback: direct open (may hang on Windows but we already tried)
-    return _read_file_direct(resolved, offset, limit, line_numbers)
 
 def _read_file_direct(
     resolved: str, offset: int, limit: int, line_numbers: bool,
     hash_lines: bool = False,
+    _content: str | None = None,
 ) -> ToolResult:
     """Direct file read -- used on Unix and as fallback on Windows.
 
     When hash_lines=True, uses AnchorStateManager for Dirac-style word
     anchors that persist across edits (unchanged lines keep their anchor).
     """
+    all_lines: list[str] = []
+    raw_content: str = ""
     try:
-        with open(resolved, "r", encoding="utf-8", errors="replace") as f:
-            all_lines = [line.rstrip("\n") for line in f]
+        if _content is not None:
+            raw_content = _content
+        else:
+            with open(resolved, "r", encoding="utf-8", errors="replace") as f:
+                raw_content = f.read()
+        all_lines = raw_content.split("\n")
+        # Remove trailing empty line from split (consistent with old behavior)
+        if all_lines and all_lines[-1] == "":
+            all_lines.pop()
     except Exception as e:
-        hint = ""
         if isinstance(e, FileNotFoundError) or "No such file" in str(e):
-            hint = "\nHint: Check the path spelling. Try list_directory to see available files."
-        return ToolResult(success=False, content=f"Error reading '{resolved}': {e}{hint}")
+            return ToolResult(success=False, content=_err("NOT_FOUND", f"{resolved}", "use list_directory"))
+        return ToolResult(success=False, content=f"Error reading '{resolved}': {e}")
 
     total_lines = len(all_lines)
 
     if offset > 0 and offset >= total_lines:
         return ToolResult(success=False, content=f"Offset {offset} exceeds file length ({total_lines} lines).")
+    # --- Populate file-content cache (so edit_file can skip disk read) ---
+    try:
+        current_mtime = os.path.getmtime(resolved)
+        if len(_FILE_CACHE) >= _FILE_CACHE_MAX and resolved not in _FILE_CACHE:
+            _FILE_CACHE.pop(next(iter(_FILE_CACHE)), None)
+        _FILE_CACHE[resolved] = (raw_content, current_mtime)
+    except Exception:
+        pass
 
     # --- Compute word anchors (Dirac-style persistent anchors) ---
     anchors: list[str] | None = None
@@ -149,7 +84,7 @@ def _read_file_direct(
         lineno = offset + i + 1  # 1-based
         if hash_lines and anchors is not None:
             anchor = anchors[offset + i]
-            collected.append(f"{lineno:>{gutter_width}} {anchor}\u2502 {line}")
+            collected.append(f"{lineno:>{gutter_width}} {anchor}\u2502{line}")
         elif line_numbers:
             collected.append(f"{lineno:>{gutter_width}} {line}")
         else:
@@ -244,20 +179,28 @@ _READ_FILES: set[str] = set()
 def _validate_python_syntax(content: str, filepath: str) -> str | None:
     """Return an error message if *content* is not valid Python, else None.
 
-    Uses ``compile()`` for fast in-process validation.  Only checks .py files.
+    Uses ``compile()`` for fast in-process validation. Only checks .py files.
+    On error, returns a compact message with the offending line and context
+    so the AI can self-correct the edit.
     """
     if not filepath.endswith(".py"):
         return None
     try:
         compile(content, filepath, "exec")
     except SyntaxError as e:
-        # Build a helpful pointer line
         lines = content.split("\n")
         lineno = e.lineno or 1
-        pointer = f"  line {lineno}: {lines[lineno - 1][:100] if lineno <= len(lines) else '?'}"
+        # Show context: 2 lines before, the error line, 2 lines after
+        ctx_start = max(0, lineno - 3)
+        ctx_end = min(len(lines), lineno + 2)
+        ctx_lines = []
+        for i in range(ctx_start, ctx_end):
+            prefix = ">>>" if i == lineno - 1 else "   "
+            ctx_lines.append(f"{prefix} {i+1}: {lines[i][:120]}")
+        ctx = "\n".join(ctx_lines)
         return (
             f"SyntaxError: {e.msg} at line {lineno}\n"
-            f"{pointer}"
+            f"{ctx}"
         )
     return None
 
@@ -286,7 +229,15 @@ _BACKUPS: dict[str, str] = {}  # resolved_path -> backup path
 # Capped at _FILE_CACHE_MAX entries; oldest entries are evicted (LRU via insertion order).
 _FILE_CACHE: dict[str, tuple[str, float]] = {}
 _FILE_CACHE_MAX = 50
+
+# Raw-content cache — populated by _read_file_direct after every disk read,
+# used by edit paths to skip redundant disk I/O.  Same LRU cap as _FILE_CACHE.
+# (Merged with _FILE_CACHE — both now store raw text + mtime.)
 _CACHE_DISK_READS = 0  # Diagnostic: counts cache-miss disk reads in edit paths
+
+# Tracks files where edit_file recently failed -- used to detect write_file-as-fallback
+# anti-pattern.  Cleared after each successful write/edit or on next read_file.
+_RECENT_EDIT_FAILURES: set[str] = set()
 
 # Per-task file content hashes — used to short-circuit re-reads when content hasn't
 # changed since last read (Dirac pattern: "no changes since your last read").
@@ -335,6 +286,9 @@ def _get_cached_content(resolved_path: str) -> str | None:
     _FILE_CACHE.pop(resolved_path, None)
     return None
 
+
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Auto plan advancement -- after a successful write/edit, check if any
@@ -418,19 +372,31 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
     else:
         return ToolResult(
             success=False,
-            content="Missing required parameter: provide either 'path' (string) or 'paths' (array of strings).",
+            content=_err("MISSING", "need 'path' or 'paths'"),
             hint="Valid parameters: path (string), paths (array), offset, limit, line_numbers, hash_lines",
         )
 
     offset = args.get("offset", 0)
+    try:
+        offset = int(offset)
+    except (TypeError, ValueError):
+        offset = 0
     if offset < 0:
         offset = 0
     limit = args.get("limit", _DEFAULT_READ_LINES)
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = _DEFAULT_READ_LINES
     if limit < 1:
         limit = _DEFAULT_READ_LINES
     limit = min(limit, _ABSOLUTE_MAX_LINES)
     line_numbers = args.get("line_numbers", False)
+    if isinstance(line_numbers, str):
+        line_numbers = line_numbers.lower() in ("true", "1", "yes")
     hash_lines = args.get("hash_lines", True)
+    if isinstance(hash_lines, str):
+        hash_lines = hash_lines.lower() in ("true", "1", "yes")
 
     results: list[str] = []
     any_failed = False
@@ -458,43 +424,47 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
             except OSError:
                 pass
 
+        # --- Read file once (single disk I/O for hash + content) ---
+        try:
+            with open(resolved, "r", encoding="utf-8", errors="replace") as f:
+                raw_content = f.read()
+        except OSError as e:
+            hint = ""
+            if "No such file" in str(e):
+                hint = _err("NOT_FOUND", f"{resolved}", "use list_directory")
+            header = f"--- {path} ---\n" if is_multi else ""
+            results.append(f"{header}{hint}" if hint else f"{header}Error reading '{resolved}': {e}")
+            any_failed = True
+            continue
+
         # --- Hash-based re-read shortcut (Dirac: "no changes since your last read") ---
         cache_key = f"{resolved}#{'anchored' if hash_lines else 'plain'}"
-        try:
-            with open(resolved, "rb") as f:
-                raw = f.read()
-            current_hash = hashlib.md5(raw).hexdigest()
-        except OSError:
-            current_hash = None
+        current_hash = hashlib.md5(raw_content.encode("utf-8")).hexdigest()
+        last_hash = _FILE_HASHES.get(cache_key)
+        if last_hash == current_hash and offset == 0 and limit >= _DEFAULT_READ_LINES:
+            header = f"--- {path} ---\n" if is_multi else ""
+            results.append(f"{header}no changes have been made to the file since your last read (Hash: {current_hash})")
+            _READ_FILES.add(resolved)
+            continue
 
-        if current_hash is not None:
-            last_hash = _FILE_HASHES.get(cache_key)
-            if last_hash == current_hash and offset == 0 and limit >= _DEFAULT_READ_LINES:
-                header = f"--- {path} ---\n" if is_multi else ""
-                results.append(f"{header}no changes have been made to the file since your last read (Hash: {current_hash})")
-                _READ_FILES.add(resolved)
-                continue
-
-        # --- Cross-turn mtime cache (disk I/O bypass) ---
-        if offset == 0 and limit == _DEFAULT_READ_LINES and not line_numbers and not hash_lines:
+        # --- Raw-content shortcut (no formatting, no offset/limit needed) ---
+        if offset == 0 and limit >= _DEFAULT_READ_LINES and not line_numbers and not hash_lines:
+            _FILE_HASHES[cache_key] = current_hash
+            # Populate cross-turn mtime cache
             try:
                 current_mtime = os.path.getmtime(resolved)
-                if resolved in _FILE_CACHE:
-                    cached_content, cached_mtime = _FILE_CACHE[resolved]
-                    if cached_mtime == current_mtime:
-                        _FILE_HASHES[cache_key] = current_hash
-                        header = f"--- {path} ---\n" if is_multi else ""
-                        results.append(header + cached_content)
-                        _READ_FILES.add(resolved)
-                        continue
+                if len(_FILE_CACHE) >= _FILE_CACHE_MAX and resolved not in _FILE_CACHE:
+                    _FILE_CACHE.pop(next(iter(_FILE_CACHE)), None)
+                _FILE_CACHE[resolved] = (raw_content, current_mtime)
             except OSError:
                 pass
+            header = f"--- {path} ---\n" if is_multi else ""
+            results.append(header + raw_content)
+            _READ_FILES.add(resolved)
+            continue
 
-        # --- Actual read ---
-        if False:  # _WINDOWS bypassed
-            result = _read_file_windows_worker(resolved, offset, limit, line_numbers)
-        else:
-            result = _read_file_direct(resolved, offset, limit, line_numbers, hash_lines=hash_lines)
+        # --- Actual formatted read (delegates to _read_file_direct with pre-read content) ---
+        result = _read_file_direct(resolved, offset, limit, line_numbers, hash_lines=hash_lines, _content=raw_content)
 
         if not result.success:
             header = f"--- {path} ---\n" if is_multi else ""
@@ -504,20 +474,13 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
 
         full_content = result.content
 
-        # --- Update caches ---
-        if current_hash is not None:
-            _FILE_HASHES[cache_key] = current_hash
-
-        if offset == 0 and "... (truncated at " not in full_content and not hash_lines and not line_numbers:
-            try:
-                current_mtime = os.path.getmtime(resolved)
-                if len(_FILE_CACHE) >= _FILE_CACHE_MAX and resolved not in _FILE_CACHE:
-                    _FILE_CACHE.pop(next(iter(_FILE_CACHE)), None)
-                _FILE_CACHE[resolved] = (full_content, current_mtime)
-            except OSError:
-                pass
+        # --- Update hash cache ---
+        _FILE_HASHES[cache_key] = current_hash
 
         _READ_FILES.add(resolved)
+
+        # Clear edit-failure tracker -- agent is doing the right thing (re-reading)
+        _RECENT_EDIT_FAILURES.discard(resolved)
 
         # Track for stale-context detection (FileContextTracker)
         try:
@@ -556,10 +519,7 @@ def _write_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
     if not safety_result.allowed:
         return ToolResult(
             success=False,
-            content=(
-                f"Write blocked by safety layer: {safety_result.reason}\n"
-                f"Hint: Use a path inside the workspace ({wg.workspace_root}) or enable unrestricted mode."
-            ),
+            content=_err("BLOCKED", f"path outside workspace", f"use {wg.workspace_root}/... or force=True"),
         )
     # Read-before-edit enforcement (ACI upgrade): reject writes to
     # .py files that haven't been read_file'd this session, unless
@@ -568,11 +528,7 @@ def _write_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
     if _resolved.endswith(".py") and os.path.isfile(_resolved) and _resolved not in _READ_FILES:
         return ToolResult(
             success=False,
-            content=(
-                f"Read-before-edit guard: '{_resolved}' has not been read this session. "
-                f"Read the file with read_file first so you have the current content "
-                f"before writing. This prevents accidental overwrites of recent changes."
-            ),
+            content=_err("GUARD", f"read_file('{_resolved}') first, then write"),
         )
     # File reservation check -- prevent sub-agent collisions
     agent_id = getattr(_current_agent_id, "task_id", None)
@@ -605,7 +561,7 @@ def _write_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
             return ToolResult(
                 success=False,
                 content=(
-                    f"Syntax validation failed -- file NOT written to prevent broken code.\n"
+                    f"Syntax validation failed -- file NOT written.\n"
                     f"{syntax_error}"
                 ),
             )
@@ -630,9 +586,27 @@ def _write_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
             _reindex_file(safety_result.resolved_path, wg.workspace_root)
         # Auto plan advancement (file path only -- full content is too noisy)
         _auto_advance_plan(safety_result.resolved_path)
+        # Hot-reload: if this is a .py file in the workspace, tell the backend
+        # to reload the module so the fix takes effect without app restart.
+        try:
+            from core.hot_reload import reload_by_path
+            reload_by_path(safety_result.resolved_path)
+        except Exception:
+            pass
+        # Diagnostic: detect write_file-as-fallback anti-pattern.
+        # If edit_file just failed on this same file, warn that edit_file should
+        # have been retried with fresh hash_lines=True instead.
+        _fallback_warning = ""
+        if safety_result.resolved_path in _RECENT_EDIT_FAILURES:
+            _RECENT_EDIT_FAILURES.discard(safety_result.resolved_path)
+            _fallback_warning = (
+                "\n[WARNING] write_file used on a file where edit_file recently failed. "
+                "Prefer re-running read_file(hash_lines=True) then retrying edit_file "
+                "with fresh anchors."
+            )
         return ToolResult(
             success=True,
-            content=f"OK: wrote {len(content)} bytes to {safety_result.resolved_path}",
+            content=f"OK: wrote {len(content)} bytes to {safety_result.resolved_path}{_fallback_warning}",
             diff_preview=diff.preview_text if diff.changed else None,
         )
     except Exception as e:
@@ -1028,6 +1002,8 @@ def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
 
     On any anchor mismatch the ENTIRE batch is rejected with a precise error.
     """
+    global _CACHE_DISK_READS
+
     path = args["path"]
     edits = args["edits"]
 
@@ -1042,13 +1018,15 @@ def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
     if not isinstance(edits, list) or not edits:
         return ToolResult(success=False, content="'edits' must be a non-empty list.")
 
+    # Track this edit attempt for write_file-as-fallback detection.
+    # Cleared on success; persists on failure so _write_file can warn.
+    _RECENT_EDIT_FAILURES.add(resolved)
+
     # --- Read-before-edit enforcement ---
     if resolved not in _READ_FILES:
         return ToolResult(
             success=False,
-            content=(
-                f"Read '{resolved}' first with read_file(hash_lines=True) to get anchors"
-            ),
+            content=_err("GUARD", f"read_file('{resolved}', hash_lines=True) first"),
         )
 
     # File reservation check
@@ -1059,13 +1037,15 @@ def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
         if not ok:
             return ToolResult(success=False, content=msg)
 
-    # Always read raw file content from disk (never use _FILE_CACHE, which may
-    # contain formatted/anchor-prefixed content from hash_lines reads).
-    try:
-        with open(resolved, "r", encoding="utf-8", errors="replace") as f:
-            original = f.read()
-    except Exception as e:
-        return ToolResult(success=False, content=f"Error reading '{resolved}': {e}")
+    # Try file-content cache first (populated by read_file), fall back to disk.
+    original = _get_cached_content(resolved)
+    if original is None:
+        _CACHE_DISK_READS += 1
+        try:
+            with open(resolved, "r", encoding="utf-8", errors="replace") as f:
+                original = f.read()
+        except Exception as e:
+            return ToolResult(success=False, content=f"Error reading '{resolved}': {e}")
 
 
     lines = original.split("\n")
@@ -1090,7 +1070,7 @@ def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
             if line_num is None or claimed_anchor is None:
                 return ToolResult(
                     success=False,
-                    content=f"edit_file: edit[{i}] missing '{endpoint}' or '{label}_hash'.",
+                    content=_err("MISSING", f"edit[{i}] needs '{endpoint}' and '{label}_hash'"),
                 )
             # 1-indexed -> 0-indexed
             idx = line_num - 1
@@ -1098,35 +1078,38 @@ def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
                 return ToolResult(
                     success=False,
                     content=(
-                        f"edit_file: edit[{i}] {label}={line_num} is out of range "
-                        f"(file has {len(lines)} lines)."
+                        _err("RANGE", f"edit[{i}] {label}={line_num} > {len(lines)} lines")
                     ),
                 )
             actual_anchor = anchors[idx]
-            # Strip content suffix if model provided "anchor│content" format
+            # Strip content suffix if model provided "anchor│content" format.
             _BOX = "\u2502"
             anchor_to_check = claimed_anchor
             content_claim = ""
             if _BOX in claimed_anchor:
                 delimiter_idx = claimed_anchor.index(_BOX)
                 anchor_to_check = claimed_anchor[:delimiter_idx]
-                content_claim = claimed_anchor[delimiter_idx + 1:].lstrip()
-            if anchor_to_check != actual_anchor:
+                content_claim = claimed_anchor[delimiter_idx + 1:]
+
+            # Content-based auto-recovery: if the model included the line content
+            # in the hash claim (as read_file(hash_lines=True) naturally produces),
+            # we can verify correctness even when anchors were refreshed by hot-reload
+            # or a chained edit.  This eliminates the need for write_file fallbacks.
+            if content_claim:
+                if content_claim == lines[idx]:
+                    pass  # Content matches -- stale anchor is harmless, proceed
+                else:
+                    return ToolResult(
+                        success=False,
+                        content=(
+                            _err("CONTENT", f"edit[{i}] {label}={line_num} content changed", "re-read with hash_lines=True")
+                        ),
+                    )
+            elif anchor_to_check != actual_anchor:
                 return ToolResult(
                     success=False,
                     content=(
-                        f"edit_file: edit[{i}] {label} line {line_num} anchor mismatch -- "
-                        f"stale anchor '{anchor_to_check}' vs file content. "
-                        f"Re-run read_file(hash_lines=True) to get current anchors."
-                    ),
-                )
-            # Content cross-check: if model provided content, verify it matches
-            if content_claim and content_claim != lines[idx]:
-                return ToolResult(
-                    success=False,
-                    content=(
-                        f"edit_file: edit[{i}] {label} content mismatch at line {line_num}. "
-                        f"Re-run read_file(hash_lines=True) to get current content."
+                        _err("ANCHOR", f"edit[{i}] {label}={line_num} '{anchor_to_check}'→'{actual_anchor}'", "re-read with hash_lines=True")
                     ),
                 )
     # --- Capture edit positions for output (before any edits) ---
@@ -1187,9 +1170,9 @@ def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
         return ToolResult(
             success=False,
             content=(
-                f"Syntax validation failed -- edit NOT applied to prevent broken code.\n"
+                f"Syntax validation failed -- edit NOT applied.\n"
                 f"{syntax_error}\n"
-                f"The file is unchanged."
+                f"File unchanged. Re-read with hash_lines=True and retry."
             ),
         )
 
@@ -1211,7 +1194,8 @@ def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
     clear_tool_cache()
     # Update cache with new content so chained edits skip disk I/O
     try:
-        _FILE_CACHE[resolved] = (updated, os.path.getmtime(resolved))
+        mtime = os.path.getmtime(resolved)
+        _FILE_CACHE[resolved] = (updated, mtime)
     except OSError:
         _FILE_CACHE.pop(resolved, None)
 
@@ -1221,6 +1205,15 @@ def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
 
     _auto_advance_plan(resolved)
 
+    # Hot-reload: if this is a .py file in the workspace, tell the backend
+    # to reload the module so the fix takes effect without app restart.
+    try:
+        from core.hot_reload import reload_by_path
+        reload_by_path(resolved)
+    except Exception:
+        pass
+
+    # --- Build compact output matching edit_file format with hash indicator ---
     # --- Build compact output matching edit_file format with hash indicator ---
 
     total_added = len(updated_lines) - len(lines)
@@ -1252,6 +1245,9 @@ def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
         last_anchor = edit_details[-1]["from_anchor_actual"]
         anchor_indicator = f"  [anchors \u2713: {first_anchor}\u2026{last_anchor}]"
 
+
+    # Edit succeeded -- clear the failure tracker so _write_file won't warn
+    _RECENT_EDIT_FAILURES.discard(resolved)
     return ToolResult(
         success=True,
         content=(
@@ -1685,8 +1681,8 @@ def _get_function(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate,
                     results.append(content)
                 all_found.extend(found)
             else:
-                # No functions found in this file -- report as error line
-                results.append(f"--- {rel_path} ---\nError: {content}")
+                # No functions found in this file -- normal when searching across multiple files
+                results.append(f"--- {rel_path} ---\n{content}")
         except Exception as e:
             results.append(f"--- {rel_path} ---\nError: {e}")
 
@@ -1775,8 +1771,7 @@ def _replace_symbol(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate,
         # Read-before-edit enforcement
         if safety.resolved_path not in _READ_FILES:
             results.append(
-                f"[{i+1}/{len(replacements)}] Edit blocked: '{safety.resolved_path}' has not been read yet. "
-                f"Use read_file first."
+                _err("GUARD", f"[{i+1}/{len(replacements)}] read_file('{safety.resolved_path}') first")
             )
             continue
 

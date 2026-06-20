@@ -613,7 +613,7 @@ def execute_tool(
         return ToolResult(
             success=False,
             content=f"Unknown tool: {name}",
-            hint=f"Tool '{name}' is not recognized. Available tools: {', '.join(known)}. Please use one of these.",
+            hint=f"unknown tool → available: {', '.join(known)}",
         )
 
     # Approval gate for write/destructive tools
@@ -622,7 +622,7 @@ def execute_tool(
             return ToolResult(
                 success=False,
                 content=f"{name} not approved by user.",
-                hint=f"Tool '{name}' requires user approval and was denied. Consider an alternative approach or ask the user to approve.",
+                hint="user denied approval → ask user or try alternative",
             )
 
     # Pass on_output to the tool if it accepts it (P0.1: cached signature check)
@@ -739,8 +739,11 @@ def execute_tool(
     if not result.success:
         standard_hint = _build_error_hint(name, error_msg=result.content)
         if result.hint and result.hint != standard_hint:
-            # Merge: standard first, then the tool-specific hint as extra context
-            result.hint = standard_hint + "\nAdditional info: " + result.hint
+            # Pre-set hint (e.g. unknown tool) — keep it, append params if useful
+            if "→" in result.hint:
+                result.hint = result.hint + " | " + standard_hint
+            else:
+                result.hint = standard_hint
         else:
             result.hint = standard_hint
 

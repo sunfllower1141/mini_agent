@@ -666,8 +666,9 @@ class LspClientManager:
 def uri_to_path(uri: str) -> str:
     """Convert a file:// URI to a platform-native path."""
     from urllib.parse import urlparse, unquote
+    from urllib.request import url2pathname
     parsed = urlparse(uri)
-    return os.path.abspath(unquote(parsed.path))
+    return url2pathname(parsed.path)
 
 
 def _severity_name(severity: int) -> str:

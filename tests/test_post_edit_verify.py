@@ -59,7 +59,7 @@ class TestPostEditVerify(unittest.TestCase):
             "function": {
                 "name": "edit_file",
                 "arguments": json.dumps(
-                    {"path": path, "from": from_line, "from_hash": from_hash, "new_text": new_text}
+                    {"path": path, "edits": [{"from": from_line, "from_hash": from_hash, "new_text": new_text}]}
                 ),
             }
         }

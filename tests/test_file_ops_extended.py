@@ -928,9 +928,9 @@ class TestHashlines(unittest.TestCase):
         self.assertTrue(result.success)
         # Check format: "1 Anchor\u2502 import os" (gutter: right-aligned lineno + anchor + box-draw)
         self.assertIn("1 ", result.content)
-        self.assertIn("\u2502 import os", result.content)
+        self.assertIn("\u2502import os", result.content)
         self.assertIn("2 ", result.content)
-        self.assertIn("\u2502 import sys", result.content)
+        self.assertIn("\u2502import sys", result.content)
 
     def test_read_file_hash_lines_vs_plain(self):
         """hash_lines=True and line_numbers=True output different prefixes."""
@@ -1005,10 +1005,10 @@ class TestHashlines(unittest.TestCase):
         }])
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertFalse(result.success)
-        self.assertIn("anchor mismatch", result.content)
-        self.assertIn("stale anchor", result.content)
-        self.assertIn("Re-run", result.content)
-        self.assertIn("read_file(hash_lines=True)", result.content)
+        self.assertIn("ANCHOR", result.content)
+        self.assertIn("ANCHOR", result.content)
+        self.assertIn("re-read", result.content)
+        self.assertIn("hash_lines=True", result.content)
         # Must NOT expose the actual hash or current line content
         self.assertNotIn("Actual hash", result.content)
         self.assertNotIn("Current line", result.content)
@@ -1030,7 +1030,7 @@ class TestHashlines(unittest.TestCase):
         }])
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertFalse(result.success)
-        self.assertIn("out of range", result.content)
+        self.assertIn("RANGE", result.content)
 
     def test_edit_lines_multiple_edits(self):
         """Multiple edits are applied bottom-up correctly."""
@@ -1068,7 +1068,7 @@ class TestHashlines(unittest.TestCase):
         }])
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertFalse(result.success)
-        self.assertIn("first with read_file(hash_lines=True)", result.content)
+        self.assertIn("hash_lines=True", result.content)
 
     def test_edit_lines_insert_lines(self):
         """edit_lines can insert lines (to=from, replacing one line with several)."""

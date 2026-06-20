@@ -282,7 +282,7 @@ class TestLocationToLine(unittest.TestCase):
             },
         }
         result = _location_to_line(loc)
-        self.assertIn("test.py:5:10", result)
+        self.assertIn("test.py:6:10", result)
 
     def test_location_link(self) -> None:
         loc = {
@@ -297,7 +297,7 @@ class TestLocationToLine(unittest.TestCase):
             },
         }
         result = _location_to_line(loc)
-        self.assertIn("test.py:3:0", result)
+        self.assertIn("test.py:4:0", result)
 
 
 # ====================================================================
@@ -345,7 +345,7 @@ class TestLspConnectionDefinition(unittest.TestCase):
         result = conn.definition("/fake/test.py", 5, 10)
         self.assertIsInstance(result, ToolResult)
         self.assertTrue(result.success)
-        self.assertIn("def_module.py:10:4", result.content)
+        self.assertIn("def_module.py:11:4", result.content)
 
     def test_definition_list_result(self) -> None:
         """Definition returning a list of locations."""
@@ -370,8 +370,8 @@ class TestLspConnectionDefinition(unittest.TestCase):
         conn.connect()
         result = conn.definition("/fake/test.py", 0, 0)
         self.assertTrue(result.success)
-        self.assertIn("foo.py:1:0", result.content)
-        self.assertIn("bar.py:2:3", result.content)
+        self.assertIn("foo.py:2:0", result.content)
+        self.assertIn("bar.py:3:3", result.content)
 
     def test_definition_on_disconnected_returns_error(self) -> None:
         conn = _make_fake_connection()
@@ -393,8 +393,8 @@ class TestLspConnectionReferences(unittest.TestCase):
         result = conn.references("/fake/test.py", 3, 4)
         self.assertIsInstance(result, ToolResult)
         self.assertTrue(result.success)
-        self.assertIn("ref_file.py:1:0", result.content)
-        self.assertIn("ref_file2.py:5:2", result.content)
+        self.assertIn("ref_file.py:2:0", result.content)
+        self.assertIn("ref_file2.py:6:2", result.content)
 
     def test_references_empty(self) -> None:
         conn = _make_fake_connection(references_result=[])

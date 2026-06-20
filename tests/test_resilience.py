@@ -181,8 +181,8 @@ class TestToolErrorHints(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertIn("Malformed JSON", result.content)
         self.assertTrue(result.hint, "hint should be populated")
-        self.assertIn("Valid parameters:", result.hint)
-        self.assertIn("path: string", result.hint)
+        self.assertIn("retry →", result.hint)
+        self.assertIn("path:string", result.hint)
 
     def test_unknown_tool_returns_hint(self):
         tc = self._make_tc("nonexistent_tool", '{}')
@@ -190,7 +190,7 @@ class TestToolErrorHints(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertIn("Unknown tool", result.content)
         self.assertTrue(result.hint)
-        self.assertIn("Available tools:", result.hint)
+        self.assertIn("unknown tool →", result.hint)
 
     def test_successful_call_has_no_hint(self):
         tc = self._make_tc("read_file", '{"path": "/tmp"}')
@@ -315,7 +315,7 @@ class TestSchemaValidation(unittest.TestCase):
         tc = self._make_tc("read_file", '{}')
         result = execute_tool(tc, self.wg, self.rg)
         self.assertFalse(result.success)
-        self.assertIn("Missing required", result.content)
+        self.assertIn("MISSING", result.content)
         self.assertIn("path", result.content)
 
     def test_correct_params_pass_validation(self):
@@ -456,9 +456,11 @@ class TestEditFileDiff(unittest.TestCase):
                 "name": "edit_file",
                 "arguments": json.dumps({
                     "path": self.test_file,
-                    "from": 1,
-                    "from_hash": anchors[0],
-                    "new_text": "goodbye world",
+                    "edits": [{
+                        "from": 1,
+                        "from_hash": anchors[0],
+                        "new_text": "goodbye world",
+                    }],
                 }),
             },
         }
