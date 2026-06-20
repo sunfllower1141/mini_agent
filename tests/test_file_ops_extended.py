@@ -195,7 +195,7 @@ class TestRestoreFile(unittest.TestCase):
         anchors = AnchorStateManager.get_anchors(path)
         execute_tool(
             _make_tool_call("edit_file", path=path,
-                            **{"from": 1, "from_hash": anchors[0], "new_text": "changed"}),
+                            edits=[{"from": 1, "from_hash": anchors[0], "new_text": "changed"}]),
             self.write_gate, self.read_gate,
         )
         r = execute_tool(

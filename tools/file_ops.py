@@ -1007,74 +1007,16 @@ def _line_match(content_lines, search_lines, trim, content=''):
     return (start_byte, end_byte)
 
 
-@_register("edit_file")
-def _edit_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
-    # --- Hash-anchored mode (primary) ---
-    from_line = args.get("from")
-    from_hash = args.get("from_hash")
-    if from_line is not None and from_hash is not None:
-        # Build a single-edit edit_lines call
-        edit_type = args.get("edit_type", "replace")
-        if edit_type in ("insert_after", "insert_before"):
-            to_line = from_line  # not used for insert; set same as from for validation
-            to_hash = from_hash
-        else:
-            to_line = args.get("to", from_line)
-            to_hash = args.get("to_hash", from_hash)
-        new_text = args.get("new_text", "")
-        preview = args.get("preview", False)
-        path = args["path"]
-
-        edit_args = {
-            "path": path,
-            "edits": [{
-                "from": from_line,
-                "from_hash": from_hash,
-                "to": to_line,
-                "to_hash": to_hash,
-                "new_text": new_text,
-                "edit_type": edit_type,
-            }],
-        }
-        if preview:
-            edit_args["preview"] = preview
-
-        # Delegate to edit_lines for hash-anchored editing
-        return _edit_lines(edit_args, wg, _rg)
-
-    # --- Hash-anchored mode is now the only mode ---
-    return ToolResult(
-        success=False,
-        content=(
-            "edit_file: hash-anchored editing is now the only mode. "
-            "Provide (from, from_hash) at minimum. "
-            "Use read_file(hash_lines=True) first to get anchors. "
-            "Full params: (from, from_hash, to, to_hash, new_text, edit_type, preview)."
-        ),
-    )
 
 
-@_summarize("edit_file")
-def _edit_file_summary(args: dict) -> str:
-    path = args.get("path", "?")
-    from_line = args.get("from")
-    from_hash = args.get("from_hash")
-    if from_line is not None and from_hash is not None:
-        to_line = args.get("to", from_line)
-        preview_flag = args.get("preview", False)
-        suffix = " [preview]" if preview_flag else ""
-        if from_line == to_line:
-            return f"edit_file({path}, line {from_line}, hash {from_hash}){suffix}"
-        else:
-            return f"edit_file({path}, lines {from_line}-{to_line}){suffix}"
-    return f"edit_file({path}, missing hash params)"
 
 
 # ---------------------------------------------------------------------------
-# edit_lines -- hash-anchored editing (Hashlines pattern from Akay/Howard Chen)
+# edit_file -- hash-anchored editing, single-edit and batch (Hashlines pattern from Akay/Howard Chen)
 # ---------------------------------------------------------------------------
 
-@_register("edit_lines")
+@_register("edit_file")  # primary name
+@_register("edit_lines")  # backward-compat alias
 def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
     """Replace line ranges using word anchors for reliable first-attempt edits.
 
@@ -1136,6 +1078,10 @@ def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
     for i, edit in enumerate(edits):
         edit_type = edit.get("edit_type", "replace")
         is_insert = edit_type in ("insert_after", "insert_before")
+        # For replace edits, default 'to' and 'to_hash' to 'from'/'from_hash'
+        if not is_insert:
+            edit.setdefault("to", edit.get("from"))
+            edit.setdefault("to_hash", edit.get("from_hash"))
         # For insert edits, only validate 'from' anchor; 'to' is ignored
         endpoints = [("from", "from")] if is_insert else [("from", "from"), ("to", "to")]
         for endpoint, label in endpoints:
@@ -1144,7 +1090,7 @@ def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
             if line_num is None or claimed_anchor is None:
                 return ToolResult(
                     success=False,
-                    content=f"edit_lines: edit[{i}] missing '{endpoint}' or '{label}_hash'.",
+                    content=f"edit_file: edit[{i}] missing '{endpoint}' or '{label}_hash'.",
                 )
             # 1-indexed -> 0-indexed
             idx = line_num - 1
@@ -1152,7 +1098,7 @@ def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
                 return ToolResult(
                     success=False,
                     content=(
-                        f"edit_lines: edit[{i}] {label}={line_num} is out of range "
+                        f"edit_file: edit[{i}] {label}={line_num} is out of range "
                         f"(file has {len(lines)} lines)."
                     ),
                 )
@@ -1169,7 +1115,7 @@ def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
                 return ToolResult(
                     success=False,
                     content=(
-                        f"edit_lines: edit[{i}] {label} line {line_num} anchor mismatch -- "
+                        f"edit_file: edit[{i}] {label} line {line_num} anchor mismatch -- "
                         f"stale anchor '{anchor_to_check}' vs file content. "
                         f"Re-run read_file(hash_lines=True) to get current anchors."
                     ),
@@ -1179,7 +1125,7 @@ def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
                 return ToolResult(
                     success=False,
                     content=(
-                        f"edit_lines: edit[{i}] {label} content mismatch at line {line_num}. "
+                        f"edit_file: edit[{i}] {label} content mismatch at line {line_num}. "
                         f"Re-run read_file(hash_lines=True) to get current content."
                     ),
                 )
@@ -1189,7 +1135,7 @@ def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
         edit_type = edit.get("edit_type", "replace")
         is_insert = edit_type in ("insert_after", "insert_before")
         f = edit["from"] - 1
-        t = edit["to"] - 1
+        t = edit.get("to", edit["from"]) - 1  # inserts: to defaults to from
         edit_details.append({
             "from_line": edit["from"],
             "to_line": edit["from"] if is_insert else edit["to"],
@@ -1203,7 +1149,7 @@ def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
     for orig_idx, edit in sorted_edits:
         edit_type = edit.get("edit_type", "replace")
         from_line = edit["from"] - 1  # 0-indexed
-        to_line = edit["to"] - 1      # 0-indexed (same as from_line for inserts)
+        to_line = edit.get("to", edit["from"]) - 1  # inserts: to defaults to from
         new_text = edit["new_text"]
         new_lines = new_text.split("\n")
 
@@ -1221,7 +1167,7 @@ def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
                 return ToolResult(
                     success=False,
                     content=(
-                        f"edit_lines: edit[{orig_idx}] from={from_line + 1} > to={to_line + 1}. "
+                        f"edit_file: edit[{orig_idx}] from={from_line + 1} > to={to_line + 1}. "
                         f"'from' must be <= 'to'."
                     ),
                 )
@@ -1318,12 +1264,13 @@ def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
     )
 
 
+@_summarize("edit_file")
 @_summarize("edit_lines")
 def _edit_lines_summary(args: dict) -> str:
     path = args.get("path", "?")
     edits = args.get("edits", [])
     if not edits:
-        return f"edit_lines({path}, 0 edits)"
+        return f"edit_file({path}, 0 edits)"
 
     parts = []
     for edit in edits:
@@ -1346,7 +1293,7 @@ def _edit_lines_summary(args: dict) -> str:
                 parts.append(f"L{from_line}[{from_hash}]→L{to_line}[{to_hash}]{plus}")
 
     details = ", ".join(parts)
-    return f"edit_lines({path}, {len(edits)} edit{'s' if len(edits) != 1 else ''}: {details})"
+    return f"edit_file({path}, {len(edits)} edit{'s' if len(edits) != 1 else ''}: {details})"
 
 
 # ---------------------------------------------------------------------------

@@ -2,6 +2,24 @@
 
 Self-modification audit trail -- what the agent changed and why.
 
+## 2026-06-20 -- edit_file Flat Args Removed + Schema Auto-Generation
+
+**Rationale:** The dual `edit_file` (flat args) / `edit_lines` (edits array) split caused
+confusion. Consolidating both entry points into the `edits[{...}]` format simplifies the
+codebase by ~90 lines and forces consistent editor behavior.
+
+### Changed
+- **`tools/file_ops.py`**: Deleted `_edit_file` wrapper (~60 lines). Both `edit_file` and
+  `edit_lines` now route directly to `_edit_lines` which accepts only `edits` array.
+  Added `to`/`to_hash` defaults (fall back to `from`/`from_hash`) for convenience.
+  Renamed all error messages from `edit_lines:` to `edit_file:`.
+- **`tools/schema.py`**: Auto-generated from 1816 lines to 95 lines. Both `edit_file`
+  and `edit_lines` schemas use `edits` array format. `SUB_AGENT_TOOLS` set moved to
+  runtime generation.
+- **`tests/test_tools.py`**: Updated all `edit_file` calls from flat args (`**{from, from_hash, new_text}`)
+  to `edits=[{from, from_hash, new_text}]` format (7 test sites).
+- **`tests/test_file_ops_extended.py`**: Fixed `test_restore_after_edit` (missed flat-args conversion).
+- **`STATE.txt`**: Updated architecture notes.
 ## 2026-06-19 -- old_string Fallback Removed from edit_file
 
 **Rationale:** Hash-anchored editing has proven reliable. Maintaining dual code paths

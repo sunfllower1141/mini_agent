@@ -281,7 +281,7 @@ class TestEditFile(unittest.TestCase):
         from core.anchor_manager import AnchorStateManager
         anchors = AnchorStateManager.get_anchors(path)
         tc = _make_tool_call("edit_file", path=path,
-                             **{"from": 1, "from_hash": anchors[0], "new_text": "hi world hello"})
+                             edits=[{"from": 1, "from_hash": anchors[0], "new_text": "hi world hello"}])
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertTrue(result.success)
         with open(path) as f:
@@ -291,7 +291,7 @@ class TestEditFile(unittest.TestCase):
         path = self._write("f.txt", "abc\n")
         execute_tool(_make_tool_call("read_file", path=path, hash_lines=True), self.write_gate, self.read_gate)
         tc = _make_tool_call("edit_file", path=path,
-                             **{"from": 1, "from_hash": "WrongAnchor", "new_text": "q"})
+                             edits=[{"from": 1, "from_hash": "WrongAnchor", "new_text": "q"}])
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertFalse(result.success)
         self.assertIn("anchor mismatch", result.content)
@@ -308,7 +308,7 @@ class TestEditFile(unittest.TestCase):
             anchors = AnchorStateManager.get_anchors(outside_path)
             tc = _make_tool_call("edit_file",
                                  path=outside_path,
-                                 **{"from": 1, "from_hash": anchors[0], "new_text": "b"})
+                                 edits=[{"from": 1, "from_hash": anchors[0], "new_text": "b"}])
             result = execute_tool(tc, self.write_gate, self.read_gate)
             self.assertNotIn("blocked by safety layer", result.content)
         finally:
@@ -411,7 +411,7 @@ class TestToolSummary(unittest.TestCase):
 
     def test_edit_file_summary(self):
         tc = _make_tool_call("edit_file", path="f.txt",
-                             **{"from": 5, "from_hash": "Wave", "new_text": "done"})
+                             edits=[{"from": 5, "from_hash": "Wave", "new_text": "done"}])
         s = tool_summary(tc)
         self.assertIn("edit_file", s)
         self.assertIn("f.txt", s)
@@ -900,7 +900,7 @@ class TestErrorHints(unittest.TestCase):
             f.write("original content\n")
         execute_tool(_make_tool_call("read_file", path=path, hash_lines=True), self.write_gate, self.read_gate)
         tc = _make_tool_call("edit_file", path=path,
-                             **{"from": 1, "from_hash": "WrongHash", "new_text": "replacement"})
+                             edits=[{"from": 1, "from_hash": "WrongHash", "new_text": "replacement"}])
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertFalse(result.success)
         self.assertIn("anchor mismatch", result.content)
@@ -1137,7 +1137,7 @@ class TestEditFileShortOutput(unittest.TestCase):
         from core.anchor_manager import AnchorStateManager
         anchors = AnchorStateManager.get_anchors(f)
         tc = _make_tool_call("edit_file", path=f,
-                             **{"from": 2, "from_hash": anchors[1], "new_text": "delta"})
+                             edits=[{"from": 2, "from_hash": anchors[1], "new_text": "delta"}])
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertTrue(result.success)
         self.assertIn("OK: applied 1 edit", result.content)
@@ -1154,7 +1154,7 @@ class TestEditFileShortOutput(unittest.TestCase):
         from core.anchor_manager import AnchorStateManager
         anchors = AnchorStateManager.get_anchors(f)
         tc = _make_tool_call("edit_file", path=f,
-                             **{"from": 2, "from_hash": anchors[1], "new_text": "TWO"})
+                             edits=[{"from": 2, "from_hash": anchors[1], "new_text": "TWO"}])
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertTrue(result.success)
         with open(f) as fh:

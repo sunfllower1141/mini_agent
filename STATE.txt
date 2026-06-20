@@ -1,12 +1,21 @@
 # mini_agent Architecture Map
-# Last updated: 2026-06-19 (old_string fallback removed -- hash-anchored editing is the only mode)
+# Last updated: 2026-06-20 (edit_file schema unified with edit_lines — flat args removed, edits[] array required)
 #
 # This file is the agent's map of the codebase. Update it after completed changes.
 # Behavioral rules live in AGENTS.md. Long-term facts live in core memory.
 
 ## Active Decisions
 
-- **old_string fallback removed (2026-06-19)** \u2014 edit_file now requires hash-anchored mode exclusively.\n  Removed `_apply_single_edit`, `_EditResult`, `old_string`/`new_string`/`count`/`paths` params.\n  Schema updated: `from` and `from_hash` are now required. `generate_diff` uses line-range diffs.\n- **Dirac-style half/quarter compaction (2026-06-19)** \u2014 replaced summary-based compaction with Dirac's pure-deletion approach.\n  Triggers only at 100% context fill (not 80%). Removes 50% of middle messages (half strategy),\n  75% if still overflowing (quarter strategy). No summary injected. Compounding deletion saves ~50%+ tokens.\n  Keeps `_compress_stale_tool_results` as secondary optimization on surviving messages.
+- **old_string fallback removed (2026-06-19)** \u2014 edit_file now requires hash-anchored mode exclusively.
+  Removed `_apply_single_edit`, `_EditResult`, `old_string`/`new_string`/`count`/`paths` params.
+  Schema updated: `from` and `from_hash` are now required. `generate_diff` uses line-range diffs.
+- **edit_file flat args removed (2026-06-20)** — Deleted `_edit_file` wrapper. Both `edit_file` and `edit_lines`
+  now route directly to `_edit_lines`, which accepts `edits` array (not flat `from`/`from_hash`).
+  Tests and schema updated to match. `generate_diff` in safety.py still uses flat args (separate code path).
+  Added `to`/`to_hash` defaults (fall back to `from`/`from_hash`) in `_edit_lines` for convenience.
+  Fixed `test_restore_after_edit` in tests/test_file_ops_extended.py (missed flat-args conversion).
+- **schema.py auto-generated (2026-06-20)** — Schema now compact JSON-lines, generated from @_register decorators.
+- **Dirac-style half/quarter compaction (2026-06-19)** \u2014 replaced summary-based compaction with Dirac's pure-deletion approach.
 - **Dirac-style anchor tracking (2026-06-18)** — AnchorStateManager with FNV-1a hashing, Myers diff, word anchor pool.
   Persistently tracks anchor words across edits so unchanged lines keep the same anchor.
   Bug fix: `_TrackedDocument` init param corrected from `available_pool` to `pool` in `reconcile()`.
