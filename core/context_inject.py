@@ -1871,6 +1871,124 @@ def _strip_orphaned_tool_results(messages: list[dict]) -> int:
     return stripped
 
 
+def _inject_tool_result_stubs(messages: list[dict]) -> int:
+    """Ensure every tool_use in assistant messages has a corresponding tool_result.
+
+    Dirac's ensureToolResultsFollowToolUse: after truncation removes the middle
+    of the conversation, some tool_use blocks in assistant messages may have
+    lost their tool_result in the removed user message.  We inject a stub
+    tool_result with content "result missing" so the conversation structure
+    remains valid for the API.
+
+    Also fixes ordering: tool_results that appear out of order relative to
+    their tool_use blocks are reordered.
+
+    Returns the count of stubs injected.
+    """
+    injected = 0
+
+    for i in range(len(messages) - 1):
+        msg = messages[i]
+
+        # Only process assistant messages with tool_calls
+        if msg.get("role") != "assistant":
+            continue
+        tool_calls = msg.get("tool_calls") or []
+        if not tool_calls:
+            continue
+
+        # Extract tool_use IDs in order
+        tool_use_ids = [tc.get("id") for tc in tool_calls if tc.get("id")]
+        if not tool_use_ids:
+            continue
+
+        next_msg = messages[i + 1]
+
+        # The next message should be a user message (or tool role in OpenAI format)
+        if next_msg.get("role") not in ("user", "tool"):
+            continue
+
+        # Determine format: content-block (Anthropic) or tool-role (OpenAI)
+        is_content_block = isinstance(next_msg.get("content"), list)
+        is_tool_role = next_msg.get("role") == "tool"
+
+        # Collect existing tool_results
+        if is_content_block:
+            blocks = next_msg["content"]
+            tool_result_map: dict[str, dict] = {}
+            other_blocks: list[dict] = []
+            for block in blocks:
+                if block.get("type") == "tool_result" and block.get("tool_use_id"):
+                    tool_result_map[block["tool_use_id"]] = block
+                else:
+                    other_blocks.append(block)
+        elif is_tool_role:
+            tr_id = next_msg.get("tool_call_id")
+            tool_result_map = {tr_id: next_msg} if tr_id else {}
+            other_blocks = []
+        else:
+            # Text-only user message: no tool results at all
+            tool_result_map = {}
+            other_blocks = []
+            # Can't inject into a text-only user message
+            if tool_use_ids:
+                injected += len(tool_use_ids)
+                _log.debug(
+                    "Cannot inject %d tool result stub(s): next message is text-only user",
+                    len(tool_use_ids),
+                )
+            continue
+
+        # Check if reordering is needed
+        needs_update = False
+        expected_idx = 0
+        if is_content_block:
+            for block in blocks:
+                if (
+                    block.get("type") == "tool_result"
+                    and expected_idx < len(tool_use_ids)
+                    and block.get("tool_use_id") == tool_use_ids[expected_idx]
+                ):
+                    expected_idx += 1
+                elif block.get("type") == "tool_result" or expected_idx < len(tool_use_ids):
+                    needs_update = True
+                    break
+            if not needs_update and (
+                expected_idx < len(tool_result_map) or expected_idx < len(tool_use_ids)
+            ):
+                needs_update = True
+
+        # Add missing tool_results as stubs
+        for tid in tool_use_ids:
+            if tid not in tool_result_map:
+                stub = (
+                    {"type": "tool_result", "tool_use_id": tid, "content": "result missing"}
+                    if is_content_block
+                    else {"role": "tool", "tool_call_id": tid, "content": "result missing"}
+                )
+                tool_result_map[tid] = stub
+                needs_update = True
+                injected += 1
+
+        if not needs_update:
+            continue
+
+        # Rebuild: tool_results first (in tool_use_ids order), then other blocks
+        if is_content_block:
+            new_content: list[dict] = []
+            for tid in tool_use_ids:
+                tr = tool_result_map.get(tid)
+                if tr is not None:
+                    new_content.append(tr)
+            new_content.extend(other_blocks)
+            next_msg["content"] = new_content
+        # OpenAI tool-role format: tool_results handled inline in the list,
+        # but a single tool message can only hold one result.  If there are
+        # multiple tool_use_ids, this is already broken; skip rebuilding.
+
+    return injected
+
+
 
 def _compact_if_needed(messages: list[dict]) -> None:
     """Dirac-style half / quarter truncation of conversation history.
@@ -1901,7 +2019,10 @@ def _compact_if_needed(messages: list[dict]) -> None:
     # This leaves breathing room for the response and prevents API 400 errors
     # from imprecise token estimation.  Without headroom, a single estimation
     # error can cause the API to reject the request outright.
-    max_allowed = max(context_window - 40_000, int(context_window * 0.80))
+    # Dirac-style headroom: compact at min(1M, max(context_window - 40k, 80% of window)).
+    # HARD_LIMIT of 1M prevents runaway context for models that report absurdly large windows.
+    HARD_LIMIT = 1_000_000
+    max_allowed = min(HARD_LIMIT, max(context_window - 40_000, int(context_window * 0.80)))
     current_tokens = _total_tokens(messages)
     if current_tokens < max_allowed:
         return
@@ -1953,6 +2074,7 @@ def _compact_if_needed(messages: list[dict]) -> None:
     # Without this, the model sees tool results without matching tool calls,
     # which breaks the conversation structure.
     _strip_orphaned_tool_results(messages)
+    _inject_tool_result_stubs(messages)
 
     _log.info(
         "Dirac compaction: %d -> %d messages (%d middle messages removed, "

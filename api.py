@@ -58,6 +58,19 @@ class APIError(Exception):
         return f"APIError({self.status_code}): {self.body}"
 
 
+class ContextWindowExceeded(APIError):
+    """Raised when the LLM API reports the context window was exceeded.
+
+    Catchers can use this to trigger compaction and retry instead of crashing.
+    """
+
+    def __init__(self, status_code: int = 400, body: str = "") -> None:
+        super().__init__(status_code, body)
+
+    def __str__(self) -> str:
+        return f"ContextWindowExceeded({self.status_code}): {self.body}"
+
+
 # ---------------------------------------------------------------------------
 # Shared truncation / utility functions
 # ---------------------------------------------------------------------------
@@ -417,6 +430,20 @@ def call_llm(
     if _last_error is not None:
         raise _last_error
 
+    # Check for context window exceeded before raising generic APIError.
+    # This allows the caller to trigger compaction instead of crashing.
+    if not r.ok:
+        _body_str = ""
+        try:
+            _body_str = str(r.json())
+        except (ValueError, AttributeError):
+            _body_str = r.text or ""
+        try:
+            from core.context_error_detect import is_context_window_error_from_body
+            if is_context_window_error_from_body(r.status_code, _body_str):
+                raise ContextWindowExceeded(status_code=r.status_code, body=_body_str)
+        except ImportError:
+            pass
     if not r.ok:
         try:
             err = r.json()
