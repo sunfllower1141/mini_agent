@@ -54,6 +54,7 @@ package-lock.json
 # Temp / scratch files
 _[!_]*.py
 _[!_]*.bat
+!core/_anchor_words.py
 nul
 list_pkgs_temp.py
 _cleanup_temp.py
