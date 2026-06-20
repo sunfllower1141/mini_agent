@@ -256,10 +256,8 @@ def _validate_python_syntax(content: str, filepath: str) -> str | None:
         lineno = e.lineno or 1
         pointer = f"  line {lineno}: {lines[lineno - 1][:100] if lineno <= len(lines) else '?'}"
         return (
-            f"SyntaxError in {filepath}: {e.msg} at line {lineno}\n"
-            f"{pointer}\n"
-            f"Fix the syntax error before applying. If unsure, read the file "
-            f"with offset near line {lineno} first."
+            f"SyntaxError: {e.msg} at line {lineno}\n"
+            f"{pointer}"
         )
     return None
 
@@ -1107,9 +1105,7 @@ def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
         return ToolResult(
             success=False,
             content=(
-                f"Edit blocked: '{resolved}' has not been read yet in this session.\n"
-                f"Use read_file(hash_lines=True) first to see the current content "
-                f"with word anchors before constructing edit_lines calls."
+                f"Read '{resolved}' first with read_file(hash_lines=True) to get anchors"
             ),
         )
 
@@ -1173,10 +1169,9 @@ def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
                 return ToolResult(
                     success=False,
                     content=(
-                        f"edit_lines: edit[{i}] {label} line {line_num} {wg._BOLD}anchor mismatch{wg._RESET} -- "
-                        f"the content at line {line_num} has changed since you read the file.\n"
-                        f"  {wg._RED}Claimed anchor:{wg._RESET} {wg._RED}{anchor_to_check}{wg._RESET} (stale)\n"
-                        f"  Re-run {wg._BOLD}read_file(hash_lines=True){wg._RESET} to get current anchors, then retry."
+                        f"edit_lines: edit[{i}] {label} line {line_num} anchor mismatch -- "
+                        f"stale anchor '{anchor_to_check}' vs file content. "
+                        f"Re-run read_file(hash_lines=True) to get current anchors."
                     ),
                 )
             # Content cross-check: if model provided content, verify it matches
@@ -1184,11 +1179,8 @@ def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
                 return ToolResult(
                     success=False,
                     content=(
-                        f"edit_lines: edit[{i}] {label} anchor \"{anchor_to_check}\" "
-                        f"exists, but the code line you provided does not match the file's content.\n"
-                        f"  Expected: \"{lines[idx]}\"\n"
-                        f"  Provided: \"{content_claim}\"\n"
-                        f"  Re-run {wg._BOLD}read_file(hash_lines=True){wg._RESET} to get current content."
+                        f"edit_lines: edit[{i}] {label} content mismatch at line {line_num}. "
+                        f"Re-run read_file(hash_lines=True) to get current content."
                     ),
                 )
     # --- Capture edit positions for output (before any edits) ---

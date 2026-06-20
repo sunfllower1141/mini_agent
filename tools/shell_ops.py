@@ -279,8 +279,7 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
     _windows_cmd_note = ""
     if platform.system() == "Windows" and not _is_bash_available() and not force:
         _windows_cmd_note = (
-            "\nNote: Running on Windows cmd.exe. "
-            "Some shell commands (pipes, redirects, etc.) may behave differently than on Unix."
+            "\nNote: Windows cmd.exe (syntax may differ from Unix)"
         )
     # Auto-backup files before any rm command (prevents permanent data loss)
     if force and re.search(r'\brm\b', command):
@@ -497,26 +496,25 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
             lines_out = stdout.split("\n")
             if len(lines_out) > 500:
                 stdout = "\n".join(lines_out[:500])
-                stdout += f"\n... (truncated at 500 lines -- {len(lines_out)} total. "
-                stdout += "Use read_file with offset/limit for the full log if needed.)"
+                stdout += f"\n... (truncated; {len(lines_out)} total lines)"
             parts.append(f"stdout:\n{stdout}")
         elif proc.returncode == 0 and not stderr:
             # ACI upgrade: explicit empty-output message (SWE-agent pattern).
             # Silence is ambiguous -- the model needs to know the command ran OK.
-            hint = "Command completed successfully (no output)."
+            hint = "OK (no output)"
             # Detect likely no-op patterns in python -c commands
             if "python" in command and " -c " in command:
                 if "#" in command:
-                    hint += " Hint: '#' in python -c comments out the rest of the line. Use ';' separators instead of comments, or use a multi-line script."
+                    hint += " Hint: '#' comments out rest in python -c. Use ';' or multi-line script."
                 elif any(kw in command for kw in (" if ", " try:", " for ", " while ", " with ", " def ", " class ")):
-                    hint += " Hint: Compound statements (if/try/for/while/with/def/class) cannot follow ';' in python -c. Use newlines in a script instead."
+                    hint += " Hint: Compound statements can't follow ';' in python -c. Use a script."
             parts.append(hint)
         if stderr:
             err_output = stderr.rstrip()
             err_lines = err_output.split("\n")
             if len(err_lines) > 100:
                 err_output = "\n".join(err_lines[:100])
-                err_output += f"\n... (stderr truncated at 100 lines -- {len(err_lines)} total)"
+                err_output += f"\n... (stderr truncated; {len(err_lines)} total lines)"
             parts.append(f"stderr:\n{err_output}")
         content_out = "\n".join(parts)
         if _danger_prefix:
@@ -524,12 +522,12 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
         if _windows_cmd_note:
             content_out += _windows_cmd_note
         if proc.returncode == 127:
-            content_out += "\nHint: Command not found. Check the spelling and that it is installed."
+            content_out += "\nHint: command not found"
         _unregister_proc(proc)
         return ToolResult(success=proc.returncode == 0, content=content_out)
     except Exception as e:
-        hint = "\nHint: Check the command and flag spelling. Try with --help first, or use search_files to find the right syntax."
-        return ToolResult(success=False, content=f"Error running command: {e}{hint}{_windows_cmd_note}")
+        hint = " (use --help or search_files for correct syntax)"
+        return ToolResult(success=False, content=f"Error: {e}{hint}{_windows_cmd_note}")
 
 
 @_summarize("run_shell")
@@ -631,11 +629,7 @@ def _search_single_file(
         if offset:
             msg += f" (offset={offset})"
         if not use_regex and '|' in pattern:
-            msg += (
-                "\nHint: your pattern contains '|' but regex is not enabled."
-                "  The '|' is matched literally.  Try again with regex: true"
-                " to treat '|' as alternation."
-            )
+            msg += " (enable regex=true for | alternation)"
         return ToolResult(success=True, content=msg)
     return ToolResult(success=True, content="\n".join(results))
 
@@ -661,19 +655,13 @@ def _search_with_rg(root_dir: str, pattern: str, use_regex: bool, ignore_case: b
         if not lines:
             msg = f"No matches for '{pattern}' in {root_dir}"
             if not use_regex and '|' in pattern:
-                msg += (
-                    "\nHint: your pattern contains '|' but regex is not enabled."
-                    "  The '|' is matched literally.  Try again with regex: true"
-                    " to treat '|' as alternation."
-                )
+                msg += " (enable regex=true for | alternation)"
             return ToolResult(success=True, content=msg)
         if offset > 0:
             lines = lines[offset:]
         output = "\n".join(lines[:_SEARCH_MAX_RESULTS])
         if len(lines) > _SEARCH_MAX_RESULTS:
-            output += f"\n... (showing first {_SEARCH_MAX_RESULTS} results. "
-            output += "There may be more matches. Narrow your search with a more specific "
-            output += "pattern, a subdirectory path, or use find_symbol for symbol lookups.)"
+            output += f"\n... (capped at {_SEARCH_MAX_RESULTS}; use offset or narrow path)"
         return ToolResult(success=True, content=output)
     except (subprocess.TimeoutExpired, Exception):
         return ToolResult(success=False, content="rg search failed or timed out")
@@ -775,11 +763,7 @@ def _search_files(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolR
         # is treated as a literal pipe character.  Remind the AI to retry with
         # regex: true for alternation patterns.
         if not use_regex and '|' in pattern:
-            msg += (
-                "\nHint: your pattern contains '|' but regex is not enabled."
-                "  The '|' is matched literally.  Try again with regex: true"
-                " to treat '|' as alternation."
-            )
+            msg += " (enable regex=true for | alternation)"
         return ToolResult(success=True, content=msg)
     output = "\n".join(results)
     if len(results) >= _SEARCH_MAX_RESULTS:

@@ -1006,10 +1006,7 @@ class TestHashlines(unittest.TestCase):
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertFalse(result.success)
         self.assertIn("anchor mismatch", result.content)
-        self.assertIn("has changed since you read the file", result.content)
-        # Must show the stale claimed anchor and re-read instruction
-        self.assertIn("Claimed anchor", result.content)
-        self.assertIn("stale", result.content)
+        self.assertIn("stale anchor", result.content)
         self.assertIn("Re-run", result.content)
         self.assertIn("read_file(hash_lines=True)", result.content)
         # Must NOT expose the actual hash or current line content
@@ -1071,7 +1068,7 @@ class TestHashlines(unittest.TestCase):
         }])
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertFalse(result.success)
-        self.assertIn("has not been read", result.content)
+        self.assertIn("first with read_file(hash_lines=True)", result.content)
 
     def test_edit_lines_insert_lines(self):
         """edit_lines can insert lines (to=from, replacing one line with several)."""

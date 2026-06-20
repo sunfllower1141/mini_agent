@@ -929,7 +929,7 @@ class TestErrorHints(unittest.TestCase):
         tc = _make_tool_call("run_shell", command=cmd)
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertTrue(result.success)
-        self.assertIn("truncated at 500 lines", result.content)
+        self.assertIn("truncated;", result.content)
 
     def test_shell_streaming_calls_on_output(self):
         """on_output is called for each line of shell stdout."""
