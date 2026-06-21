@@ -296,7 +296,7 @@ function AppShell() {
   }, []);
   const [showSettings, setShowSettings] = useState(false);
   const [inputValue, setInputValue] = useState('');
-  const [textareaRows, setTextareaRows] = useState(1);
+
   const [theme, setTheme] = useState(() => localStorage.getItem('mini_agent_theme') || 'dark');
   const [themePickerOpen, setThemePickerOpen] = useState(false);
   const themeToggleRef = useRef(null);
@@ -926,24 +926,28 @@ function AppShell() {
     setInputValue(val);
   }, []);
 
-  // Auto-resize rows 1–15 based on visual line count (including soft-wrapped lines).
-  // Temporarily set rows=1 so scrollHeight reflects true content height
-  // (scrollHeight is monotonic — it never shrinks on its own).
+  // Auto-resize the textarea height to fit content (1–15 visual rows).
+  // Uses the standard “height:auto → scrollHeight” pattern so it
+  // shrinks correctly when lines are deleted.
   useLayoutEffect(() => {
-    const ta = inputRef.current;
-    if (!ta) return;
-    ta.rows = 1;
-    const scrollH = ta.scrollHeight;
-    const style = getComputedStyle(ta);
+    const el = inputRef.current;
+    if (!el) return;
+
+    // Compute max height (15 rows × line-height) for the scrollbar gate.
+    const style = getComputedStyle(el);
     const lineH = parseFloat(style.lineHeight);
-    if (!lineH || lineH <= 0) {
-      // Fallback: count hard newlines only
-      const lines = (inputValue || '').split('\n').length;
-      setTextareaRows(Math.min(Math.max(lines, 1), 15));
-      return;
-    }
-    const needed = Math.ceil(scrollH / lineH);
-    setTextareaRows(Math.min(Math.max(needed, 1), 15));
+    const maxH = (lineH && lineH > 0) ? lineH * 15 : 300;
+
+    // Reset to ‘auto’ so scrollHeight reflects the true content height
+    // (scrollHeight never shrinks on its own).
+    el.style.height = 'auto';
+    const scrollH = el.scrollHeight;
+
+    // Apply new height, capped at max.
+    el.style.height = Math.min(scrollH, maxH) + 'px';
+
+    // Show scrollbar only when content exceeds the visible area.
+    el.style.overflowY = scrollH > maxH ? 'auto' : 'hidden';
   }, [inputValue]);
 
   // Drag-and-drop: use the preload bridge which can read Electron's File.path.
@@ -1220,7 +1224,6 @@ function AppShell() {
               <textarea
                 ref={inputRef}
                 id="user-input"
-                rows={textareaRows}
                 placeholder="Ctrl+Enter to send · Enter for newline · Drop files here..."
                 autoFocus
                 autoComplete="off"
@@ -1228,6 +1231,7 @@ function AppShell() {
                 value={inputValue}
                 onChange={handleChange}
                 onKeyDown={handleKeyDown}
+                style={{ height: 'auto', overflowY: 'hidden' }}
               />
             </div>
           </div>
