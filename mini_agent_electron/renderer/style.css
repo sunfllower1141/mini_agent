@@ -724,7 +724,7 @@ body::before {
     var(--accent),
     var(--thinking)
   ) 1;
-  animation: glow-angle-rotate 3s linear infinite;
+  animation: blockFadeIn 0.2s ease forwards, glow-angle-rotate 3s linear infinite running;
 }
 /* Tool call box while running */
 .tool-call-box.tool-running {
@@ -736,7 +736,7 @@ body::before {
     var(--thinking),
     var(--accent)
   ) 1;
-  animation: glow-angle-rotate 3s linear infinite;
+  animation: blockFadeIn 0.2s ease forwards, glow-angle-rotate 3s linear infinite running;
 }
 @media (prefers-reduced-motion: reduce) {
   .thinking-box.thinking-active,
@@ -811,7 +811,7 @@ body::before {
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgb(var(--accent-rgb) / 0.06);
   border-left: 3px solid var(--thinking);
-  animation: blockFadeIn 0.2s ease;
+  animation: blockFadeIn 0.2s ease forwards, glow-angle-rotate 3s linear infinite paused;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 .thinking-box:hover {
@@ -1495,7 +1495,7 @@ body::before {
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgb(var(--accent-rgb) / 0.06);
   border-left: 3px solid var(--border);
-  animation: blockFadeIn 0.2s ease;
+  animation: blockFadeIn 0.2s ease forwards, glow-angle-rotate 3s linear infinite paused;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 .tool-call-box:hover {
