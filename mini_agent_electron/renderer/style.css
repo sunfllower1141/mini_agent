@@ -800,6 +800,7 @@ body::before {
    Soft rounded card, slightly muted with a subtle tint to feel
    distinct from the bold green/red tool call boxes. */
 .thinking-box {
+  position: relative;
   margin: 0.5em 0;
   border-left: 3px solid var(--thinking);
   border-radius: 8px;
@@ -1483,6 +1484,7 @@ body::before {
    Full colored border (green/red), bigger & bolder. */
 /* Tool call box -- left accent bar carries status color (green/red). */
 .tool-call-box {
+  position: relative;
   margin: 0.5em 0;
   border-left: 3px solid var(--border);
   border-radius: 8px;
@@ -1503,6 +1505,17 @@ body::before {
 .tool-call-box.tool-ok  { border-left-color: var(--green); }
 .tool-call-box.tool-err { border-left-color: var(--red); }
 
+/* Click strip -- invisible wider hit area on the left border for collapsing.
+   Only rendered when the box is expanded.  14px wide (3px border + 11px fudge). */
+.click-strip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 14px;
+  cursor: pointer;
+  z-index: 1;
+}
 
 .tool-call-header {
   display: flex;

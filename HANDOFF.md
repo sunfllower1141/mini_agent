@@ -1,16 +1,32 @@
 # Session Handoff
 # Auto-generated at session end. Read at next session start for continuity.
 
-## Last Session: 2026-06-21 19:21 UTC
+## Last Session: 2026-06-21 19:26 UTC
 
 ### What I Changed
-(no git changes detected)
+### Commits
+```
+f868204 UI: thinking-box inline + ToolCallBox collapse + prompt separator + cost_control refactor
+```
+```
+HANDOFF.md                                         |  13 +-
+ STATE.txt                                          |   3 +-
+ core/constants.py                                  |   8 +
+ core/context_inject.py                             |   9 +-
+ core/cost_control.py                               | 549 +++++++++------------
+ core/safety.py                                     |   2 +-
+ mini_agent_electron/renderer/src/App.jsx           | 217 ++++----
+ .../renderer/src/components/LogLine.jsx            |  19 +
+ .../renderer/src/components/LogPanel.jsx           |   2 +-
+ .../renderer/src/components/ThinkingBlock.jsx      | 102 ++++
+ .../renderer/src/components/ToolCallBox.jsx        |  72 +++
+ mini_agent_electron/renderer/style.css             | 321 +++++++++++-
+ tools/file_ops.py                                  |   2 +-
+ 13 files changed, 886 insertions(+), 433 deletions(-)
+```
 
 ### What's Pending
 (none recorded)
-
-### Recent Conversation
-- there's a bug make the separator containing user prompt create multiple lines, our goal is make user prompt appears truncated and one line only.
 
 ### Plan Progress
 Plan (3/3 complete):
@@ -19,4 +35,16 @@ Plan (3/3 complete):
   [V] 3. Verify the changes work by checking for any related issues
 
 ### Modified Files
-(none tracked)
+- HANDOFF.md
+- STATE.txt
+- core/constants.py
+- core/context_inject.py
+- core/cost_control.py
+- core/safety.py
+- mini_agent_electron/renderer/src/App.jsx
+- .../renderer/src/components/LogLine.jsx
+- .../renderer/src/components/LogPanel.jsx
+- .../renderer/src/components/ThinkingBlock.jsx
+- .../renderer/src/components/ToolCallBox.jsx
+- mini_agent_electron/renderer/style.css
+- tools/file_ops.py

@@ -38,6 +38,7 @@ const ToolCallBox = memo(function ToolCallBox({ toolName, toolArgs, ok, summary,
 
   return (
     <div className={`${cls} ${open ? 'open' : ''}`}>
+      {open && <div className="click-strip" onClick={handleClick} />}
       <div
         className="tool-call-header"
         onClick={handleClick}

@@ -71,7 +71,8 @@ const ThinkingBlock = memo(function ThinkingBlock({ text, active }) {
   const toggle = () => setOpen((o) => !o);
 
   return (
-    <div className={cls} onClick={open ? toggle : undefined}>
+    <div className={cls}>
+      {open && <div className="click-strip" onClick={toggle} />}
       <div
         className="thinking-box-header"
         onClick={toggle}
