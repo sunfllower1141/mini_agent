@@ -22,16 +22,19 @@ pytest>=9.0
 pytest-timeout>=2.0         # prevents hanging tests (all platforms; especially Windows)
 
 # ================================================
+
+# --- Code parsing via tree-sitter (AST tools, codebase map) ---
+tree-sitter>=0.23
+tree-sitter-python
+tree-sitter-javascript
+tree-sitter-typescript
+tree-sitter-c
+tree-sitter-cpp
+
+# ================================================
 # Optional — uncomment what you need:
 # ================================================
 
-# --- Code parsing via tree-sitter (falls back to regex/AST if missing) ---
-# tree-sitter>=0.21
-# tree-sitter-python
-# tree-sitter-javascript
-# tree-sitter-typescript
-# tree-sitter-c
-# tree-sitter-cpp
 
 # --- Browser automation (web skill, all platforms) ---
 # playwright>=1.40
