@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import useSmoothStream from './hooks/useSmoothStream';
 import useAutoScroll from './hooks/useAutoScroll';
 import LogLine from './components/LogLine';
@@ -924,10 +924,24 @@ function AppShell() {
   const handleChange = useCallback((e) => {
     const val = e.target.value;
     setInputValue(val);
-    // Auto-resize rows 1–15 based on newline count
-    const lines = val.split('\n').length;
-    setTextareaRows(Math.min(Math.max(lines, 1), 15));
   }, []);
+
+  // Auto-resize rows 1–15 based on visual line count (including soft-wrapped lines)
+  useLayoutEffect(() => {
+    const ta = inputRef.current;
+    if (!ta) return;
+    const scrollH = ta.scrollHeight;
+    const style = getComputedStyle(ta);
+    const lineH = parseFloat(style.lineHeight);
+    if (!lineH || lineH <= 0) {
+      // Fallback: count hard newlines only
+      const lines = (inputValue || '').split('\n').length;
+      setTextareaRows(Math.min(Math.max(lines, 1), 15));
+      return;
+    }
+    const needed = Math.ceil(scrollH / lineH);
+    setTextareaRows(Math.min(Math.max(needed, 1), 15));
+  }, [inputValue]);
 
   // Drag-and-drop: use the preload bridge which can read Electron's File.path.
   // The preload manages dragOver/drop at the document level and calls our
