@@ -227,7 +227,7 @@ class WriteSafetyGate:
             elif line.startswith("-"):
                 colored.append(f"{self._RED}{stripped}{self._RESET}")
             elif line.startswith("---") or line.startswith("+++"):
-                colored.append(f"{self._BOLD}{stripped}{self._RESET}")
+                continue  # Skip ---/+++ header lines
             else:
                 colored.append(stripped)
         return "\n".join(colored)

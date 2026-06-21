@@ -28,7 +28,7 @@ const LogPanel = memo(function LogPanel({ id, className, lines, children }) {
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
     >
-      {lines && lines.map((line, i) => <LogLine key={i} line={line} />)}
+      {lines && lines.map((line, i) => <LogLine key={line._key || line.id || `ln-${i}`} line={line} />)}
       {children}
       {/* Scroll-to-bottom button */}
       {showJump && (

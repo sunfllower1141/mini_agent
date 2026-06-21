@@ -2,6 +2,7 @@ import { memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import CodeBlock from './CodeBlock';
+import ThinkingBlock from './ThinkingBlock';
 
 const markdownComponents = {
   code({ className, children, inline, ...props }) {
@@ -59,7 +60,25 @@ const LogLine = memo(function LogLine({ line }) {
     );
   }
 
+  // Collapsible thinking box (sits inline among tool lines)
+  if (line.thinkingText !== undefined) {
+    return <ThinkingBlock text={line.thinkingText} active={line.thinkingActive} />;
+  }
+
+  // Prompt separator -- bold section divider marking user prompt boundaries in tools panel
+  if (line.cls === 'prompt-separator') {
+    return (
+      <div className="prompt-separator">
+        <span className="prompt-separator-line" />
+        <span className="prompt-separator-badge"><span className="prompt-separator-badge-text">{line.promptText}</span></span>
+        <span className="prompt-separator-line" />
+      </div>
+    );
+
+  }
+
   // Plain text -- HTML-escaped
+
   return <div className={line.cls || ''}>{escapeHtml(line.text)}</div>;
 });
 

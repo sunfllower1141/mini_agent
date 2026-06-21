@@ -38,65 +38,6 @@ from core.compaction import (
 )
 from memory.memory_prune import _estimate_tokens
 
-
-# --- Dead-tool pruning ---
-
-DEAD_TOOL_PRUNE_TURN = 6
-"""Number of turns before checking for unused tools to prune."""
-
-DEAD_TOOL_RESET_TURN = 4
-"""If all tools were called in the last N turns, skip pruning."""
-
-
-def prune_dead_tools(
-    active_tools: list[dict],
-    called_tool_names: set[str],
-    turn_count: int,
-    preserve_tools: set[str] | None = None,
-) -> tuple[list[dict], set[str]]:
-    """Remove tools that have never been called after DEAD_TOOL_PRUNE_TURN turns.
-
-    Returns (pruned_tools, pruned_names).  The caller must re-establish
-    the prefix if tools change (fingerprint changes → cache invalidated).
-
-    preserve_tools: set of tool names that should never be pruned
-        (e.g. read_file, write_file, run_shell, plan, todo_write, etc.)
-    """
-    if turn_count < DEAD_TOOL_PRUNE_TURN:
-        return active_tools, set()
-
-    if preserve_tools is None:
-        preserve_tools = {
-            "read_file", "write_file", "edit_file", "run_shell",
-            "search_files", "find_symbol", "list_directory", "file_info",
-            "web_search", "todo_write", "todo_read",
-            "plan", "plan_status", "memory_core", "remember",
-            "write_scratchpad", "session_search",
-        }
-
-    pruned: set[str] = set()
-    kept: list[dict] = []
-
-    for tool in active_tools:
-        name = tool.get("function", {}).get("name", "")
-        if name in preserve_tools:
-            kept.append(tool)
-        elif name in called_tool_names:
-            kept.append(tool)
-        else:
-            pruned.add(name)
-
-    if pruned:
-        import logging
-        _log = logging.getLogger("cost_control")
-        _log.info(
-            "dead_tool_prune: removed %d unused tools (turn %d): %s",
-            len(pruned), turn_count, sorted(pruned),
-        )
-
-    return kept, pruned
-
-
 # --- Model escalation ---
 
 

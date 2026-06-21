@@ -43,6 +43,7 @@ from typing import Any
 
 from api import APIError
 from .safety import ReadSafetyGate
+from .constants import DEAD_TOOL_PRUNE_TURN
 from tools import _TOOL_CONTEXT, get_modified_files
 from logging_setup import get_logger
 from interject import poll_interjections
@@ -65,7 +66,7 @@ _CIRCUIT_THRESHOLD: int = 3
 # Dead-tool pruning: after this many turns, deactivate skills whose tools
 # have never been used.  Reduces API payload by ~500-2000 tokens and
 # stabilizes the KV-cache prefix (tool definitions stop changing).
-_DEAD_TOOL_PRUNE_TURN: int = 5
+# (DEAD_TOOL_PRUNE_TURN imported from core/constants.py)
 _MIN_PRUNE_COUNT: int = 3  # must have at least this many unused tools to prune
 
 def _tool_call_key(tc: dict) -> str:
@@ -1442,7 +1443,7 @@ def _inject_dead_tool_pruning(
 ) -> None:
     """Prune unused tools after the dead-tool threshold turn.
 
-    After _DEAD_TOOL_PRUNE_TURN turns, any skill whose tools have never
+    After DEAD_TOOL_PRUNE_TURN turns, any skill whose tools have never
     been used is deactivated.  This shrinks the API payload (fewer tool
     definitions) and stabilizes the KV-cache prefix (tool definitions
     stop changing mid-session).
@@ -1450,13 +1451,13 @@ def _inject_dead_tool_pruning(
     A transient message is injected so the agent is aware of the change.
     Only runs once per session (at exactly the threshold turn).
     """
-    if turn_count != _DEAD_TOOL_PRUNE_TURN:
+    if turn_count != DEAD_TOOL_PRUNE_TURN:
         return
 
     try:
         from tools import get_unused_tools
         from tools.skills import prune_unused_skills, active_skills
-        unused = get_unused_tools(min_turns=_DEAD_TOOL_PRUNE_TURN)
+        unused = get_unused_tools(min_turns=DEAD_TOOL_PRUNE_TURN)
         if len(unused) < _MIN_PRUNE_COUNT:
             return
         pruned = prune_unused_skills(unused)

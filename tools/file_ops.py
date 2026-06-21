@@ -1231,7 +1231,7 @@ def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
             f"OK: applied {len(edits)} {edit_label} to {resolved}"
             f"{line_info}{delta_str}"
             f"\n  {anchor_indicator.strip()}"
-            f"  [\u26a0 anchors preserved for unchanged lines \u2013 chain edits without re-reading]"
+
         ),
         diff_preview=diff.preview_text if diff.changed else None,
     )

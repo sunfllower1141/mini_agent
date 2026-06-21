@@ -11,7 +11,7 @@
                   'Noto Sans Mono CJK SC', 'Source Han Mono SC',
                   'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB',
                   'WenQuanYi Micro Hei', monospace;
-  --font-size: 13px;
+  --font-size: 13.5px;
   --line-height: 1.5;
 }
 
@@ -31,6 +31,7 @@
   --yellow:         #999999;
   --red:            #e05555;
   --thinking:       #888888;
+  --thinking-text:  #d4a574;
   --pulse:          #888888;
   --final-thought:  #cccccc;
   --overlay:        #15121f;
@@ -51,6 +52,7 @@
   --yellow:         #8a7a2a;
   --red:            #c03030;
   --thinking:       #777777;
+  --thinking-text:  #b87333;
   --pulse:          #777777;
   --final-thought:  #222222;
   --overlay:        #f6f6f6;
@@ -71,6 +73,7 @@
   --yellow:         #f1fa8c;
   --red:            #ff5555;
   --thinking:       #6272a4;
+  --thinking-text:  #bd93f9;
   --pulse:          #bd93f9;
   --final-thought:  #f8f8f2;
   --overlay:        #21222c;
@@ -91,6 +94,7 @@
   --yellow:         #ebcb8b;
   --red:            #bf616a;
   --thinking:       #81a1c1;
+  --thinking-text:  #88c0d0;
   --pulse:          #88c0d0;
   --final-thought:  #eceff4;
   --overlay:        #2e3440;
@@ -111,6 +115,7 @@
   --yellow:         #f9e2af;
   --red:            #f38ba8;
   --thinking:       #89b4fa;
+  --thinking-text:  #f5c2e7;
   --pulse:          #cba6f7;
   --final-thought:  #cdd6f4;
   --overlay:        #1e1e2e;
@@ -131,6 +136,7 @@
   --yellow:         #f6c177;
   --red:            #eb6f92;
   --thinking:       #908caa;
+  --thinking-text:  #ebbcba;
   --pulse:          #c4a7e7;
   --final-thought:  #e0def4;
   --overlay:        #191724;
@@ -151,6 +157,7 @@
   --yellow:         #d79921;
   --red:            #cc241d;
   --thinking:       #928374;
+  --thinking-text:  #fabd2f;
   --pulse:          #d79921;
   --final-thought:  #ebdbb2;
   --overlay:        #282828;
@@ -171,6 +178,7 @@
   --yellow:         #b58900;
   --red:            #dc322f;
   --thinking:       #657b83;
+  --thinking-text:  #2aa198;
   --pulse:          #268bd2;
   --final-thought:  #93a1a1;
   --overlay:        #002b36;
@@ -191,6 +199,7 @@
   --yellow:         #e0af68;
   --red:            #f7768e;
   --thinking:       #565f89;
+  --thinking-text:  #7dcfff;
   --pulse:          #7aa2f7;
   --final-thought:  #c0caf5;
   --overlay:        #1a1b26;
@@ -211,6 +220,7 @@
   --yellow:         #e6db74;
   --red:            #f92672;
   --thinking:       #75715e;
+  --thinking-text:  #a6e22e;
   --pulse:          #a6e22e;
   --final-thought:  #f8f8f2;
   --overlay:        #272822;
@@ -230,6 +240,18 @@ html, body {
   font-size: var(--font-size);
   line-height: var(--line-height);
   -webkit-font-smoothing: antialiased;
+  transition: background 0.5s ease, color 0.5s ease;
+}
+
+/* --- Noise texture overlay --- */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  opacity: 0.012;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 0;
 }
 
 #app {
@@ -678,6 +700,52 @@ html, body {
   to   { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes blockFadeIn {
+  from { opacity: 0; transform: translateY(-3px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* --- Animated gradient border (rotating conic-gradient) --- */
+@property --glow-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+@keyframes glow-angle-rotate {
+  to { --glow-angle: 1turn; }
+}
+/* Active/streaming thinking block gets a rotating gradient accent */
+.thinking-box.thinking-active {
+  border-image: conic-gradient(
+    from var(--glow-angle),
+    var(--thinking),
+    var(--accent),
+    var(--thinking),
+    var(--accent),
+    var(--thinking)
+  ) 1;
+  animation: glow-angle-rotate 3s linear infinite;
+}
+/* Tool call box while running */
+.tool-call-box.tool-running {
+  border-image: conic-gradient(
+    from var(--glow-angle),
+    var(--accent),
+    var(--thinking),
+    var(--accent),
+    var(--thinking),
+    var(--accent)
+  ) 1;
+  animation: glow-angle-rotate 3s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .thinking-box.thinking-active,
+  .tool-call-box.tool-running {
+    animation: none;
+    border-image: none;
+  }
+}
+
 .agent-tree-tooltip-header {
   display: flex;
   align-items: center;
@@ -728,13 +796,112 @@ html, body {
 .agent-tree-tooltip::-webkit-scrollbar-track { background: transparent; }
 .agent-tree-tooltip::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
-/* Fixed-height thinking area (left pane) */
-.thinking-log {
-  max-height: 12em;
+/* Collapsible thinking box -- sits inline between tool call boxes.
+   Soft rounded card, slightly muted with a subtle tint to feel
+   distinct from the bold green/red tool call boxes. */
+.thinking-box {
+  margin: 0.5em 0;
+  border-left: 3px solid var(--thinking);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.95em;
+  background: rgb(var(--bg-rgb) / 0.35);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgb(var(--accent-rgb) / 0.06);
+  border-left: 3px solid var(--thinking);
+  animation: blockFadeIn 0.2s ease;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.thinking-box:hover {
+  transform: translateX(2px);
+  box-shadow: 0 2px 16px rgb(var(--bg-rgb) / 0.35);
+}
+.thinking-box-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0.25em 0.55em;
+  cursor: pointer;
+  color: var(--thinking);
+  user-select: none;
+}
+.thinking-box-header:hover {
+  background: color-mix(in srgb, var(--thinking) 10%, transparent);
+}
+
+.thinking-box-label {
   flex-shrink: 0;
-  overflow-y: auto;
-  overflow-wrap: break-word;
+  font-style: italic;
+  font-weight: 500;
+}
+.thinking-box-preview {
+  color: var(--thinking-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  line-height: 1.45;
+  min-width: 0;
   word-break: break-word;
+}
+.thinking-box-body {
+  padding: 0.4em 0.7em 0.6em 0.8em;
+  color: var(--thinking-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-top: 1px solid color-mix(in srgb, var(--thinking) 28%, transparent);
+  line-height: 1.5;
+  animation: slideDown 0.25s ease;
+}
+
+/* Blinking cursor for typewriter effect */
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.thinking-cursor {
+  animation: blink-cursor 0.8s step-end infinite;
+  color: var(--thinking-text);
+  font-weight: 300;
+}
+
+/* Prompt separator -- prominent divider between user prompts in the tools panel.
+   Uses a horizontal-line + badge + horizontal-line layout for clear visual separation. */
+.prompt-separator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 6px 6px 6px;
+  margin: 10px 0 4px 0;
+}
+.prompt-separator-line {
+  flex: 1 1 0;
+  height: 1px;
+  min-width: 12px;
+  background: linear-gradient(to right, transparent, var(--accent), transparent);
+  opacity: 0.45;
+}
+.prompt-separator-badge {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 70%;
+  padding: 2px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.prompt-separator-badge-text {
+  display: block;
+  font-size: 0.8em;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Scrollable fills remaining space */
@@ -1252,7 +1419,7 @@ html, body {
 .text     { color: var(--text); }
 .dim      { color: var(--dim); }
 .accent   { color: var(--accent); }
-.thinking { color: var(--thinking); }
+.thinking { color: var(--thinking-text); }
 .red      { color: var(--red); }
 .green    { color: var(--green); }
 .yellow   { color: var(--yellow); }
@@ -1261,17 +1428,17 @@ html, body {
 /* ---------------------------------------------------------------------------
    Message styles
    --------------------------------------------------------------------------- */
-.msg-user     { color: var(--text); margin-bottom: 0.5em; padding-left: 0.75em; border-left: 3px solid var(--accent); }
-.msg-agent    { color: var(--final-thought); margin-bottom: 1em; }
-.msg-error    { color: var(--red); }
-.msg-thinking { color: var(--thinking); }
-.msg-agent-pending { min-height: 1em; }
+.msg-user     { color: var(--text); margin-bottom: 0.5em; padding: 0.3em 0.5em 0.3em 0.75em; border-left: 3px solid var(--accent); background: rgb(var(--accent-rgb) / 0.03); border-radius: 0 6px 6px 0; animation: messageIn 0.25s ease; }
+.msg-agent    { color: var(--final-thought); margin-bottom: 1em; animation: messageIn 0.25s ease; }
+.msg-error    { color: var(--red); animation: messageIn 0.25s ease; }
+.msg-thinking { color: var(--thinking-text); animation: messageIn 0.25s ease; }
+.msg-agent-pending { min-height: 1em; animation: messageIn 0.25s ease; }
 
 /* Code blocks -- unified styling (Shiki + plain) */
 .code-block {
   margin: 0.5em 0;
   padding: 0.75em 1em;
-  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
   border-radius: 6px;
   background: rgb(var(--bg-rgb) / 0.25);
   overflow-x: auto;
@@ -1299,6 +1466,7 @@ html, body {
   border: none;
   border-top: 1px solid var(--border);
   margin: 12px 0 8px 0;
+  opacity: 0.5;
   user-select: none;
 }
 
@@ -1311,6 +1479,114 @@ html, body {
   user-select: none;
 }
 
+/* Tool call box -- wraps a complete tool invocation (name + args + output).
+   Full colored border (green/red), bigger & bolder. */
+/* Tool call box -- left accent bar carries status color (green/red). */
+.tool-call-box {
+  margin: 0.5em 0;
+  border-left: 3px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 1.05em;
+  background: rgb(var(--bg-rgb) / 0.35);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgb(var(--accent-rgb) / 0.06);
+  border-left: 3px solid var(--border);
+  animation: blockFadeIn 0.2s ease;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.tool-call-box:hover {
+  transform: translateX(2px);
+  box-shadow: 0 2px 16px rgb(var(--bg-rgb) / 0.35);
+}
+.tool-call-box.tool-ok  { border-left-color: var(--green); }
+.tool-call-box.tool-err { border-left-color: var(--red); }
+
+
+.tool-call-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0.35em 0.7em;
+  color: var(--text);
+  font-weight: 700;
+  font-size: 1.05em;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s, transform 0.15s ease;
+}
+.tool-call-header:hover {
+  background: rgb(var(--bg-rgb) / 0.3);
+  transform: translateX(3px);
+}
+
+
+/* Keep tool name on one line, no wrap */
+.tool-call-header .accent {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Args: fill remaining header space, wrap at word boundaries, never collapse to 0 px */
+.tool-call-header .dim {
+  flex: 1 1 0;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  min-width: 2em;
+}
+
+
+
+.tool-call-preview {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 50%;
+  margin-left: 0.3em;
+  padding: 0.05em 0.45em;
+  border-radius: 5px;
+  font-size: 0.75em;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tool-call-preview.ok {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--green) 25%, transparent);
+}
+.tool-call-preview.err {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--red) 25%, transparent);
+}
+
+/* Spinning indicator for running tool calls */
+.tool-call-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-left: 0.5em;
+  border: 2px solid var(--accent);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: tool-spin 0.7s linear infinite;
+}
+@keyframes tool-spin {
+  to { transform: rotate(1turn); }
+}
+
+.tool-call-body {
+  padding: 0.2em 0.6em 0.5em 0.8em;
+  color: var(--dim);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  animation: slideDown 0.2s ease;
+}
+.tool-call-body .diff-view { margin-left: 0; }
+
 /* Plain tool output */
 .tool-out { margin: 2px 0 4px 0; font-size: 0.82em; overflow-x: auto; white-space: pre-wrap; }
 /* Shiki output wrapper -- ensure the pre inside renders correctly */
@@ -1321,6 +1597,7 @@ html, body {
   margin: 0 !important;
   padding: 10px 14px !important;
   border-radius: 6px;
+  box-shadow: inset 0 0 20px rgb(var(--accent-rgb) / 0.04);
   font-family: var(--font-family) !important;
   font-size: 0.9em;
   line-height: 1.55;
@@ -1336,9 +1613,9 @@ html, body {
   user-select: none;
 }
 
-.msg-tool-ok  { color: var(--green); font-size: 0.75em; }
-.msg-tool-err { color: var(--red); font-size: 0.75em; }
-.msg-status   { color: var(--dim); font-style: italic; }
+.msg-tool-ok  { color: var(--green); font-size: 0.75em; animation: messageIn 0.25s ease; }
+.msg-tool-err { color: var(--red); font-size: 0.75em; animation: messageIn 0.25s ease; }
+.msg-status   { color: var(--dim); font-style: italic; animation: messageIn 0.25s ease; }
 
 /* shrink all lines inside the tools panel */
 #tools-log, .tools-log .log-line { font-size: 0.75em; }
@@ -1525,6 +1802,18 @@ html, body {
 @keyframes thoughtPop {
   from { opacity: 0; transform: translateY(4px); filter: blur(1px); }
   to   { opacity: 1; transform: translateY(0);    filter: blur(0); }
+}
+
+/* Message entry -- slide up + fade in */
+@keyframes messageIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Tool-call body expand */
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 .thought-chunk {

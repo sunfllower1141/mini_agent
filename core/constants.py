@@ -36,6 +36,14 @@ HTTP_POOL_CONNECTIONS = 2     # max connections per host
 HTTP_POOL_MAXSIZE = 4         # max total pool size
 
 # ---------------------------------------------------------------------------
+# Dead-tool pruning
+# ---------------------------------------------------------------------------
+
+DEAD_TOOL_PRUNE_TURN = 5
+"""Number of turns before deactivating skills whose tools have never been used.
+Reduces API payload by ~500-2000 tokens and stabilises the KV-cache prefix."""
+
+# ---------------------------------------------------------------------------
 # Directory names to skip during os.walk / tree traversal.
 #
 # Used by: codebase_map.py, knowledge_graph.py, prompt.py (startup context),

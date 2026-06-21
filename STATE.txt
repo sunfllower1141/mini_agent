@@ -1,7 +1,6 @@
 # mini_agent Architecture Map
-# Last updated: 2026-06-20 (gut hash cache read_file system)
+# Last updated: 2026-06-21 (DEAD_TOOL_PRUNE_TURN unified, dead prune_dead_tools removed)
 
-# Last updated: 2026-06-20 (cross-session conversation continuity via HANDOFF.md recent_conversation)
 #
 # This file is the agent's map of the codebase. Update it after completed changes.
 # Behavioral rules live in AGENTS.md. Long-term facts live in core memory.

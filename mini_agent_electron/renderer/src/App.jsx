@@ -7,11 +7,12 @@ import SearchResults from './components/SearchResults';
 import ReadFileResult from './components/ReadFileResult';
 import ShellResults from './components/ShellResults';
 import AstResult from './components/AstResult';
+import ToolCallBox from './components/ToolCallBox';
 
 import LogPanel from './components/LogPanel';
 import AgentTree from './components/AgentTree';
 import RoundedFrame from './components/RoundedFrame';
-import CharStream from './components/CharStream';
+
 import DeferredMarkdown from './components/DeferredMarkdown';
 import StreamingMessage from './components/StreamingMessage';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -119,6 +120,15 @@ function stripAnsi(text) {
   return text.replace(new RegExp(ESC + '\\[[0-9;]*m', 'g'), '');
 }
 
+/** Collapse newlines → spaces, truncate to maxLen, append … if truncated. */
+function _singleLine(text, maxLen) {
+  if (!text) return '';
+  const oneLine = String(text).replace(/[\r\n]+/g, ' ');
+  if (oneLine.length <= maxLen) return oneLine;
+  return oneLine.slice(0, maxLen) + '\u2026';
+}
+
+
 // Parse a unified-diff hunk header like "@@ -1,6 +1,9 @@" into human-readable form.
 // Returns e.g. "Line 1  (+3 lines)" or "Line 5" for a pure-context hunk.
 function formatHunkHeader(raw) {
@@ -141,10 +151,8 @@ function DiffView({ diff }) {
   const rows = [];
   let oldLn = 0, newLn = 0;
   for (const line of rawLines) {
-    if (line.startsWith('--- ') || line.startsWith('+++ ')) {
-      rows.push({ display: line, color: 'var(--dim)', ln: '' });
-      continue;
-    }
+    // Skip --- file / +++ file header lines (already in status line)
+    if (line.startsWith('--- ') || line.startsWith('+++ ')) continue;
     const hunkMatch = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)/);
     if (hunkMatch) {
       oldLn = parseInt(hunkMatch[1], 10);
@@ -219,8 +227,10 @@ function AppShell() {
   // Sub-agent data -- { [task_id]: { name, desc, toolCalls: [], thoughts: [], output: "", ok: null } }
   const [subagentData, setSubagentData] = useState({});
 
-  // Smooth streaming for thinking & chat
-  const thinking = useSmoothStream();
+  // Thinking text accumulator (plain ref — no useSmoothStream overhead)
+  const thinkingRef = useRef('');
+  const thinkingLiveRef = useRef(false);
+  const thinkingKeyRef = useRef('');
   const chatStream = useSmoothStream();
 
   // UI state
@@ -235,7 +245,7 @@ function AppShell() {
   const [tokenCountVal, setTokenCountVal] = useState(null);
   const [elapsedSec, setElapsedSec] = useState(null);
   const [inputDisabled, setInputDisabled] = useState(false);
-  const [thinkingBlocks, setThinkingBlocks] = useState([]);
+
   const [botStatus, setBotStatus] = useState({});
   const [botMenuOpen, setBotMenuOpen] = useState(false);
   const botMenuToggleRef = useRef(null);
@@ -249,17 +259,13 @@ function AppShell() {
   const [subagentRunning, setSubagentRunning] = useState(0);
 
   const inputRef = useRef(null);
-  const thinkingLogRef = useRef(null);
   const chatLogRef = useRef(null);
 
   // --- Auto-scroll hooks (depend on content deps) ---
-  const { isAtBottom: thinkingAtBottom, scrollToBottom: scrollThinking } =
-    useAutoScroll(thinkingLogRef, [thinking.displayedText]);
   const { isAtBottom: chatAtBottom, scrollToBottom: scrollChat } =
     useAutoScroll(chatLogRef, [chatLines, chatStream.displayedText]);
 
   // --- Hover state for scroll-jump buttons ---
-  const [thinkingHover, setThinkingHover] = useState(false);
   const [chatHover, setChatHover] = useState(false);
   const inThinkingRef = useRef(false);
   const submitTimeoutRef = useRef(null);
@@ -415,6 +421,18 @@ function AppShell() {
 
   const addToolLine = useCallback((line) => addLine(setToolsLines)(line), [addLine]);
 
+  // Upsert: replace line with same _key, or append
+  const upsertToolLine = useCallback((line) => {
+    setToolsLines((prev) => {
+      if (!line._key) return [...prev, line];
+      const idx = prev.findIndex((l) => l._key === line._key);
+      if (idx === -1) return [...prev, line];
+      const next = [...prev];
+      next[idx] = line;
+      return next;
+    });
+  }, []);
+
   // Status / init -- fetched once on mount (empty deps to avoid re-render loop)
   useEffect(() => {
     const api = window.miniAgent;
@@ -480,7 +498,9 @@ function AppShell() {
 
     unsubs.push(api.on('stream:token', (data) => {
       if (inThinkingRef.current) {
-        thinking.addChunk(data.text);
+        thinkingRef.current += data.text;
+        // Live-update the thinking placeholder with accumulated text
+        upsertToolLine({ thinkingText: thinkingRef.current, _key: thinkingKeyRef.current, thinkingActive: true });
       } else {
         chatStream.addChunk(data.text);
       }
@@ -488,18 +508,24 @@ function AppShell() {
 
     unsubs.push(api.on('stream:thinking_start', () => {
       inThinkingRef.current = true;
-      thinking.reset();
+      thinkingRef.current = '';
+      thinkingLiveRef.current = true;
+      thinkingKeyRef.current = 'thinking_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+      // Push placeholder immediately — visible while backend streams
+      upsertToolLine({ thinkingText: '', _key: thinkingKeyRef.current, thinkingActive: true });
     }));
 
     unsubs.push(api.on('stream:thinking_end', () => {
       inThinkingRef.current = false;
-      const flushed = thinking.flush();
-      if (flushed) setThinkingBlocks((prev) => [...prev, flushed]);
+      thinkingLiveRef.current = false;
+      const text = thinkingRef.current;
+      if (text) {
+        upsertToolLine({ thinkingText: text, _key: thinkingKeyRef.current, thinkingActive: false });
+      }
     }));
 
     unsubs.push(api.on('stream:tool_start', (data) => {
-      addToolLine({ text: '', cls: 'tool-separator' });
-      // Color-code the tool name using structured data (not HTML strings)
+      // Parse tool name + args from summary (e.g. "read_file(path/to/file)")
       const summary = data.summary;
       const parenIdx = summary.indexOf('(');
       let toolName, toolArgs;
@@ -510,14 +536,28 @@ function AppShell() {
         toolName = summary;
         toolArgs = '';
       }
-      addToolLine({
-        toolName,
-        toolArgs,
-        cls: '',
+      const key = `tool_${summary}`;
+      // Push buffer with metadata + key for later upsert
+      toolOutputStack.current.push({
+        lines: [],
+        toolName: data.summary,
+        displayName: toolName,
+        displayArgs: toolArgs,
+        _key: key,
       });
-      // Push a new buffer for this tool call (stack supports parallel calls)
-      // Track tool name alongside the buffer for language detection
-      toolOutputStack.current.push({ lines: [], toolName: data.summary });
+      // Push placeholder ToolCallBox immediately — shows running state
+      upsertToolLine({
+        _key: key,
+        component: (
+          <ToolCallBox
+            toolName={toolName}
+            toolArgs={toolArgs}
+            ok={null}
+            running={true}
+            summary="running…"
+          />
+        ),
+      });
     }));
 
     unsubs.push(api.on('stream:tool_output', (data) => {
@@ -531,68 +571,70 @@ function AppShell() {
     }));
 
     unsubs.push(api.on('stream:tool_end', (data) => {
-      const status = data.ok ? 'OK' : 'ERR';
-      const cls = data.ok ? 'msg-tool-ok' : 'msg-tool-err';
-      // Pop this tool's buffer from the stack (supports parallel calls)
-      const entry = toolOutputStack.current.pop() || { lines: [], toolName: '' };
+      const ok = !!data.ok;
+      const entry = toolOutputStack.current.pop() || { lines: [], toolName: '', displayName: '', displayArgs: '' };
       const bufCode = entry.lines.join('\n').trim();
       const code = bufCode || (data.content || '').trim();
-      // When diff_preview is present, render colored diff (edit_file, write_file)
-      if (data.diff_preview) {
-        addToolLine({ text: `  ${status}`, cls });
-        // Show the content line (hash verification, line counts) as plain text
-        if (code) {
-          addToolLine({ text: `  ${code}`, cls: '' });
-        }
 
-        addToolLine({
-          component: <DiffView diff={data.diff_preview} />,
-          cls: '',
-        });
+      // Build children (status + content) for the ToolCallBox body
+      const children = [];
+
+      if (data.diff_preview) {
+        // edit_file / write_file with diff
+        if (code) {
+          children.push(<div key="status" className={ok ? 'msg-tool-ok' : 'msg-tool-err'}>  {code}</div>);
+        }
+        children.push(<DiffView key="diff" diff={data.diff_preview} />);
       } else if (code) {
-        const isSearch = /^search_files\(|^find_symbol\(/.test(entry.toolName || '');
-        const isReadFile = /^read_file\(/.test(entry.toolName || '');
-        const isShell = /^run_shell\(/.test(entry.toolName || '');
-        const isAst = /^get_file_skeleton\(|^get_function\(|^get_symbol_range\(|^replace_symbol\(/.test(entry.toolName || '');
+        const tname = entry.toolName || '';
+        const isSearch = /^search_files\(|^find_symbol\(/.test(tname);
+        const isReadFile = /^read_file\(/.test(tname);
+        const isShell = /^run_shell\(/.test(tname);
+        const isAst = /^get_file_skeleton\(|^get_function\(|^get_symbol_range\(|^replace_symbol\(/.test(tname);
         if (isSearch) {
-          addToolLine({ text: `  ${status}`, cls });
-          addToolLine({
-            component: <SearchResults content={code} />,
-            cls: 'msg-search-results',
-          });
+          children.push(<SearchResults key="result" content={code} />);
         } else if (isReadFile) {
-          addToolLine({ text: `  ${status}`, cls });
-          addToolLine({
-            component: <ReadFileResult content={code} toolName={entry.toolName} />,
-            cls: '',
-          });
+          children.push(<ReadFileResult key="result" content={code} toolName={tname} />);
         } else if (isShell) {
-          addToolLine({ text: `  ${status}`, cls });
-          addToolLine({
-            component: <ShellResults content={code} ok={data.ok} />,
-            cls: '',
-          });
+          children.push(<ShellResults key="result" content={code} ok={ok} />);
         } else if (isAst) {
-          addToolLine({ text: `  ${status}`, cls });
-          addToolLine({
-            component: <AstResult content={code} toolName={entry.toolName} />,
-            cls: '',
-          });
+          children.push(<AstResult key="result" content={code} toolName={tname} />);
         } else {
           const isSingleLine = !code.includes('\n');
           if (isSingleLine) {
-            addToolLine({ text: `  ${status}  ${code}`, cls });
+            children.push(<div key="result" style={{ whiteSpace: 'pre-wrap' }}>{code}</div>);
           } else {
-            addToolLine({ text: `  ${status}`, cls });
-            addToolLine({
-              component: <CodeBlock code={code} fontSize="0.75em" toolName={entry.toolName} wrap={true} />,
-              cls: '',
-            });
+            children.push(<CodeBlock key="result" code={code} fontSize="0.75em" toolName={tname} wrap={true} />);
           }
         }
       } else {
-        addToolLine({ text: `  ${status} ${data.detail}`, cls });
+        children.push(<div key="detail" className={ok ? 'msg-tool-ok' : 'msg-tool-err'}>{data.detail || ''}</div>);
       }
+      // Compute a one-line summary for the collapsed preview
+      let summary = '';
+      if (data.diff_preview) {
+        const s = code || 'diff applied';
+        summary = _singleLine(s, 120);
+      } else if (code) {
+        summary = _singleLine(code, 120);
+      } else if (data.detail) {
+        summary = _singleLine(data.detail, 120);
+      }
+
+      // Upsert the tool placeholder with real results
+      upsertToolLine({
+        _key: entry._key,
+        component: (
+          <ToolCallBox
+            toolName={entry.displayName}
+            toolArgs={entry.displayArgs}
+            ok={ok}
+            summary={summary}
+          >
+            {children}
+          </ToolCallBox>
+        ),
+      });
     }));
 
     unsubs.push(api.on('stream:turn_complete', (data) => {
@@ -799,8 +841,6 @@ function AppShell() {
         setToolsLines([]);
         setSubagentData({});
         chatStream.reset();
-        thinking.reset();
-        setThinkingBlocks([]);
         setIsLive(false);
         setInputDisabled(false);
         setInputValue('');
@@ -839,8 +879,6 @@ function AppShell() {
         setToolsLines([]);
         setSubagentData({});
         chatStream.reset();
-        thinking.reset();
-        setThinkingBlocks([]);
       }
       return;
     }
@@ -851,6 +889,11 @@ function AppShell() {
       { id: nextLineId(), text: `> ${text}`, cls: 'msg-user' },
       { id: nextLineId(), text: '', cls: 'msg-separator' },
       { id: nextLineId(), text: '', cls: 'msg-agent-pending' },
+    ]);
+    // Push prompt separator into tools/thinking panel
+    setToolsLines((prev) => [
+      ...prev,
+      { _key: `sep_${nextLineId()}`, cls: 'prompt-separator', promptText: text },
     ]);
     chatStream.reset();
 
@@ -931,10 +974,10 @@ function AppShell() {
     clearTimeout(submitTimeoutRef.current);
     stopTimer();
     inThinkingRef.current = false;
+    thinkingLiveRef.current = false;
     const agentText = chatStream.flush();
-    const thinkText = thinking.flush();
-    if (thinkText) setThinkingBlocks((prev) => [...prev, thinkText]);
-    thinking.reset();
+    const thinkText = thinkingRef.current;
+    if (thinkText) upsertToolLine({ thinkingText: thinkText, _key: thinkingKeyRef.current, thinkingActive: false });
     if (agentText) {
       setChatLines((prev) => {
         const updated = [...prev];
@@ -949,7 +992,7 @@ function AppShell() {
     setInputDisabled(false);
     setInputValue('');
     inputRef.current?.focus();
-  }, [chatStream, thinking, stopTimer]);
+  }, [chatStream, stopTimer, addToolLine]);
 
   // Discord bot start/stop toggle
   const BOT_SCRIPTS = { 'mini-agent': 'workspace_bot.py', 'emotion-game': 'discord_bot.py' };
@@ -1108,24 +1151,6 @@ function AppShell() {
         <div id="left-stack">
           <RoundedFrame id="left-pane">
             <LogPanel id="tools-log" className="scrollable dim" lines={toolsLines.slice(-MAX_RENDERED_TOOL_LINES)} />
-            <div className="hr" />
-            <div id="thinking-log" ref={thinkingLogRef} className="log thinking-log thinking"
-                 onMouseEnter={() => setThinkingHover(true)}
-                 onMouseLeave={() => setThinkingHover(false)}>
-              {thinking.displayedText && (
-                <CharStream text={thinking.displayedText} className="msg-thinking" />
-              )}
-              {!thinking.displayedText && thinkingBlocks.map((block, i) => (
-                <div key={i} className="msg-thinking">
-                  <DeferredMarkdown text={block} markdown={false} />
-                </div>
-              ))}
-              {/* Scroll-to-bottom button */}
-              {thinkingHover && !thinkingAtBottom && (
-                <button className="scroll-jump-btn" onClick={scrollThinking}
-                        title="Scroll to latest" aria-label="Scroll to latest">↓</button>
-              )}
-            </div>
           </RoundedFrame>
           {Object.keys(subagentData).length > 0 && (
             <div id="agent-tree-panel">
@@ -1147,7 +1172,7 @@ function AppShell() {
                   </div>
                 );
               }
-              return <LogLine key={line.id} line={line} />;
+              return <LogLine key={line._key || line.id} line={line} />;
             })}
             {chatStream.displayedText && (
               <div className="msg-agent">
