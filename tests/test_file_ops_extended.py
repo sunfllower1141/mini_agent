@@ -906,7 +906,7 @@ class TestHashlines(unittest.TestCase):
         from tools import file_ops, _TOOL_CACHE
         from tools.idempotency import clear_idempotent
         file_ops._READ_FILES.clear()
-        file_ops._FILE_CACHE.clear()
+
         _TOOL_CACHE.clear()
         clear_idempotent()
 
@@ -1174,77 +1174,19 @@ class TestHashlines(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestStormBreaker(unittest.TestCase):
-    """Tests for the storm-breaker synthesized response on repeated failures."""
+    """Storm-breaker gutted (2026-06-18).  Stubs kept for API compat."""
 
-    def test_check_storm_breaker_no_failures(self):
-        """No failures -> not triggered."""
-        from core.llm import _check_storm_breaker, _STORM_FAILURES, _STORM_LOCK
-        with _STORM_LOCK:
-            _STORM_FAILURES.clear()
+    def test_check_storm_breaker_always_false(self):
+        from core.llm import _check_storm_breaker
         triggered, name, error = _check_storm_breaker()
         self.assertFalse(triggered)
+        self.assertEqual(name, "")
+        self.assertEqual(error, "")
 
-    def test_check_storm_breaker_one_failure(self):
-        """One failure -> not triggered."""
-        from core.llm import _check_storm_breaker, _STORM_FAILURES, _STORM_LOCK
-        with _STORM_LOCK:
-            _STORM_FAILURES.clear()
-            _STORM_FAILURES.append(("read_file", "path is empty"))
-        triggered, name, error = _check_storm_breaker()
-        self.assertFalse(triggered)
-
-    def test_check_storm_breaker_three_same_failures(self):
-        """Three identical failures -> triggered."""
-        from core.llm import _check_storm_breaker, _STORM_FAILURES, _STORM_LOCK, _STORM_THRESHOLD
-        with _STORM_LOCK:
-            _STORM_FAILURES.clear()
-            for _ in range(_STORM_THRESHOLD):
-                _STORM_FAILURES.append(("read_file", "path is empty"))
-        triggered, name, error = _check_storm_breaker()
-        self.assertTrue(triggered)
-        self.assertEqual(name, "read_file")
-        self.assertIn("path is empty", error)
-        # Queue should be cleared after trigger
-        self.assertEqual(len(_STORM_FAILURES), 0)
-
-    def test_check_storm_breaker_mixed_failures(self):
-        """Different failures -> not triggered."""
-        from core.llm import _check_storm_breaker, _STORM_FAILURES, _STORM_LOCK
-        with _STORM_LOCK:
-            _STORM_FAILURES.clear()
-            _STORM_FAILURES.append(("read_file", "path is empty"))
-            _STORM_FAILURES.append(("edit_file", "not found"))
-            _STORM_FAILURES.append(("read_file", "path is empty"))
-        triggered, name, error = _check_storm_breaker()
-        self.assertFalse(triggered)
-
-    def test_synthesize_storm_breaker_message(self):
-        """Message is coherent and includes tool name + error."""
+    def test_synthesize_storm_breaker_message_always_empty(self):
         from core.llm import _synthesize_storm_breaker_message
-        msg = _synthesize_storm_breaker_message("read_file", "path argument is empty")
-        self.assertIn("read_file", msg)
-        self.assertIn("path argument is empty", msg)
-        self.assertIn("unable to continue", msg.lower())
-        self.assertIn("```", msg)  # error is formatted in code block
-
-    def test_storm_breaker_appended_to_messages(self):
-        """When triggered, an assistant message is appended."""
-        from core.llm import _check_storm_breaker, _synthesize_storm_breaker_message
-        from core.llm import _STORM_FAILURES, _STORM_LOCK, _STORM_THRESHOLD
-
-        # Simulate 3 identical failures
-        with _STORM_LOCK:
-            _STORM_FAILURES.clear()
-            for _ in range(_STORM_THRESHOLD):
-                _STORM_FAILURES.append(("run_shell", "command not found"))
-
-        triggered, name, error = _check_storm_breaker()
-        self.assertTrue(triggered)
-
-        msg = _synthesize_storm_breaker_message(name, error)
-        self.assertIsInstance(msg, str)
-        self.assertGreater(len(msg), 50)
-
+        msg = _synthesize_storm_breaker_message("read_file", "some error")
+        self.assertEqual(msg, "")
 
 if __name__ == "__main__":
     unittest.main()

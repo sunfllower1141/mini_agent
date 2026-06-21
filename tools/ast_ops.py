@@ -24,6 +24,7 @@ from core.anchor_manager import AnchorStateManager, format_line_with_anchor
 from core.symbol_context_resolver import resolve_symbol_context
 from core.tree_sitter_parser import _get_parser_for_ext, _TREE_SITTER_AVAILABLE
 
+from tools.error_hints import _err
 
 # Unicode box-drawing character used by read_file hash_lines output
 _BOX = "\u2502"  # │
@@ -44,8 +45,6 @@ def _format_anchored(lineno: int, gutter: int, anchor: str, content: str) -> str
 # ---------------------------------------------------------------------------
 
 # Cache: "path::function_name#anchored" -> hash_hex
-_FUNCTION_HASH_CACHE: dict[str, str] = {}
-
 
 def _hash_content(text: str) -> str:
     """Compute a content hash for change detection."""
@@ -284,67 +283,55 @@ def get_function(
         start_byte = defn["start_byte"]
         end_byte = defn["end_byte"]
         func_source = source[start_byte:end_byte]
+        header = f"--- {file_path} ---\n## {name}"
 
-        # Compute hash for caching
-        func_hash = _hash_content(func_source)
-        cache_key = f"{file_path}::{name}#{'anchored' if include_anchors else 'plain'}"
-        last_hash = _FUNCTION_HASH_CACHE.get(cache_key)
 
-        header = f"--- {file_path} :: {name} ---"
 
-        if last_hash and last_hash == func_hash:
-            results.append(
-                f"{header}\n"
-                f"no changes have been made to the function since your last read "
-                f"(Hash: {func_hash})"
-            )
-        else:
-            _FUNCTION_HASH_CACHE[cache_key] = func_hash
 
-            # Add anchors if requested
-            if include_anchors and anchors:
-                start_line = defn["start_line"]
-                end_line = defn["end_line"]
-                anchored_lines = []
-                for i in range(start_line, min(end_line, len(lines), len(anchors))):
-                    anchored_lines.append(_format_anchored(i + 1, gutter_width, anchors[i], lines[i]))
-                anchored_body = "\n".join(anchored_lines)
+        # Add anchors if requested
+        if include_anchors and anchors:
+            start_line = defn["start_line"]
+            end_line = defn["end_line"]
+            anchored_lines = []
+            for i in range(start_line, min(end_line, len(lines), len(anchors))):
+                anchored_lines.append(_format_anchored(i + 1, gutter_width, anchors[i], lines[i]))
+            anchored_body = "\n".join(anchored_lines)
 
-                # Resolve import/class context (Dirac SymbolContextResolver pattern)
-                context_str = ""
-                try:
-                    def_node = _find_definition_node(
-                        tree.root_node, source, name,
-                        parent_name=defn.get("parent_name", ""),
+            # Resolve import/class context (Dirac SymbolContextResolver pattern)
+            context_str = ""
+            try:
+                def_node = _find_definition_node(
+                    tree.root_node, source, name,
+                    parent_name=defn.get("parent_name", ""),
+                )
+                if def_node:
+                    context_str = resolve_symbol_context(
+                        node=def_node,
+                        file_content=source,
+                        parser=parser,
+                        ext=ext,
+                        anchors=anchors,
+                        root_node=tree.root_node,
                     )
-                    if def_node:
-                        context_str = resolve_symbol_context(
-                            node=def_node,
-                            file_content=source,
-                            parser=parser,
-                            ext=ext,
-                            anchors=anchors,
-                            root_node=tree.root_node,
-                        )
-                except Exception:
-                    pass  # Context resolution is best-effort
+            except Exception:
+                pass  # Context resolution is best-effort
 
-                func_hash_line = f"[Function Hash: {func_hash}]"
-                if context_str:
-                    anchor_header = (
-                        "All Hash Anchors provided below are stable and can "
-                        "be used with edit_file directly."
-                    )
-                    results.append(
-                        f"{header}\n{func_hash_line}\n{anchor_header}\n"
-                        f"{context_str}\n{anchored_body}"
-                    )
-                else:
-                    results.append(
-                        f"{header}\n{func_hash_line}\n{anchored_body}"
-                    )
+            func_hash_line = ""  # hash removed (cache gut)
+            if context_str:
+                anchor_header = (
+                    "All Hash Anchors provided below are stable and can "
+                    "be used with edit_file directly."
+                )
+                results.append(
+                    f"{header}\n{anchor_header}\n"
+                    f"{context_str}\n{anchored_body}"
+                )
             else:
-                results.append(f"{header}\n{func_source}")
+                results.append(
+                    f"{header}\n{anchored_body}"
+                )
+        else:
+            results.append(f"{header}\n{func_source}")
 
     if not results:
         return (
@@ -1360,17 +1347,8 @@ def _ast_fallback_function(
 
         func_lines = lines[start_line:end_line]
         func_source = "\n".join(func_lines)
-
-        func_hash = _hash_content(func_source)
-        hash_key = f"{file_path}::{name}#{'anchored' if include_anchors else 'plain'}"
-        old_hash = _FUNCTION_HASH_CACHE.get(hash_key)
-        _FUNCTION_HASH_CACHE[hash_key] = func_hash
-
         header = f"--- {file_path} ---\n## {name}"
-        if old_hash == func_hash:
-            results.append(f"{header}\n[no changes since last read]")
-            found_names.append(name)
-            continue
+
 
         if include_anchors:
             anchors = AnchorStateManager.reconcile(file_path, lines, task_id)
@@ -1379,10 +1357,10 @@ def _ast_fallback_function(
                 for i, l in enumerate(func_lines)
                 if start_line + i < len(anchors)
             )
-            func_hash_line = f"[Function Hash: {func_hash}]"
+            func_hash_line = ""  # hash removed (cache gut)
             anchor_header = "All Hash Anchors below are stable and can be used with edit_file directly."
             results.append(
-                f"{header}\n{func_hash_line}\n{anchor_header}\n{anchored_body}"
+                f"{header}\n{anchor_header}\n{anchored_body}"
             )
         else:
             results.append(f"{header}\n{func_source}")

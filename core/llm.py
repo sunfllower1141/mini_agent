@@ -58,50 +58,13 @@ TURN_HISTORY_MAX_ENTRIES = 200        # cap on _turn_history entries
 from .context_inject import _CIRCUIT_WINDOW, _CIRCUIT_THRESHOLD
 
 
-# ---------------------------------------------------------------------------
-# Storm-breaker -- synthesizes assistant message on repeated tool failures
-# ---------------------------------------------------------------------------
-# When the model makes the same failing tool call 3+ times in a row
-# (same tool name + same error fingerprint), instead of silently continuing,
-# we inject a synthesized assistant-role message explaining what went wrong
-# and asking the user for guidance.  This is the pattern from Howard Chen's
-# cwcode harness: "don't crash, talk."
-# ---------------------------------------------------------------------------
-
-from collections import deque as _deque
-
-_STORM_THRESHOLD = 3               # consecutive identical failures to trigger
-_STORM_FAILURES: _deque[tuple[str, str]] = _deque()  # (tool_name, error_fp)
-_STORM_LOCK = threading.Lock()
-
-
+# Storm-breaker GUTTED (2026-06-18) -- false-positive stops.  Stubs kept for
+# compatibility; always returns no-trigger.
 def _check_storm_breaker() -> tuple[bool, str, str]:
-    """Check if storm-breaker should trigger.
-
-    Returns (triggered, tool_name, error_message).
-    """
-    with _STORM_LOCK:
-        if len(_STORM_FAILURES) < _STORM_THRESHOLD:
-            return False, "", ""
-        names = {n for n, _ in _STORM_FAILURES}
-        fps = {f for _, f in _STORM_FAILURES}
-        if len(names) == 1 and len(fps) == 1:
-            name, fp = _STORM_FAILURES[0]
-            _STORM_FAILURES.clear()
-            return True, name, fp
     return False, "", ""
 
-
 def _synthesize_storm_breaker_message(tool_name: str, error: str) -> str:
-    """Build a natural-language storm-breaker message in the assistant's voice."""
-    return (
-        f"I'm unable to continue: tool `{tool_name}` failed "
-        f"{_STORM_THRESHOLD} times in a row with the same error:\n\n"
-        f"```\n{error[:500]}\n```\n\n"
-        f"This usually means the arguments are wrong, the target doesn't exist, "
-        f"or there's a deeper issue I can't resolve on my own. "
-        f"Please clarify what you'd like me to do, or check the inputs and try again."
-    )
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -815,18 +778,7 @@ def run_agent_turn(
             # _tool_execution_phase returns False when all tools were
             # already streamed -- just continue the loop.
 
-            # --- Storm-breaker: synthesize assistant message on repeated failures ---
-            triggered, storm_name, storm_error = _check_storm_breaker()
-            if triggered:
-                storm_msg = _synthesize_storm_breaker_message(storm_name, storm_error)
-                messages.append({"role": "assistant", "content": storm_msg})
-                if total_usage:
-                    storm_msg_dict = {"role": "assistant", "content": storm_msg, "_total_usage": total_usage}
-                else:
-                    storm_msg_dict = {"role": "assistant", "content": storm_msg}
-                if turn_count > 1:
-                    storm_msg_dict["_turn_count"] = turn_count
-                return storm_msg_dict
+
 
             # _run_consolidation(messages, config)  # disabled: causes API connection collision + cost surge
 
@@ -903,18 +855,7 @@ def _append_tool_result(
             while len(recent_keys) > _CIRCUIT_WINDOW:
                 recent_keys.popleft()
 
-    # --- Storm-breaker: track consecutive failed tool calls ---
-    if not result.success:
-        name = tc.get("function", {}).get("name", "?")
-        # Fingerprint: first 100 chars of error, stripped
-        fp = result.content[:100].strip() if result.content else ""
-        with _STORM_LOCK:
-            _STORM_FAILURES.append((name, fp))
-            while len(_STORM_FAILURES) > _STORM_THRESHOLD:
-                _STORM_FAILURES.popleft()
-    else:
-        with _STORM_LOCK:
-            _STORM_FAILURES.clear()
+
 
 
 def _append_cancel_results(

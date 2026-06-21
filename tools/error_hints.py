@@ -48,6 +48,7 @@ _ERROR_HINTS: dict[str, list[tuple[str, str]]] = {
         ("not found", "file not found → list_directory"),
         ("No such file", "file not found → list_directory"),
         ("FileNotFoundError", "file not found → list_directory"),
+        ("refused", "placeholder path → list_directory or read a file first"),
     ],
     "search_files": [
         ("No matches", "no match → enable regex=true or shorten pattern"),
@@ -61,6 +62,7 @@ _ERROR_HINTS: dict[str, list[tuple[str, str]]] = {
         ("outside workspace", "path outside workspace → use workspace path"),
         ("hash mismatch", "stale anchors → re-read with hash_lines=True"),
         ("missing edit specification", "provide from/from_hash"),
+        ("refused", "placeholder path → list_directory or read a file first"),
     ],
     "run_shell": [
         ("not found", "cmd not found → check PATH/spelling"),
@@ -76,7 +78,7 @@ def _build_error_hint(name: str, exc: Exception = None, error_msg: str = "") -> 
     Returns a single line: "retry → params: path (required), content (required)"
     Only includes heuristics when the error isn't already self-explanatory.
     """
-    error_text = error_msg or str(exc) if exc else ""
+    error_text = error_msg if error_msg else (str(exc) if exc else "")
 
     # 1. Check heuristic pattern hints (only for non-compact errors)
     heuristic: str | None = None
@@ -104,6 +106,12 @@ def _build_error_hint(name: str, exc: Exception = None, error_msg: str = "") -> 
         else:
             _TOOL_PARAM_CACHE[name] = ("", set())
     valid_params_str, _required_set = _TOOL_PARAM_CACHE[name]
+
+    # If the error was REFUSED (placeholder like ?), never say "retry"
+    if "refused" in error_text.lower() or "bogus" in error_text.lower():
+        if heuristic:
+            return f"DO NOT RETRY \u2192 {heuristic}"
+        return "DO NOT RETRY \u2014 determine the correct path/value before calling this tool"
 
     parts = []
     if valid_params_str:
@@ -299,15 +307,18 @@ _FAILURE_PATTERNS: dict[str, dict[str, str]] = {
         "count": "use count=1 or count=-1",
         "hash mismatch": "re-read with read_file(hash_lines=True)",
         "missing edit specification": "provide from/from_hash/to/to_hash/new_text",
+        "refused": "STOP — path is a placeholder. Read a file or list_directory first to identify the real file path.",
     },
     "write_file": {
         "blocked": "use path inside workspace or force=True",
         "guard": "read_file(path) first",
         "exists": "use force=True to overwrite",
+        "refused": "STOP — path is a placeholder. Read a file or list_directory first to identify the real file path.",
     },
     "read_file": {
         "not_found": "check path with list_directory",
         "offset": "reduce offset; use file_info to check size",
+        "refused": "STOP — path is a placeholder. Use list_directory or search_files to find the correct file.",
     },
     "run_shell": {
         "not_found": "check command spelling and PATH",

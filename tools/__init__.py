@@ -527,6 +527,21 @@ def execute_tool(
     if isinstance(args, dict):
         pipe_config = args.pop("_pipe", None)
 
+    # --- gut check: refuse placeholder values like ? before any tool runs ---
+    # Catches ALL tools (including run_shell with command=?) at the dispatch
+    # level so the tool function never executes.  The LLM sees a hard refusal
+    # with no retry path, which breaks storm loops.
+    _PLACEHOLDER_VALUES: frozenset[str] = frozenset({"?", "???", "...", ""})
+    if isinstance(args, dict):
+        for _pk, _pv in args.items():
+            if isinstance(_pv, str) and _pv.strip() in _PLACEHOLDER_VALUES:
+                _display = repr(_pv.strip()) if _pv.strip() else "(empty)"
+                return ToolResult(
+                    success=False,
+                    content=f"\u2717 REFUSED: {_pk}={_display} is a placeholder, not a real value",
+                    hint="DO NOT RETRY with placeholder values \u2014 use list_directory, search_files, or read a file first to find the actual path/content",
+                )
+
     # Check cache for read-only tools (skip if on_output is streaming)
     cache_key = ""
     if on_output is None and name in _CACHEABLE:

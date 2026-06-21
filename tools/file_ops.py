@@ -24,8 +24,32 @@ from tools.error_hints import _err, _hint
 # Thread-local: current sub-agent task_id (set by agent_ops before tool execution)
 import threading
 
-from core.file_context_tracker import get_tracker
+
 _current_agent_id: threading.local = threading.local()
+
+# Bogus path markers that indicate the model forgot to fill in a real path.
+# These are never valid file paths and should be caught early with a clear
+# error message rather than propagating to OS-level file operations.
+_BOGUS_PATH_MARKERS: frozenset[str] = frozenset({"?", "", " ", "  ", "???", "...", "path", "file"})
+
+
+def _validate_path(path: str, context: str = "path") -> str | None:
+    """Return an error string if *path* is obviously bogus, otherwise None.
+
+    Catches placeholder values like ``?`` that the model may emit when it
+    fails to fill in a real file path.  These would otherwise pass schema
+    validation (they are strings) and cause confusing OS-level errors.
+    """
+    stripped = path.strip() if isinstance(path, str) else ""
+    if not stripped:
+        return _err("REFUSED", f"{context} is empty, not a real path",
+                   fix="use list_directory or search_files to find the real path")
+    if stripped in _BOGUS_PATH_MARKERS:
+        return _err("REFUSED", f"{context}='{stripped}' is a placeholder, not a real path",
+                   fix="read a file or list files first")
+    return None
+
+
 
 
 
@@ -60,14 +84,7 @@ def _read_file_direct(
 
     if offset > 0 and offset >= total_lines:
         return ToolResult(success=False, content=_err("RANGE", f"offset={offset} > {total_lines}"))
-    # --- Populate file-content cache (so edit_file can skip disk read) ---
-    try:
-        current_mtime = os.path.getmtime(resolved)
-        if len(_FILE_CACHE) >= _FILE_CACHE_MAX and resolved not in _FILE_CACHE:
-            _FILE_CACHE.pop(next(iter(_FILE_CACHE)), None)
-        _FILE_CACHE[resolved] = (raw_content, current_mtime)
-    except Exception:
-        pass
+    
 
     # --- Compute word anchors (Dirac-style persistent anchors) ---
     anchors: list[str] | None = None
@@ -224,67 +241,22 @@ for _cp, _repl in _UNICODE_WHITESPACE_MAP.items():
 
 _BACKUPS: dict[str, str] = {}  # resolved_path -> backup path
 
-# Cross-turn file content cache -- avoids re-reading files whose mtime hasn't changed.
-# Key: resolved path (str), Value: (content: str, mtime: float)
-# Capped at _FILE_CACHE_MAX entries; oldest entries are evicted (LRU via insertion order).
-_FILE_CACHE: dict[str, tuple[str, float]] = {}
-_FILE_CACHE_MAX = 50
 
-# Raw-content cache — populated by _read_file_direct after every disk read,
-# used by edit paths to skip redundant disk I/O.  Same LRU cap as _FILE_CACHE.
-# (Merged with _FILE_CACHE — both now store raw text + mtime.)
-_CACHE_DISK_READS = 0  # Diagnostic: counts cache-miss disk reads in edit paths
 
 # Tracks files where edit_file recently failed -- used to detect write_file-as-fallback
 # anti-pattern.  Cleared after each successful write/edit or on next read_file.
 _RECENT_EDIT_FAILURES: set[str] = set()
 
-# Per-task file content hashes — used to short-circuit re-reads when content hasn't
-# changed since last read (Dirac pattern: "no changes since your last read").
-# Key: "{resolved_path}#anchored" or "{resolved_path}#plain", Value: content hash.
-_FILE_HASHES: dict[str, str] = {}
+
 
 # Maximum file size for full reads before warning (50KB). Larger files should be
 # read with offset/limit or via get_file_skeleton / get_function.
 _MAX_FILE_READ_SIZE = 50 * 1024
 
-def _cache_file_content(resolved_path: str, _source: str | None = None) -> None:
-    """Populate _FILE_CACHE with file content (LRU eviction).
-
-    Args:
-        resolved_path: Absolute file path (cache key).
-        _source: Pre-read file content. When provided, skips the disk read.
-    """
-    try:
-        if resolved_path in _FILE_CACHE:
-            return  # already cached
-        current_mtime = os.path.getmtime(resolved_path)
-        # Evict oldest if at capacity
-        if len(_FILE_CACHE) >= _FILE_CACHE_MAX:
-            _FILE_CACHE.pop(next(iter(_FILE_CACHE)), None)
-        if _source is not None:
-            _FILE_CACHE[resolved_path] = (_source, current_mtime)
-        else:
-            with open(resolved_path, "r", encoding="utf-8", errors="replace") as _f:
-                _FILE_CACHE[resolved_path] = (_f.read(), current_mtime)
-    except OSError:
-        pass
 
 
-def _get_cached_content(resolved_path: str) -> str | None:
-    """Return cached file content if mtime matches, otherwise None."""
-    cached = _FILE_CACHE.get(resolved_path)
-    if cached is None:
-        return None
-    content, cached_mtime = cached
-    try:
-        if os.path.getmtime(resolved_path) == cached_mtime:
-            return content
-    except OSError:
-        pass
-    # Stale cache -- evict and return None
-    _FILE_CACHE.pop(resolved_path, None)
-    return None
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -376,6 +348,13 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
             hint="Valid parameters: path (string), paths (array), offset, limit, line_numbers, hash_lines",
         )
 
+    # Reject obviously bogus paths (e.g. placeholder '?' instead of a real path)
+    for p in file_paths:
+        bogus_err = _validate_path(p)
+        if bogus_err:
+            return ToolResult(success=False, content=bogus_err)
+
+
     offset = args.get("offset", 0)
     try:
         offset = int(offset)
@@ -437,27 +416,8 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
             any_failed = True
             continue
 
-        # --- Hash-based re-read shortcut (Dirac: "no changes since your last read") ---
-        cache_key = f"{resolved}#{'anchored' if hash_lines else 'plain'}"
-        current_hash = hashlib.md5(raw_content.encode("utf-8")).hexdigest()
-        last_hash = _FILE_HASHES.get(cache_key)
-        if last_hash == current_hash and offset == 0 and limit >= _DEFAULT_READ_LINES:
-            header = f"--- {path} ---\n" if is_multi else ""
-            results.append(f"{header}no changes have been made to the file since your last read (Hash: {current_hash})")
-            _READ_FILES.add(resolved)
-            continue
-
         # --- Raw-content shortcut (no formatting, no offset/limit needed) ---
         if offset == 0 and limit >= _DEFAULT_READ_LINES and not line_numbers and not hash_lines:
-            _FILE_HASHES[cache_key] = current_hash
-            # Populate cross-turn mtime cache
-            try:
-                current_mtime = os.path.getmtime(resolved)
-                if len(_FILE_CACHE) >= _FILE_CACHE_MAX and resolved not in _FILE_CACHE:
-                    _FILE_CACHE.pop(next(iter(_FILE_CACHE)), None)
-                _FILE_CACHE[resolved] = (raw_content, current_mtime)
-            except OSError:
-                pass
             header = f"--- {path} ---\n" if is_multi else ""
             results.append(header + raw_content)
             _READ_FILES.add(resolved)
@@ -474,20 +434,12 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
 
         full_content = result.content
 
-        # --- Update hash cache ---
-        _FILE_HASHES[cache_key] = current_hash
-
         _READ_FILES.add(resolved)
 
         # Clear edit-failure tracker -- agent is doing the right thing (re-reading)
         _RECENT_EDIT_FAILURES.discard(resolved)
 
-        # Track for stale-context detection (FileContextTracker)
-        try:
-            tracker = get_tracker(getattr(_current_agent_id, "task_id", ""))
-            tracker.mark_file_read(resolved)
-        except Exception:
-            pass
+
 
         header = f"--- {path} ---\n" if is_multi else ""
         results.append(header + full_content)
@@ -513,8 +465,25 @@ def _read_file_summary(args: dict) -> str:
 
 @_register("write_file")
 def _write_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
-    path = args["path"]
-    content = args["content"]
+    path = args.get("path")
+    if not path or not isinstance(path, str):
+        return ToolResult(
+            success=False,
+            content="Missing required: path",
+            hint="Valid parameters: path, content",
+        )
+    bogus_err = _validate_path(path)
+    if bogus_err:
+        return ToolResult(success=False, content=bogus_err)
+
+    content = args.get("content")
+    if content is None:
+        return ToolResult(
+            success=False,
+            content="Missing required: content",
+            hint="Valid parameters: path, content",
+        )
+
     safety_result = wg.check(path)
     if not safety_result.allowed:
         return ToolResult(
@@ -529,6 +498,13 @@ def _write_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
         return ToolResult(
             success=False,
             content=_err("GUARD", f"read_file('{_resolved}') first, then write"),
+        )
+    # write_file only creates new files; use edit_file for existing files
+    if os.path.isfile(_resolved):
+        return ToolResult(
+            success=False,
+            content=_err("EXISTS", f"file already exists; use edit_file to modify",
+                         f"edit_file('{path}', ...)"),
         )
     # File reservation check -- prevent sub-agent collisions
     agent_id = getattr(_current_agent_id, "task_id", None)
@@ -570,8 +546,7 @@ def _write_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
         from tools import add_modified_file
         add_modified_file(safety_result.resolved_path)
         clear_tool_cache()
-        # Invalidate cross-turn file cache
-        _FILE_CACHE.pop(safety_result.resolved_path, None)
+        
         # Invalidate anchor state for this file (Dirac-style)
         try:
             from core.anchor_manager import AnchorStateManager
@@ -995,10 +970,27 @@ def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
 
     On any anchor mismatch the ENTIRE batch is rejected with a precise error.
     """
-    global _CACHE_DISK_READS
+    
 
-    path = args["path"]
-    edits = args["edits"]
+    path = args.get("path")
+    if not path or not isinstance(path, str):
+        return ToolResult(
+            success=False,
+            content="Missing required: path",
+            hint="Valid parameters: path, edits",
+        )
+    bogus_err = _validate_path(path)
+    if bogus_err:
+        return ToolResult(success=False, content=bogus_err)
+
+    edits = args.get("edits")
+    if not edits:
+        return ToolResult(
+            success=False,
+            content="Missing required: edits",
+            hint="Valid parameters: edits, path",
+        )
+
 
     safety_result = wg.check(path)
     if not safety_result.allowed:
@@ -1030,15 +1022,12 @@ def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
         if not ok:
             return ToolResult(success=False, content=msg)
 
-    # Try file-content cache first (populated by read_file), fall back to disk.
-    original = _get_cached_content(resolved)
-    if original is None:
-        _CACHE_DISK_READS += 1
-        try:
-            with open(resolved, "r", encoding="utf-8", errors="replace") as f:
-                original = f.read()
-        except Exception as e:
-            return ToolResult(success=False, content=_err("READ", str(e)))
+    # Read original for anchor-based editing
+    try:
+        with open(resolved, "r", encoding="utf-8", errors="replace") as f:
+            original = f.read()
+    except Exception as e:
+        return ToolResult(success=False, content=_err("READ", str(e)))
 
 
     lines = original.split("\n")
@@ -1193,12 +1182,7 @@ def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
     from tools import add_modified_file
     add_modified_file(resolved)
     clear_tool_cache()
-    # Update cache with new content so chained edits skip disk I/O
-    try:
-        mtime = os.path.getmtime(resolved)
-        _FILE_CACHE[resolved] = (updated, mtime)
-    except OSError:
-        _FILE_CACHE.pop(resolved, None)
+    
 
     if path.endswith(".py"):
         from tools.search_ops import _reindex_file
@@ -1291,7 +1275,17 @@ def _edit_lines_summary(args: dict) -> str:
 
 @_register("list_directory")
 def _list_directory(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
-    path = args["path"]
+    path = args.get("path")
+    if not path or not isinstance(path, str):
+        return ToolResult(
+            success=False,
+            content="Missing required: path",
+            hint="Valid parameters: path",
+        )
+    bogus_err = _validate_path(path)
+    if bogus_err:
+        return ToolResult(success=False, content=bogus_err)
+
     safety_result = rg.check(path)
     if not safety_result.allowed:
         return ToolResult(
@@ -1324,7 +1318,17 @@ def _list_directory_summary(args: dict) -> str:
 
 @_register("file_info")
 def _file_info(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResult:
-    path = args["path"]
+    path = args.get("path")
+    if not path or not isinstance(path, str):
+        return ToolResult(
+            success=False,
+            content="Missing required: path",
+            hint="Valid parameters: path",
+        )
+    bogus_err = _validate_path(path)
+    if bogus_err:
+        return ToolResult(success=False, content=bogus_err)
+
     safety_result = rg.check(path)
     if not safety_result.allowed:
         return ToolResult(
@@ -1572,7 +1576,6 @@ def _get_file_skeleton(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate,
             try:
                 with open(safety.resolved_path, "r", encoding="utf-8", errors="replace") as _f:
                     source = _f.read()
-                _cache_file_content(safety.resolved_path, _source=source)
             except OSError:
                 source = None  # fall through; get_file_skeleton will read it
             _READ_FILES.add(safety.resolved_path)
@@ -1657,7 +1660,6 @@ def _get_function(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate,
             try:
                 with open(safety.resolved_path, "r", encoding="utf-8", errors="replace") as _f:
                     source = _f.read()
-                _cache_file_content(safety.resolved_path, _source=source)
             except OSError:
                 source = None  # fall through; get_function will read it
             _READ_FILES.add(safety.resolved_path)
@@ -1771,16 +1773,12 @@ def _replace_symbol(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate,
         try:
             _backup_before_write(safety.resolved_path)
 
-            # Read original for diff preview (use cache when available)
-            original = _get_cached_content(safety.resolved_path)
-            if original is None:
-                global _CACHE_DISK_READS
-                _CACHE_DISK_READS += 1
-                try:
-                    with open(safety.resolved_path, "r", encoding="utf-8", errors="replace") as f:
-                        original = f.read()
-                except OSError:
-                    original = ""
+            # Read original for diff preview
+            try:
+                with open(safety.resolved_path, "r", encoding="utf-8", errors="replace") as f:
+                    original = f.read()
+            except OSError:
+                original = ""
 
             result_msg = replace_symbol(safety.resolved_path, repl_symbol, repl_text, symbol_type=repl_type)
             clear_tool_cache()
@@ -1797,11 +1795,7 @@ def _replace_symbol(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate,
             except OSError:
                 updated = repl_text
 
-            # Update cache with new content so chained edits skip disk I/O
-            try:
-                _FILE_CACHE[safety.resolved_path] = (updated, os.path.getmtime(safety.resolved_path))
-            except OSError:
-                _FILE_CACHE.pop(safety.resolved_path, None)
+            
 
             diff_text = wg._format_diff(safety.resolved_path, original, updated)
             diff_changed = original != updated
@@ -1876,7 +1870,6 @@ def _get_symbol_range(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate,
         try:
             with open(safety.resolved_path, "r", encoding="utf-8", errors="replace") as _f:
                 source = _f.read()
-            _cache_file_content(safety.resolved_path, _source=source)
         except OSError:
             source = None  # fall through; get_symbol_range will read it
         _READ_FILES.add(safety.resolved_path)

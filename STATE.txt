@@ -1,5 +1,7 @@
 # mini_agent Architecture Map
-# Last updated: 2026-06-20 (AST tools now fall back to Python's built-in `ast` when tree-sitter unavailable)
+# Last updated: 2026-06-20 (gut hash cache read_file system)
+
+# Last updated: 2026-06-20 (cross-session conversation continuity via HANDOFF.md recent_conversation)
 #
 # This file is the agent's map of the codebase. Update it after completed changes.
 # Behavioral rules live in AGENTS.md. Long-term facts live in core memory.
@@ -246,4 +248,25 @@
 - `AGENTS.md` — behavioral rules
 - `STATE.txt` — architecture map (this file)
 - `CHANGELOG.md` — audit trail
+- `HANDOFF.md` -- session handoff, auto-generated at end, read at start
 
+### Session Continuity (2026-06-20)
+- `write_session_handoff()` in `memory/memory.py` now accepts `recent_conversation`
+  parameter to include the last 3-5 user messages in HANDOFF.md.
+- `_cleanup_on_exit()` in `core/bootstrap.py` extracts recent user messages
+  (filtering out system metadata and summaries) and passes them to both
+  `write_session_handoff` and `capture_session_summary`.
+- On restart, `_inject_handoff_context` in `core/context_inject.py` injects
+  HANDOFF.md as a user message so the agent knows what was happening.
+- `.mini_agent.rules` now includes "Session Continuity" section instructing
+  the agent to read HANDOFF.md at session start.
+- Placeholder-value guard (`?`, `???`, `...`) is documented in both
+  `_STATIC_PROMPT` (all models) and `.mini_agent.rules` (Tool Usage Rules).
+
+
+ 
+### Hash Cache read_file System Gutted (2026-06-20) 
+- Removed hash-based re-read shortcut (CACHED -> response) from file_ops.py. 
+- Removed _FILE_HASHES, _FILE_CACHE, _get_cached_content, _cache_file_content. 
+- Gutted core/file_context_tracker.py to no-op stubs. 
+- All 70 tests pass.

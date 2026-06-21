@@ -691,6 +691,7 @@ class MemoryStore:
         notes: str = "",
         plan_steps: list[str] | None = None,
         plan_done: list[int] | None = None,
+        recent_conversation: str = "",
     ) -> str:
         """Auto-generate and write HANDOFF.md from session state.
 
@@ -768,6 +769,8 @@ class MemoryStore:
             f"### What I Changed\n{changes_text}\n\n"
             f"### What's Pending\n{pending_text}\n\n"
         )
+        if recent_conversation.strip():
+            content += f"### Recent Conversation\n{recent_conversation.strip()}\n\n"
         if plan_text:
             content += f"### Plan Progress\n{plan_text}\n"
         content += f"### Modified Files\n{files_text}\n"

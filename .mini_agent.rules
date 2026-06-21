@@ -115,6 +115,14 @@
 - Every new feature needs at least one test.
 - If tests fail, stop and diagnose before making additional changes.
 
+## Tool Usage Rules
+- NEVER use '?', '???', '...', or empty strings as tool parameter values. These are
+  placeholder markers that the runtime automatically refuses with ✗ REFUSED.
+- If you don't know a path, content, or argument value: use discovery tools
+  (list_directory, search_files, read_file, find_symbol) to find the real value.
+- Guessing with '?' wastes a turn and triggers storm-breaker protection.
+
+
 ## Self-Review Cycle
 After completing a significant change (new file, refactored module, or >50 lines edited):
 1. **Observe**: what did I just do? What files did I touch?
@@ -127,3 +135,12 @@ At the end of every session, write a HANDOFF.md with:
 - What I changed (files and reasoning)
 - What's pending (unfinished work)
 - Modified files list (for git context on next startup)
+
+## Session Continuity
+At the start of every session, HANDOFF.md from the previous session is injected.
+- Read HANDOFF.md content carefully -- it tells you what was changed, what's pending,
+  the plan progress, and the recent conversation from the last session.
+- Use this to pick up where you left off without re-discovering context.
+- At session end, HANDOFF.md is auto-generated with your changes, pending items,
+  and recent user messages for continuity.
+

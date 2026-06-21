@@ -1,3 +1,39 @@
+## 2026-06-20 -- Gut Hash Cache read_file System
+
+**Rationale:** The hash-based re-read shortcut returned a `CACHED ->` stub
+instead of file content when content hadn't changed. This confused models.
+Every read_file now always reads from disk and returns full content.
+
+### Changed
+- **file_ops.py:** Removed `_FILE_HASHES` dict and hash-based cache shortcut (~lines 471-486).
+  Removed `_FILE_CACHE`, `_get_cached_content()`, `_cache_file_content()`, `_CACHE_DISK_READS`.
+  Removed `FileContextTracker` import and `mark_file_read` call. All read/edit paths
+  now do direct disk I/O.
+- **file_context_tracker.py:** Gutted to no-op stubs; module kept for import safety.
+- **test_file_ops_extended.py:** Removed `_FILE_CACHE.clear()` reference.
+
+
+## 2026-06-20 -- Cross-Session Conversation Continuity
+
+**Rationale:** The agent was forgetting conversation context when the Electron
+app restarted. The HANDOFF.md and session summary captured only git changes and
+plan progress, with no record of what the user was actually discussing.
+
+### Changed
+- **memory.py (`write_session_handoff`):** Added `recent_conversation` parameter.
+  When provided, a "### Recent Conversation" section is written to HANDOFF.md
+  with the last 3-5 user messages. This gives the next session immediate context.
+- **bootstrap.py (`_cleanup_on_exit`):** Extracts recent user messages from saved
+  conversation (filtering out system metadata and summaries), passes them to
+  `write_session_handoff` and `capture_session_summary`. Session summary now
+  includes "Recent conversation" in addition to scratchpad and turn history.
+- **prompt.py (`_STATIC_PROMPT`):** Added "PLACEHOLDER-VALUE GUARD" section
+  telling all models that ?, ???, ... are refused as tool parameters.
+- **.mini_agent.rules:** Added "Tool Usage Rules" (no placeholder values) and
+  "Session Continuity" (read HANDOFF.md at startup) sections.
+- **memory_core:** Added entry documenting the REFUSED guard for cross-model awareness.
+
+
 # Changelog
 ## 2026-06-20 -- Compact Error Messages Everywhere
 

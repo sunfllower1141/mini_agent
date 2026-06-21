@@ -666,8 +666,9 @@ def _search_files(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolR
     use_regex = args.get("regex", False)
     ignore_case = args.get("ignore_case", False)
     offset = max(0, int(args.get("offset", 0)))
-    if not use_regex and '|' in pattern:
-        return ToolResult(success=True, content="please enable regex=true")
+    # | (pipe) always implies regex=true; no fallback needed
+    if '|' in pattern:
+        use_regex = True
 
     if file_path:
         # Single-file mode: skip the directory safety check, only validate the file

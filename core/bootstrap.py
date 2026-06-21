@@ -424,11 +424,32 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
             # Capture plan state for handoff
             plan_steps = getattr(_TOOL_CONTEXT, "_plan_steps", [])
             plan_done = list(getattr(_TOOL_CONTEXT, "_plan_done", set()))
+            # Extract recent user messages for conversation continuity
+            recent_conv = ""
+            try:
+                saved = memory.load()
+                user_msgs = [
+                    m for m in saved
+                    if m.get("role") == "user"
+                    and not m.get("_transient")
+                    and "SESSION METADATA" not in str(m.get("content", ""))
+                    and "CORE MEMORY" not in str(m.get("content", ""))
+                    and "WORKSPACE CONTEXT" not in str(m.get("content", ""))
+                    and "Earlier in this conversation" not in str(m.get("content", ""))
+                ]
+                recent = user_msgs[-5:] if len(user_msgs) > 5 else user_msgs
+                recent_conv = "\n".join(
+                    f"- {m.get('content', '')[:200]}"
+                    for m in recent if m.get("content", "").strip()
+                )
+            except Exception:
+                pass
             memory.write_session_handoff(
                 workspace, start_head=start_head,
                 pending=pending, notes="",
                 plan_steps=plan_steps if plan_steps else None,
                 plan_done=plan_done if plan_done else None,
+                recent_conversation=recent_conv,
             )
         except Exception:
             pass
@@ -446,10 +467,31 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
             for k in turn_keys[-5:]:
                 recent_turns.append(_TOOL_CONTEXT._turn_history.get(k, ""))
             turn_text = "\n".join(recent_turns)
+            # Build summary: prefer scratchpad, fall back to turn history + recent user messages
             summary = scratchpad[:300] if scratchpad else turn_text[:300]
-            detail = f"Scratchpad:\n{scratchpad[:500]}\n\nTurn history:\n{turn_text[:500]}"
+            # Include recent conversation for richer context on next startup
+            conv_context = ""
+            try:
+                saved = memory.load()
+                user_msgs = [
+                    m for m in saved
+                    if m.get("role") == "user"
+                    and not m.get("_transient")
+                    and "SESSION METADATA" not in str(m.get("content", ""))
+                    and "CORE MEMORY" not in str(m.get("content", ""))
+                    and "WORKSPACE CONTEXT" not in str(m.get("content", ""))
+                    and "Earlier in this conversation" not in str(m.get("content", ""))
+                ]
+                recent = user_msgs[-3:] if len(user_msgs) > 3 else user_msgs
+                conv_context = "\n".join(
+                    f"User: {m.get('content', '')[:150]}"
+                    for m in recent if m.get("content", "").strip()
+                )
+            except Exception:
+                pass
+            detail = f"Scratchpad:\n{scratchpad[:500]}\n\nRecent conversation:\n{conv_context[:500]}\n\nTurn history:\n{turn_text[:500]}"
             if summary.strip():
-                memory.capture_session_summary(summary[:200], detail[:1000])
+                memory.capture_session_summary(summary[:200], detail[:1500])
         except Exception:
             pass
 
