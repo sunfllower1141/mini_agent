@@ -930,7 +930,14 @@ function AppShell() {
   useLayoutEffect(() => {
     const ta = inputRef.current;
     if (!ta) return;
+    // Temporarily reset to minimum + hide overflow so scrollHeight gives
+    // the true content height (scrollHeight is monotonic otherwise).
+    const prevOverflow = ta.style.overflowY;
+    ta.style.overflowY = 'hidden';
+    ta.rows = 1;
     const scrollH = ta.scrollHeight;
+    ta.style.overflowY = prevOverflow;
+
     const style = getComputedStyle(ta);
     const lineH = parseFloat(style.lineHeight);
     if (!lineH || lineH <= 0) {
