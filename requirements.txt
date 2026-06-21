@@ -63,7 +63,8 @@ tree-sitter-cpp
 
 # --- Windows desktop automation ---
 # uiautomation               # Windows UI Automation API
-
+# pygetwindow                 # Window management (Windows/macOS)
+# psutil                      # Process management (cross-platform, used by win_ops)
 # --- Discord bot ---
 # discord.py>=2.3
 # elevenlabs>=1.0            # TTS voice synthesis (needs ELEVENLABS_API_KEY)
