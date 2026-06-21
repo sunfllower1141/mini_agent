@@ -990,10 +990,17 @@ body::before {
   padding: 0;
   resize: none;
   overflow-y: auto;
+  scrollbar-width: thin;                     /* Firefox */
+  scrollbar-color: var(--border) transparent; /* Firefox */
 }
 
 #user-input::placeholder { color: var(--dim); }
 #user-input:disabled { opacity: 0.5; }
+
+#user-input::-webkit-scrollbar { width: 5px; }
+#user-input::-webkit-scrollbar-track { background: transparent; }
+#user-input::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+#user-input::-webkit-scrollbar-thumb:hover { background: var(--dim); }
 
 /* ---------------------------------------------------------------------------
    Status bar
