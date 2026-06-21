@@ -43,6 +43,13 @@ DEAD_TOOL_PRUNE_TURN = 5
 """Number of turns before deactivating skills whose tools have never been used.
 Reduces API payload by ~500-2000 tokens and stabilises the KV-cache prefix."""
 
+COMPACTION_HARD_LIMIT = 200_000
+"""Absolute token ceiling for context before Dirac-style truncation fires.
+Models reporting absurdly large context windows (e.g. 1M) would otherwise
+never trigger the half/quarter conversation truncation, causing every turn
+to re-send the full history.  Set to a realistic cap that leaves headroom
+for the model response while keeping API costs under control."""
+
 # ---------------------------------------------------------------------------
 # Directory names to skip during os.walk / tree traversal.
 #

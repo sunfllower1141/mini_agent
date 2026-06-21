@@ -305,11 +305,11 @@ class AgentRunner:
         sc = self._session_cost
         status["session_cost"] = format_cost_usd(sc.total_cost)
         status["session_turns"] = sc.turn_count
-        status["session_tokens"] = sc.total_prompt_tokens + sc.total_completion_tokens
+        status["session_tokens"] = sc.total_billable_tokens
         status["cache_hit_rate"] = round(sc.cache_hit_rate * 100) if sc.cache_hit_rate is not None else None
         if sc.last_turn:
             status["turn_cost"] = format_cost_usd(sc.last_turn.total_cost)
-            status["turn_tokens"] = sc.last_turn.prompt_tokens + sc.last_turn.completion_tokens
+            status["turn_tokens"] = sc.last_turn.billable_tokens
             last_rate = sc.last_cache_hit_rate
             status["turn_cache_hit_rate"] = round(last_rate * 100) if last_rate is not None else None
 
@@ -571,11 +571,12 @@ class AgentRunner:
         # Notify Electron
         sc = self._session_cost
         turn_usage = {
-            "total_tokens": self._total_tokens,
+            "total_tokens": sc.last_turn.billable_tokens if sc.last_turn else 0,
             "prompt_tokens": sc.last_turn.prompt_tokens if sc.last_turn else 0,
             "completion_tokens": sc.last_turn.completion_tokens if sc.last_turn else 0,
             "turn_cost": format_cost_usd(sc.last_turn.total_cost) if sc.last_turn else "-",
             "session_cost": format_cost_usd(sc.total_cost),
+            "session_tokens": sc.total_billable_tokens,
             "session_turns": sc.turn_count,
             "cache_hit_rate": round(sc.cache_hit_rate * 100) if sc.cache_hit_rate is not None else None,
             "subagent_running": self._running_subagent_count,

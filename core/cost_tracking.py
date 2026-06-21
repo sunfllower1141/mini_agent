@@ -65,6 +65,16 @@ class TurnCost:
     prompt_tokens: int = 0
     completion_tokens: int = 0
 
+    @property
+    def billable_tokens(self) -> int:
+        """Tokens you actually pay for: cache-miss input + output.
+
+        DeepSeek reports ``prompt_tokens`` as the sum of cache-hit AND
+        cache-miss tokens.  Cache-hit tokens cost ~0.08% of the miss rate,
+        so displaying the gross number is misleading.  This property returns
+        the billable count: cache-miss (input) + completion (output).
+        """
+        return self.cache_miss_tokens + self.completion_tokens
 
 @dataclass
 class SessionCost:
@@ -81,6 +91,10 @@ class SessionCost:
     total_completion_tokens: int = 0
     last_turn: TurnCost | None = None
 
+    @property
+    def total_billable_tokens(self) -> int:
+        """Session billable tokens: cache-miss input + output."""
+        return self.total_cache_miss_tokens + self.total_completion_tokens
     def record_turn(
         self,
         model: str,

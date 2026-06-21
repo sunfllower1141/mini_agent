@@ -2020,10 +2020,15 @@ def _compact_if_needed(messages: list[dict]) -> None:
     # This leaves breathing room for the response and prevents API 400 errors
     # from imprecise token estimation.  Without headroom, a single estimation
     # error can cause the API to reject the request outright.
-    # Dirac-style headroom: compact at min(1M, max(context_window - 40k, 80% of window)).
-    # HARD_LIMIT of 1M prevents runaway context for models that report absurdly large windows.
-    HARD_LIMIT = 1_000_000
-    max_allowed = min(HARD_LIMIT, max(context_window - 40_000, int(context_window * 0.80)))
+    # COMPACTION_HARD_LIMIT caps context at 200k regardless of model's
+    # reported window.  Without this, models reporting 1M windows (like
+    # deepseek-v4-pro) never trigger compaction, and every turn re-sends
+    # the full conversation history -- burning tokens on every API call.
+    from core.constants import COMPACTION_HARD_LIMIT
+    max_allowed = min(
+        COMPACTION_HARD_LIMIT,
+        max(context_window - 40_000, int(context_window * 0.80))
+    )
     current_tokens = _total_tokens(messages)
     if current_tokens < max_allowed:
         return

@@ -1,5 +1,15 @@
 ## 2026-06-20 -- Gut Hash Cache read_file System
 
+## 2026-06-21
+
+### Fixed
+- **Cost control: Dirac compaction never firing.** `_compact_if_needed()` used
+  `HARD_LIMIT=1_000_000`, which meant models reporting 1M context windows
+  (deepseek-v4-pro) never triggered conversation truncation. Every turn re-sent
+  the full history. Added `COMPACTION_HARD_LIMIT=200_000` to `core/constants.py`
+  and changed `_compact_if_needed` to use it.  Compaction now fires at 200k tokens
+  regardless of model-reported window.
+  - Files: `core/context_inject.py`, `core/constants.py`
 **Rationale:** The hash-based re-read shortcut returned a `CACHED ->` stub
 instead of file content when content hadn't changed. This confused models.
 Every read_file now always reads from disk and returns full content.

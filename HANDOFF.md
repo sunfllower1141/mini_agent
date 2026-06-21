@@ -1,23 +1,31 @@
 # Session Handoff
 # Auto-generated at session end. Read at next session start for continuity.
 
-## Last Session: 2026-06-21 19:41 UTC
+## Last Session: 2026-06-21 21:26 UTC
 
 ### What I Changed
-(no git changes detected)
+### Commits
+```
+59b27e0 chore: remove broken drag-and-drop file handler
+```
+```
+mini_agent_electron/preload.js           | 340 +++++++++++++++----------------
+ mini_agent_electron/renderer/src/App.jsx |  89 ++++++--
+ mini_agent_electron/renderer/style.css   |  92 ++++++++-
+ 3 files changed, 330 insertions(+), 191 deletions(-)
+```
 
 ### What's Pending
 (none recorded)
 
-### Recent Conversation
-- thinking box preview keeps flashing, blinking when typewriter finish or tool call spawn or something 
-- continue
-
 ### Plan Progress
-Plan (3/3 complete):
-  [V] 1. Modify ToolCallBox.jsx: badge always shows OK/ERR, summary shown as separate header element (dim, truncatable) when collapsed
-  [V] 2. Adjust CSS: badge gets flex-shrink:0 so it never shrinks, summary gets flex:1 with overflow ellipsis
-  [V] 3. Build JSX bundle and verify
+Plan (4/4 complete):
+  [V] 1. Fix _compact_if_needed HARD_LIMIT from 1M to 200k so Dirac truncation actually fires
+  [V] 2. Add a COMPACTION_MAX_TOKENS constant to constants.py for the hard cap
+  [V] 3. Remove unused cost_control.compact_if_needed() dead code
+  [V] 4. Clean up measurement scripts
 
 ### Modified Files
-(none tracked)
+- mini_agent_electron/preload.js
+- mini_agent_electron/renderer/src/App.jsx
+- mini_agent_electron/renderer/style.css

@@ -1,5 +1,5 @@
 # mini_agent Architecture Map
-# Last updated: 2026-06-21 (DEAD_TOOL_PRUNE_TURN unified, dead prune_dead_tools removed)
+# Last updated: 2026-06-21 (Dirac compaction HARD_LIMIT fixed from 1M→200k)
 
 #
 # This file is the agent's map of the codebase. Update it after completed changes.
@@ -22,6 +22,13 @@
   Added `_ast_fallback_definitions` and four fallback functions (+315 lines in ast_ops.py).
 
 ## Active Decisions
+
+- **Dirac compaction HARD_LIMIT fix (2026-06-21)** — `_compact_if_needed()` used `HARD_LIMIT=1_000_000`,
+  which meant models reporting 1M context windows (deepseek-v4-pro) never triggered the
+  half/quarter conversation truncation. Every turn re-sent the full history, burning tokens.
+  Added `COMPACTION_HARD_LIMIT=200_000` to `core/constants.py`.  Compaction now fires at
+  200k tokens regardless of model-reported window, keeping API costs under control.
+  Also discovered `core/cost_control.py` is entirely orphaned (never imported).
 
 - **old_string fallback removed (2026-06-19)** \u2014 edit_file now requires hash-anchored mode exclusively.
   Removed `_apply_single_edit`, `_EditResult`, `old_string`/`new_string`/`count`/`paths` params.
