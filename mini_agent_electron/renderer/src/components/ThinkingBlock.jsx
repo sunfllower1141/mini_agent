@@ -17,6 +17,10 @@ const ThinkingBlock = memo(function ThinkingBlock({ text, active }) {
   const [visible, setVisible] = useState(0);
   const timerRef = useRef(null);
   const prevActiveRef = useRef(false);
+  // Track whether this block was EVER active (streaming).
+  // If true, the full text was already visible -- bypass stale visible
+  // state to prevent a 1-frame blink when active transitions true→false.
+  const wasEverActiveRef = useRef(false);
 
   // --- Typewriter animation (only when not actively streaming) ---
   useEffect(() => {
@@ -25,6 +29,7 @@ const ThinkingBlock = memo(function ThinkingBlock({ text, active }) {
 
     // During active streaming, show text immediately — no typewriter
     if (active) {
+      wasEverActiveRef.current = true;
       setVisible(text.length);
       if (timerRef.current) clearInterval(timerRef.current);
       timerRef.current = null;
@@ -40,7 +45,10 @@ const ThinkingBlock = memo(function ThinkingBlock({ text, active }) {
       return;
     }
 
-    // Typewriter for brand-new or text-changed-while-inactive thinking blocks
+    // Typewriter for brand-new non-streaming thinking blocks.
+    // Skip if this block was ever active (streaming) — don't replay.
+    if (wasEverActiveRef.current) return;
+    wasEverActiveRef.current = false;
     setVisible(0);
     if (timerRef.current) clearInterval(timerRef.current);
 
@@ -63,10 +71,11 @@ const ThinkingBlock = memo(function ThinkingBlock({ text, active }) {
     };
   }, [text, active]);
 
-  // When active (streaming), show all text; otherwise use typewriter progress
-  const revealed = active ? text : text.slice(0, visible);
+  // Show full text if active OR if this block was ever active (avoids
+  // stale visible state during the active→inactive transition frame).
+  const showFull = active || wasEverActiveRef.current;
+  const revealed = showFull ? text : text.slice(0, visible);
   const typing = active ? false : visible < text.length;
-
   const cls = `thinking-box ${open ? 'open' : ''}${active ? ' thinking-active' : ''}`;
   const toggle = () => setOpen((o) => !o);
 

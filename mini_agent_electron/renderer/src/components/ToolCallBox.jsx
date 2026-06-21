@@ -57,7 +57,7 @@ const ToolCallBox = memo(function ToolCallBox({ toolName, toolArgs, ok, summary,
         {running && <span className="tool-call-spinner" />}
         {!open && !running && (
           <span className={`tool-call-preview ${ok ? 'ok' : 'err'}`}>
-            {summary || (ok ? 'OK' : 'ERR')}
+            {ok ? 'OK' : 'ERR'}
           </span>
         )}
       </div>

@@ -1552,9 +1552,7 @@ body::before {
 
 
 .tool-call-preview {
-  flex-shrink: 1;
-  min-width: 0;
-  max-width: 50%;
+  flex-shrink: 0;
   margin-left: 0.3em;
   padding: 0.05em 0.45em;
   border-radius: 5px;
@@ -1562,8 +1560,6 @@ body::before {
   font-weight: 700;
   letter-spacing: 0.04em;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .tool-call-preview.ok {
   color: var(--green);
@@ -1575,6 +1571,7 @@ body::before {
   background: color-mix(in srgb, var(--red) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--red) 25%, transparent);
 }
+
 
 /* Spinning indicator for running tool calls */
 .tool-call-spinner {
