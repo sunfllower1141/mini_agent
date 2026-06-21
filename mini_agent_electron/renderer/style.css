@@ -260,6 +260,8 @@ body::before {
   height: 100vh;
   padding: 12px 16px;
   gap: 0;
+  position: relative;
+  overflow: hidden;
 }
 
 /* ---------------------------------------------------------------------------
@@ -410,6 +412,7 @@ body::before {
   gap: 10px;
   min-height: 0;
   overflow: hidden;
+  padding-bottom: 78px;  /* room for floating input frame + status bar */
 }
 
 #left-stack {
@@ -912,8 +915,12 @@ body::before {
    Input area
    --------------------------------------------------------------------------- */
 #input-frame {
-  flex: 0 0 auto;
-  margin-top: 8px;
+  position: absolute;
+  bottom: 32px;  /* above status bar */
+  left: 12px;
+  right: 12px;
+  z-index: 10;
+  background: var(--bg);
   border-radius: 8px;
   border: 1px solid var(--border);
   transition: border-color 0.15s ease;
@@ -981,6 +988,8 @@ body::before {
   line-height: var(--line-height);
   caret-color: var(--accent);
   padding: 0;
+  resize: none;
+  overflow-y: auto;
 }
 
 #user-input::placeholder { color: var(--dim); }

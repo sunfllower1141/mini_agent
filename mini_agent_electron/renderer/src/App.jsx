@@ -296,6 +296,7 @@ function AppShell() {
   }, []);
   const [showSettings, setShowSettings] = useState(false);
   const [inputValue, setInputValue] = useState('');
+  const [textareaRows, setTextareaRows] = useState(1);
   const [theme, setTheme] = useState(() => localStorage.getItem('mini_agent_theme') || 'dark');
   const [themePickerOpen, setThemePickerOpen] = useState(false);
   const themeToggleRef = useRef(null);
@@ -913,14 +914,19 @@ function AppShell() {
   }, [inputDisabled, chatStream]);
 
   const handleKeyDown = useCallback((e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    // Ctrl+Enter or Cmd+Enter (macOS) sends the message
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       handleSubmit(e.target.value);
     }
   }, [handleSubmit]);
 
   const handleChange = useCallback((e) => {
-    setInputValue(e.target.value);
+    const val = e.target.value;
+    setInputValue(val);
+    // Auto-resize rows 1–4 based on newline count
+    const lines = val.split('\n').length;
+    setTextareaRows(Math.min(Math.max(lines, 1), 4));
   }, []);
 
   // Drag-and-drop: use the preload bridge which can read Electron's File.path.
@@ -1194,10 +1200,10 @@ function AppShell() {
           <div className="frame-content">
             <div id="input-container">
               <span className="prompt">{'>'}</span>
-              <input
+              <textarea
                 ref={inputRef}
-                type="text"
                 id="user-input"
+                rows={textareaRows}
                 placeholder="Type a message, /command, or drop files here..."
                 autoFocus
                 autoComplete="off"
