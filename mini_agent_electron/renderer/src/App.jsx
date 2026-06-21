@@ -1220,7 +1220,7 @@ function AppShell() {
         <div className="frame-body">
           <div className="frame-content">
             <div id="input-container">
-              <span className="prompt">{'>'}</span>
+              <span className="prompt">{'\u276F'}</span>
               <textarea
                 ref={inputRef}
                 id="user-input"
