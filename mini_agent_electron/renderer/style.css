@@ -412,7 +412,7 @@ body::before {
   gap: 10px;
   min-height: 0;
   overflow: hidden;
-  padding-bottom: 78px;  /* room for floating input frame + status bar */
+  padding-bottom: 86px;  /* room for floating input frame + status bar */
 }
 
 #left-stack {
@@ -916,7 +916,7 @@ body::before {
    --------------------------------------------------------------------------- */
 #input-frame {
   position: absolute;
-  bottom: 32px;  /* above status bar */
+  bottom: 40px;  /* above status bar */
   left: 12px;
   right: 12px;
   z-index: 10;
