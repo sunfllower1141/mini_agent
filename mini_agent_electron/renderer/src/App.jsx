@@ -924,9 +924,9 @@ function AppShell() {
   const handleChange = useCallback((e) => {
     const val = e.target.value;
     setInputValue(val);
-    // Auto-resize rows 1–4 based on newline count
+    // Auto-resize rows 1–15 based on newline count
     const lines = val.split('\n').length;
-    setTextareaRows(Math.min(Math.max(lines, 1), 4));
+    setTextareaRows(Math.min(Math.max(lines, 1), 15));
   }, []);
 
   // Drag-and-drop: use the preload bridge which can read Electron's File.path.
@@ -1204,7 +1204,7 @@ function AppShell() {
                 ref={inputRef}
                 id="user-input"
                 rows={textareaRows}
-                placeholder="Type a message, /command, or drop files here..."
+                placeholder="Ctrl+Enter to send · Enter for newline · Drop files here..."
                 autoFocus
                 autoComplete="off"
                 spellCheck="false"
