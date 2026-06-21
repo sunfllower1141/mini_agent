@@ -4,28 +4,30 @@
 ## Last Session: 2026-06-21 21:26 UTC
 
 ### What I Changed
+- Fixed token display: was showing gross tokens (including cache hits), now shows billable (cache-miss + output). For a "push to main" with 85% cache rate, display drops from ~135k to ~15-30k.
+- Added `billable_tokens` property to both `TurnCost` and `SessionCost` in `core/cost_tracking.py`
+- Updated `server.py` to send billable token counts via `send_status` and `turn_complete`
+- Updated `App.jsx` token counter to show per-turn billable tokens with clarifying tooltip; cost tooltips now include token counts on hover
+- Also in this commit: COMPACTION_MAX_TOKENS constant, fix _compact_if_needed HARD_LIMIT, removed unused cost_control code
+
 ### Commits
 ```
+445f347 fix: use billable tokens (cache-miss + output) instead of gross for token display
 59b27e0 chore: remove broken drag-and-drop file handler
-```
-```
-mini_agent_electron/preload.js           | 340 +++++++++++++++----------------
- mini_agent_electron/renderer/src/App.jsx |  89 ++++++--
- mini_agent_electron/renderer/style.css   |  92 ++++++++-
- 3 files changed, 330 insertions(+), 191 deletions(-)
 ```
 
 ### What's Pending
-(none recorded)
+(none)
 
 ### Plan Progress
-Plan (4/4 complete):
-  [V] 1. Fix _compact_if_needed HARD_LIMIT from 1M to 200k so Dirac truncation actually fires
-  [V] 2. Add a COMPACTION_MAX_TOKENS constant to constants.py for the hard cap
-  [V] 3. Remove unused cost_control.compact_if_needed() dead code
-  [V] 4. Clean up measurement scripts
+Plan: all complete. Token count fix deployed.
 
 ### Modified Files
-- mini_agent_electron/preload.js
+- core/cost_tracking.py (added billable_tokens)
+- core/constants.py (COMPACTION_MAX_TOKENS)
+- core/context_inject.py
+- mini_agent_electron/backend/server.py
 - mini_agent_electron/renderer/src/App.jsx
-- mini_agent_electron/renderer/style.css
+- CHANGELOG.md
+- STATE.txt
+- HANDOFF.md
