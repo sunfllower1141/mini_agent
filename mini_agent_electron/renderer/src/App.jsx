@@ -257,6 +257,7 @@ function AppShell() {
   const [turnCost, setTurnCost] = useState('-');
   const [cacheHitRate, setCacheHitRate] = useState(null);
   const [subagentRunning, setSubagentRunning] = useState(0);
+  const [attachedFiles, setAttachedFiles] = useState([]);
 
   const inputRef = useRef(null);
   const chatLogRef = useRef(null);
@@ -831,8 +832,25 @@ function AppShell() {
 
   // Submit handler
   const handleSubmit = useCallback((text) => {
-    if (!text) return;
+    // Allow submitting when there are attached files even with empty text
+    if (!text && attachedFiles.length === 0) return;
 
+    // Build markdown prefix for attached files (images get data URL, others get path)
+    let filePrefix = '';
+    if (attachedFiles.length > 0) {
+      const lines = [];
+      for (const f of attachedFiles) {
+        if (f.dataUrl) {
+          lines.push(`![${f.name}](${f.dataUrl})`);
+        } else if (f.path) {
+          lines.push(`[${f.name}](${f.path})`);
+        } else {
+          lines.push(f.name);
+        }
+      }
+      filePrefix = lines.join('\n') + '\n';
+    }
+    const fullText = filePrefix + text;
     // Allow /clear (and cancel) even during an active turn so the user
     // isn't trapped in a runaway agent loop. Reject all other input.
     if (inputDisabled) {
@@ -887,14 +905,14 @@ function AppShell() {
     setChatLines((prev) => [
       ...prev,
       ...(prev.length > 0 ? [{ id: nextLineId(), text: '', cls: 'msg-separator' }] : []),
-      { id: nextLineId(), text: `> ${text}`, cls: 'msg-user' },
+      { id: nextLineId(), text: `> ${fullText}`, cls: 'msg-user' },
       { id: nextLineId(), text: '', cls: 'msg-separator' },
       { id: nextLineId(), text: '', cls: 'msg-agent-pending' },
     ]);
     // Push prompt separator into tools/thinking panel
     setToolsLines((prev) => [
       ...prev,
-      { _key: `sep_${nextLineId()}`, cls: 'prompt-separator', promptText: text },
+      { _key: `sep_${nextLineId()}`, cls: 'prompt-separator', promptText: fullText },
     ]);
     chatStream.reset();
 
@@ -902,7 +920,8 @@ function AppShell() {
     setInputDisabled(true);
     setInputValue('');
 
-    window.miniAgent.submit(text);
+    window.miniAgent.submit(fullText);
+    setAttachedFiles([]);
 
     // Safety timeout -- re-enable input after 120s in case the backend
     // hangs or crashes.  The idle message handles normal completion;
@@ -911,7 +930,7 @@ function AppShell() {
       setInputDisabled(false);
       inputRef.current?.focus();
     }, 120_000);
-  }, [inputDisabled, chatStream]);
+  }, [inputDisabled, chatStream, attachedFiles]);
 
   const handleKeyDown = useCallback((e) => {
     // Ctrl+Enter or Cmd+Enter (macOS) sends the message
@@ -950,22 +969,35 @@ function AppShell() {
     el.style.overflowY = scrollH > maxH ? 'auto' : 'hidden';
   }, [inputValue]);
 
-  // Drag-and-drop: use the preload bridge which can read Electron's File.path.
-  // The preload manages dragOver/drop at the document level and calls our
-  // callback with absolute file paths.
+  // Clipboard paste: files attached via Ctrl+V.
+
+
+  // Clipboard paste: same treatment as drag-and-drop files.
   useEffect(() => {
     const api = window.miniAgent;
-    if (!api || !api.onFileDrop) return;
-    const unsub = api.onFileDrop((paths) => {
-      setInputValue((prev) => {
-        const appended = paths.join(' ');
-        return prev ? `${prev} ${appended}` : appended;
+    if (!api || !api.onPaste) return;
+    const unsub = api.onPaste((records) => {
+      setAttachedFiles((prev) => {
+        const existing = new Set(prev.map((f) => f.path).filter(Boolean));
+        const fresh = [];
+        for (const r of records) {
+          const key = r.path || `${r.name}::${r.size}`;
+          if (!existing.has(key)) {
+            existing.add(key);
+            fresh.push({ ...r, _id: `${key}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}` });
+          }
+        }
+        if (fresh.length === 0) return prev;
+        return [...prev, ...fresh];
       });
-      inputRef.current?.focus();
     });
     return () => unsub();
   }, []);
 
+
+  const removeAttachment = useCallback((_id) => {
+    setAttachedFiles((prev) => prev.filter((f) => f._id !== _id));
+  }, []);
   // Click workspace to change it
   const handleWorkspaceClick = useCallback(async () => {
     const api = window.miniAgent;
@@ -1219,12 +1251,37 @@ function AppShell() {
       <div id="input-frame" className={`rounded-frame${isLive ? ' live' : ''}`}>
         <div className="frame-body">
           <div className="frame-content">
+            {/* Attached file previews */}
+            {attachedFiles.length > 0 && (
+              <div className="attach-preview-strip">
+                {attachedFiles.map((f) => (
+                  <div key={f._id} className={f.dataUrl ? 'attach-thumb' : 'attach-chip'}>
+                    {f.dataUrl ? (
+                      <>
+                        <img src={f.dataUrl} alt={f.name} className="attach-thumb-img" />
+                        <button className="attach-remove" onClick={() => removeAttachment(f._id)}
+                                title={`Remove ${f.name}`} aria-label={`Remove ${f.name}`}>×</button>
+                      </>
+                    ) : (
+                      <>
+                        <span className="attach-chip-icon">
+                          {f.type ? (f.type.includes('pdf') ? '📄' : f.type.includes('zip') ? '📦' : '📁') : '📁'}
+                        </span>
+                        <span className="attach-chip-name" title={f.name}>{f.name}</span>
+                        <button className="attach-remove" onClick={() => removeAttachment(f._id)}
+                                title={`Remove ${f.name}`} aria-label={`Remove ${f.name}`}>×</button>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
             <div id="input-container">
               <span className="prompt">{'\u276F'}</span>
               <textarea
                 ref={inputRef}
                 id="user-input"
-                placeholder="Ctrl+Enter to send · Enter for newline · Drop files here..."
+                placeholder="Ctrl+Enter to send · Enter for newline · Paste/Drop files here..."
                 autoFocus
                 autoComplete="off"
                 spellCheck="false"

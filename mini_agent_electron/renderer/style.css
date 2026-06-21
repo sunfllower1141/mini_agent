@@ -946,11 +946,7 @@ body::before {
   border-color: var(--accent);
 }
 
-#input-frame.drag-over {
-  border-color: var(--accent);
-  background: rgb(var(--accent-rgb) / 0.04);
-  box-shadow: 0 0 0 1px rgb(var(--accent-rgb) / 0.08);
-}
+
 
 #input-frame .frame-left,
 #input-frame .frame-right,
@@ -1002,9 +998,95 @@ body::before {
 #user-input::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 #user-input::-webkit-scrollbar-thumb:hover { background: var(--dim); }
 
+
+/* ---------------------------------------------------------------------------
+   Attached file preview strip
+   --------------------------------------------------------------------------- */
+.attach-preview-strip {
+  display: flex;
+  gap: 6px;
+  padding: 0 0 10px 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.attach-preview-strip::-webkit-scrollbar { height: 4px; }
+.attach-preview-strip::-webkit-scrollbar-track { background: transparent; }
+.attach-preview-strip::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* Image thumbnail */
+.attach-thumb {
+  position: relative;
+  flex-shrink: 0;
+  width: 60px;
+  height: 60px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--panel);
+}
+.attach-thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* File chip */
+.attach-chip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  max-width: 200px;
+  height: 28px;
+  padding: 0 22px 0 7px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  font-size: 12px;
+}
+.attach-chip-icon {
+  flex-shrink: 0;
+  font-size: 14px;
+}
+.attach-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dim);
+}
+
+/* Remove button on both */
+.attach-remove {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 0.55);
+  color: #fff;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  padding: 0;
+}
+.attach-thumb:hover .attach-remove,
+.attach-chip:hover .attach-remove {
+  opacity: 1;
+}
+
 /* ---------------------------------------------------------------------------
    Status bar
    --------------------------------------------------------------------------- */
+
 .status-bar {
   display: flex;
   align-items: center;

@@ -79,56 +79,56 @@ contextBridge.exposeInMainWorld('miniAgent', {
   stopBot: (script) => ipcRenderer.invoke('bot:stop', script),
 
   // --- File drop bridge ---
-  // Registers a callback that receives an array of absolute file paths
-  // whenever the user drops files from the OS onto the window.
-  // Returns an unsubscribe function.
-  onFileDrop: (callback) => {
-    const inputFrame = () => document.getElementById('input-frame');
-    const handler = (e) => {
-      const frame = inputFrame();
-      if (frame) frame.classList.remove('drag-over');
-      // Must preventDefault BEFORE reading paths -- Electron's default
-      // is to navigate to / open the dropped file.
-      e.preventDefault();
-      e.stopPropagation();
-      const files = e.dataTransfer?.files;
-      if (!files || files.length === 0) return;
-      const paths = [];
-      for (let i = 0; i < files.length; i++) {
-        // File.path was removed in Electron 32; use webUtils instead
-        const p = webUtils.getPathForFile(files[i]);
-        if (p) paths.push(p);
-      }
-      if (paths.length === 0) return;
-      callback(paths);
-    };
-    const dragOver = (e) => {
-      const files = e.dataTransfer?.files;
-      if (!files || files.length === 0) return;
-      // Always prevent default for file drags -- do NOT gate on file.path,
-      // because file.path may only be populated on drop, not dragover.
-      e.preventDefault();
-      e.stopPropagation();
-      e.dataTransfer.dropEffect = 'copy';
-      const frame = inputFrame();
-      if (frame) frame.classList.add('drag-over');
-    };
-    const dragLeave = (e) => {
-      // Only remove when actually leaving the document
-      if (e.target === document.documentElement || e.target === document.body) {
-        const frame = inputFrame();
-        if (frame) frame.classList.remove('drag-over');
-      }
-    };
-    document.addEventListener('dragover', dragOver);
-    document.addEventListener('dragleave', dragLeave);
-    document.addEventListener('drop', handler);
-    return () => {
-      document.removeEventListener('dragover', dragOver);
-      document.removeEventListener('dragleave', dragLeave);
-      document.removeEventListener('drop', handler);
-    };
+  // Resolve the absolute file-system path for a File object dropped from the OS.
+  // Electron removed File.path in v32; use webUtils instead.
+  getFilePath: (file) => {
+    try { return webUtils.getPathForFile(file); } catch { return null; }
   },
+
+  // Registers a callback that receives serializable file records whenever
+  // --- Clipboard paste bridge ---
+  // Listens for Ctrl+V paste of files (images or other files).
+  // Image files include a base64 dataUrl for instant preview.
+
+
+  onPaste: (callback) => {
+    const handler = async (e) => {
+      const files = e.clipboardData?.files;
+      if (!files || files.length === 0) return;
+
+      // Don't preventDefault -- let text still paste into the textarea normally.
+      const results = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        let path = '';
+        try { path = webUtils.getPathForFile(file) || ''; } catch { /* may throw in some Electron versions */ }
+        const item = {
+          name: file.name,
+          type: file.type,
+          size: file.size,
+          path,
+        };
+        // Read image files as base64 data URLs for instant preview
+        if (file.type.startsWith('image/')) {
+          try {
+            item.dataUrl = await new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(reader.result);
+              reader.onerror = reject;
+              reader.readAsDataURL(file);
+            });
+          } catch {
+            // ignore read errors -- still include the file record
+          }
+        }
+        results.push(item);
+      }
+      if (results.length > 0) callback(results);
+    };
+    document.addEventListener('paste', handler);
+    return () => document.removeEventListener('paste', handler);
+  },
+
 
   // --- Event listeners (renderer subscribes) ---
   on: (channel, callback) => {
