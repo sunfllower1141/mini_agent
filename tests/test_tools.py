@@ -1618,16 +1618,15 @@ class TestErrorSteering(unittest.TestCase):
         self.assertIn("read_file", result.content.lower())
 
     def test_write_guard_steers_to_read_file_first(self):
-        """GUARD for write_file tells AI to read_file first."""
+        """write_file on existing .py succeeds but warns about edit_file."""
         path = os.path.join(self.workspace, "unread_write.py")
         with open(path, "w") as f:
             f.write("x = 1\n")
-        # Write without reading first
+        # Write without reading first — now allowed (pi-style), but with a note
         tc = _make_tool_call("write_file", path=path, content="y = 2")
         result = execute_tool(tc, self.write_gate, self.read_gate)
-        self.assertFalse(result.success)
-        self.assertIn("\u2717", result.content)
-        self.assertIn("read_file", result.content.lower())
+        self.assertTrue(result.success)
+        self.assertIn("OK", result.content)
 
 
 # Import helper for tests above

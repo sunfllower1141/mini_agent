@@ -1104,7 +1104,6 @@ function AppShell() {
         <span className="statusbar-metrics">
           {balanceDisplay && balanceDisplay.available && (
             <span className="statusbar-metric statusbar-balance" title="DeepSeek wallet balance">
-              <span className="statusbar-metric-icon">💰</span>
               <span className="statusbar-metric-value">{balanceDisplay.display}</span>
             </span>
           )}

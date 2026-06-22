@@ -542,30 +542,29 @@ def _write_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
             success=False,
             content=_err("BLOCKED", f"path outside workspace", f"use {wg.workspace_root}/... or force=True"),
         )
-    # Read-before-edit enforcement (ACI upgrade): reject writes to
-    # .py files that haven't been read_file'd this session, unless
-    # the file doesn't exist yet (new file creation is allowed).
     _resolved = safety_result.resolved_path
-    if _resolved.endswith(".py") and os.path.isfile(_resolved) and _resolved not in _READ_FILES:
-        return ToolResult(
-            success=False,
-            content=_err("GUARD", f"read_file('{_resolved}') first, then write"),
-        )
-    # write_file only creates new files; use edit_file for existing files
-    if os.path.isfile(_resolved):
-        return ToolResult(
-            success=False,
-            content=_err("EXISTS", f"file already exists; use edit_file to modify",
-                         f"edit_file('{path}', ...)"),
-        )
+    # write_file always works (pi-style): creates new files, overwrites existing.
+    # No EXISTS guard — the model can freely rewrite test files, fix scripts, etc.
+    # without getting stuck in delete+rewrite loops.  Use edit_file for targeted changes.
+    #
     # Block delete+rewrite anti-pattern: if this file was just deleted via rm
-    # to bypass the EXISTS guard, refuse the write.
+    # to bypass some other guard, refuse the write.
     if _is_recently_deleted(_resolved):
         return ToolResult(
             success=False,
-            content=_err("BLOCKED", f"{path} was deleted via rm to bypass edit_file -- restore the file and use edit_file instead",
+            content=_err("BLOCKED", f"{path} was deleted via rm — restore the file and use edit_file instead",
                          "use git checkout or restore_file to recover the original file"),
         )
+
+    # Gentle nudge: if overwriting a .py file that hasn't been read, suggest edit_file.
+    # But don't block — the model knows what it's doing for full rewrites.
+    _overwriting = os.path.isfile(_resolved)
+    if _overwriting and _resolved.endswith(".py") and _resolved not in _READ_FILES:
+        _overwrite_note = (
+            "\nNote: overwriting existing file. For small changes, edit_file is more efficient."
+        )
+    else:
+        _overwrite_note = ""
     # File reservation check -- prevent sub-agent collisions
     agent_id = getattr(_current_agent_id, "task_id", None)
     if agent_id is not None:
@@ -634,7 +633,7 @@ def _write_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
             )
         return ToolResult(
             success=True,
-            content=f"OK: wrote {len(content)} bytes to {safety_result.resolved_path}{_fallback_warning}",
+            content=f"OK: wrote {len(content)} bytes to {safety_result.resolved_path}{_overwrite_note}{_fallback_warning}",
             diff_preview=diff.preview_text if diff.changed else None,
         )
     except Exception as e:
