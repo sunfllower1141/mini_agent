@@ -352,18 +352,24 @@ class AgentRunner:
 
     def _refresh_git_status(self) -> None:
         try:
+            env = os.environ.copy()
+            env["GIT_TERMINAL_PROMPT"] = "0"
+            env["GCM_INTERACTIVE"] = "never"
+            env["GIT_ASKPASS"] = "echo"
             r = subprocess.run(
                 ["git", "branch", "--show-current"],
                 cwd=self.config.workspace,
                 capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=3,
+                env=env, stdin=subprocess.DEVNULL,
             )
-            self._git_branch = r.stdout.strip()
+            self._git_branch = r.stdout.strip() if r.stdout else ""
             r2 = subprocess.run(
                 ["git", "status", "--porcelain"],
                 cwd=self.config.workspace,
                 capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=3,
+                env=env, stdin=subprocess.DEVNULL,
             )
-            self._git_dirty = bool(r2.stdout.strip())
+            self._git_dirty = bool(r2.stdout.strip()) if r2.stdout else False
         except Exception:
             self._git_branch = ""
             self._git_dirty = False

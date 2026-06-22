@@ -4,13 +4,14 @@ Behavioral rules the agent MUST follow. Architecture facts go in STATE.txt.
 Long-term facts and preferences go in core memory.
 
 ## Git Operations
-- The `git` and `diff` tools have been **removed**. All git commands go through `run_shell`:
-  - `git status --short`
-  - `git diff`
-  - `git add -A`
-  - `git commit -m "..."`
-  - `git push origin branch:branch`
-  - `git log --oneline`
+- Use dedicated git tools (not `run_shell`) for all git operations. These are Windows-safe,
+  suppress credential prompts, and have proper timeouts:
+  - `git_status` — replaces `git status --short`
+  - `git_diff` — replaces `git diff` (use `staged=true` for staged, `path=<file>` for single file)
+  - `git_log` — replaces `git log --oneline` (use `n=5` for last 5 commits)
+  - `git_add` — replaces `git add` (use `paths='all'` for `git add -A`, or specific paths)
+  - `git_commit` — replaces `git commit -m "..."` (use `message="..."`)
+- For `git push`, use `run_shell` with `force=True` if needed.
 
 ## Read/Write Guardrails (ACI)
 - **Read-before-edit**: MUST `read_file` any `.py` file before editing it. New files exempt.

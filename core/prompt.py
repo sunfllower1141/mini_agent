@@ -270,8 +270,14 @@ def build_startup_context(
 
     # 3. Recent git log (last 5 commits, if this is a git repo)
     try:
+        _git_env = os.environ.copy()
+        _git_env["GIT_TERMINAL_PROMPT"] = "0"
+        _git_env["GCM_INTERACTIVE"] = "never"
+        _git_env["GIT_ASKPASS"] = "echo"
         r = _sp.run(["git", "-C", workspace, "log", "--oneline", f"-{GIT_LOG_COUNT}"],
-                    capture_output=True, text=True, timeout=GIT_LOG_TIMEOUT)
+                    capture_output=True, text=True, encoding="utf-8", errors="replace",
+                    timeout=GIT_LOG_TIMEOUT,
+                    stdin=_sp.DEVNULL, env=_git_env)
         if r.returncode == 0 and r.stdout.strip():
             parts.append("\n## Recent git log\n```\n" + r.stdout.rstrip() + "\n```")
     except (OSError, _sp.TimeoutExpired):

@@ -12,6 +12,7 @@ All tools are registered via @_register and activated via use_skill('git').
 from __future__ import annotations
 
 import os
+import platform
 import subprocess as _sp
 from typing import Any
 
@@ -57,7 +58,7 @@ def _do_register(reg, sum_fn):
         args: dict, _wg: Any, _rg: Any
     ) -> ToolResult:
         """Run git status --short."""
-        return _run_git(["status", "--short"], _rg)
+        return _run_git(["--no-optional-locks", "status", "--short"], _rg)
 
     @sum_fn("git_status")
     def _git_status_summary(_args: dict) -> str:
@@ -150,6 +151,7 @@ def _do_register(reg, sum_fn):
 # ---------------------------------------------------------------------------
 
 _GIT_TIMEOUT = 15  # seconds -- generous for most operations, prevents hangs
+_WINDOWS = platform.system() == "Windows"
 
 
 def _get_workspace(rg: Any) -> str:
@@ -177,15 +179,27 @@ def _run_git(args_list: list[str], rg: Any) -> ToolResult:
     """
     workspace = _get_workspace(rg)
     env = os.environ.copy()
-    env["GIT_TERMINAL_PROMPT"] = "0"  # suppress credential prompts
+    # Windows 11: Git Credential Manager (GCM) ignores GIT_TERMINAL_PROMPT.
+    # GCM_INTERACTIVE=never + GIT_ASKPASS=echo prevent GUI prompts from hanging.
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GCM_INTERACTIVE"] = "never"
+    env["GIT_ASKPASS"] = "echo"
+
+    # On Windows, CREATE_NO_WINDOW prevents a console window flash on each call
+    popen_kwargs: dict = {}
+    if _WINDOWS:
+        popen_kwargs["creationflags"] = _sp.CREATE_NO_WINDOW
 
     try:
         r = _sp.run(
             ["git", "-C", workspace] + args_list,
             capture_output=True,
             text=True,
+            encoding="utf-8", errors="replace",
             timeout=_GIT_TIMEOUT,
             env=env,
+            stdin=_sp.DEVNULL,
+            **popen_kwargs,
         )
     except _sp.TimeoutExpired:
         return ToolResult(
@@ -206,9 +220,9 @@ def _run_git(args_list: list[str], rg: Any) -> ToolResult:
         )
 
     output = ""
-    if r.stdout.strip():
+    if r.stdout and r.stdout.strip():
         output += r.stdout.strip()
-    if r.stderr.strip():
+    if r.stderr and r.stderr.strip():
         if output:
             output += "\n"
         output += r.stderr.strip()

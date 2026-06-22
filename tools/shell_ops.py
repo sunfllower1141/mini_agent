@@ -373,6 +373,11 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
             _is_bash = "bash" in _shell_cmd[0].lower() if _shell_cmd else False
             if _is_bash:
                 _use_bash = True
+        # Prevent git credential prompts from hanging (esp. Windows 11 + GCM)
+        if re.search(r'\bgit\b', command):
+            _git_env = os.environ.copy()
+            _git_env["GIT_TERMINAL_PROMPT"] = "0"
+            popen_kwargs["env"] = _git_env
         if _use_bash:
             # Use bash -c "command" for proper single-quote support
             escaped = command.replace("\\", "\\\\").replace('"', '\\"')
