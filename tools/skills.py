@@ -497,6 +497,9 @@ CORE_TOOLS: list[str] = [
     "get_function",
     "replace_symbol",
     "get_symbol_range",
+    # Session tools
+    "session_stats",
+    "write_session_handoff",
 ]
 
 

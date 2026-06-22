@@ -539,13 +539,22 @@ class TestAutoHandoff(unittest.TestCase):
         self.assertIn("write_session_handoff", names)
 
     def test_prompt_mentions_handoff(self):
-        """System prompt must instruct the agent to call write_session_handoff."""
+        """System prompt or project rules must instruct the agent to call write_session_handoff."""
         root = _project_root()
         prompt_path = os.path.join(root, "core", "prompt.py")
         with open(prompt_path, encoding="utf-8") as f:
             content = f.read()
-        self.assertIn("write_session_handoff", content)
-        self.assertIn("Session handoff", content)
+        # pi-style: handoff instruction in .mini_agent.rules, referenced in prompt
+        self.assertIn("HANDOFF.md", content)
+        # Also check .mini_agent.rules
+        rules_path = os.path.join(root, ".mini_agent.rules")
+        if os.path.exists(rules_path):
+            with open(rules_path, encoding="utf-8") as f:
+                rules = f.read()
+            self.assertTrue(
+                "write_session_handoff" in rules or "Session Handoff" in rules,
+                "write_session_handoff must be mentioned in prompt or rules"
+            )
 
     def test_session_start_head_initialized(self):
         """_session_start_head must be initialized on AgentContext."""

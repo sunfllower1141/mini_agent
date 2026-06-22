@@ -143,7 +143,7 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
         )
         if r.returncode == 0:
             _TOOL_CONTEXT._session_start_head = r.stdout.strip()
-    except (OSError, _sp.TimeoutExpired):
+    except (OSError, _sp.TimeoutExpired, FileNotFoundError):
         _TOOL_CONTEXT._session_start_head = None
 
     # Warmup: run a trivial cmd.exe call to absorb any first-invocation
@@ -357,11 +357,11 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     system_prompt = build_system_prompt(config)
     messages: list[dict] = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": session_header},
+        {"role": "user", "content": session_header, "_cache_mark": True},
     ]
     if memory_snapshot:
-        messages.append({"role": "user", "content": memory_snapshot})
-    messages.append({"role": "user", "content": startup_ctx})
+        messages.append({"role": "user", "content": memory_snapshot, "_cache_mark": True})
+    messages.append({"role": "user", "content": startup_ctx, "_cache_mark": True})
     if saved:
         messages.extend(saved)
 

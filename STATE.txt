@@ -1,9 +1,95 @@
 # mini_agent Architecture Map
-# Last updated: 2026-06-22 (pi-style token/cost optimizations)
+# Last updated: 2026-06-22 (pi-style LLM summarization compaction)
 
 #
 # This file is the agent's map of the codebase. Update it after completed changes.
 # Behavioral rules live in AGENTS.md. Long-term facts live in core memory.
+
+- **Pi-style LLM summarization compaction (2026-06-22)** — Replaced Dirac-style
+  half/quarter truncation with pi's LLM summarization approach.  New module
+  `core/pi_compaction.py` (470 lines) implements:
+  - **Structured summaries**: Goal, Constraints, Progress (Done/In Progress/
+    Blocked), Key Decisions, Next Steps, Critical Context + file tracking.
+  - **Pi-style thresholds**: `contextTokens > contextWindow - reserveTokens`
+    (default reserve=16384, fires at ~984K on 1M window).  pi lets context
+    grow as much as possible, compacting only near the limit.
+  - **Iterative updates**: if a previous compaction summary exists, the
+    UPDATE_SUMMARIZATION_PROMPT merges new info instead of regenerating.
+  - **File tracking**: read_files and modified_files extracted from tool
+    calls, appended as `<read-files>` / `<modified-files>` tags.
+  - **Keep recent**: configurable keep_recent_tokens (default 20K pi default),
+    keeping the most recent conversation verbatim.
+  - `_compact_if_needed()` in `context_inject.py` now delegates to
+    `pi_compaction.compact()` instead of Dirac truncation.
+  - `COMPACTION_HARD_LIMIT` raised from 200K to 1M to match deepseek-v4-pro's
+    actual context window.  pi-style compaction uses the model's reported
+    context_window from config, not the hard cap.
+  - Previous compaction summary stored on `_TOOL_CONTEXT._pi_compaction_summary`
+    for iterative updates across compactions.
+
+- **Git skill (2026-06-22)** — Created `skills/git/` skill with 5 Windows-safe
+  tools: git_status, git_diff, git_log, git_add, git_commit.  All use
+  subprocess.run() with GIT_TERMINAL_PROMPT=0, capture_output, text=True,
+  and a 15-second timeout to prevent hangs on Windows 11 (credential prompts,
+  AV scanning, pipe buffer deadlocks).  Implemented in `tools/git_ops.py`.
+  Added to `.mini_agent.rules` with guidance to use git tools instead of
+  `run_shell` for git operations.  Previously the LLM called `use_skill('git')`
+  which failed (skill didn't exist), then fell back to `run_shell` with raw
+  git commands that hung on Windows (120s timeout).
+
+#
+# This file is the agent's map of the codebase. Update it after completed changes.
+# Behavioral rules live in AGENTS.md. Long-term facts live in core memory.
+
+- **write_session_handoff freeze fix (2026-06-22)** — The `.mini_agent.rules`
+  instruction "Before signing off: write_session_handoff(pending='...')" caused
+  the LLM to call a non-existent tool every turn. Since the tool had no schema
+  or dispatch, the LLM either got "Unknown tool" errors (retry loop) or fell
+  back to `run_shell` with Python code that called `MemoryStore.write_session_handoff()`
+  which ran git subprocesses that HANG on Windows (credential prompts, antivirus,
+  large repos).
+  
+  Fixes:
+  1. **Registered `write_session_handoff` as a proper tool** (schema + dispatch
+     in tools/agent_ops.py + tools/schema.py), added to CORE_TOOLS in skills.py.
+     The tool writes a lightweight HANDOFF.md WITHOUT running git (no subprocess
+     hangs). The full git-diff handoff is always auto-generated at session end.
+  2. **Fixed `.mini_agent.rules`** — tells the agent that HANDOFF.md is
+     auto-generated and the tool is only for mid-session checkpoints.
+  3. **Made `MemoryStore.write_session_handoff()` Windows-safe** — catches
+     `FileNotFoundError` (git not installed) and broader exceptions beyond
+     just `OSError`/`TimeoutExpired` for pipe deadlocks.
+  4. **Made `bootstrap.py` git rev-parse Windows-safe** — added
+     `FileNotFoundError` to the exception handler.
+
+- **Pi-style static prompt minimization (2026-06-22)** — Static system prompt
+  slashed from ~2000 tokens to ~275 tokens (7x reduction). All detailed
+  behavioral instructions moved to .mini_agent.rules (appended at end, outside
+  cache prefix). This frees ~1700 tokens of DeepSeek KV-cache budget for
+  conversation history, dramatically improving cache hit rates.  The prompt
+  follows pi's ultra-minimal pattern: identity, tools list, guidelines (~7
+  items), and project doc references.  All detailed rules (loop prevention,
+  edit policies, Windows commands, ACI guardrails, AST tools, multi-agent,
+  token efficiency) now live in .mini_agent.rules as a "AI Behavioral Rules"
+  section.
+
+- **Extended cache_control coverage (2026-06-22)** — cache_control markers
+  now extend beyond the system message to cover session header, memory
+  snapshot, and startup context (via _cache_mark field).  Messages marked
+  _cache_mark get ephemeral cache_control in api.py.  This anchors the
+  entire immutable prefix (system + session header + memory + startup) in
+  DeepSeek's KV cache, not just the system prompt.
+
+- **Per-turn injection pruning (2026-06-22)** — Disabled 12 of 18 per-turn
+  context injections to reduce cache churn.  Only essential injections remain:
+  compaction, circuit breaker, interjections, progress check, modified-files
+  checkpoint, stale tool compression, and system reminder.  Disabled:
+  cache degradation alert, edit risk, pattern rules, scratchpad nudge,
+  strategy hint, plan status, self-critique, confidence nudge, tool graph,
+  experience context, dead tool pruning, post-edit verification, auto
+  skeletons, mistake count, condensation warning.  Injection intervals
+  also relaxed: progress check every 10 turns (was 5), scratchpad nudge
+  every 8 turns (was 3), read-only nudge after 6 turns (was 3).
 
 - **Pi-style output truncation (2026-06-22)** — read_file now has hard caps at
   2000 lines / 50KB with pi-style continuation hints: `[Showing lines X-Y of Z.

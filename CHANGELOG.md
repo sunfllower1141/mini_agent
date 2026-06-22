@@ -2,6 +2,26 @@
 
 ## 2026-06-22
 
+### Changed — Pi-style cache-hit optimization
+- **Static prompt minimized** — slashed from ~2000 to ~275 tokens (7x reduction).
+  All detailed behavioral instructions moved from `core/prompt.py:_STATIC_PROMPT`
+  to `.mini_agent.rules` (appended at end, outside cache prefix).  Frees ~1700
+  tokens of DeepSeek KV-cache budget for conversation history.  Prompt now follows
+  pi's ultra-minimal pattern: identity, tools list, guidelines (~7 items), project
+  doc references.
+- **Extended cache_control** — `cache_control: {type: "ephemeral"}` now covers
+  session header, memory snapshot, and startup context (via `_cache_mark` field),
+  not just the system message.  Anchors entire immutable prefix in KV cache.
+- **Per-turn injection pruning** — Disabled 12 of 18 per-turn context injections
+  to reduce cache churn.  Only essential ones remain: compaction, circuit breaker,
+  interjections, progress check, modified-files checkpoint, stale compression,
+  system reminder.
+- **Relaxed injection intervals** — Progress check: every 10 turns (was 5).
+  Scratchpad nudge: every 8 turns (was 3).  Read-only nudge: after 6 turns (was 3).
+  All thresholds follow pi's "trust the model" philosophy.
+- **Tests updated** — `test_prompt.py` and `test_agent_self_tracking.py` updated
+  for new minimal prompt expectations.
+
 ### Fixed
 - **`_inject_tool_result_stubs` OpenAI format bug.** When Dirac compaction
   (`_compact_if_needed`) truncated the conversation, assistant messages with

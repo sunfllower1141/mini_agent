@@ -29,22 +29,20 @@ class TestBuildSystemPrompt(unittest.TestCase):
     def test_static_prompt_has_identity(self):
         prompt = build_system_prompt(self._config())
         self.assertIn("You are mini_agent", prompt)
-        self.assertIn("terminal AI coding assistant", prompt)
+        self.assertIn("coding agent harness", prompt)
 
     def test_static_prompt_has_key_modules(self):
         prompt = build_system_prompt(self._config())
-        self.assertIn("prompt.py", prompt)
-        self.assertIn("config.py", prompt)
-        self.assertIn("llm.py", prompt)
-        self.assertIn("api.py", prompt)
-        self.assertIn("memory.py", prompt)
-        self.assertIn("safety.py", prompt)
+        # pi-style: project docs referenced, not hardcoded module list
+        self.assertIn("STATE.txt", prompt)
+        self.assertIn("CHANGELOG.md", prompt)
+        self.assertIn("AGENTS.md", prompt)
         self.assertIn("README.md", prompt)
 
     def test_static_prompt_has_behavior_section(self):
         prompt = build_system_prompt(self._config())
-        self.assertIn("Behavior:", prompt)
-        self.assertIn("Be direct and concise", prompt)
+        self.assertIn("Guidelines", prompt)
+        self.assertIn("Be concise", prompt)
 
     def test_static_prompt_has_tool_guidance(self):
         prompt = build_system_prompt(self._config())
@@ -53,8 +51,8 @@ class TestBuildSystemPrompt(unittest.TestCase):
 
     def test_static_prompt_has_loop_prevention(self):
         prompt = build_system_prompt(self._config())
-        self.assertIn("Loop prevention", prompt)
-        self.assertIn("Same tool + same args 2x = STUCK", prompt)
+        self.assertIn("Same tool + same args 2x = stuck", prompt)
+        self.assertIn("switch approach", prompt)
 
     def test_static_prompt_has_provider_note(self):
         prompt = build_system_prompt(self._config())
@@ -89,16 +87,16 @@ class TestBuildSystemPrompt(unittest.TestCase):
     def test_prompt_length_within_limit(self):
         prompt = build_system_prompt(self._config())
         length = len(prompt)
-        # Static prompt is ~3,900 chars -- allow some headroom for provider notes
-        self.assertLess(length, 9000,
-                        f"Prompt is {length} chars (expected ~3900)")
-        self.assertGreater(length, 2000,
-                           f"Prompt is only {length} chars, expected > 2000")
+        # pi-style: static prompt is ~1,100 chars (down from ~3,900)
+        self.assertLess(length, 3000,
+                        f"Prompt is {length} chars (expected ~1100)")
+        self.assertGreater(length, 500,
+                           f"Prompt is only {length} chars, expected > 500")
 
     def test_prompt_not_empty(self):
         prompt = build_system_prompt(self._config())
-        self.assertGreater(len(prompt), 500,
-                           "Prompt should be substantially longer than 500 chars")
+        self.assertGreater(len(prompt), 300,
+                           "Prompt should be substantially longer than 300 chars")
 
 
 class TestBuildSessionHeader(unittest.TestCase):

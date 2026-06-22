@@ -849,6 +849,7 @@ from tools.search_ops import build_symbol_index  # noqa: E402, F401
 from tools.mcp_client import get_mcp_manager, init_mcp_servers, shutdown_mcp  # noqa: E402, F401
 from tools.ast_ops import *      # noqa: E402, F401 -- get_file_skeleton, get_function, replace_symbol
 from tools.condense_ops import *  # noqa: E402, F401 -- condense tool + proactive warning
+from tools import git_ops         # noqa: E402, F401 -- git_status, git_diff, git_log, git_add, git_commit
 
 # ---------------------------------------------------------------------------
 # mcp_discover / mcp_call -- MCP client tools

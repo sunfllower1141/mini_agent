@@ -20,6 +20,8 @@ import threading
 import time
 from typing import Any
 
+import re
+
 import numpy as np
 
 from logging_setup import get_logger
@@ -30,15 +32,15 @@ _log = get_logger("semantic_cache")
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_SIMILARITY_THRESHOLD: float = 0.92  # cosine similarity >= this -> cache hit
-MAX_ENTRIES: int = 128                       # max cache entries (LRU eviction)
-DEFAULT_TTL_SECONDS: int = 3600              # 1 hour TTL
-MIN_QUERY_LENGTH: int = 10                   # don't cache queries shorter than this
+DEFAULT_SIMILARITY_THRESHOLD: float = 0.84  # cosine similarity >= this -> cache hit
+MAX_ENTRIES: int = 512                       # max cache entries (LRU eviction)
+DEFAULT_TTL_SECONDS: int = 14400             # 4 hour TTL (covers full session)
+MIN_QUERY_LENGTH: int = 6                   # don't cache queries shorter than this
 
 # Adaptive threshold tuning (per-entry, inspired by vCache)
-ADAPTIVE_THRESHOLD_MIN: float = 0.75          # floor — never go below this
-ADAPTIVE_THRESHOLD_DECAY: float = 0.005       # reduction per successful verified hit
-ADAPTIVE_THRESHOLD_PENALTY: float = 0.03      # increase on false positive feedback
+ADAPTIVE_THRESHOLD_MIN: float = 0.68          # floor — never go below this
+ADAPTIVE_THRESHOLD_DECAY: float = 0.008       # reduction per successful verified hit
+ADAPTIVE_THRESHOLD_PENALTY: float = 0.05      # increase on false positive feedback
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +123,32 @@ class SemanticCache:
     # Public API
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _normalize_query(text: str) -> str:
+        """Normalize query text for better cache hit rates.
+
+        Strips injected context prefixes, normalizes whitespace, and
+        collapses redundant patterns so that semantically identical
+        queries produce the same hash.
+        """
+        # Strip "Earlier in this conversation:" prefix (injected by context_inject)
+        text = re.sub(
+            r'^\s*Earlier in this conversation:\s*', '', text, flags=re.IGNORECASE,
+        )
+        # Strip "- User:" and "- Files read:" block (injected by context_inject)
+        text = re.sub(
+            r'\n-Files read:.*?(?=\n\n|\Z)', '', text, flags=re.DOTALL,
+        )
+        # Strip "- Commands run:" block
+        text = re.sub(
+            r'\n-Commands run:.*?(?=\n\n|\Z)', '', text, flags=re.DOTALL,
+        )
+        # Strip markdown code fences (they vary but carry no semantic intent)
+        text = re.sub(r'```[\s\S]*?```', ' [code] ', text)
+        # Normalize whitespace
+        text = ' '.join(text.split())
+        return text.strip()
+
     def lookup(self, query_text: str) -> tuple[dict | None, float]:
         """Check if *query_text* matches a cached query.
 
@@ -131,6 +159,9 @@ class SemanticCache:
         if len(query_text) < MIN_QUERY_LENGTH:
             self._misses += 1
             return None, 0.0
+
+        # Normalize query for better hash and embedding matching
+        query_text = self._normalize_query(query_text)
 
         query_hash = self._hash_text(query_text)
 
@@ -179,8 +210,8 @@ class SemanticCache:
                 self._hits += 1
                 self._semantic_hits += 1
                 self._total_saved += entry.cost_saved
-                # Lower threshold slightly on successful hit (confidence grows)
-                if entry.hit_count > 2:
+                # Lower threshold on every hit (confidence grows quickly)
+                if entry.hit_count > 0:
                     entry.adaptive_threshold = max(
                         ADAPTIVE_THRESHOLD_MIN,
                         entry.adaptive_threshold - ADAPTIVE_THRESHOLD_DECAY,
@@ -224,6 +255,9 @@ class SemanticCache:
             # Don't cache tool-call responses -- they depend on tool results
             # which change the conversation state and can't be cached.
             return
+
+        # Normalize query before hashing and embedding
+        query_text = self._normalize_query(query_text)
 
         embedding = self._embed(query_text)
         if embedding is None:

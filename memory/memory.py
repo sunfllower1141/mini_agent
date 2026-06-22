@@ -744,7 +744,13 @@ class MemoryStore:
                 )
                 if r.returncode == 0 and r.stdout.strip():
                     changes_lines.append(f"```\n{r.stdout.strip()}\n```")
-        except (OSError, _sp.TimeoutExpired):
+        except (_sp.TimeoutExpired, OSError, FileNotFoundError):
+            # Windows: git can hang due to credential prompts, antivirus
+            # scanning, or large repos.  Gracefully degrade.
+            pass
+        except Exception:
+            # Broader catch: any other subprocess weirdness (e.g., Windows
+            # pipe deadlocks with capture_output on large outputs).
             pass
 
         changes_text = "\n".join(changes_lines) if changes_lines else "(no git changes detected)"

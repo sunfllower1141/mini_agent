@@ -43,12 +43,11 @@ DEAD_TOOL_PRUNE_TURN = 5
 """Number of turns before deactivating skills whose tools have never been used.
 Reduces API payload by ~500-2000 tokens and stabilises the KV-cache prefix."""
 
-COMPACTION_HARD_LIMIT = 200_000
-"""Absolute token ceiling for context before Dirac-style truncation fires.
-Models reporting absurdly large context windows (e.g. 1M) would otherwise
-never trigger the half/quarter conversation truncation, causing every turn
-to re-send the full history.  Set to a realistic cap that leaves headroom
-for the model response while keeping API costs under control."""
+COMPACTION_HARD_LIMIT = 1_000_000
+"""Absolute token ceiling before pi-style compaction fires.
+Matches deepseek-v4-pro's 1M context window.  Pi-style compaction
+uses the model's reported window (context_window from config),
+not this hard cap.  This is a safety backstop only."""
 
 # ---------------------------------------------------------------------------
 # Directory names to skip during os.walk / tree traversal.

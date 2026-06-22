@@ -824,6 +824,85 @@ def _session_stats_summary(args: dict) -> str:
     return "session_stats"
 
 
+# ---------------------------------------------------------------------------
+# write_session_handoff -- mid-session handoff (Windows-safe, no git hang)
+# ---------------------------------------------------------------------------
+
+
+@_register("write_session_handoff")
+def _write_session_handoff(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
+    """Write HANDOFF.md mid-session with pending items.
+
+    On Windows, git subprocess calls can hang (credential prompts, antivirus
+    scanning, large repos).  This tool writes a lightweight handoff WITHOUT
+    running git -- just records the pending items and current timestamp.
+    The full git-diff handoff is generated at session cleanup.
+    """
+    import datetime
+    import os as _os
+
+    pending = str(args.get("pending", "")).strip()
+    notes = str(args.get("notes", "")).strip()
+
+    workspace = getattr(_rg, "workspace_root", "") if _rg else ""
+    if not workspace:
+        workspace = _os.getcwd()
+
+    date_str = datetime.datetime.now(datetime.timezone.utc).strftime(
+        "%Y-%m-%d %H:%M UTC"
+    )
+
+    handoff_path = _os.path.join(workspace, "HANDOFF.md")
+
+    # Read existing handoff if present (preserve git-diff section)
+    existing = ""
+    try:
+        if _os.path.isfile(handoff_path):
+            with open(handoff_path, encoding="utf-8", errors="replace") as f:
+                existing = f.read()
+    except OSError:
+        pass
+
+    # Extract existing "What I Changed" section if present
+    changes_section = "(no git changes detected)"
+    if existing:
+        import re
+        m = re.search(r"### What I Changed\n(.*?)(?=\n###|\n##|\Z)", existing, re.DOTALL)
+        if m:
+            changes_section = m.group(1).strip()
+
+    pending_text = pending if pending else "(none recorded)"
+    notes_text = f"\n\n### Notes\n{notes}" if notes else ""
+
+    content = (
+        f"# Session Handoff\n"
+        f"# Auto-generated at session end. Read at next session start for continuity.\n\n"
+        f"## Last Session: {date_str}\n\n"
+        f"### What I Changed\n{changes_section}\n\n"
+        f"### What's Pending\n{pending_text}\n"
+        f"{notes_text}\n"
+    )
+
+    try:
+        with open(handoff_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return ToolResult(
+            success=True,
+            content=f"Handoff written to {handoff_path}\nPending: {pending_text}",
+        )
+    except OSError as e:
+        return ToolResult(
+            success=False,
+            content=f"Failed to write handoff: {e}",
+            hint=f"Check write permissions for {handoff_path}",
+        )
+
+
+@_summarize("write_session_handoff")
+def _write_session_handoff_summary(args: dict) -> str:
+    return f"write_session_handoff(pending='{str(args.get('pending', ''))[:60]}')"
+
+
 
 
 

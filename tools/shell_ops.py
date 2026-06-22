@@ -362,20 +362,33 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
         if stdin_text is not None:
             stdin_kw["stdin"] = subprocess.PIPE
 
-        # On Windows, prevent console windows from flashing
+        # On Windows with Git Bash available: use bash explicitly for python -c
+        # support (single quotes work). Otherwise fall back to shell=True (cmd.exe).
         popen_kwargs = {}
+        _use_bash = False
         if _WINDOWS:
             popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-
-        # Always use shell=True: cmd.exe on Windows, /bin/sh on Unix.
-        # No bash wrapping -- it creates a fragile cmd->bash->command chain
-        # and can cause process explosions when quoting is mishandled.
-        proc = subprocess.Popen(
-            command, shell=True,
-            cwd=rg.workspace_root,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            **stdin_kw, **popen_kwargs,
-        )
+            # If Git Bash is available, use it for better python -c support
+            _shell_cmd = _get_shell_command()
+            _is_bash = "bash" in _shell_cmd[0].lower() if _shell_cmd else False
+            if _is_bash:
+                _use_bash = True
+        if _use_bash:
+            # Use bash -c "command" for proper single-quote support
+            escaped = command.replace("\\", "\\\\").replace('"', '\\"')
+            proc = subprocess.Popen(
+                _shell_cmd + ["-c", escaped],
+                cwd=rg.workspace_root,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                **stdin_kw, **popen_kwargs,
+            )
+        else:
+            proc = subprocess.Popen(
+                command, shell=True,
+                cwd=rg.workspace_root,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                **stdin_kw, **popen_kwargs,
+            )
 
         _register_proc(proc)
         stdout_lines: list[str] = []

@@ -123,7 +123,12 @@ def _clean_message(msg: dict, index: int, provider: str = "deepseek") -> dict | 
             {k: v for k, v in tc.items() if k != "index"}
             for tc in m2["tool_calls"]
         ]
-    if index == 0 and m2.get("role") == "system" and provider == "deepseek":
+    if (index == 0 or index == msg.get("_cache_mark", -1)) and m2.get("role") == "system" and provider == "deepseek":
+        m2["cache_control"] = {"type": "ephemeral"}
+    # Also mark cache points on user messages that are part of the immutable prefix
+    # (session header, memory snapshot, startup context). These are marked in
+    # bootstrap.py via _cache_mark field.
+    if msg.get("_cache_mark") and provider == "deepseek":
         m2["cache_control"] = {"type": "ephemeral"}
     return m2
 

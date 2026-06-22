@@ -1,10 +1,10 @@
 # mini_agent Project Conventions
 # Read this before making changes. Consult STATE.txt for current architecture decisions.
 #
-# NOTE: This file is a supplement to prompt.py's _STATIC_PROMPT — it covers
-# project-specific conventions (code style, module map, testing rules).
-# The full AI behavioral instruction lives in prompt.py. These rules are
-# injected at the end of the system prompt as an appendix.
+# NOTE: This file contains the full AI behavioral instructions — formerly in
+# prompt.py. The system prompt is now pi-style ultra-minimal (~200 tokens).
+# All detailed behavioral rules, edit policies, loop prevention, etc. live HERE
+# and are appended at the END of the system prompt, outside the cache prefix.
 #
 # SELF-MODIFICATION: This agent modifies its own codebase. After every
 # completed change, update STATE.txt. At session end, write HANDOFF.md.
@@ -122,6 +122,13 @@
   (list_directory, search_files, read_file, find_symbol) to find the real value.
 - Guessing with '?' wastes a turn and triggers storm-breaker protection.
 
+## Git Operations
+- Use `use_skill('git')` to unlock git_status, git_diff, git_log, git_add, git_commit.
+- These tools are Windows-safe (GIT_TERMINAL_PROMPT=0, 15s timeout) — they never hang.
+- Do NOT use `run_shell` for git commands — it can hang on Windows.
+- Use `git_status` before changes, `git_diff` to review, `git_add` + `git_commit` to save.
+- For push: use `run_shell(command='git push', ...)` (blocked without force=True).
+
 
 ## Self-Review Cycle
 After completing a significant change (new file, refactored module, or >50 lines edited):
@@ -135,6 +142,80 @@ At the end of every session, write a HANDOFF.md with:
 - What I changed (files and reasoning)
 - What's pending (unfinished work)
 - Modified files list (for git context on next startup)
+
+
+## AI Behavioral Rules
+These are the PRIMARY behavioral instructions. The system prompt is minimal (~200 tokens)
+to maximize LLM prompt cache hit rates. All detailed rules live here.
+
+### Knowledge & Search
+- Rate your confidence 1-10 on external knowledge questions.
+  1-6: use web_search FIRST, don't guess.
+  7-8: fairly sure, verify if high-consequence.
+  9-10: answer directly.
+- Codebase-first: search local code before web_search. But if local search misses, web_search promptly.
+- 3+ consecutive tool failures → web_search, don't keep retrying.
+
+### Loop Prevention (CRITICAL)
+- Same tool + same args 2x = STUCK. Switch approach immediately.
+- Long commands (>10s): use background mode.
+- read_file MUST be called before edit_file/write_file on the same file.
+- write_file creates new files OR overwrites existing files. For small targeted
+  changes to an existing file, PREFER edit_file with oldText/newText. For full
+  rewrites, write_file is appropriate. NEVER delete a file first — just use
+  write_file directly on the path you want.
+- Preferred: pi-style oldText/newText editing — no anchors needed.
+  Example: edits:[{oldText:'print("hello")', newText:'print("hi")'}]
+- For insertions: edit_type='insert_after' with oldText as anchor line.
+  Example: edits:[{oldText:'import os', newText:'import sys', edit_type:'insert_after'}]
+- NEVER write Python scripts to edit files. NEVER use sed -i. NEVER use shell
+  redirects to modify workspace files. Only edit_file or write_file.
+
+### Windows Commands
+- Git Bash on Windows. Single quotes work: python -c 'code'
+- For multi-line Python: write_file then run_shell.
+- Pipe/filter: run_shell(command='head -n 50 file.py')
+
+### Read-Before-Edit (ACI Guardrails)
+- CANNOT write/edit .py files not read_file'd this session.
+- After edit_file/write_file, verify with syntax check or test.
+- Shell exit 0 with no output = normal, not error.
+- Search capped at 200 results; narrow pattern if at cap.
+- Dangerous commands blocked (rm -rf, sudo, git push --force) unless force=True.
+
+### Token Efficiency
+- read_file output capped at 2000 lines/50KB. Use offset/limit.
+- run_shell output tail-truncated to 2000 lines/50KB; full output saved to temp file.
+- Batch ALL independent tool calls in ONE response.
+- Use get_file_skeleton BEFORE read_file for structure (5-20x savings).
+- Prefer find_symbol over search_files (10x faster).
+- Update write_scratchpad every 3 turns.
+
+### Plan-before-Edit
+- Changes spanning 3+ files or 50+ lines: call plan() FIRST.
+- Plan: files, order, verification per file.
+- Mark steps with plan_status(step=N).
+- Stuck without a plan? STOP and create one.
+
+### AST-Native Tools
+- get_file_skeleton: structural outline (signatures only, no bodies). Use BEFORE read_file.
+- get_function: extract specific function by name (supports ClassName.method).
+- replace_symbol: AST-precise function/method/class replacement.
+
+### Placeholder Guard
+- Runtime refuses '?', '???', '...', empty strings as ANY parameter.
+- Use discovery tools (list_directory, search_files, read_file, find_symbol) instead.
+
+### Multi-Agent (use_skill('agents') first)
+- spawn_agent for independent sub-tasks. Patterns: fan_out, fan_in, pipeline, barrier.
+- Orchestrate, don't duplicate.
+
+### Session Handoff
+- HANDOFF.md is auto-generated at session end. You do NOT need to call
+  write_session_handoff() — the runtime handles it automatically.
+- If you want to record pending items mid-session, use write_scratchpad or
+  write_file to HANDOFF.md directly.
+- Auto-generates from git diff at session cleanup.
 
 ## Session Continuity
 At the start of every session, HANDOFF.md from the previous session is injected.

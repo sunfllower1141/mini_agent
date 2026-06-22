@@ -98,11 +98,11 @@ def _check_circuit(recent_keys: list[str]) -> str | None:
 
 SUB_AGENT_RESULT_PREVIEW = 120  # max chars for sub-agent result in context message
 
-# Context injection intervals
-PROGRESS_INTERVAL = 5               # turns between progress reminders
-SCRATCHPAD_NUDGE_START_TURN = 5     # first turn to check scratchpad staleness
-SCRATCHPAD_NUDGE_INTERVAL = 3       # interval for scratchpad staleness nudge
-MODIFIED_FILES_CHECKPOINT_TURN = 2  # turn to show modified-files checkpoint
+# Context injection intervals (pi-style: infrequent, minimal)
+PROGRESS_INTERVAL = 10               # turns between progress reminders (was 5)
+SCRATCHPAD_NUDGE_START_TURN = 10     # first turn to check scratchpad staleness (was 5)
+SCRATCHPAD_NUDGE_INTERVAL = 8        # interval for scratchpad staleness nudge (was 3)
+MODIFIED_FILES_CHECKPOINT_TURN = 3   # turn to show modified-files checkpoint (was 2)
 
 
 
@@ -1615,11 +1615,9 @@ def _inject_context(
     _inject_scratchpad_context(messages, memory_store=memory_store)
     _inject_git_diff(messages, memory_store=memory_store, read_gate=read_gate)
 
-    # Per-turn injections
+    # Per-turn injections (pi-style: keep only essential, minimize churn)
     _inject_orchestration_context(messages)
     _inject_interjections(messages)
-
-
     _inject_progress_check(messages, turn_count=turn_count)
 
     if turn_count == MODIFIED_FILES_CHECKPOINT_TURN and (
@@ -1628,29 +1626,25 @@ def _inject_context(
         _inject_modified_files_checkpoint(messages, read_gate=read_gate)
 
     _inject_circuit_breaker(messages, recent_tool_keys=recent_tool_keys)
-    _inject_cache_degradation_alert(messages)
-    _inject_edit_risk_context(messages)
-    _inject_pattern_rules(messages)
-    _inject_scratchpad_nudge(messages, turn_count=turn_count)
-    _inject_strategy_hint(messages)
-    _inject_plan_status(messages)
-    _inject_self_critique(messages, turn_count=turn_count)
-    _inject_confidence_web_search_nudge(messages, turn_count=turn_count)
-    _inject_tool_graph_context(messages)
-    _inject_experience_context(messages, memory_store=memory_store)
-    _inject_dead_tool_pruning(messages, turn_count=turn_count)
-    _inject_post_edit_verification(messages)
 
-    # Auto-context enrichment (Dirac-style): pre-load skeletons for mentioned files
-    _inject_auto_file_skeletons(messages, read_gate=read_gate)
+    # pi-style: disable low-value injections to reduce cache churn
+    # _inject_cache_degradation_alert(messages)        # disabled: noisy, rare value
+    # _inject_edit_risk_context(messages)               # disabled: redundant with knowledge graph
+    # _inject_pattern_rules(messages)                   # disabled: moved to .mini_agent.rules
+    # _inject_scratchpad_nudge(messages, turn_count=turn_count)  # disabled: progress check covers this
+    # _inject_strategy_hint(messages)                   # disabled: model should self-direct
+    # _inject_plan_status(messages)                     # disabled: agent tracks via plan_status tool
+    # _inject_self_critique(messages, turn_count=turn_count)     # disabled: rare value
+    # _inject_confidence_web_search_nudge(messages, turn_count=turn_count)  # disabled: in .mini_agent.rules
+    # _inject_tool_graph_context(messages)              # disabled: subtle, rarely helps
+    # _inject_experience_context(messages, memory_store=memory_store)  # disabled: startup context covers this
+    # _inject_dead_tool_pruning(messages, turn_count=turn_count)       # disabled: skills handle internally
+    # _inject_post_edit_verification(messages)          # disabled: knowledge graph handles
+    # _inject_auto_file_skeletons(messages, read_gate=read_gate)       # disabled: agent should discover
+    # _inject_mistake_count_context(messages)           # disabled: circuit breaker covers
+    # _inject_condensation_warning(messages)            # disabled: compaction handles proactively
 
-    # Mistake count tracking (Dirac-style): inject if agent is flailing
-    _inject_mistake_count_context(messages)
-
-    # Proactive condensation warning (Dirac-style)
-    _inject_condensation_warning(messages)
-
-    # Context-quality defences (research-backed: 25% fill degrades quality)
+    # Context-quality defences (keep: these are essential for long sessions)
     _compress_stale_tool_results(messages)
     _inject_system_reminder(messages, turn_count=turn_count)
 
@@ -2025,112 +2019,61 @@ def _inject_tool_result_stubs(messages: list[dict]) -> int:
 
 
 def _compact_if_needed(messages: list[dict]) -> None:
-    """Dirac-style half / quarter truncation of conversation history.
+    """Pi-style compaction: summarize old messages, keep recent ones.
 
-    When total tokens reach the context window limit, remove the middle
-    50% (half strategy) or 75% (quarter strategy) of conversation messages.
-    Always preserves the first 2 messages (system prompt + first user
-    context) and maintains user / assistant alternation.
-
-    Unlike the previous summary-based approach, this is a pure deletion
-    strategy -- no summary is injected.  The model sees a shorter but
-    structurally correct conversation.  Research shows models handle
-    truncated history well when the most recent turns are intact.
+    Replaces the old Dirac-style half/quarter truncation with pi's LLM
+    summarization approach.  When context exceeds contextWindow - reserveTokens,
+    old messages are summarized into a structured checkpoint (Goal, Progress,
+    Key Decisions, Next Steps, Critical Context) and recent ~20K tokens are
+    kept verbatim.
 
     Called before context injection each turn so fresh context messages
     are not immediately pruned.
     """
-    from memory.memory_prune import _total_tokens
-
     config = getattr(_TOOL_CONTEXT, "_agent_config", None)
     if config is None:
         return
-    context_window = getattr(config, "context_window", 200_000)
+    context_window = getattr(config, "context_window", 1_000_000)
     if context_window <= 0:
         return
 
-    # Dirac-style headroom: compact at max(context_window - 40k, 80% of window).
-    # This leaves breathing room for the response and prevents API 400 errors
-    # from imprecise token estimation.  Without headroom, a single estimation
-    # error can cause the API to reject the request outright.
-    # COMPACTION_HARD_LIMIT caps context at 200k regardless of model's
-    # reported window.  Without this, models reporting 1M windows (like
-    # deepseek-v4-pro) never trigger compaction, and every turn re-sends
-    # the full conversation history -- burning tokens on every API call.
-    from core.constants import COMPACTION_HARD_LIMIT
-    max_allowed = min(
-        COMPACTION_HARD_LIMIT,
-        max(context_window - 40_000, int(context_window * 0.80))
-    )
-    current_tokens = _total_tokens(messages)
-    if current_tokens < max_allowed:
+    # Use pi-style thresholds: compact when tokens > window - reserve
+    from core.pi_compaction import should_compact, compact, _estimate_messages_tokens
+
+    token_count = _estimate_messages_tokens(messages)
+    if not should_compact(token_count, context_window):
         return
 
-    if len(messages) <= _COMPACTION_MIN_MESSAGES:
-        return  # not enough to compact meaningfully
+    if len(messages) < 8:
+        return  # not enough messages to compact meaningfully
 
-    # Dirac always preserves the first user-assistant pairing (indices 0, 1)
-    # and truncates from the middle.  This keeps the system prompt intact
-    # (critical for API-side prompt caching) and the initial task context.
-    system_msgs = messages[:2]
-    conversation = messages[2:]
+    # Track previous summary for iterative updates
+    previous_summary = getattr(_TOOL_CONTEXT, "_pi_compaction_summary", "")
 
-    if len(conversation) < 6:
-        return  # need at least a few pairs for truncation to be meaningful
+    # Get API credentials from config
+    import os as _os
+    api_key = getattr(config, "api_key", "") or _os.environ.get("DEEPSEEK_API_KEY", "")
+    model = getattr(config, "summarizer_model", "") or _os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+    base_url = getattr(config, "summarizer_base_url", "") or _os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
 
-    # --- Strategy selection (Dirac logic) ---
-    # half:  keep the last 50% of conversation messages (remove oldest 50%)
-    # quarter: keep only the last 25% (remove oldest 75%)
-    #
-    # Dirac chooses quarter when totalTokens / 2 > maxAllowedSize,
-    # i.e. when even after removing half we'd still be over the window.
-    # We approximate with a token-based heuristic.
-    half_count = max(4, len(conversation) // 2)
-    if half_count % 2 != 0:
-        half_count -= 1  # keep even number (user / assistant pairs)
-
-    # Estimate tokens in the kept portion assuming roughly uniform distribution
-    kept_estimated = int(current_tokens * (2 + half_count) / len(messages))
-    if kept_estimated >= max_allowed:
-        # quarter strategy: keep only 1/4 of conversation
-        half_count = max(4, len(conversation) // 4)
-        if half_count % 2 != 0:
-            half_count -= 1
-
-    if half_count >= len(conversation):
-        return  # nothing to remove
-
-    kept = conversation[-half_count:]
-    removed_count = len(conversation) - len(kept)
-
-    # Rebuild: system prefix + truncated conversation tail
-    messages.clear()
-    messages.extend(system_msgs)
-    messages.extend(kept)
-
-    # Dirac-style cleanup: strip orphaned tool messages whose tool_call
-    # no longer exists after trimming the middle of the conversation.
-    # Without this, the model sees tool results without matching tool calls,
-    # which breaks the conversation structure.
-    _strip_orphaned_tool_results(messages)
-    _inject_tool_result_stubs(messages)
-
-    # Invalidate the API message-cleaning cache.  _compact_if_needed rebuilds
-    # messages in-place (same Python list object, same id, fewer entries),
-    # so the incremental cleaning cache in api.py would otherwise serve
-    # stale pre-compaction messages to the API on the next call_llm.
-    try:
-        from api import clear_api_cache
-        clear_api_cache()
-    except Exception:
-        pass
-
-    _log.info(
-        "Dirac compaction: %d -> %d messages (%d middle messages removed, "
-        "keeping last %d conversation messages)",
-        len(system_msgs) + len(conversation),
-        len(messages),
-        removed_count,
-        half_count,
+    # Run pi-style compaction
+    result = compact(
+        messages,
+        context_window=context_window,
+        api_key=api_key,
+        model=model,
+        base_url=base_url,
+        previous_summary=previous_summary,
     )
+
+    # Store summary for next iterative update
+    if result.summary:
+        _TOOL_CONTEXT._pi_compaction_summary = result.summary
+
+    if result.did_compact:
+        _log.info(
+            "pi_compaction: compacted %d -> %d messages, saved ~%d tokens",
+            result.messages_before, result.messages_after,
+            result.tokens_before - result.tokens_after,
+        )
 

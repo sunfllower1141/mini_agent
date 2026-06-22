@@ -107,7 +107,7 @@ def _save_turn_summary(
 
 
 # Read-only nudge threshold (used by context_inject._inject_progress_check via _TOOL_CONTEXT)
-_READ_ONLY_NUDGE_THRESHOLD: int = 3  # turns of pure reads before nudge
+_READ_ONLY_NUDGE_THRESHOLD: int = 6  # turns of pure reads before nudge (pi-style: trust model)
 
 # ---------------------------------------------------------------------------
 # Context injection -- imported from context_inject.py
