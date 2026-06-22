@@ -1007,7 +1007,7 @@ class TestHashlines(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertIn("ANCHOR", result.content)
         self.assertIn("ANCHOR", result.content)
-        self.assertIn("re-read", result.content)
+        self.assertIn("Re-read", result.content)
         self.assertIn("hash_lines=True", result.content)
         # Must NOT expose the actual hash or current line content
         self.assertNotIn("Actual hash", result.content)

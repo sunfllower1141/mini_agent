@@ -193,8 +193,11 @@ def _parse_pytest_output(raw_output: str, exit_code: int = 0) -> tuple[str, bool
 
 # Patterns for dangerous commands that should warn or block
 _DANGEROUS_COMMANDS: list[tuple[str, str]] = [
-    # (regex pattern, explanation)
+    # (regex pattern, explanation) — ordered: specific patterns first, generic last
     (r"\brm\s+-rf\b", "rm -rf: recursive force delete -- will permanently remove files"),
+    (r"\brm\s+-r\b", "rm -r: recursive delete -- will remove directories"),
+    (r"\brm\s+-f\b", "rm -f: force delete -- use edit_file instead of delete+rewrite"),
+    (r"\brm\s+", "rm: delete workspace file -- use edit_file instead of delete+rewrite"),
     (r"\bgit\s+push\s+.*--force\b", "git push --force: overwrites remote history"),
     (r"\bgit\s+push\s+.*-f\b", "git push -f: overwrites remote history"),
     (r"\bsudo\b", "sudo: requires elevated privileges"),
@@ -287,7 +290,7 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
             )
     # Auto-backup files before any rm command (prevents permanent data loss)
     if force and re.search(r'\brm\b', command):
-        from tools.file_ops import _backup_before_write
+        from tools.file_ops import _backup_before_write, _track_deleted_file
         import shlex
         try:
             tokens = shlex.split(command)
@@ -299,6 +302,7 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
                     continue
                 if not token.startswith('-'):
                     _backup_before_write(token)
+                    _track_deleted_file(token)  # prevent delete+rewrite anti-pattern
                 idx += 1
         except Exception:
             pass  # best-effort, don't block the rm

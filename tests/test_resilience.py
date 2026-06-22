@@ -182,7 +182,7 @@ class TestToolErrorHints(unittest.TestCase):
         self.assertIn("Malformed JSON", result.content)
         self.assertTrue(result.hint, "hint should be populated")
         self.assertIn("retry →", result.hint)
-        self.assertIn("path:string", result.hint)
+        self.assertIn("path", result.hint)
 
     def test_unknown_tool_returns_hint(self):
         tc = self._make_tc("nonexistent_tool", '{}')
@@ -315,7 +315,7 @@ class TestSchemaValidation(unittest.TestCase):
         tc = self._make_tc("read_file", '{}')
         result = execute_tool(tc, self.wg, self.rg)
         self.assertFalse(result.success)
-        self.assertIn("MISSING", result.content)
+        self.assertIn("Missing required", result.content)
         self.assertIn("path", result.content)
 
     def test_correct_params_pass_validation(self):

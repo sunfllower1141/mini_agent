@@ -284,6 +284,20 @@ _BACKUPS: dict[str, str] = {}  # resolved_path -> backup path
 # Tracks files where edit_file recently failed -- used to detect write_file-as-fallback
 # anti-pattern.  Cleared after each successful write/edit or on next read_file.
 _RECENT_EDIT_FAILURES: set[str] = set()
+# Track files deleted via rm (shell) to prevent delete+rewrite anti-pattern.
+# When _write_file sees a path in this set, it blocks the write even if the
+# file no longer exists on disk (because the model deleted it to bypass guards).
+_RECENTLY_DELETED: set[str] = set()
+
+
+def _track_deleted_file(path: str) -> None:
+    """Record that a workspace file was just deleted (called from shell_ops)."""
+    _RECENTLY_DELETED.add(os.path.realpath(path))
+
+
+def _is_recently_deleted(path: str) -> bool:
+    """Check if a path was recently deleted via rm."""
+    return os.path.realpath(path) in _RECENTLY_DELETED
 
 
 
@@ -543,6 +557,14 @@ def _write_file(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
             success=False,
             content=_err("EXISTS", f"file already exists; use edit_file to modify",
                          f"edit_file('{path}', ...)"),
+        )
+    # Block delete+rewrite anti-pattern: if this file was just deleted via rm
+    # to bypass the EXISTS guard, refuse the write.
+    if _is_recently_deleted(_resolved):
+        return ToolResult(
+            success=False,
+            content=_err("BLOCKED", f"{path} was deleted via rm to bypass edit_file -- restore the file and use edit_file instead",
+                         "use git checkout or restore_file to recover the original file"),
         )
     # File reservation check -- prevent sub-agent collisions
     agent_id = getattr(_current_agent_id, "task_id", None)
@@ -995,6 +1017,168 @@ def _line_match(content_lines, search_lines, trim, content=''):
 # edit_file -- hash-anchored editing, single-edit and batch (Hashlines pattern from Akay/Howard Chen)
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Pi-style exact text matching for edits (no anchors needed)
+# ---------------------------------------------------------------------------
+
+# Unicode normalization map for fuzzy text matching (pi-style)
+# Smart quotes, Unicode dashes, special spaces → ASCII equivalents
+_UNICODE_NORMALIZE_MAP: dict[int, int | None] = {
+    # Smart single quotes → '
+    0x2018: ord("'"), 0x2019: ord("'"), 0x201A: ord("'"), 0x201B: ord("'"),
+    # Smart double quotes → "
+    0x201C: ord('"'), 0x201D: ord('"'), 0x201E: ord('"'), 0x201F: ord('"'),
+    # Dashes/hyphens → -
+    0x2010: ord('-'), 0x2011: ord('-'), 0x2012: ord('-'),
+    0x2013: ord('-'), 0x2014: ord('-'), 0x2015: ord('-'), 0x2212: ord('-'),
+    # Special spaces → regular space
+    0x00A0: ord(' '), 0x2002: ord(' '), 0x2003: ord(' '), 0x2004: ord(' '),
+    0x2005: ord(' '), 0x2006: ord(' '), 0x2007: ord(' '), 0x2008: ord(' '),
+    0x2009: ord(' '), 0x200A: ord(' '), 0x202F: ord(' '), 0x205F: ord(' '),
+    0x3000: ord(' '),
+}
+
+
+def _normalize_for_match(text: str) -> str:
+    """Normalize text for fuzzy matching (pi-style).
+    
+    - Strip trailing whitespace from each line
+    - Normalize smart quotes, Unicode dashes, special spaces to ASCII
+    - Normalize Unicode NFKC
+    """
+    import unicodedata
+    # Per-line trailing whitespace strip
+    lines = [line.rstrip() for line in text.split("\n")]
+    result = "\n".join(lines)
+    # NFKC normalization
+    result = unicodedata.normalize("NFKC", result)
+    # Smart quotes, dashes, spaces → ASCII
+    return result.translate(_UNICODE_NORMALIZE_MAP)
+
+
+def _edit_file_text_match(resolved: str, edits: list[dict], display_path: str) -> ToolResult:
+    """Apply edits using pi-style exact text matching (oldText → newText).
+    
+    Each edit.oldText must match a unique, non-overlapping region in the file.
+    Edits are applied bottom-up (reverse order by match position) so earlier
+    edits don't affect the positions of later ones.
+    
+    No read-before-edit requirement — the model edits from what it already saw.
+    """
+    # Read the file
+    try:
+        with open(resolved, "r", encoding="utf-8", errors="replace") as f:
+            original = f.read()
+    except FileNotFoundError:
+        return ToolResult(success=False, content=_err("NOT_FOUND", resolved, "use list_directory"))
+    except Exception as e:
+        return ToolResult(success=False, content=_err("READ", str(e)))
+
+    # Detect line endings (preserve them like pi does)
+    line_ending = "\r\n" if "\r\n" in original else "\n"
+    # Normalize to LF for matching
+    normalized = original.replace("\r\n", "\n")
+    fuzzy_normalized = _normalize_for_match(normalized)
+
+    # --- Validate all edits first (against original file, not incremental) ---
+    matches: list[dict] = []
+    for i, edit in enumerate(edits):
+        old_text = edit.get("oldText", "")
+        new_text = edit.get("newText", "")
+        if not isinstance(old_text, str) or not isinstance(new_text, str):
+            return ToolResult(
+                success=False,
+                content=_err("INVALID", f"edit[{i}] oldText/newText must be strings"),
+            )
+        # Normalize oldText for fuzzy matching
+        fuzzy_old = _normalize_for_match(old_text)
+        # Find match in normalized content
+        match_idx = fuzzy_normalized.find(fuzzy_old)
+        if match_idx == -1:
+            # Try exact match (no normalization)
+            match_idx = normalized.find(old_text)
+            if match_idx == -1:
+                # Build helpful error: show where in the file the text is similar
+                # Find the closest line to show as context
+                first_line = old_text.split("\n")[0][:40]
+                hint = (
+                    f"oldText not found in file. The file may have changed since you last read it. "
+                    f"Re-read the file, then copy the EXACT text you want to replace. "
+                    f"First line of your oldText: '{first_line}...'"
+                )
+                return ToolResult(
+                    success=False,
+                    content=_err("NOT_FOUND", f"edit[{i}] oldText not found in {display_path}", hint),
+                )
+        # Check for duplicate matches (oldText must be unique)
+        second_match = fuzzy_normalized.find(fuzzy_old, match_idx + len(fuzzy_old))
+        if second_match != -1:
+            return ToolResult(
+                success=False,
+                content=_err("DUPLICATE", f"edit[{i}] oldText matches multiple locations in {display_path}",
+                             "Add more surrounding context to make oldText unique"),
+            )
+        matches.append({
+            "idx": match_idx,
+            "old_len": len(old_text),
+            "new_text": new_text,
+            "edit_idx": i,
+        })
+
+    # Check for overlapping matches
+    sorted_matches = sorted(matches, key=lambda m: m["idx"])
+    for j in range(len(sorted_matches) - 1):
+        a = sorted_matches[j]
+        b = sorted_matches[j + 1]
+        a_end = a["idx"] + a["old_len"]
+        if a_end > b["idx"]:
+            return ToolResult(
+                success=False,
+                content=_err("OVERLAP",
+                             f"edit[{a['edit_idx']}] and edit[{b['edit_idx']}] overlap in {display_path}",
+                             "Merge overlapping edits into a single edit"),
+            )
+
+    # --- Apply edits bottom-up (reverse position order) ---
+    result = normalized
+    for m in reversed(sorted_matches):
+        result = result[:m["idx"]] + m["new_text"] + result[m["idx"] + m["old_len"]:]
+
+    # Restore line endings
+    if line_ending == "\r\n":
+        result = result.replace("\n", "\r\n")
+
+    # Write the file
+    try:
+        _backup_before_write(resolved)
+        with open(resolved, "w", encoding="utf-8", errors="replace") as f:
+            f.write(result)
+    except Exception as e:
+        return ToolResult(success=False, content=_err("WRITE", str(e)))
+
+    # Generate a simple diff preview
+    from difflib import unified_diff
+    diff_lines = list(unified_diff(
+        original.splitlines(keepends=True),
+        result.splitlines(keepends=True),
+        fromfile=display_path,
+        tofile=display_path,
+    ))
+    diff_preview = "".join(diff_lines[:30])  # cap at 30 lines
+    if len(diff_lines) > 30:
+        diff_preview += f"\n... ({len(diff_lines) - 30} more diff lines)"
+
+    # Success
+    _RECENT_EDIT_FAILURES.discard(resolved)
+    from tools import add_modified_file
+    add_modified_file(resolved)
+    return ToolResult(
+        success=True,
+        content=f"Applied {len(edits)} edit(s) to {display_path}",
+        diff_preview=diff_preview,
+    )
+
+
 @_register("edit_file")  # primary name
 @_register("edit_lines")  # backward-compat alias
 def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolResult:
@@ -1045,7 +1229,22 @@ def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
     # Cleared on success; persists on failure so _write_file can warn.
     _RECENT_EDIT_FAILURES.add(resolved)
 
-    # --- Read-before-edit enforcement ---
+    # --- Detect edit style: pi-style (oldText/newText) vs anchor-style (from/from_hash) ---
+    has_old_text = all("oldText" in e and "newText" in e for e in edits)
+    has_anchors = all("from" in e and "from_hash" in e for e in edits)
+
+    if has_old_text:
+        # --- Pi-style exact text matching (primary path, no anchors needed) ---
+        return _edit_file_text_match(resolved, edits, path)
+
+    if not has_anchors:
+        return ToolResult(
+            success=False,
+            content="edits must use either oldText/newText (pi-style text match) or from/from_hash (anchor-style). Mixed edits not supported.",
+        )
+
+    # --- Anchor-style editing (existing path, requires read-before-edit) ---
+    # Read-before-edit enforcement
     if resolved not in _READ_FILES:
         return ToolResult(
             success=False,
@@ -1122,14 +1321,18 @@ def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
                     return ToolResult(
                         success=False,
                         content=(
-                            _err("CONTENT", f"edit[{i}] {label}={line_num} content changed", "re-read with hash_lines=True")
+                            _err("CONTENT", f"edit[{i}] {label}={line_num} content changed since last read",
+                                 "Re-read the file with read_file(hash_lines=True), then use the CURRENT anchors and content. "
+                                 "DO NOT delete the file — that is blocked. Use read+edit, not delete+rewrite.")
                         ),
                     )
             elif anchor_to_check != actual_anchor:
                 return ToolResult(
                     success=False,
                     content=(
-                        _err("ANCHOR", f"edit[{i}] {label}={line_num} '{anchor_to_check}'→'{actual_anchor}'", "re-read with hash_lines=True")
+                        _err("ANCHOR", f"edit[{i}] {label}={line_num} anchor mismatch",
+                             "Re-read the file with read_file(hash_lines=True), then use the EXACT anchors shown. "
+                             "DO NOT delete the file and rewrite it — that loses git history and is blocked.")
                     ),
                 )
     # --- Capture edit positions for output (before any edits) ---
