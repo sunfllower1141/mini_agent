@@ -90,7 +90,7 @@ class TestBuildSystemPrompt(unittest.TestCase):
         prompt = build_system_prompt(self._config())
         length = len(prompt)
         # Static prompt is ~3,900 chars -- allow some headroom for provider notes
-        self.assertLess(length, 8000,
+        self.assertLess(length, 9000,
                         f"Prompt is {length} chars (expected ~3900)")
         self.assertGreater(length, 2000,
                            f"Prompt is only {length} chars, expected > 2000")

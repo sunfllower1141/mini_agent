@@ -577,6 +577,7 @@ class AgentRunner:
             "turn_cost": format_cost_usd(sc.last_turn.total_cost) if sc.last_turn else "-",
             "session_cost": format_cost_usd(sc.total_cost),
             "session_tokens": sc.total_billable_tokens,
+            "turn_tokens": sc.last_turn.billable_tokens if sc.last_turn else 0,
             "session_turns": sc.turn_count,
             "cache_hit_rate": round(sc.cache_hit_rate * 100) if sc.cache_hit_rate is not None else None,
             "subagent_running": self._running_subagent_count,

@@ -380,6 +380,13 @@ body::before {
 .statusbar-session-cost .statusbar-metric-value {
   color: var(--accent);
 }
+
+.statusbar-metric-tokens {
+  font-size: 0.78em;
+  color: var(--text-muted);
+  margin-left: 2px;
+}
+
 .statusbar-subagents {
   color: var(--yellow);
 }

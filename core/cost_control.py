@@ -4,26 +4,24 @@ cost_control.py -- Cost control via proactive context management.
 
 Reasonix Pillar 3: Cost Control.
 
-Three mechanisms:
+Three-tier architecture:
 
-1. Proactive compaction at 40% context ratio, emergency at 80%.
-   Compacts tool results and folds old turns before the context
-   window fills up, preventing expensive truncation.
+1. TIER 1 (FREE): Prune stale tool results -- prune_stale_tool_results()
+   Replaces old tool results with compact placeholders. If this alone
+   drops context below the hard threshold, the expensive compaction is
+   skipped entirely.  (Reasonix compact.go:maybeCompact pattern.)
 
-2. Dead-tool pruning: after N turns, remove MCP/skill tools that
-   were never called.  Shrinks the tool spec payload for future
-   turns.  The prefix must be re-established if tool specs change.
+2. TIER 2 (FREE): Tool-result truncation -- compact_tool_results_at_turn_end()
+   Truncates oversized tool results at turn boundary.
 
-3. Model escalation: start with v4-flash, escalate to v4-pro only
-   on repeated failures (2+ failures in 3 turns).
+3. TIER 3 (PAID): LLM summarization -- only when tiers 1+2 are exhausted.
 
-Also provides a compact_if_needed() function that can be called
-at turn boundaries.
+Multi-zone thresholds (Reasonix compact.go:25-35):
+  - SOFT  (50%): context growing -- emit warning only
+  - HARD  (80%): prune first + compact if still above threshold
+  - FORCE (90%): prune + compact regardless of economic gate
 
-Budget hard-stop: ``check_budget_limit()`` estimates cumulative cost
-from token counts and raises ``BudgetExceeded`` when the configured
-``budget_limit`` (in USD) is exceeded.  This prevents runaway agent
-loops from draining API balances.
+Also: dead-tool pruning, model escalation, budget hard-stop.
 """
 
 from __future__ import annotations
@@ -34,7 +32,12 @@ from core.compaction import (
     should_compact,
     compact_tool_results_at_turn_end,
     append_compaction_summary,
-    COMPACTION_RATIO_EMERGENCY,
+    prune_stale_tool_results,
+    PruneStats,
+    fold_economics,
+    estimate_context_tokens,
+    COMPACTION_RATIO_HARD,
+    COMPACTION_RATIO_SOFT,
 )
 from memory.memory_prune import _estimate_tokens
 
@@ -81,43 +84,67 @@ def compact_if_needed(
     *,
     force: bool = False,
 ) -> int:
-    """Compact context if the token ratio exceeds thresholds.
+    """Compact context using the 3-tier prune-before-compact pipeline.
 
     Called at turn boundaries (after tool execution, before next API call).
 
-    Returns number of messages compacted.
+    Pipeline:
+      1. TIER 1 (FREE): prune_stale_tool_results() -- replace old tool results
+         with compact placeholders.
+      2. Re-check threshold: if pruning dropped it below hard, skip compaction.
+      3. TIER 2 (FREE): compact_tool_results_at_turn_end() -- truncate oversized.
+      4. TIER 3 (PAID): LLM summarization -- only if still above threshold AND
+         the economic gate passes (foldable region >= 400 tokens).
+
+    force=True skips the economic gate (for 'force' level and manual /compact).
+
+    Returns number of messages compacted (not counting pruned).
     """
     context_limit = getattr(config, "context_limit", 128_000) or 128_000
-    token_count = sum(_estimate_tokens(m) for m in messages)
+    token_count = estimate_context_tokens(messages)
 
     level = should_compact(token_count, context_limit)
     if level is None and not force:
         return 0
 
-    # Tool result compaction (always safe, always append-only)
+    total_compacted = 0
+
+    # --- TIER 1: Prune stale tool results (FREE) ---
+    # Reasonix pattern: prune before compact. If pruning alone clears the
+    # trigger, skip the expensive summarization entirely.
+    if level is not None or force:
+        prune_stats = prune_stale_tool_results(messages)
+        if prune_stats.results > 0:
+            # Re-estimate after pruning
+            new_count = estimate_context_tokens(messages)
+            # If pruning dropped us below the hard threshold, skip compaction
+            new_level = should_compact(new_count, context_limit)
+            if new_level not in ("hard", "force") and not force:
+                return prune_stats.results  # pruned, nothing more needed
+            token_count = new_count  # use updated count for rest of pipeline
+
+    # --- TIER 2: Turn-end tool-result truncation (always safe) ---
     compacted = compact_tool_results_at_turn_end(messages)
+    total_compacted += compacted
 
-    # Emergency: aggressive compaction of old turns
-    if level == "emergency" or force:
-        compacted += _emergency_compact(messages, context_limit)
+    # Re-check after truncation
+    if level != "force" and not force:
+        token_count = estimate_context_tokens(messages)
+        if should_compact(token_count, context_limit) not in ("hard", "force"):
+            return total_compacted
 
-    return compacted
+    # --- TIER 3: Emergency/hard compaction (PAID -- LLM summarization) ---
+    # Only do paid summarization for 'hard', 'force', or forced compaction
+    if not force and level != "hard" and level != "force":
+        return total_compacted
 
-
-def _emergency_compact(messages: list[dict], context_limit: int) -> int:
-    """Aggressive compaction for emergency situations (>80% context).
-
-    Collapses old conversation turns (before the last 4) into a summary
-    message appended at the END.  Never rewrites the prefix.
-    """
-    # Find the system message (index 0) — preserve it
+    # Collapse old conversation turns (before the last 4) into a summary
+    # appended at the END.  Never rewrites the prefix.
     if not messages:
-        return 0
+        return total_compacted
     if messages[0].get("role") != "system":
-        return 0  # no system message to anchor prefix
+        return total_compacted
 
-    # Keep: system (index 0) + last 4 turns worth of messages
-    # A "turn" = assistant + tool messages
     system_msg = messages[0]
     rest = messages[1:]
 
@@ -127,23 +154,29 @@ def _emergency_compact(messages: list[dict], context_limit: int) -> int:
         if m.get("role") == "assistant"
     ]
     if len(assistant_indices) <= 4:
-        return 0  # not enough turns to compact
+        return total_compacted
 
-    # Keep last 4 turns
+    # Estimate foldable tokens for economic gate
     keep_from = assistant_indices[-4]
     old = rest[:keep_from]
+    foldable_tokens = sum(_estimate_tokens(m) for m in old)
+
+    # Economic gate: skip if not worth the API call (unless forced)
+    if not force and level != "force" and not fold_economics(foldable_tokens):
+        return total_compacted
+
     kept = rest[keep_from:]
 
     if not old:
-        return 0
+        return total_compacted
 
     # Summarize old turns
     turn_count = len([m for m in old if m.get("role") == "assistant"])
     summary = (
-        f"[CONTEXT COMPACTION — {turn_count} earlier turns summarized]\n"
+        f"[CONTEXT COMPACTION -- {turn_count} earlier turns summarized]\n"
         f"The conversation prefix is unchanged.  Key context from earlier turns:\n\n"
     )
-    # Extract key info: tool names called, files read/written
+    # Extract key info: tool names called
     tools_called: set[str] = set()
     for m in old:
         if m.get("role") == "assistant":
@@ -154,8 +187,9 @@ def _emergency_compact(messages: list[dict], context_limit: int) -> int:
 
     # Rebuild messages: system + compacted summary + recent
     messages[:] = [system_msg] + [{"role": "user", "content": summary}] + kept
+    total_compacted += len(old)
 
-    return len(old)
+    return total_compacted
 
 
 # ---------------------------------------------------------------------------

@@ -1912,6 +1912,7 @@ def _inject_tool_result_stubs(messages: list[dict]) -> int:
         # Determine format: content-block (Anthropic) or tool-role (OpenAI)
         is_content_block = isinstance(next_msg.get("content"), list)
         is_tool_role = next_msg.get("role") == "tool"
+        needs_update = False  # default: no update needed
 
         # Collect existing tool_results
         if is_content_block:
@@ -1924,26 +1925,30 @@ def _inject_tool_result_stubs(messages: list[dict]) -> int:
                 else:
                     other_blocks.append(block)
         elif is_tool_role:
-            tr_id = next_msg.get("tool_call_id")
-            tool_result_map = {tr_id: next_msg} if tr_id else {}
+            # Scan ALL consecutive tool messages after this assistant message.
+            # The first one is next_msg; there may be more.
+            tool_result_map = {}
+            j = i + 1
+            while j < len(messages) and messages[j].get("role") == "tool":
+                tid = messages[j].get("tool_call_id", "")
+                if tid:
+                    tool_result_map[tid] = messages[j]
+                j += 1
             other_blocks = []
         else:
-            # Text-only user message: no tool results at all
+            # Text-only user message: no tool results at all.
+            # We need to INSERT stub tool messages before this user message.
+            # Skip the reordering check (irrelevant for text-only msg) and
+            # proceed directly to building stubs.
             tool_result_map = {}
             other_blocks = []
-            # Can't inject into a text-only user message
-            if tool_use_ids:
-                injected += len(tool_use_ids)
-                _log.debug(
-                    "Cannot inject %d tool result stub(s): next message is text-only user",
-                    len(tool_use_ids),
-                )
-            continue
+            needs_update = True  # always needs update when tool results are absent
 
-        # Check if reordering is needed
-        needs_update = False
-        expected_idx = 0
+        # Check if reordering is needed (content-block format only)
         if is_content_block:
+            # Reset: determine from scratch whether content-block needs reordering
+            needs_update = False
+            expected_idx = 0
             for block in blocks:
                 if (
                     block.get("type") == "tool_result"
@@ -1983,9 +1988,37 @@ def _inject_tool_result_stubs(messages: list[dict]) -> int:
                     new_content.append(tr)
             new_content.extend(other_blocks)
             next_msg["content"] = new_content
-        # OpenAI tool-role format: tool_results handled inline in the list,
-        # but a single tool message can only hold one result.  If there are
-        # multiple tool_use_ids, this is already broken; skip rebuilding.
+        elif needs_update:
+            # OpenAI tool-role format (or text-only user where stubs are needed):
+            # each tool result is a separate message.  We need to insert
+            # missing tool result stubs right after the assistant message,
+            # before any existing tool messages or the next user message.
+            #
+            # Strategy: find all consecutive tool messages after this assistant
+            # message, merge them with stubs into a properly ordered block.
+            j = i + 1
+            existing_tool_msgs: dict[str, dict] = {}
+            while j < len(messages) and messages[j].get("role") == "tool":
+                tid = messages[j].get("tool_call_id", "")
+                if tid:
+                    existing_tool_msgs[tid] = messages[j]
+                j += 1
+            # Build ordered tool result messages matching tool_use_ids order
+            ordered: list[dict] = []
+            seen_ids: set[str] = set()
+            for tid in tool_use_ids:
+                if tid in seen_ids:
+                    continue
+                seen_ids.add(tid)
+                stub = tool_result_map.get(tid)
+                if stub is not None:
+                    ordered.append(stub)
+            # Replace the existing tool messages with the ordered block
+            # (delete from i+1 to j-1, insert ordered stubs before the
+            # next non-tool message, usually a user message)
+            del messages[i + 1:j]
+            for stub in reversed(ordered):
+                messages.insert(i + 1, stub)
 
     return injected
 
@@ -2081,6 +2114,16 @@ def _compact_if_needed(messages: list[dict]) -> None:
     # which breaks the conversation structure.
     _strip_orphaned_tool_results(messages)
     _inject_tool_result_stubs(messages)
+
+    # Invalidate the API message-cleaning cache.  _compact_if_needed rebuilds
+    # messages in-place (same Python list object, same id, fewer entries),
+    # so the incremental cleaning cache in api.py would otherwise serve
+    # stale pre-compaction messages to the API on the next call_llm.
+    try:
+        from api import clear_api_cache
+        clear_api_cache()
+    except Exception:
+        pass
 
     _log.info(
         "Dirac compaction: %d -> %d messages (%d middle messages removed, "

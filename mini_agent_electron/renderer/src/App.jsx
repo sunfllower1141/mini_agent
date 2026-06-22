@@ -669,6 +669,7 @@ function AppShell() {
       if (data.usage?.turn_cost) setTurnCost(data.usage.turn_cost);
       if (data.usage?.session_cost) setSessionCost(data.usage.session_cost);
       if (data.usage?.session_tokens != null) setSessionTokens(data.usage.session_tokens);
+      if (data.usage?.turn_tokens != null) setTurnTokens(data.usage.turn_tokens);
       if (data.usage?.cache_hit_rate != null) setCacheHitRate(data.usage.cache_hit_rate);
       if (data.usage?.subagent_running != null) setSubagentRunning(data.usage.subagent_running);
       // Balance -- pushed on every turn_complete so the wallet display updates live
@@ -1108,17 +1109,21 @@ function AppShell() {
             </span>
           )}
           {sessionCost !== '-' && (
-            <span className="statusbar-metric statusbar-session-cost" title={`Session: ${sessionCost} · ${sessionTokens != null ? (sessionTokens >= 1000 ? (sessionTokens/1000).toFixed(1)+'k' : sessionTokens) : '?'} tok`}>
+            <span className="statusbar-metric statusbar-session-cost" title={`Session cost: ${sessionCost}`}>
               <span className="statusbar-metric-icon">∑</span>
               <span className="statusbar-metric-value">{sessionCost}</span>
+              {sessionTokens != null && <span className="statusbar-metric-tokens"> · {(sessionTokens >= 1000 ? (sessionTokens/1000).toFixed(1)+'k' : sessionTokens)} tok</span>}
             </span>
           )}
+
           {turnCost !== '-' && (
-            <span className="statusbar-metric statusbar-turn-cost" title={`Last turn: ${turnCost} · ${turnTokens != null ? (turnTokens >= 1000 ? (turnTokens/1000).toFixed(1)+'k' : turnTokens) : '?'} tok`}>
+            <span className="statusbar-metric statusbar-turn-cost" title={`Last turn cost: ${turnCost}`}>
               <span className="statusbar-metric-icon">↻</span>
               <span className="statusbar-metric-value">{turnCost}</span>
+              {turnTokens != null && <span className="statusbar-metric-tokens"> · {(turnTokens >= 1000 ? (turnTokens/1000).toFixed(1)+'k' : turnTokens)} tok</span>}
             </span>
           )}
+
           {cacheHitRate != null && (
             <span className="statusbar-metric statusbar-cache" title={`Cache hit rate: ${cacheHitRate}%`}>
               <span className="statusbar-metric-icon">⚡</span>
@@ -1366,12 +1371,7 @@ function AppShell() {
         {turnCountVal != null && (
           <span id="turn-counter"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.5" className="icon-sm"><path d="M2 8a6 6 0 0 1 6-6 5.5 5.5 0 0 1 5 3.5M14 8a6 6 0 0 1-6 6"/><polyline points="11,3 13,1 15,3"/></svg> turn <span id="turn-count">{turnCountVal}</span></span>
         )}
-        {tokenCountVal != null && (
-          <span id="token-counter" title="Last turn billable tokens (cache-miss + output)"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.5" className="icon-sm"><circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/></svg> <span id="token-count">{tokenCountVal}</span> tok</span>
-        )}
-        {turnCost !== '-' && (
-          <span id="turn-cost" title={`Last turn cost: ${turnCost}`}>↻ {turnCost}</span>
-        )}
+
         {subagentRunning > 0 && (
           <span id="subagent-count" title={`${subagentRunning} sub-agents running`}>\u2225{subagentRunning}</span>
         )}

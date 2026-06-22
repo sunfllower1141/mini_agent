@@ -922,14 +922,14 @@ class TestErrorHints(unittest.TestCase):
         else:
             self.assertIn("not recognized", result.content)
 
-    def test_shell_output_truncated_at_500_lines(self):
-        """Long shell output is truncated."""
+    def test_shell_output_truncated_at_2000_lines(self):
+        """Long shell output is tail-truncated at 2000 lines."""
         import sys
-        cmd = sys.executable + ' -c "for i in range(600): print(i)"'
+        cmd = sys.executable + ' -c "for i in range(2500): print(i)"'
         tc = _make_tool_call("run_shell", command=cmd)
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertTrue(result.success)
-        self.assertIn("truncated;", result.content)
+        self.assertIn("Showing lines", result.content)
 
     def test_shell_streaming_calls_on_output(self):
         """on_output is called for each line of shell stdout."""

@@ -109,17 +109,55 @@ def _read_file_direct(
 
     # Actual lines remaining after offset
     lines_after_offset = total_lines - offset
+    visible_count = len(sliced)
+
+    # --- pi-style truncation with continuation hints ---
+    # Hard caps: 2000 lines / 50KB (whichever hit first)
+    HARD_LINE_CAP = 2000
+    HARD_BYTE_CAP = 50 * 1024  # 50KB
+
+    # Check if output exceeds caps
+    full_content = "\n".join(collected)
+    content_bytes = len(full_content.encode("utf-8"))
+    truncated_by_lines = visible_count > HARD_LINE_CAP
+    truncated_by_bytes = content_bytes > HARD_BYTE_CAP
+
+    if truncated_by_lines or truncated_by_bytes:
+        # Trim to fit within caps
+        kept_lines: list[str] = []
+        kept_bytes = 0
+        for line in collected:
+            line_bytes = len(line.encode("utf-8")) + (1 if kept_lines else 0)  # +1 for newline
+            if len(kept_lines) >= HARD_LINE_CAP:
+                break
+            if kept_bytes + line_bytes > HARD_BYTE_CAP:
+                break
+            kept_lines.append(line)
+            kept_bytes += line_bytes
+        shown_lines = len(kept_lines)
+        end_line = offset + shown_lines
+        next_offset = end_line + 1
+        # Continuation hint like pi: actionable offset for next chunk
+        if next_offset <= total_lines:
+            hint = (
+                f"\n\n[Showing lines {offset + 1}-{end_line} of {total_lines}"
+                f" ({'line' if truncated_by_lines else 'byte'} limit)."
+                f" Use offset={next_offset} to continue.]"
+            )
+        else:
+            hint = ""
+        truncated = "\n".join(kept_lines) + hint
+        return ToolResult(success=True, content=truncated)
 
     if lines_after_offset > limit:
+        next_offset = offset + limit + 1
         truncated = "\n".join(collected[:limit])
         msg = (
             f"{truncated}\n"
-            f"... (truncated at {limit} lines -- {lines_after_offset} total in selection. "
-            f"Use a higher limit or offset to see more.)"
+            f"\n[Showing lines {offset + 1}-{offset + limit} of {total_lines}."
+            f" Use offset={next_offset} to continue.]"
         )
         return ToolResult(success=True, content=msg)
-
-    full_content = "\n".join(collected)
 
     return ToolResult(success=True, content=full_content)
 
@@ -373,7 +411,7 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
     line_numbers = args.get("line_numbers", False)
     if isinstance(line_numbers, str):
         line_numbers = line_numbers.lower() in ("true", "1", "yes")
-    hash_lines = args.get("hash_lines", True)
+    hash_lines = args.get("hash_lines", False)  # default off — only use when editing
     if isinstance(hash_lines, str):
         hash_lines = hash_lines.lower() in ("true", "1", "yes")
 

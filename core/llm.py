@@ -194,7 +194,10 @@ def _execute_single_no_pipe(
                                 recent_keys=recent_tool_keys, lock=tool_keys_lock)
         return []
     if on_tool_start is not None:
-        on_tool_start(tool_summary(tc))
+        try:
+            on_tool_start(tool_summary(tc))
+        except Exception:
+            pass
     result = execute_tool(tc, write_gate, read_gate,
                           on_output=on_tool_output,
                           approve_callback=approve_callback,
@@ -222,7 +225,10 @@ def _execute_parallel_no_pipes(
     """Execute multiple independent tool calls in parallel."""
     if on_tool_start is not None:
         for tc in remaining:
-            on_tool_start(tool_summary(tc), True)
+            try:
+                on_tool_start(tool_summary(tc), True)
+            except Exception:
+                pass
 
     def _run_tool(tc: dict) -> tuple[dict, "ToolResult"]:
         return tc, execute_tool(tc, write_gate, read_gate,
@@ -309,8 +315,11 @@ def _execute_groups(
     for group_idx, group in enumerate(groups):
         if on_tool_start is not None:
             for i in group:
-                on_tool_start(tool_summary(remaining[i]),
-                              parallel=len(group) > 1)
+                try:
+                    on_tool_start(tool_summary(remaining[i]),
+                                  parallel=len(group) > 1)
+                except Exception:
+                    pass
 
         if len(group) == 1:
             i = group[0]
@@ -422,7 +431,10 @@ def _execute_tools(
         # Cycle detected -- fall back to sequential execution
         if on_tool_start is not None:
             for tc in remaining:
-                on_tool_start(tool_summary(tc))
+                try:
+                    on_tool_start(tool_summary(tc))
+                except Exception:
+                    pass
         results: list[tuple[dict, "ToolResult"]] = []
         for i, tc in enumerate(remaining):
             if cancel_event is not None and cancel_event.is_set():
@@ -517,19 +529,38 @@ def _api_call_phase(
         if idx in executed_tool_indices:
             return
         if cancel_event is not None and cancel_event.is_set():
+            # Cancelled mid-stream: mark as executed and append a failure
+            # result so the tool_call_id isn't orphaned (no 400 on next API call).
+            from tools import ToolResult as TR
+            executed_tool_indices.add(idx)
+            deferred_stream_results.append((tc, TR(
+                success=False,
+                content="Tool cancelled during streaming (cancel requested).",
+            )))
             return
+        # on_tool_start is best-effort UI notification -- must not block execution.
         if on_tool_start is not None:
-            on_tool_start(tool_summary(tc))
-        import sys as _sys_otr
-        _sys_otr.stderr.write(f"[_on_tool_ready] calling execute_tool for '{tc.get('function',{}).get('name','?')}'...\n")
-        _sys_otr.stderr.flush()
+            try:
+                on_tool_start(tool_summary(tc))
+            except Exception:
+                pass
+        # Debug logging to stderr -- best-effort, must not crash tool execution.
+        try:
+            import sys as _sys_otr
+            _sys_otr.stderr.write(f"[_on_tool_ready] calling execute_tool for '{tc.get('function',{}).get('name','?')}'...\n")
+            _sys_otr.stderr.flush()
+        except Exception:
+            pass
         try:
             result = execute_tool(tc, write_gate, read_gate,
                                   on_output=on_tool_output,
                                   approve_callback=approve_callback,
                                   cancel_event=cancel_event)
-            _sys_otr.stderr.write(f"[_on_tool_ready] execute_tool returned success={result.success}\n")
-            _sys_otr.stderr.flush()
+            try:
+                _sys_otr.stderr.write(f"[_on_tool_ready] execute_tool returned success={result.success}\n")
+                _sys_otr.stderr.flush()
+            except Exception:
+                pass
             executed_tool_indices.add(idx)
         except Exception as _exc:
             # NEVER leave a tool_call_id orphaned -- a failure result
@@ -834,24 +865,55 @@ def _append_tool_result(
     recent_keys: list[str] | None = None,
     lock: threading.Lock | None = None,
 ) -> None:
-    """Append a tool result message and fire the on_tool_end callback."""
-    detail = format_tool_detail(result, max_len=TOOL_DETAIL_DISPLAY_LENGTH)
-    if on_tool_end is not None:
-        on_tool_end(result.success, detail, diff_preview=result.diff_preview, content=result.content)
+    """Append a tool result message and fire the on_tool_end callback.
+
+    CRITICAL: messages.append() runs BEFORE on_tool_end() so a UI notification
+    failure (broken stdout pipe, JSON serialization error on large content, etc.)
+    cannot drop the tool result from the model's context.  The model MUST see
+    every executed tool's output or the next API call will 400.
+    """
+    # Build the tool-call id.  Fall back to empty string if tc has no "id"
+    # (should never happen with well-formed API responses, but be safe).
+    tool_call_id = tc.get("id", "") if isinstance(tc, dict) else ""
+    # Serialize result.  Fall back to a plain string if to_json fails.
+    try:
+        content_str = result.to_json()
+    except Exception:
+        try:
+            content_str = str(getattr(result, 'content', result))
+        except Exception:
+            content_str = "[tool result serialization failed]"
+    # Append to messages FIRST so the model sees this result even if
+    # anything below crashes.
     messages.append({
         "role": "tool",
-        "tool_call_id": tc["id"],
-        "content": result.to_json(),
+        "tool_call_id": tool_call_id,
+        "content": content_str,
     })
+    # Build display detail for UI notification (best-effort).
+    try:
+        detail = format_tool_detail(result, max_len=TOOL_DETAIL_DISPLAY_LENGTH)
+    except Exception:
+        detail = str(getattr(result, 'content', ''))[:300]
+    # UI notification is best-effort -- must not block context integrity.
+    if on_tool_end is not None:
+        try:
+            on_tool_end(result.success, detail, diff_preview=result.diff_preview, content=result.content)
+        except Exception:
+            pass
     # Track for circuit breaker
     if recent_keys is not None:
+        try:
+            key = _tool_call_key(tc)
+        except Exception:
+            key = f"{tool_call_id}:<key-error>"
         if lock is not None:
             with lock:
-                recent_keys.append(_tool_call_key(tc))
+                recent_keys.append(key)
                 while len(recent_keys) > _CIRCUIT_WINDOW:
                     recent_keys.popleft()
         else:
-            recent_keys.append(_tool_call_key(tc))
+            recent_keys.append(key)
             while len(recent_keys) > _CIRCUIT_WINDOW:
                 recent_keys.popleft()
 

@@ -1,14 +1,54 @@
 # mini_agent Architecture Map
-# Last updated: 2026-06-21 (Dirac compaction HARD_LIMIT fixed from 1M→200k)
+# Last updated: 2026-06-22 (pi-style token/cost optimizations)
 
 #
 # This file is the agent's map of the codebase. Update it after completed changes.
 # Behavioral rules live in AGENTS.md. Long-term facts live in core memory.
 
-- **Error steering verified (2026-06-20)** — Added `TestErrorSteering` (15 tests) verifying
-  the full error pipeline: `✗ CODE: what → fix` compact format, fingerprint extraction,
-  error classification, recovery hint injection on repeated failures, and end-to-end
-  steering correctness across all tool types. 111/111 tests pass.
+- **Pi-style output truncation (2026-06-22)** — read_file now has hard caps at
+  2000 lines / 50KB with pi-style continuation hints: `[Showing lines X-Y of Z.
+  Use offset=N to continue.]`.  run_shell output is now TAIL-truncated (keep last
+  2000 lines / 50KB) with full output preserved to a temp file (path shown in
+  result).  Previously run_shell used HEAD truncation (dropped errors at end).
+  Both now show actionable continuation hints instead of generic "truncated" msgs.
+
+- **Windows command guidance (2026-06-22)** — System prompt now includes a
+  WINDOWS COMMAND PATTERNS section teaching the model to use single quotes for
+  python -c, prefer grep/head/tail via run_shell over read_file for filtering,
+  and write temp scripts for multi-line Python.  shell_ops.py now detects
+  likely-failing double-quote patterns in python -c on Windows and adds a
+  warning hint.
+
+- **hash_lines default changed (2026-06-22)** — Changed from True to False.
+  The agent now only uses hash-anchored reads when it intends to edit, saving
+  ~1 read per edit (no more forced re-read with anchors).  System prompt no
+  longer requires hash_lines=True on every read.
+
+- **Slimmer tool descriptions (2026-06-22)** — Simplified read_file, run_shell,
+  and edit_file descriptions in schema.py.  Removed verbose "absolute max: 1000"
+  notes, multi-file paths, and redundant implementation details.  edit_file
+  description cut from 450→200 chars (saves ~60 tokens per API call).
+
+- **Token efficiency guidance (2026-06-22)** — New TOKEN EFFICIENCY section in
+  system prompt: use offset/limit, get_file_skeleton first, prefer find_symbol
+  over search_files, batch independent calls, update scratchpad every 3 turns.
+
+- **Tool-result-stubs injection fix (2026-06-22)** — `_inject_tool_result_stubs()` in
+  context_inject.py had a silent failure for OpenAI tool-role format: when assistant
+  tool_calls had missing tool results (after Dirac compaction truncated the conversation),
+  stubs were counted but NEVER inserted into the messages list.  The comment said
+  "skip rebuilding" for multiple tool_use_ids, leaving orphaned tool_calls that
+  `_strip_orphaned_tool_messages` had to clean up (stripping the entire assistant
+  message).  Fixed to: (a) scan ALL consecutive tool messages, not just the first;
+  (b) properly insert stubs when next message is a text-only user; (c) initialize
+  `needs_update` before format-specific blocks.
+
+- **API clean-messages cache invalidation after compaction (2026-06-22)** —
+  `_compact_if_needed()` rebuilds messages in-place (`clear()` + `extend()`), keeping
+  the same Python list object ID.  The incremental cleaning cache in api.py
+  (`_clean_messages_cache`) is keyed by `id(messages)`, so after compaction it served
+  stale pre-compaction messages to the API.  Fixed by calling `clear_api_cache()`
+  after `_compact_if_needed()` modifies the message list.
 
 - **C/C++ AST-native tool support (2026-06-20)** — `get_file_skeleton`, `get_function`,
   (`.cpp`, `.cc`, `.cxx`, `.hpp`, `.hh`, `.hxx`). Uses tree-sitter-c and tree-sitter-cpp.
@@ -276,3 +316,28 @@
 - Removed _FILE_HASHES, _FILE_CACHE, _get_cached_content, _cache_file_content. 
 - Gutted core/file_context_tracker.py to no-op stubs. 
 - All 70 tests pass.
+
+### Tool Result Loss Fix (2026-06-22) — HARDENED
+- Bug: `_append_tool_result` called `on_tool_end` BEFORE `messages.append`.
+  If `on_tool_end` threw, tool result was lost → 400 error loop.
+- Fix: Moved `messages.append(...)` before `on_tool_end(...)`; wrapped both.
+- SECONDARY HARDENING:
+  - `_on_tool_ready`: cancel early-return now appends failure to deferred_results.
+  - `_on_tool_ready`: stderr writes wrapped in try/except.
+  - `_append_tool_result`: `format_tool_detail`, `result.to_json()`, `tc["id"]`
+    hardened with fallbacks so serialization errors can't drop a result.
+  - `_append_tool_result`: `_tool_call_key(tc)` wrapped in try/except.
+  - All `on_tool_start` calls wrapped in try/except across 6 call sites.
+- PRINCIPLE: UI notifications are best-effort. Context integrity is paramount.
+- All 24 llm tests + 16 compaction tests pass.
+
+### Turn-Boundary Compaction Reverted (2026-06-22)
+- Bug: `run_turn_boundary_compaction` called at EVERY turn boundary, which at
+  HARD compaction level (80% context, ~turn 20-25 on DeepSeek) called
+  `prune_stale_tool_results` that replaced tool results with compact placeholders
+  in-place. This caused "tools never spawned in UI" and "AI doesn't see tool results."
+- Fix: Reverted to bugfree behavior -- only `compact_tool_results_at_turn_end`
+  (truncation, not pruning) at the turn boundary. The full compaction pipeline
+  (`maybe_compact`, `prune_stale_tool_results`) now only runs through the
+  existing `_compact_if_needed` call in `context_inject.py`.
+- This matches the behavior in bugfree `E:\TEST_MINI_A\mini_agent`.

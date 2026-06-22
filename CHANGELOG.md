@@ -1,5 +1,46 @@
 ## 2026-06-20 -- Gut Hash Cache read_file System
 
+## 2026-06-22
+
+### Fixed
+- **`_inject_tool_result_stubs` OpenAI format bug.** When Dirac compaction
+  (`_compact_if_needed`) truncated the conversation, assistant messages with
+  `tool_calls` could lose their corresponding tool result messages (which were
+  in the removed middle section).  `_inject_tool_result_stubs` was supposed to
+  inject "result missing" stubs but silently SKIPPED rebuilding for OpenAI
+  tool-role format (the `is_tool_role` path).  Additionally, the function only
+  looked at the first consecutive tool message, missing subsequent ones; and
+  the text-only-user-message case `continue`d without inserting stubs.
+  
+  **Fix:** (a) Initialize `needs_update` before format-specific blocks.
+  (b) In the `is_tool_role` path, scan ALL consecutive tool messages (not just
+  `next_msg`).  (c) Convert the text-only-user `continue` path to actually build
+  and insert stubs before the user message.  (d) Change the rebuild guard from
+  `elif is_tool_role and needs_update:` to `elif needs_update:` so both cases
+  are handled.
+  - File: `core/context_inject.py`
+
+- **API clean-messages cache staleness after Dirac compaction.**
+  `_compact_if_needed()` rebuilds messages in-place (`clear()` + `extend()`),
+  keeping the same Python list object and `id()`.  The incremental cleaning
+  cache in `api.py` (`_clean_messages_cache`), keyed by `id(messages)`, would
+  then serve stale pre-compaction messages to the API on the next `call_llm`.
+  
+  **Fix:** Call `clear_api_cache()` at the end of `_compact_if_needed()`
+  after the message list has been modified, invalidating the stale cache entry.
+  - File: `core/context_inject.py`
+- **Turn-boundary compaction reverted.** Removed `run_turn_boundary_compaction`
+  call from the turn loop in `core/llm.py`. This function was running the full
+  three-tier compaction pipeline (truncate → prune → LLM-compact) at EVERY turn
+  boundary, when it should only run truncation (`compact_tool_results_at_turn_end`).
+  At HARD compaction level (~80% context window, turn 20-25), `prune_stale_tool_results`
+  was replacing recent tool results with compact placeholders in-place, causing
+  "tools never spawned" in the UI and the AI being unaware of tool outputs.
+  
+  Reverted to bugfree behavior: only truncation at turn boundary, full compaction
+  still runs through the existing `_compact_if_needed` path.
+
+
 ## 2026-06-21
 
 ### Fixed

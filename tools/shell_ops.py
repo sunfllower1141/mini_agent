@@ -278,6 +278,13 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
         _windows_cmd_note = (
             "\nNote: Windows cmd.exe (syntax may differ from Unix)"
         )
+    # Windows: detect likely-failing python -c with double quotes
+    if platform.system() == "Windows" and "python" in command and " -c " in command:
+        if '"""' in command or command.count('"') > 4:
+            _windows_cmd_note += (
+                "\nWARNING: On Windows, python -c with nested double-quotes often fails."
+                " Use single quotes: python -c 'code' or write a temp script instead."
+            )
     # Auto-backup files before any rm command (prevents permanent data loss)
     if force and re.search(r'\brm\b', command):
         from tools.file_ops import _backup_before_write
@@ -488,17 +495,54 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
             _TOOL_CONTEXT._active_proc = None
 
         parts = [f"exit_code={proc.returncode}"]
+        # --- pi-style tail truncation: keep LAST N lines / 50KB ---
+        # Errors and final results are typically at the end of output.
+        _TAIL_LINES = 2000
+        _TAIL_BYTES = 50 * 1024  # 50KB
+        _full_output_path = ""
         if stdout:
             lines_out = stdout.split("\n")
-            if len(lines_out) > 500:
-                stdout = "\n".join(lines_out[:500])
-                stdout += f"\n... (truncated; {len(lines_out)} total lines)"
+            total_lines = len(lines_out)
+            stdout_bytes = len(stdout.encode("utf-8"))
+            if total_lines > _TAIL_LINES or stdout_bytes > _TAIL_BYTES:
+                # Save full output to temp file (like pi does)
+                try:
+                    import tempfile, os as _os
+                    fd, _full_output_path = tempfile.mkstemp(
+                        prefix="mini_agent_run_", suffix=".log", text=True
+                    )
+                    _os.write(fd, stdout.encode("utf-8"))
+                    _os.close(fd)
+                except Exception:
+                    _full_output_path = ""
+                # Keep last N lines, respecting byte cap
+                kept = []
+                kept_bytes = 0
+                for line in reversed(lines_out):
+                    lb = len(line.encode("utf-8")) + (1 if kept else 0)
+                    if len(kept) >= _TAIL_LINES or kept_bytes + lb > _TAIL_BYTES:
+                        break
+                    kept.append(line)
+                    kept_bytes += lb
+                kept.reverse()
+                start_line = total_lines - len(kept) + 1
+                end_line = total_lines
+                if _full_output_path:
+                    stdout = (
+                        "\n".join(kept)
+                        + f"\n\n[Showing lines {start_line}-{end_line} of {total_lines}"
+                        f" ({'line' if total_lines > _TAIL_LINES else 'byte'} limit)."
+                        f" Full output: {_full_output_path}]"
+                    )
+                else:
+                    stdout = (
+                        "\n".join(kept)
+                        + f"\n\n[Showing lines {start_line}-{end_line} of {total_lines}"
+                        f" ({'line' if total_lines > _TAIL_LINES else 'byte'} limit).]"
+                    )
             parts.append(f"stdout:\n{stdout}")
         elif proc.returncode == 0 and not stderr:
-            # ACI upgrade: explicit empty-output message (SWE-agent pattern).
-            # Silence is ambiguous -- the model needs to know the command ran OK.
             hint = _hint("no output")
-            # Detect likely no-op patterns in python -c commands
             if "python" in command and " -c " in command:
                 if "#" in command:
                     hint += _hint("# comments out rest; use script file")
@@ -508,9 +552,10 @@ def _run_shell(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate, on_output: 
         if stderr:
             err_output = stderr.rstrip()
             err_lines = err_output.split("\n")
-            if len(err_lines) > 100:
-                err_output = "\n".join(err_lines[:100])
-                err_output += f"\n... (stderr truncated; {len(err_lines)} total lines)"
+            if len(err_lines) > 200:
+                # Tail-truncate stderr too (errors at end)
+                err_output = "\n".join(err_lines[-200:])
+                err_output = f"... (last 200 of {len(err_lines)} stderr lines)\n{err_output}"
             parts.append(f"stderr:\n{err_output}")
         content_out = "\n".join(parts)
         if _danger_prefix:

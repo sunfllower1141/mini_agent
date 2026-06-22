@@ -17,10 +17,12 @@ from typing import Any
 
 from core.compaction import (
     compact_tool_results_at_turn_end,
+    prune_stale_tool_results,
     should_compact,
     estimate_context_tokens,
-    COMPACTION_RATIO_PROACTIVE,
-    COMPACTION_RATIO_EMERGENCY,
+    COMPACTION_RATIO_SOFT,
+    COMPACTION_RATIO_HARD,
+    COMPACTION_RATIO_FORCE,
     TURN_END_RESULT_CAP_TOKENS,
     TURN_END_RESULT_CAP_CHARS,
 )
@@ -49,23 +51,30 @@ def _condense(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate,
     # Estimate current token usage
     estimated_tokens = estimate_context_tokens(messages)
 
-    # Compact oversized tool results
+    # TIER 1: Prune stale tool results (FREE)
+    prune_stats = prune_stale_tool_results(messages)
+
+    # TIER 2: Compact oversized tool results
     compacted = compact_tool_results_at_turn_end(messages)
 
     # Check if we should do deeper compaction
-    # Use a reasonable default context limit
     context_limit = 128000  # Default for many models
-    need = should_compact(estimated_tokens, context_limit)
+    new_tokens = estimate_context_tokens(messages)
+    need = should_compact(new_tokens, context_limit)
 
     lines = []
     lines.append(f"Condensation complete.")
     lines.append(f"  Estimated tokens before: ~{estimated_tokens}")
+    if prune_stats.results > 0:
+        lines.append(f"  Pruned tool results: {prune_stats.results}"
+                     f" (~{prune_stats.estimated_tokens_saved} tokens saved)")
     lines.append(f"  Compacted tool results: {compacted}")
+    lines.append(f"  Estimated tokens after: ~{new_tokens}")
 
     if need:
-        lines.append(f"  Context ratio: {estimated_tokens / context_limit:.1%}")
+        lines.append(f"  Context ratio: {new_tokens / context_limit:.1%}")
         lines.append(f"  Recommendation: {need} compaction recommended")
-        if need == "emergency":
+        if need in ("hard", "force"):
             lines.append(
                 f"  Consider summarizing older conversation turns or "
                 f"requesting a fresh session."
@@ -97,8 +106,9 @@ def should_auto_condense(messages: list[dict], context_limit: int = 128000) -> s
     Check if the conversation should trigger automatic condensation.
 
     Called before each API call by the orchestrator.  Returns:
-      - 'proactive': context is filling up, consider compacting
-      - 'emergency': context is critical, must compact immediately
+      - 'soft': context is filling up, consider compacting
+      - 'hard': context is critical, prune + compact needed
+      - 'force': context emergency, compact regardless of economics
       - None: no condensation needed
 
     This mirrors Dirac's ContextManager.shouldCompactContextWindow().
@@ -125,13 +135,19 @@ def inject_condensation_warning(
     estimated_tokens = estimate_context_tokens(messages)
     ratio = estimated_tokens / context_limit if context_limit > 0 else 0
 
-    if need == "emergency":
+    if need == "force":
+        warning = (
+            f"CRITICAL: Context window is {ratio:.0%} full (~{estimated_tokens}/{context_limit} tokens). "
+            f"Context MUST be freed before continuing. "
+            f"Use the condense tool immediately."
+        )
+    elif need == "hard":
         warning = (
             f"URGENT: Context window is {ratio:.0%} full (~{estimated_tokens}/{context_limit} tokens). "
             f"Use the condense tool NOW to free up space before continuing. "
             f"Summarize older turns or compact large tool results."
         )
-    else:
+    else:  # soft
         warning = (
             f"Note: Context window is {ratio:.0%} full (~{estimated_tokens}/{context_limit} tokens). "
             f"Consider using the condense tool to free up space."
