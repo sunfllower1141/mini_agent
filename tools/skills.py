@@ -500,6 +500,12 @@ CORE_TOOLS: list[str] = [
     # Session tools
     "session_stats",
     "write_session_handoff",
+    # Git tools -- always available, never route through run_shell
+    "git_status",
+    "git_diff",
+    "git_log",
+    "git_add",
+    "git_commit",
 ]
 
 

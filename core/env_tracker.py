@@ -64,6 +64,8 @@ def _get_agent_version() -> str:
             result = subprocess.run(
                 ["git", "describe", "--tags", "--always", "--dirty"],
                 capture_output=True, text=True, timeout=3,
+                encoding="utf-8", errors="replace",
+                stdin=subprocess.DEVNULL,
             )
             if result.returncode == 0:
                 return result.stdout.strip()

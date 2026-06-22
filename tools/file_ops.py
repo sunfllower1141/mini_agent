@@ -1745,6 +1745,8 @@ def _init_rules(args: dict, _wg, read_gate: ReadSafetyGate) -> ToolResult:
                 result = subprocess.run(
                     ["git", "branch", "--show-current"],
                     cwd=workspace, capture_output=True, text=True, timeout=3,
+                    encoding="utf-8", errors="replace",
+                    stdin=subprocess.DEVNULL,
                 )
                 branch = result.stdout.strip()
                 git_info = f"branch: {branch}" if branch else "git repo detected"

@@ -90,6 +90,7 @@ def _command_exists(cmd: str) -> bool:
         result = subprocess.run(
             ["which" if PLATFORM != "Windows" else "where", cmd],
             capture_output=True, text=True, timeout=5,
+            stdin=subprocess.DEVNULL,
         )
         return result.returncode == 0
     except Exception:

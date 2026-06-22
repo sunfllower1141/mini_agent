@@ -44,6 +44,7 @@ def _run_ps(script: str, timeout: float = 10.0) -> tuple[bool, str]:
             ["powershell.exe", "-NoProfile", "-Command", script],
             capture_output=True, text=True, timeout=timeout,
             encoding="utf-8", errors="replace",
+            stdin=subprocess.DEVNULL,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
         stdout = result.stdout or ""
@@ -65,6 +66,7 @@ def _run_cmd(cmd: list[str], timeout: float = 10.0) -> tuple[bool, str, str]:
         result = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout,
             encoding="utf-8", errors="replace",
+            stdin=subprocess.DEVNULL,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
         stdout = result.stdout or ""
@@ -202,6 +204,7 @@ def _win_list_apps() -> ToolResult:
             ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", tmp_path],
             capture_output=True, text=True, timeout=15.0,
             encoding="utf-8", errors="replace",
+            stdin=subprocess.DEVNULL,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
         os.unlink(tmp_path)
@@ -467,6 +470,7 @@ if ($proc -and $proc.MainWindowHandle -ne 0) {{
             ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", tmp_path],
             capture_output=True, text=True, timeout=10.0,
             encoding="utf-8", errors="replace",
+            stdin=subprocess.DEVNULL,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
         os.unlink(tmp_path)
@@ -535,6 +539,7 @@ def _win_list_windows() -> ToolResult:
             ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", tmp_path],
             capture_output=True, text=True, timeout=15.0,
             encoding="utf-8", errors="replace",
+            stdin=subprocess.DEVNULL,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
         os.unlink(tmp_path)
@@ -786,6 +791,7 @@ def _win_press_keys(combo: str) -> ToolResult:
             ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", tmp_path],
             capture_output=True, text=True, timeout=5.0,
             encoding="utf-8", errors="replace",
+            stdin=subprocess.DEVNULL,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
         os.unlink(tmp_path)
@@ -836,6 +842,7 @@ $toast = New-Object Windows.UI.Notifications.ToastNotification $xml
             ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", tmp_path],
             capture_output=True, text=True, timeout=10.0,
             encoding="utf-8", errors="replace",
+            stdin=subprocess.DEVNULL,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
         os.unlink(tmp_path)

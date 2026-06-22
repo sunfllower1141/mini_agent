@@ -123,11 +123,15 @@
 - Guessing with '?' wastes a turn and triggers storm-breaker protection.
 
 ## Git Operations
-- Use `use_skill('git')` to unlock git_status, git_diff, git_log, git_add, git_commit.
-- These tools are Windows-safe (GIT_TERMINAL_PROMPT=0, 15s timeout) — they never hang.
+- Use dedicated git tools for ALL git operations — they are always available, Windows-safe, and never hang:
+  - `git_status` — replaces `git status --short`
+  - `git_diff` — replaces `git diff` (use `staged=true` for staged, `path=<file>` for single file)
+  - `git_log` — replaces `git log --oneline` (use `n=5` for last 5 commits)
+  - `git_add` — replaces `git add` (use `paths='all'` for `git add -A`, or specific paths)
+  - `git_commit` — replaces `git commit -m "..."` (use `message="..."`)
 - Do NOT use `run_shell` for git commands — it can hang on Windows.
 - Use `git_status` before changes, `git_diff` to review, `git_add` + `git_commit` to save.
-- For push: use `run_shell(command='git push', ...)` (blocked without force=True).
+- For `git push`: use `run_shell(command='git push', ...)` (blocked without force=True).
 
 
 ## Self-Review Cycle

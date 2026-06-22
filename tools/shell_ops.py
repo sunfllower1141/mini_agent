@@ -104,6 +104,7 @@ def _get_python_cmd() -> list[str]:
                 result = subprocess.run(
                     cmd + ["-m", "pytest", "--version"],
                     capture_output=True, text=True, timeout=5,
+                    stdin=subprocess.DEVNULL,
                 )
                 if result.returncode == 0:
                     with_pytest.append(cmd)
@@ -714,6 +715,7 @@ def _search_with_rg(root_dir: str, pattern: str, use_regex: bool, ignore_case: b
     cmd.extend(["--", pattern, root_dir])
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=15,
+                                stdin=subprocess.DEVNULL,
                                 **(_WINDOWS_POPEN_KWARGS if _WINDOWS else {}))
         # Check for rg errors (regex parse errors, etc.)
         if result.returncode != 0 and result.stderr.strip():

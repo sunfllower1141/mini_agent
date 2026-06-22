@@ -124,15 +124,21 @@ def build_session_header(config: "AgentConfig") -> str:
     # --- Git context ---
     try:
         import subprocess
+        _git_env = os.environ.copy()
+        _git_env["GIT_TERMINAL_PROMPT"] = "0"
+        _git_env["GCM_INTERACTIVE"] = "never"
+        _git_env["GIT_ASKPASS"] = "echo"
         branch = subprocess.check_output(
             ["git", "branch", "--show-current"], cwd=config.workspace,
-            stderr=subprocess.DEVNULL, text=True
+            stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, text=True,
+            encoding="utf-8", errors="replace", env=_git_env,
         ).strip()
         if branch:
             git_info = [f"Current branch: {branch}"]
             status = subprocess.check_output(
                 ["git", "status", "--porcelain"], cwd=config.workspace,
-                stderr=subprocess.DEVNULL, text=True
+                stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, text=True,
+                encoding="utf-8", errors="replace", env=_git_env,
             ).strip()
             if status:
                 changed = status.split("\n")[:15]

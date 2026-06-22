@@ -180,6 +180,7 @@ def get_unused_tools(min_turns: int = 5) -> set[str]:
         "search_files", "list_directory", "file_info", "find_symbol",
         "remember", "memory_core", "use_skill", "plan", "plan_status",
         "todo_write", "todo_read", "write_scratchpad",
+        "git_status", "git_diff", "git_log", "git_add", "git_commit",
     })
     unused = active - used - _UNPRUNABLE
     return unused

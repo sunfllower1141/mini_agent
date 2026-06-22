@@ -1464,7 +1464,8 @@ def _find_usages(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolRe
             for d in _SKIP_DIRS:
                 cmd.extend(["--exclude-dir", d])
             cmd.extend(["-w", name, root])
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10,
+                                    stdin=subprocess.DEVNULL)
             if result.stdout.strip():
                 lines_out = result.stdout.strip().split("\n")[:30]
                 return ToolResult(
