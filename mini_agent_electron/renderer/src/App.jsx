@@ -1137,8 +1137,6 @@ function AppShell() {
             </span>
           )}
         </span>
-        {/* Center: app title */}
-        <span className="header-title">mini_agent</span>
         {/* Right: sound toggle + model */}
         <span className="header-right">
         <span

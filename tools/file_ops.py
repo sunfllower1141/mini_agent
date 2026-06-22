@@ -1085,6 +1085,7 @@ def _edit_file_text_match(resolved: str, edits: list[dict], display_path: str) -
     for i, edit in enumerate(edits):
         old_text = edit.get("oldText", "")
         new_text = edit.get("newText", "")
+        edit_type = edit.get("edit_type", "replace")
         if not isinstance(old_text, str) or not isinstance(new_text, str):
             return ToolResult(
                 success=False,
@@ -1099,7 +1100,6 @@ def _edit_file_text_match(resolved: str, edits: list[dict], display_path: str) -
             match_idx = normalized.find(old_text)
             if match_idx == -1:
                 # Build helpful error: show where in the file the text is similar
-                # Find the closest line to show as context
                 first_line = old_text.split("\n")[0][:40]
                 hint = (
                     f"oldText not found in file. The file may have changed since you last read it. "
@@ -1111,17 +1111,24 @@ def _edit_file_text_match(resolved: str, edits: list[dict], display_path: str) -
                     content=_err("NOT_FOUND", f"edit[{i}] oldText not found in {display_path}", hint),
                 )
         # Check for duplicate matches (oldText must be unique)
-        second_match = fuzzy_normalized.find(fuzzy_old, match_idx + len(fuzzy_old))
+        second_match = fuzzy_normalized.find(fuzzy_old, match_idx + max(len(fuzzy_old), 1))
         if second_match != -1:
             return ToolResult(
                 success=False,
                 content=_err("DUPLICATE", f"edit[{i}] oldText matches multiple locations in {display_path}",
                              "Add more surrounding context to make oldText unique"),
             )
+        # Handle insert mode: newText goes before/after oldText
+        if edit_type == "insert_after":
+            replacement = old_text + "\n" + new_text if new_text else old_text
+        elif edit_type == "insert_before":
+            replacement = new_text + "\n" + old_text if new_text else old_text
+        else:
+            replacement = new_text
         matches.append({
             "idx": match_idx,
             "old_len": len(old_text),
-            "new_text": new_text,
+            "new_text": replacement,
             "edit_idx": i,
         })
 
