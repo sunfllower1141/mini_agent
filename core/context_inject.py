@@ -1017,10 +1017,37 @@ def _compress_stale_tool_results(messages: list[dict]) -> None:
 
     Only tool results outside the *keep_recent* window are compressed;
     recent results stay intact for the model to reference.
-    """
-    from memory.memory_prune import _compress_tool_results
 
-    _compress_tool_results(messages, keep_recent=12)
+    CRITICAL (Cache-First Loop): Tool results BEFORE the last non-transient
+    user message are part of the cached prefix (protected by cache_control
+    on that user message).  Compressing them in-place would change the
+    byte pattern and invalidate DeepSeek's KV-cache.  We only compress
+    tool results AFTER the last user message (the current/ongoing turn).
+    """
+    # Find the index of the last non-transient user message.
+    # Only tool results AFTER this index are safe to compress in-place.
+    last_user_idx = -1
+    for i in range(len(messages) - 1, -1, -1):
+        m = messages[i]
+        if m.get("role") == "user" and not m.get("_transient"):
+            last_user_idx = i
+            break
+
+    # If no user message found, fall back to the old behavior (safe: empty conversation).
+    if last_user_idx < 0:
+        from memory.memory_prune import _compress_tool_results
+        _compress_tool_results(messages, keep_recent=12)
+        return
+
+    # Split: prefix region (cached, must NOT be mutated) vs tail (uncached, safe to compress).
+    prefix = messages[:last_user_idx + 1]
+    tail = messages[last_user_idx + 1:]
+
+    # Only compress tool results in the uncached tail.
+    # The prefix region is protected by cache_control on the last user message.
+    if tail:
+        from memory.memory_prune import _compress_tool_results
+        _compress_tool_results(tail, keep_recent=12)
 
 
 def _inject_failure_pattern_warnings(
@@ -1352,15 +1379,10 @@ def _inject_strategy_hint(messages: list[dict]) -> None:
             if hint in _inject_strategy_hint._injected:
                 return
             _inject_strategy_hint._injected.add(hint)
-            # Insert after the last system message, or at index 1 if none found
-            insert_at = 1
-            for i in range(len(messages) - 1, -1, -1):
-                if messages[i].get("role") == "system":
-                    insert_at = i + 1
-                    break
-            # Avoid inserting beyond list bounds
-            if insert_at <= len(messages):
-                messages.insert(insert_at, {"role": "system", "content": hint})
+            # APPEND as transient instead of inserting — inserting at a
+            # specific index shifts all subsequent message indices and
+            # invalidates DeepSeek's prefix cache (Reasonix Pillar 1).
+            messages.append({"role": "user", "content": hint, "_transient": True})
     except (KeyError, IndexError, TypeError, ValueError):
         pass
 

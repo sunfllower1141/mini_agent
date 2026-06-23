@@ -630,6 +630,12 @@ function handlePythonMessage(msg) {
       // data handler (no renderer action needed).
       break;
 
+    case 'stats':
+      // Real-time cache/token/context stats (pi-style footer) sent after
+      // every LLM API call.  Forwarded to renderer for live status bar.
+      win.webContents.send('stream:stats', data);
+      break;
+
     case 'error':
       win.webContents.send('stream:error', data);
       break;

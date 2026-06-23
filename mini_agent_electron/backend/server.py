@@ -114,6 +114,22 @@ def _start_heartbeat(stop_event: threading.Event) -> threading.Thread:
     return t
 
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _read_context_pressure() -> float | None:
+    """Read context window pressure from _TOOL_CONTEXT after last API call."""
+    try:
+        from tools import _TOOL_CONTEXT
+        stats = getattr(_TOOL_CONTEXT, "_last_stats", None)
+        if stats:
+            return stats.get("context_pressure_pct")
+    except Exception:
+        pass
+    return None
+
+
 def send_msg(msg: dict) -> None:
     """Write a JSON message to stdout followed by newline, then flush.
 
@@ -264,6 +280,11 @@ class AgentRunner:
         # Session cost tracking (Reasonix-style per-turn + cumulative).
         self._session_cost = SessionCost()
 
+        # Wire up real-time stats callback so _report_cache_hit sends
+        # stats to the Electron UI after every API call (pi-style footer).
+        from tools import _TOOL_CONTEXT
+        _TOOL_CONTEXT._stats_callback = self._on_stats_update
+
         # Balance — fetched once at startup, refreshed on demand.
         self._balance: dict | None = None
         self._fetch_balance_async()
@@ -375,6 +396,14 @@ class AgentRunner:
             self._git_dirty = False
 
     # -- turn execution -------------------------------------------------
+
+    def _on_stats_update(self, stats: dict) -> None:
+        """Callback from api.py after every LLM API call.
+
+        Sends real-time cache/token/cost stats to the Electron frontend
+        so it can update the status bar live (pi-style footer).
+        """
+        send_msg(stats)
 
     def submit(self, text: str) -> None:
         """Queue user input and start a turn if not already running."""
@@ -587,6 +616,8 @@ class AgentRunner:
             "session_turns": sc.turn_count,
             "cache_hit_rate": round(sc.cache_hit_rate * 100) if sc.cache_hit_rate is not None else None,
             "subagent_running": self._running_subagent_count,
+            # Context window pressure from live stats
+            "context_pressure_pct": _read_context_pressure(),
             # Include current cached balance so the status bar updates immediately.
             # The async re-fetch below will push the latest balance when it completes.
             "balance": self._balance,
@@ -596,6 +627,16 @@ class AgentRunner:
             "usage": turn_usage,
             "turn_count": self._total_turns,
         })
+
+        # Send latest real-time stats (from _TOOL_CONTEXT._last_stats) so
+        # the status bar updates after the turn with per-API-call data.
+        try:
+            from tools import _TOOL_CONTEXT
+            last = getattr(_TOOL_CONTEXT, "_last_stats", None)
+            if last is not None:
+                send_msg(last)
+        except Exception:
+            pass
 
         # Re-fetch balance after every turn so the wallet display stays current.
         self._fetch_balance_async()

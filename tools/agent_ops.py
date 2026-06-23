@@ -726,66 +726,55 @@ def _session_stats(args: dict, _wg: WriteSafetyGate, _rg: ReadSafetyGate) -> Too
 
 
     lines = [
-
-
-        f"Turns used:    {turns_used}",
-
-
-        f"Context tokens: {token_count} / {CONTEXT_BUDGET} ({pct_used:.1f}% used)",
-
-
-        f"Sub-agents:     {active_agents} active, {completed_agents} completed",
-
-
+        f"Turns:          {turns_used}",
     ]
 
+    # Real-time status (pi-style footer)
+    status = getattr(_TOOL_CONTEXT, "_last_status_line", "")
+    if status:
+        lines.append(f"Status:         {status}")
 
+    # Context window pressure
+    actual_prompt = input_tokens if input_tokens > 0 else token_count
+    pct_used = (actual_prompt / CONTEXT_BUDGET * 100) if CONTEXT_BUDGET else 0
+    if input_tokens > 0:
+        lines.append(
+            f"Context:        {input_tokens:,} / {CONTEXT_BUDGET:,} tokens "
+            f"({pct_used:.1f}% of window)"
+        )
+    else:
+        lines.append(
+            f"Context:        ~{token_count:,} est / {CONTEXT_BUDGET:,} ({pct_used:.1f}%)"
+        )
+
+    # Sub-agents
+    if active_agents > 0 or completed_agents > 0:
+        lines.append(
+            f"Sub-agents:     {active_agents} active, {completed_agents} completed"
+        )
+
+    # Cache + token breakdown
     if cache_calls > 0:
-
-
         lines.append(
-
-
-            f"API calls:      {cache_calls} | "
-
-
-            f"input {input_tokens:,} tok | output {output_tokens:,} tok"
-
-
+            f"API calls:      {cache_calls}  "
+            f"in:{input_tokens:,} tok  out:{output_tokens:,} tok"
+        )
+        lines.append(
+            f"Cache:          {hit_rate_pct:.1f}% hit rate  "
+            f"({cache_hits:,} cached, {cache_misses:,} missed)"
         )
 
-
+    # Cost
+    if saved > 0:
         lines.append(
-
-
-            f"Cache hit rate: {hit_rate_pct:.1f}% "
-
-
-            f"({cache_hits:,} cached / {total_cache_tokens:,} tokens)"
-
-
+            f"Cost:           ${actual_total:.4f} "
+            f"(saved ${saved:.4f} via cache)"
         )
+    elif actual_total > 0:
+        lines.append(f"Cost:           ${actual_total:.4f}")
 
 
-        if saved > 0:
 
-
-            lines.append(
-
-
-                f"Cost:          ${actual_total:.4f} "
-
-
-                f"(saved ${saved:.4f} via cache)"
-
-
-            )
-
-
-        elif actual_total > 0:
-
-
-            lines.append(f"Cost:          ${actual_total:.4f}")
 
 
     plan = getattr(_TOOL_CONTEXT, "_plan_steps", [])

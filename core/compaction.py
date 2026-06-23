@@ -429,13 +429,31 @@ def compact_tool_results_at_turn_end(
     The model saw the full result during the turn; subsequent turns only
     need the gist.  Keeps first ~15% and last ~60% of each oversized result.
 
+    CRITICAL (Cache-First Loop): Only truncates tool results AFTER the last
+    non-transient user message.  Tool results in the cached prefix (before
+    that user message) must stay byte-identical or DeepSeek's KV-cache is
+    invalidated.
+
     Returns number of tool results compacted.
     """
     compacted = 0
     if not messages:
         return compacted
 
-    for msg in messages:
+    # Find the index of the last non-transient user message.
+    # Only tool results AFTER this index are safe to truncate.
+    last_user_idx = -1
+    for i in range(len(messages) - 1, -1, -1):
+        m = messages[i]
+        if m.get("role") == "user" and not m.get("_transient"):
+            last_user_idx = i
+            break
+
+    # Only process messages in the uncached tail
+    start_idx = last_user_idx + 1 if last_user_idx >= 0 else 0
+
+    for i in range(start_idx, len(messages)):
+        msg = messages[i]
         if msg.get("role") != "tool":
             continue
         if msg.get("_turn_end_compacted") or msg.get("_pruned"):

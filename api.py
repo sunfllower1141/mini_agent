@@ -160,6 +160,16 @@ def _build_payload(
     model = config.model
     tools = get_active_tools()
 
+    # --- Pillar 1 (Cache-First Loop): Mark last tool definition for caching ---
+    # Pi-style: add cache_control to the last tool so the ENTIRE tools block
+    # is cached by DeepSeek.  Without this, tool definitions (~2-8K tokens)
+    # are re-processed on every turn.  Must deep-copy the last tool to avoid
+    # mutating the global TOOLS schema.
+    if provider == "deepseek" and tools:
+        tools = list(tools)  # shallow copy the list
+        tools[-1] = dict(tools[-1])  # deep-copy the last tool dict
+        tools[-1]["cache_control"] = {"type": "ephemeral"}
+
     payload: dict = {
         "model": model,
         "messages": clean_messages,
@@ -295,6 +305,19 @@ def call_llm(
     # Memory pruning can leave orphaned tool messages or assistant(tool_calls)
     # causing 400 errors from the API.
     safe_messages = _strip_orphaned_tool_messages(clean_messages)
+
+    # --- Pillar 1 (Cache-First Loop): Mark conversation history for caching ---
+    # Pi-style: add cache_control to the last non-transient user message so
+    # the ENTIRE conversation up to that point is cached by DeepSeek.  Without
+    # this, only the system message (~2K tokens) is cached; with it, every
+    # prior turn's messages are cached and reused.  Multiple cache marks
+    # create multiple cached regions (write-once, read-many).
+    if provider == "deepseek":
+        for m in reversed(safe_messages):
+            if m.get("role") == "user":
+                if "cache_control" not in m:
+                    m["cache_control"] = {"type": "ephemeral"}
+                break  # only the last user message before the current turn
 
     payload = _build_payload(config, messages, safe_messages)
 
@@ -490,9 +513,12 @@ def call_llm(
 
 
 def _report_cache_hit(usage: dict, config: "AgentConfig") -> None:
-    """Log prompt cache hit rate from API usage and store for session_stats."""
+    """Log prompt cache hit rate from API usage, store for session_stats,
+    and emit a real-time status line (pi-style footer) to stderr."""
     hit = usage.get("prompt_cache_hit_tokens", 0)
     miss = usage.get("prompt_cache_miss_tokens", 0)
+    prompt_tokens = usage.get("prompt_tokens", 0)
+    completion_tokens = usage.get("completion_tokens", 0)
     total_prompt_cache = hit + miss
     if total_prompt_cache <= 0:
         return
@@ -500,8 +526,7 @@ def _report_cache_hit(usage: dict, config: "AgentConfig") -> None:
     _log = __import__("logging_setup", fromlist=["get_logger"]).get_logger("api")
     _log.info(
         "cache_hit=%.1f%% hit_tokens=%d miss_tokens=%d prompt=%d completion=%d",
-        hit_rate, hit, miss,
-        usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0),
+        hit_rate, hit, miss, prompt_tokens, completion_tokens,
     )
     # Store for session_stats visibility
     try:
@@ -515,8 +540,8 @@ def _report_cache_hit(usage: dict, config: "AgentConfig") -> None:
             _TOOL_CONTEXT._cache_stats["hits"] += hit
             _TOOL_CONTEXT._cache_stats["misses"] += miss
             _TOOL_CONTEXT._cache_stats["calls"] += 1
-            _TOOL_CONTEXT._cache_stats["input_tokens"] += usage.get("prompt_tokens", 0)
-            _TOOL_CONTEXT._cache_stats["output_tokens"] += usage.get("completion_tokens", 0)
+            _TOOL_CONTEXT._cache_stats["input_tokens"] += prompt_tokens
+            _TOOL_CONTEXT._cache_stats["output_tokens"] += completion_tokens
             # --- Per-turn tracking for degradation detection ---
             turn = int(getattr(_TOOL_CONTEXT, "_turn_count", 0) or 0)
             if not hasattr(_TOOL_CONTEXT, "_cache_turn_history"):
@@ -534,8 +559,179 @@ def _report_cache_hit(usage: dict, config: "AgentConfig") -> None:
             entry["hits"] += hit
             entry["misses"] += miss
             entry["calls"] += 1
+
+            # --- Store per-turn usage for real-time display ---
+            _TOOL_CONTEXT._last_turn_usage = {
+                "hit": hit,
+                "miss": miss,
+                "hit_rate": round(hit_rate, 1),
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "turn": turn,
+            }
+            # --- Emit real-time status line (pi-style footer) ---
+            _emit_cache_status_line(_TOOL_CONTEXT._cache_stats, config)
     except Exception:
         pass
+
+
+def _emit_cache_status_line(cache_stats: dict, config: "AgentConfig") -> None:
+    """Emit a real-time cache status line (pi-style footer).
+
+    Sends enriched stats to the UI via ``_TOOL_CONTEXT._stats_callback``
+    if set (Electron/TUI mode).  Falls back to stderr (terminal mode).
+
+    The callback receives a dict with all stats fields so the UI can
+    render them however it wants (footer bar, status line, tooltip, etc.).
+    """
+    try:
+        hits = cache_stats.get("hits", 0)
+        misses = cache_stats.get("misses", 0)
+        calls = cache_stats.get("calls", 0)
+        input_tok = cache_stats.get("input_tokens", 0)
+        output_tok = cache_stats.get("output_tokens", 0)
+        total_cache_tok = hits + misses
+
+        # Cache hit rate (cumulative)
+        cache_rate = (100.0 * hits / total_cache_tok) if total_cache_tok > 0 else 0.0
+
+        # Context window pressure
+        ctx_pct = _estimate_context_pressure()
+
+        # Cost estimate
+        cost = _estimate_cumulative_cost(cache_stats, config)
+
+        # Build structured stats dict for UI consumption
+        stats = {
+            "type": "stats",
+            "cache_hit_rate": round(cache_rate, 1),
+            "cache_hit_tokens": hits,
+            "cache_miss_tokens": misses,
+            "cache_total_tokens": total_cache_tok,
+            "calls": calls,
+            "input_tokens": input_tok,
+            "output_tokens": output_tok,
+            "context_pressure_pct": round(ctx_pct, 1) if ctx_pct is not None else None,
+            "cost_usd": round(cost, 4),
+            "status_line": _fmt_status_line(cache_rate, ctx_pct, input_tok, output_tok, cost),
+        }
+
+        # Store for polling by TUI / session_stats
+        try:
+            from tools import _TOOL_CONTEXT
+            if _TOOL_CONTEXT is not None:
+                _TOOL_CONTEXT._last_stats = stats
+                _TOOL_CONTEXT._last_status_line = stats["status_line"]
+        except Exception:
+            pass
+
+        # Route to UI callback if available (Electron / TUI mode)
+        try:
+            from tools import _TOOL_CONTEXT
+            cb = getattr(_TOOL_CONTEXT, "_stats_callback", None) if _TOOL_CONTEXT is not None else None
+            if cb is not None:
+                cb(stats)
+                return
+        except Exception:
+            pass
+
+        # Fallback: emit to stderr (terminal mode)
+        import sys as _sys_emit
+        _sys_emit.stderr.write(f"\r\x1b[K  {stats['status_line']}\n")
+        _sys_emit.stderr.flush()
+    except Exception:
+        pass
+
+
+def _fmt_status_line(
+    cache_rate: float,
+    ctx_pct: float | None,
+    input_tok: int,
+    output_tok: int,
+    cost: float,
+) -> str:
+    """Build a compact one-line status string (pi footer style).
+
+    Example:  CH 98%  ctxt 12%  in:45.2k out:8.1k  $0.023
+    """
+    parts: list[str] = []
+    parts.append(f"CH {cache_rate:.0f}%")
+    if ctx_pct is not None:
+        parts.append(f"ctxt {ctx_pct:.0f}%")
+    if input_tok > 0:
+        parts.append(f"in:{_fmt_tok(input_tok)}")
+    if output_tok > 0:
+        parts.append(f"out:{_fmt_tok(output_tok)}")
+    if cost > 0:
+        parts.append(f"${cost:.3f}")
+    return "  ".join(parts)
+
+
+def _fmt_tok(tokens: int) -> str:
+    """Format token count compactly: 1234 -> '1.2k', 1234567 -> '1.2M'."""
+    if tokens >= 1_000_000:
+        return f"{tokens / 1_000_000:.1f}M"
+    if tokens >= 1_000:
+        return f"{tokens / 1_000:.1f}k"
+    return str(tokens)
+
+
+def _estimate_context_pressure() -> float | None:
+    """Estimate context window pressure as a percentage.
+
+    Uses the last API call's prompt_tokens as a proxy for context size.
+    Falls back to token estimation from message list.
+    """
+    try:
+        from tools import _TOOL_CONTEXT
+        if _TOOL_CONTEXT is None:
+            return None
+        config = getattr(_TOOL_CONTEXT, "_agent_config", None)
+        if config is None:
+            return None
+        context_window = getattr(config, "context_window", 0)
+        if context_window <= 0:
+            return None
+
+        # Prefer real usage from last API call
+        last_usage = getattr(_TOOL_CONTEXT, "_last_turn_usage", None)
+        if last_usage and last_usage.get("prompt_tokens", 0) > 0:
+            return 100.0 * last_usage["prompt_tokens"] / context_window
+
+        # Fall back: estimate from message list
+        memory_store = getattr(_TOOL_CONTEXT, "_memory_store", None)
+        if memory_store is not None:
+            token_count = getattr(memory_store, "token_count", 0)
+            if token_count > 0:
+                return 100.0 * token_count / context_window
+        return None
+    except Exception:
+        return None
+
+
+def _estimate_cumulative_cost(cache_stats: dict, config: "AgentConfig") -> float:
+    """Estimate cumulative USD cost from cache stats and provider pricing."""
+    try:
+        provider = getattr(config, "api_provider", "deepseek")
+        from core.config import PROVIDER_DEFAULTS
+        pd = PROVIDER_DEFAULTS.get(provider)
+        if pd is None:
+            return 0.0
+        hits = cache_stats.get("hits", 0)
+        misses = cache_stats.get("misses", 0)
+        input_tok = cache_stats.get("input_tokens", 0)
+        output_tok = cache_stats.get("output_tokens", 0)
+        # Cost = (miss * input_price + hit * cache_hit_price) / 1e6
+        #     + overhead(uncached) * input_price / 1e6
+        #     + output * output_price / 1e6
+        miss_cost = misses / 1_000_000 * pd.input_price
+        hit_cost = hits / 1_000_000 * pd.cache_hit_price
+        overhead = max(0, input_tok - hits - misses)
+        overhead_cost = overhead / 1_000_000 * pd.input_price
+        output_cost = output_tok / 1_000_000 * pd.output_price
+        return miss_cost + hit_cost + overhead_cost + output_cost
+    except Exception:
+        return 0.0
 
 
 # ---------------------------------------------------------------------------

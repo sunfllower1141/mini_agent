@@ -256,6 +256,7 @@ function AppShell() {
   const [sessionCost, setSessionCost] = useState('-');
   const [turnCost, setTurnCost] = useState('-');
   const [cacheHitRate, setCacheHitRate] = useState(null);
+  const [contextPressure, setContextPressure] = useState(null);
   const [sessionTokens, setSessionTokens] = useState(null);
   const [turnTokens, setTurnTokens] = useState(null);
   const [subagentRunning, setSubagentRunning] = useState(0);
@@ -671,6 +672,7 @@ function AppShell() {
       if (data.usage?.session_tokens != null) setSessionTokens(data.usage.session_tokens);
       if (data.usage?.turn_tokens != null) setTurnTokens(data.usage.turn_tokens);
       if (data.usage?.cache_hit_rate != null) setCacheHitRate(data.usage.cache_hit_rate);
+      if (data.usage?.context_pressure_pct != null) setContextPressure(data.usage.context_pressure_pct);
       if (data.usage?.subagent_running != null) setSubagentRunning(data.usage.subagent_running);
       // Balance -- pushed on every turn_complete so the wallet display updates live
       if (data.usage?.balance != null) setBalanceDisplay(data.usage.balance);
@@ -678,6 +680,19 @@ function AppShell() {
       // turn immediately (sub-agent auto-report, tool continuations, etc.).
       // Only the 'idle' message (sent when _turn_loop truly drains the
       // queue) should reset isLive.
+    }));
+
+    // Real-time stats sent after every LLM API call (pi-style footer).
+    // Updates cache hit rate, context pressure, and token counts live
+    // during a turn — not just at turn completion.
+    unsubs.push(api.on('stream:stats', (data) => {
+      if (data.cache_hit_rate != null) setCacheHitRate(data.cache_hit_rate);
+      if (data.context_pressure_pct != null) setContextPressure(data.context_pressure_pct);
+      if (data.session_tokens != null) setSessionTokens(data.session_tokens);
+      if (data.session_cost != null) setSessionCost(data.session_cost);
+      // Also update turn-level fields for the status bar timer row
+      if (data.input_tokens != null) setTurnTokens(data.input_tokens);
+      if (data.cost_usd != null) setTurnCost(`$${data.cost_usd.toFixed(3)}`);
     }));
 
     unsubs.push(api.on('stream:error', (data) => {
@@ -1127,6 +1142,12 @@ function AppShell() {
             <span className="statusbar-metric statusbar-cache" title={`Cache hit rate: ${cacheHitRate}%`}>
               <span className="statusbar-metric-icon">⚡</span>
               <span className="statusbar-metric-value">{cacheHitRate}%</span>
+            </span>
+          )}
+          {contextPressure != null && (
+            <span className="statusbar-metric statusbar-cache" title={`Context window: ${contextPressure}% used`}>
+              <span className="statusbar-metric-icon">⊞</span>
+              <span className="statusbar-metric-value">{contextPressure}%</span>
             </span>
           )}
           {subagentRunning > 0 && (
