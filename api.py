@@ -160,16 +160,6 @@ def _build_payload(
     model = config.model
     tools = get_active_tools()
 
-    # --- Pillar 1 (Cache-First Loop): Mark last tool definition for caching ---
-    # Pi-style: add cache_control to the last tool so the ENTIRE tools block
-    # is cached by DeepSeek.  Without this, tool definitions (~2-8K tokens)
-    # are re-processed on every turn.  Must deep-copy the last tool to avoid
-    # mutating the global TOOLS schema.
-    if provider == "deepseek" and tools:
-        tools = list(tools)  # shallow copy the list
-        tools[-1] = dict(tools[-1])  # deep-copy the last tool dict
-        tools[-1]["cache_control"] = {"type": "ephemeral"}
-
     payload: dict = {
         "model": model,
         "messages": clean_messages,
@@ -195,6 +185,27 @@ def _build_payload(
         # on the same inference engine, reusing cached KV state.
         _cache_seed = str(len(tools)) if tools else "0"
         payload["prompt_cache_key"] = f"mini_agent-v1-{_cache_seed}"
+
+        # --- Pillar 1 (Cache-First Loop): single mark on last message ---
+        # Adding cache_control to the LAST message (whatever role) tells
+        # DeepSeek to cache everything.  Only one mark, always at the end,
+        # never in the middle of the conversation.  We copy the dict so
+        # the incremental _clean_messages_cache is never mutated.
+        msgs = payload["messages"]
+        if msgs:
+            msgs = list(msgs)
+            msgs[-1] = dict(msgs[-1])
+            msgs[-1]["cache_control"] = {"type": "ephemeral"}
+            payload["messages"] = msgs
+
+        # --- Cache tool definitions too (saves 2-8K tokens per request) ---
+        # Pi-style: last tool gets cache_control so the entire tools block
+        # is cached.  Must deep-copy to avoid mutating the global TOOLS list.
+        if tools:
+            tools = list(tools)
+            tools[-1] = dict(tools[-1])
+            tools[-1]["cache_control"] = {"type": "ephemeral"}
+            payload["tools"] = tools
 
     elif provider == "mimo":
         # MiMo V2.5 Pro through OpenRouter: enable reasoning via OpenRouter's
@@ -305,19 +316,6 @@ def call_llm(
     # Memory pruning can leave orphaned tool messages or assistant(tool_calls)
     # causing 400 errors from the API.
     safe_messages = _strip_orphaned_tool_messages(clean_messages)
-
-    # --- Pillar 1 (Cache-First Loop): Mark conversation history for caching ---
-    # Pi-style: add cache_control to the last non-transient user message so
-    # the ENTIRE conversation up to that point is cached by DeepSeek.  Without
-    # this, only the system message (~2K tokens) is cached; with it, every
-    # prior turn's messages are cached and reused.  Multiple cache marks
-    # create multiple cached regions (write-once, read-many).
-    if provider == "deepseek":
-        for m in reversed(safe_messages):
-            if m.get("role") == "user":
-                if "cache_control" not in m:
-                    m["cache_control"] = {"type": "ephemeral"}
-                break  # only the last user message before the current turn
 
     payload = _build_payload(config, messages, safe_messages)
 
@@ -520,14 +518,13 @@ def _report_cache_hit(usage: dict, config: "AgentConfig") -> None:
     prompt_tokens = usage.get("prompt_tokens", 0)
     completion_tokens = usage.get("completion_tokens", 0)
     total_prompt_cache = hit + miss
-    if total_prompt_cache <= 0:
-        return
-    hit_rate = 100.0 * hit / total_prompt_cache
+    hit_rate = (100.0 * hit / total_prompt_cache) if total_prompt_cache > 0 else 0.0
     _log = __import__("logging_setup", fromlist=["get_logger"]).get_logger("api")
-    _log.info(
-        "cache_hit=%.1f%% hit_tokens=%d miss_tokens=%d prompt=%d completion=%d",
-        hit_rate, hit, miss, prompt_tokens, completion_tokens,
-    )
+    if total_prompt_cache > 0:
+        _log.info(
+            "cache_hit=%.1f%% hit_tokens=%d miss_tokens=%d prompt=%d completion=%d",
+            hit_rate, hit, miss, prompt_tokens, completion_tokens,
+        )
     # Store for session_stats visibility
     try:
         from tools import _TOOL_CONTEXT
@@ -571,6 +568,13 @@ def _report_cache_hit(usage: dict, config: "AgentConfig") -> None:
             }
             # --- Emit real-time status line (pi-style footer) ---
             _emit_cache_status_line(_TOOL_CONTEXT._cache_stats, config)
+            # --- Store emit function on context so llm.py can trigger
+            # per-tool-execution stats updates without circular imports.
+            _TOOL_CONTEXT._emit_realtime_stats = lambda c=config: (
+                _emit_cache_status_line(_TOOL_CONTEXT._cache_stats, c)
+                if _TOOL_CONTEXT is not None and hasattr(_TOOL_CONTEXT, "_cache_stats")
+                else None
+            )
     except Exception:
         pass
 
@@ -611,6 +615,8 @@ def _emit_cache_status_line(cache_stats: dict, config: "AgentConfig") -> None:
             "calls": calls,
             "input_tokens": input_tok,
             "output_tokens": output_tok,
+            "session_tokens": input_tok + output_tok,
+            "session_cost": f"${cost:.3f}",
             "context_pressure_pct": round(ctx_pct, 1) if ctx_pct is not None else None,
             "cost_usd": round(cost, 4),
             "status_line": _fmt_status_line(cache_rate, ctx_pct, input_tok, output_tok, cost),

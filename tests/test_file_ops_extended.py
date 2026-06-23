@@ -460,9 +460,9 @@ class TestSessionStatsCache(unittest.TestCase):
         tc = _make_tool_call("session_stats")
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertTrue(result.success)
-        self.assertIn("Turns used:", result.content)
+        self.assertIn("Turns:", result.content)
         self.assertNotIn("API calls:", result.content)
-        self.assertNotIn("Cache hit rate:", result.content)
+        self.assertNotIn("Cache:", result.content)
         self.assertNotIn("Cost:", result.content)
 
     def test_cache_hits_only_shows_100_pct_and_savings(self):
@@ -474,10 +474,10 @@ class TestSessionStatsCache(unittest.TestCase):
         tc = _make_tool_call("session_stats")
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertTrue(result.success)
-        self.assertIn("Cache hit rate: 100.0%", result.content)
+        self.assertIn("Cache:          100.0% hit rate", result.content)
         self.assertIn("50,000 cached", result.content)
-        self.assertIn("input 50,000 tok", result.content)
-        self.assertIn("output 10,000 tok", result.content)
+        self.assertIn("in:50,000 tok", result.content)
+        self.assertIn("out:10,000 tok", result.content)
         self.assertIn("saved $", result.content)
         # Cost without cache: 50000 * 0.14/1M = $0.007
         # With cache:       50000 * 0.014/1M = $0.0007
@@ -492,9 +492,9 @@ class TestSessionStatsCache(unittest.TestCase):
         tc = _make_tool_call("session_stats")
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertTrue(result.success)
-        self.assertIn("Cache hit rate: 0.0%", result.content)
+        self.assertIn("Cache:          0.0% hit rate", result.content)
         self.assertIn("0 cached", result.content)
-        self.assertIn("input 30,000 tok", result.content)
+        self.assertIn("in:30,000 tok", result.content)
         # No "saved" line because saved=0
         self.assertNotIn("saved $", result.content)
         # Cost line should still appear
@@ -510,9 +510,9 @@ class TestSessionStatsCache(unittest.TestCase):
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertTrue(result.success)
         # 20000 / 30000 = 66.666...%
-        self.assertIn("Cache hit rate: 66.7%", result.content)
+        self.assertIn("Cache:          66.7% hit rate", result.content)
         self.assertIn("20,000 cached", result.content)
-        self.assertIn("30,000 tokens", result.content)
+        self.assertIn("10,000 missed", result.content)
         self.assertIn("saved $", result.content)
 
     def test_unknown_provider_skips_cost_line(self):
@@ -525,7 +525,7 @@ class TestSessionStatsCache(unittest.TestCase):
         tc = _make_tool_call("session_stats")
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertTrue(result.success)
-        self.assertIn("Cache hit rate:", result.content)
+        self.assertIn("Cache:", result.content)
         self.assertNotIn("Cost:", result.content)
 
     def test_no_cache_stats_no_api_calls_no_cost(self):
@@ -537,9 +537,9 @@ class TestSessionStatsCache(unittest.TestCase):
         tc = _make_tool_call("session_stats")
         result = execute_tool(tc, self.write_gate, self.read_gate)
         self.assertTrue(result.success)
-        self.assertIn("Turns used:", result.content)
+        self.assertIn("Turns:", result.content)
         self.assertNotIn("API calls:", result.content)
-        self.assertNotIn("Cache hit rate:", result.content)
+        self.assertNotIn("Cache:", result.content)
         self.assertNotIn("Cost:", result.content)
 
 

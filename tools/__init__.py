@@ -633,7 +633,7 @@ def execute_tool(
     import sys as _sys
     import time as _time
     _turn = getattr(_TOOL_CONTEXT, '_turn_count', 0)
-    _sys.stderr.write(f"[turn {_turn}] dispatching '{name}' (timeout={_TOOL_TIMEOUT}s)\n")
+    _sys.stderr.write(f"  {name}... ")
     _sys.stderr.flush()
     _t_dispatch_start = _time.monotonic()
     _t_start = _time.monotonic()
@@ -655,7 +655,7 @@ def execute_tool(
             _last_hb = _t_dispatch_start
             while t.is_alive() and _time.monotonic() < _deadline:
                 if cancel_event.is_set():
-                    _sys.stderr.write(f"[turn {_turn}] cancelled '{name}' thread (elapsed={_time.monotonic() - _t_dispatch_start:.2f}s)\n")
+                    _sys.stderr.write(f"cancelled\n")
                     _sys.stderr.flush()
                     # Kill any active process trees immediately to unblock
                     # tool threads waiting on subprocess I/O (e.g. _run_shell
@@ -674,7 +674,7 @@ def execute_tool(
                 # Heartbeat: log every 5s so we can tell if thread is stuck
                 _now = _time.monotonic()
                 if _now - _last_hb >= 5.0:
-                    _sys.stderr.write(f"[turn {_turn}] '{name}' still running ({_now - _t_dispatch_start:.1f}s elapsed)...\n")
+                    _sys.stderr.write(f"...\n")
                     _sys.stderr.flush()
                     _last_hb = _now
         else:
@@ -708,9 +708,9 @@ def execute_tool(
     # --- console: success / failure status ---
     _turn = getattr(_TOOL_CONTEXT, '_turn_count', 0)
     if result.success:
-        _sys.stderr.write(f"[turn {_turn}] '{name}' OK\n")
+        _sys.stderr.write("OK\n")
     else:
-        _sys.stderr.write(f"[turn {_turn}] '{name}' ERR -- {result.content[:120]}\n")
+        _sys.stderr.write(f"FAIL ({result.content[:80]})\n")
     _sys.stderr.flush()
 
     # Normalize: every failed result gets a _build_error_hint so the LLM

@@ -102,19 +102,30 @@ class TestCompressStaleToolResults:
     def test_compresses_old_multi_line_tool_result(self):
         import json
         # Real tool results are JSON-wrapped: {"content": "...", "success": true}
+        # Tool results BEFORE the last user message are in the cached prefix
+        # and MUST NOT be mutated (Reasonix Pillar 1: Cache-First Loop).
+        # This test places tool results AFTER the last user message, with
+        # enough padding to push them beyond keep_recent=12 for compression.
         inner = "line1\nline2\nline3\nline4\nline5\nline6\nline7"
-        msgs = [{"role": "tool", "content": json.dumps({"content": inner, "success": True})}]
-        # Pad with enough messages to push tool result beyond keep_recent (12)
-        padding = [{"role": "user", "content": f"msg {i}"} for i in range(14)]
-        msgs = msgs + padding
+        # Create tool results that are in the uncached tail (after last user)
+        tool_results = [
+            {"role": "tool", "content": json.dumps({"content": inner, "success": True})}
+            for _ in range(3)
+        ]
+        # 20 user messages: last one is the cache breakpoint
+        user_msgs = [{"role": "user", "content": f"msg {i}"} for i in range(20)]
+        # Tool results AFTER the last user message, with padding to exceed keep_recent
+        padding = [{"role": "user", "content": f"pad {i}", "_transient": True} for i in range(15)]
+        msgs = user_msgs + tool_results + padding
         _compress_stale_tool_results(msgs)
-        # The tool message (index 0) should be compressed -- check the JSON content
-        data = json.loads(msgs[0]["content"])
+        # The first two tool results (indices 20, 21) should be compressed
+        data = json.loads(msgs[20]["content"])
         assert "truncated" in data["content"]
 
     def test_skips_recent_tool_results(self):
         import json
         inner = "line1\nline2\nline3\nline4\nline5\nline6\nline7"
+        # Tool result after the last user message, but within keep_recent=12
         msgs = [{"role": "user", "content": "a"}] * 5 + [
             {"role": "tool", "content": json.dumps({"content": inner, "success": True})}
         ]
@@ -126,29 +137,30 @@ class TestCompressStaleToolResults:
     def test_skips_already_compressed(self):
         import json
         # Content that is already short enough -- won't be re-compressed
-        msgs = [{"role": "tool", "content": json.dumps({"content": "line1\nline2", "success": True})}]
+        # Place tool result in the uncached tail (after last user message)
         padding = [{"role": "user", "content": f"msg {i}"} for i in range(20)]
-        msgs = msgs + padding
-        original = msgs[0]["content"]
+        tool_result = {"role": "tool", "content": json.dumps({"content": "line1\nline2", "success": True})}
+        msgs = padding + [tool_result]
+        original = msgs[-1]["content"]
         _compress_stale_tool_results(msgs)
-        assert msgs[0]["content"] == original  # unchanged
+        assert msgs[-1]["content"] == original  # unchanged
 
     def test_skips_single_line_results(self):
         import json
-        msgs = [{"role": "tool", "content": json.dumps({"content": "single line only", "success": True})}]
         padding = [{"role": "user", "content": f"msg {i}"} for i in range(20)]
-        msgs = msgs + padding
+        tool_result = {"role": "tool", "content": json.dumps({"content": "single line only", "success": True})}
+        msgs = padding + [tool_result]
         _compress_stale_tool_results(msgs)
         # Single line should not be compressed
-        data = json.loads(msgs[0]["content"])
+        data = json.loads(msgs[-1]["content"])
         assert data["content"] == "single line only"
 
     def test_skips_non_string_content(self):
-        msgs = [{"role": "tool", "content": 42}]
         padding = [{"role": "user", "content": f"msg {i}"} for i in range(20)]
-        msgs = msgs + padding
+        tool_result = {"role": "tool", "content": 42}
+        msgs = padding + [tool_result]
         _compress_stale_tool_results(msgs)
-        assert msgs[0]["content"] == 42  # unchanged
+        assert msgs[-1]["content"] == 42  # unchanged
 
     def test_skips_non_tool_messages(self):
         import json

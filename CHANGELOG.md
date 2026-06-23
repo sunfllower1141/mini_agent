@@ -1,3 +1,20 @@
+## 2026-06-23
+
+### Changed — Real-time per-tool-call metrics to UI
+- **api.py** `_report_cache_hit()`: Removed early return that blocked stats from
+  reaching the UI when cache hit data was zero (common early in a session).
+  `_emit_cache_status_line()` is now called on every API response, so context
+  pressure, token counts, and cost estimates update in real-time.
+- **api.py** `_emit_cache_status_line()`: Added `session_tokens` and `session_cost`
+  fields to the stats dict so the renderer can display them live (previously only
+  available at turn-end via `get_status()`).
+- **core/llm.py** `_tool_execution_phase()`: Emits stats after tool execution
+  (both streaming and non-streaming paths) via `_TOOL_CONTEXT._emit_realtime_stats`,
+  a lambda stored by api.py to avoid circular imports. Context pressure now
+  reflects newly appended tool results mid-turn.
+
+---
+
 ## 2026-06-20 -- Gut Hash Cache read_file System
 
 ## 2026-06-22

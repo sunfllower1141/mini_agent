@@ -142,7 +142,7 @@ def _read_file_direct(
             hint = (
                 f"\n\n[Showing lines {offset + 1}-{end_line} of {total_lines}"
                 f" ({'line' if truncated_by_lines else 'byte'} limit)."
-                f" Use offset={next_offset} to continue.]"
+                f" Use from_line={next_from} to continue.]"
             )
         else:
             hint = ""
@@ -150,12 +150,12 @@ def _read_file_direct(
         return ToolResult(success=True, content=truncated)
 
     if lines_after_offset > limit:
-        next_offset = offset + limit + 1
+        next_from = offset + limit + 1
         truncated = "\n".join(collected[:limit])
         msg = (
             f"{truncated}\n"
             f"\n[Showing lines {offset + 1}-{offset + limit} of {total_lines}."
-            f" Use offset={next_offset} to continue.]"
+            f" Use from_line={next_from} to continue.]"
         )
         return ToolResult(success=True, content=msg)
 
@@ -302,7 +302,7 @@ def _is_recently_deleted(path: str) -> bool:
 
 
 # Maximum file size for full reads before warning (50KB). Larger files should be
-# read with offset/limit or via get_file_skeleton / get_function.
+# read with from_line/to_line or via get_file_skeleton / get_function.
 _MAX_FILE_READ_SIZE = 50 * 1024
 
 
@@ -397,7 +397,7 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
         return ToolResult(
             success=False,
             content=_err("MISSING", "need 'path' or 'paths'"),
-            hint="Valid parameters: path (string), paths (array), offset, limit, line_numbers, hash_lines",
+            hint="Valid parameters: path (string), from_line/to_line (1-based inclusive), hash_lines",
         )
 
     # Reject obviously bogus paths (e.g. placeholder '?' instead of a real path)
@@ -406,6 +406,19 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
         if bogus_err:
             return ToolResult(success=False, content=bogus_err)
 
+
+    from_line = args.get("from_line")
+    to_line = args.get("to_line")
+    if from_line is not None:
+        try: from_line = int(from_line)
+        except (TypeError, ValueError): from_line = None
+        else:
+            if from_line < 1: from_line = 1
+    if to_line is not None:
+        try: to_line = int(to_line)
+        except (TypeError, ValueError): to_line = None
+        else:
+            if to_line < 1: to_line = 1
 
     offset = args.get("offset", 0)
     try:
@@ -422,9 +435,15 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
     if limit < 1:
         limit = _DEFAULT_READ_LINES
     limit = min(limit, _ABSOLUTE_MAX_LINES)
-    line_numbers = args.get("line_numbers", False)
-    if isinstance(line_numbers, str):
-        line_numbers = line_numbers.lower() in ("true", "1", "yes")
+
+    # Convert from_line/to_line to offset/limit EARLY, before file size guard
+    if from_line is not None and to_line is not None:
+        if to_line >= from_line:
+            offset = from_line - 1
+            limit = to_line - from_line + 1
+    elif from_line is not None:
+        offset = from_line - 1
+    line_numbers = True  # always show line numbers (pi-style)
     hash_lines = args.get("hash_lines", False)  # default off — only use when editing
     if isinstance(hash_lines, str):
         hash_lines = hash_lines.lower() in ("true", "1", "yes")
@@ -440,15 +459,18 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
             continue
         resolved = safety_result.resolved_path
 
-        # --- File size guard (Dirac: warn on >50KB full reads) ---
-        if offset == 0 and limit >= _DEFAULT_READ_LINES:
+        # --- File size guard: warn on >50KB full reads (no explicit range) ---
+        is_full_read = (offset == 0 and limit >= _DEFAULT_READ_LINES
+                        and from_line is None and to_line is None
+                        and args.get("offset") is None)
+        if is_full_read:
             try:
                 fsize = os.path.getsize(resolved)
                 if fsize > _MAX_FILE_READ_SIZE:
                     results.append(
                         f"--- {path} ---\n"
                         f"[WARNING] File is {fsize // 1024}KB, exceeds {_MAX_FILE_READ_SIZE // 1024}KB "
-                        f"limit for full reads. Use offset/limit to read ranges, "
+                        f"limit for full reads. Use from_line/to_line to read ranges, "
                         f"or get_file_skeleton / get_function for surgical reads."
                     )
                     continue
@@ -468,10 +490,16 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
             any_failed = True
             continue
 
-        # --- Raw-content shortcut (no formatting, no offset/limit needed) ---
-        if offset == 0 and limit >= _DEFAULT_READ_LINES and not line_numbers and not hash_lines:
+        # --- Raw-content shortcut ---
+        if offset == 0 and limit >= _DEFAULT_READ_LINES and not hash_lines:
+            all_lines = raw_content.split("\n")
+            if all_lines and all_lines[-1] == "":
+                all_lines.pop()
+            total_lines = len(all_lines)
+            gutter_width = max(len(str(total_lines)), 1)
+            collected = [f"{i+1:>{gutter_width}} {line}" for i, line in enumerate(all_lines[:limit])]
             header = f"--- {path} ---\n" if is_multi else ""
-            results.append(header + raw_content)
+            results.append(header + "\n".join(collected))
             _READ_FILES.add(resolved)
             continue
 
@@ -503,12 +531,24 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
 
 @_summarize("read_file")
 def _read_file_summary(args: dict) -> str:
-    paths = args.get("paths") or [args.get("path", "?")]
-    if isinstance(paths, list) and len(paths) <= 3:
-        return f"read_file({', '.join(paths)})"
-    elif isinstance(paths, list):
-        return f"read_file({len(paths)} files)"
-    return f"read_file({paths})"
+    path = args.get("path", args.get("paths", ["?"])[0] if args.get("paths") else "?")
+    parts = path.replace("\\", "/").split("/")
+    short = "/".join(parts[-2:]) if len(parts) > 2 else path
+    from_line = args.get("from_line")
+    to_line = args.get("to_line")
+    if from_line is not None and to_line is not None:
+        return f"read_file({short}, {from_line}:{to_line})"
+    if from_line is not None:
+        return f"read_file({short}, from={from_line})"
+    offset = args.get("offset")
+    limit = args.get("limit")
+    if offset is not None and limit is not None:
+        start = int(offset) + 1
+        end = start + int(limit) - 1
+        return f"read_file({short}, {start}:{end})"
+    if offset is not None:
+        return f"read_file({short}, from={int(offset) + 1})"
+    return f"read_file({short})"
 
 
 # ---------------------------------------------------------------------------

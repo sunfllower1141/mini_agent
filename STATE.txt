@@ -1,9 +1,24 @@
 # mini_agent Architecture Map
-# Last updated: 2026-06-22 (pi-style LLM summarization compaction)
+# Last updated: 2026-06-23 (real-time per-tool-call metrics to UI)
 
 #
 # This file is the agent's map of the codebase. Update it after completed changes.
 # Behavioral rules live in AGENTS.md. Long-term facts live in core memory.
+
+- **Real-time per-tool-call metrics to UI (2026-06-23)** — Fixed stats emission
+  so the Electron status bar updates live during a turn, not just at turn-end:
+  - **api.py** `_report_cache_hit()`: Removed early return when cache data is 0;
+    always calls `_emit_cache_status_line()` so context pressure, token counts,
+    and cost estimates reach the UI on every API call (not just when cache hits).
+  - **api.py** `_emit_cache_status_line()`: Added `session_tokens` and
+    `session_cost` fields to the stats dict for the renderer's live display.
+  - **core/llm.py** `_tool_execution_phase()`: Emits stats after tool execution
+    (both streaming-only and non-streaming paths), so context pressure updates
+    reflect newly appended tool results. Uses `_TOOL_CONTEXT._emit_realtime_stats`
+    lambda to avoid circular imports from api.py.
+  - **Render pipeline**: `server.py` `_on_stats_update` → `main.js` `stream:stats`
+    → `App.jsx` live state updates was already wired; now fires on every API
+    response + after tool execution, not just at turn boundary.
 
 - **Pi-style LLM summarization compaction (2026-06-22)** — Replaced Dirac-style
   half/quarter truncation with pi's LLM summarization approach.  New module

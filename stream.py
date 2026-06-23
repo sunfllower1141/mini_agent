@@ -105,20 +105,11 @@ def _parse_stream(response: requests.Response, on_token: Callable[[str], None] |
                 # Reasoning content (thinking mode) -- forward via on_token or print
                 # OpenRouter returns this as delta["reasoning"] for some models,
                 # while DeepSeek's native API uses delta["reasoning_content"].
-                # Check both field names.
                 _reason_text = (delta.get("reasoning_content") or delta.get("reasoning") or "")
                 if _reason_text:
-                    if not reasoning_header_printed and not full_content:
-                        if on_token:
-                            on_token(THINKING_START)
-                        else:
-                            print(c("  thinking...", DIM), file=sys.stderr, flush=True)
-                        reasoning_header_printed = True
                     full_reasoning += _reason_text
                     if on_token:
                         on_token(_reason_text)
-                    else:
-                        print(c(_reason_text, GREEN), end="", file=sys.stderr, flush=True)
 
                 # Tool calls -- accumulate fragments by index and detect completion
                 if "tool_calls" in delta:
@@ -156,8 +147,7 @@ def _parse_stream(response: requests.Response, on_token: Callable[[str], None] |
                                     on_tool_ready(ready)
                                 except (json.JSONDecodeError, ValueError):
                                     pass  # still fragmentary
-            except (json.JSONDecodeError, KeyError, TypeError, IndexError, ValueError, AttributeError) as _e:
-                print(f"[SSE] stream parse: {_e}", file=sys.stderr)
+            except (json.JSONDecodeError, KeyError, TypeError, IndexError, ValueError, AttributeError):
                 continue
     except (
         requests.exceptions.ChunkedEncodingError,
@@ -165,20 +155,8 @@ def _parse_stream(response: requests.Response, on_token: Callable[[str], None] |
         requests.exceptions.StreamConsumedError,
         OSError,
     ) as exc:
-        print(
-            f"\n  WARNING: stream interrupted ({exc}) -- using partial response",
-            file=sys.stderr, flush=True,
-        )
+        print(f"  stream interrupted ({exc})", file=sys.stderr, flush=True)
 
-    if full_reasoning and not on_token:
-        print(file=sys.stderr, flush=True)  # newline after dimmed reasoning block
-
-    if full_content and not on_token:
-        print(flush=True)  # final newline after streamed text
-
-    # If thinking was opened but never closed (e.g. reasoning-only response
-    # with tool calls and no text content), close it now so subsequent tokens
-    # in this turn don't get stuck in the thinking panel.
     if full_reasoning and not thinking_ended and on_token:
         on_token(THINKING_END)
 

@@ -384,6 +384,7 @@ def init_session(workspace: str, cli_args: object | None = None) -> dict:
     # multiple times in the same session.
     _TOOL_CONTEXT._scratchpad_injected = False
     _TOOL_CONTEXT._git_diff_injected = False
+    _TOOL_CONTEXT._in_tool_loop = False
     _TOOL_CONTEXT._handoff_injected = False
     _TOOL_CONTEXT._state_txt_injected = False
     _TOOL_CONTEXT._tasks_injected = False

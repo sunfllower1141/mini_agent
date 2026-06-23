@@ -1,7 +1,7 @@
 # Session Handoff
 # Auto-generated at session end. Read at next session start for continuity.
 
-## Last Session: 2026-06-23 07:41 UTC
+## Last Session: 2026-06-23 16:51 UTC
 
 ### What I Changed
 (no git changes detected)
@@ -10,19 +10,14 @@
 (none recorded)
 
 ### Recent Conversation
-- push to main
-- push to main
-- push to main
-- push to main
-- hello
+- check app.jsx
 
 ### Plan Progress
-Plan (3/5 complete):
-  [V] 1. Tune cache constants (threshold, max entries, TTL, adaptive params) for higher hit rate
-  [V] 2. Add query normalization to increase both exact and semantic matches
-  [V] 3. Add query key extraction to cache at a better granularity than raw last-user-message
-  [o] 4. Run existing tests to verify no regressions
-  [o] 5. Add a simple unit test for the query normalization
+Plan (4/4 complete):
+  [V] 1. Fix `_report_cache_hit()` early-return in api.py — always emit stats, not just when cache data > 0
+  [V] 2. Add `session_tokens` and `session_cost` fields to stats dict in `_emit_cache_status_line()`
+  [V] 3. Emit stats after tool execution in core/llm.py so metrics update per-tool-call, not just per-API-call
+  [V] 4. Verify: syntax check, then run relevant tests
 
 ### Modified Files
 (none tracked)

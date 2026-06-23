@@ -1017,37 +1017,10 @@ def _compress_stale_tool_results(messages: list[dict]) -> None:
 
     Only tool results outside the *keep_recent* window are compressed;
     recent results stay intact for the model to reference.
-
-    CRITICAL (Cache-First Loop): Tool results BEFORE the last non-transient
-    user message are part of the cached prefix (protected by cache_control
-    on that user message).  Compressing them in-place would change the
-    byte pattern and invalidate DeepSeek's KV-cache.  We only compress
-    tool results AFTER the last user message (the current/ongoing turn).
     """
-    # Find the index of the last non-transient user message.
-    # Only tool results AFTER this index are safe to compress in-place.
-    last_user_idx = -1
-    for i in range(len(messages) - 1, -1, -1):
-        m = messages[i]
-        if m.get("role") == "user" and not m.get("_transient"):
-            last_user_idx = i
-            break
+    from memory.memory_prune import _compress_tool_results
 
-    # If no user message found, fall back to the old behavior (safe: empty conversation).
-    if last_user_idx < 0:
-        from memory.memory_prune import _compress_tool_results
-        _compress_tool_results(messages, keep_recent=12)
-        return
-
-    # Split: prefix region (cached, must NOT be mutated) vs tail (uncached, safe to compress).
-    prefix = messages[:last_user_idx + 1]
-    tail = messages[last_user_idx + 1:]
-
-    # Only compress tool results in the uncached tail.
-    # The prefix region is protected by cache_control on the last user message.
-    if tail:
-        from memory.memory_prune import _compress_tool_results
-        _compress_tool_results(tail, keep_recent=12)
+    _compress_tool_results(messages, keep_recent=12)
 
 
 def _inject_failure_pattern_warnings(
@@ -1609,7 +1582,11 @@ def _inject_context(
     """
     # Compaction must run FIRST -- before injecting new context messages --
     # so fresh context isn't immediately pruned.
-    _compact_if_needed(messages)
+    # BUT only during the opening turn (no pending tool results). If we're
+    # mid-tool-call-loop, compaction would drop results the LLM hasn't seen.
+    _in_tool_loop = getattr(_TOOL_CONTEXT, "_in_tool_loop", False)
+    if not _in_tool_loop:
+        _compact_if_needed(messages)
 
     # Build knowledge graph at startup (one-time, lazy -- no-op if already built)
     workspace = read_gate.workspace_root if read_gate else ""
@@ -1660,7 +1637,7 @@ def _inject_context(
     # _inject_confidence_web_search_nudge(messages, turn_count=turn_count)  # disabled: in .mini_agent.rules
     # _inject_tool_graph_context(messages)              # disabled: subtle, rarely helps
     # _inject_experience_context(messages, memory_store=memory_store)  # disabled: startup context covers this
-    # _inject_dead_tool_pruning(messages, turn_count=turn_count)       # disabled: skills handle internally
+    _inject_dead_tool_pruning(messages, turn_count=turn_count)
     # _inject_post_edit_verification(messages)          # disabled: knowledge graph handles
     # _inject_auto_file_skeletons(messages, read_gate=read_gate)       # disabled: agent should discover
     # _inject_mistake_count_context(messages)           # disabled: circuit breaker covers
@@ -2060,9 +2037,18 @@ def _compact_if_needed(messages: list[dict]) -> None:
         return
 
     # Use pi-style thresholds: compact when tokens > window - reserve
+    # Prefer real prompt_tokens from last API call over heuristic estimate
     from core.pi_compaction import should_compact, compact, _estimate_messages_tokens
 
-    token_count = _estimate_messages_tokens(messages)
+    # Pi-style: use actual prompt_tokens from the last API usage response.
+    # This is far more accurate than the chars/4 heuristic and prevents
+    # premature or delayed compaction.
+    last_usage = getattr(_TOOL_CONTEXT, "_last_turn_usage", None)
+    if last_usage and last_usage.get("prompt_tokens", 0) > 0:
+        token_count = last_usage["prompt_tokens"]
+    else:
+        token_count = _estimate_messages_tokens(messages)
+
     if not should_compact(token_count, context_window):
         return
 

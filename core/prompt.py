@@ -206,7 +206,7 @@ STATIC_PROMPT = _STATIC_PROMPT = (
     "Guidelines:\n"
     "- Be concise in your responses\n"
     "- Show file paths clearly when working with files\n"
-    "- Use read_file with offset/limit for large files\n"
+    "- Use read_file with from_line:to_line for line ranges (e.g., from_line=10, to_line=50). Lines are 1-indexed inclusive.\n"
     "- Batch independent tool calls in a single response\n"
     "- Read before edit; verify after change\n"
     "- Prefer pi-style oldText/newText edits (no anchors needed)\n"

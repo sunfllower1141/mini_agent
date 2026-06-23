@@ -976,8 +976,15 @@ body::before {
   color: var(--accent);
   flex-shrink: 0;
   user-select: none;
-  font-weight: 600;
-  margin-right: 6px;
+  display: flex;
+  align-items: center;
+  margin-right: 8px;
+  opacity: 0.7;
+}
+
+.prompt svg {
+  display: block;
+  transform: scaleX(-1);
 }
 
 #user-input {

@@ -287,8 +287,8 @@ def log_tool_failure(
 
     logger = get_logger("tools")
     logger.warning(
-        "Tool failure | tool=%s fingerprint=%s content=%.200s",
-        tool_name, fingerprint, error_content,
+        "  %s  FAIL  %.200s",
+        tool_name, error_content,
         extra={"event_type": "tool_failure", "tool_name": tool_name,
                "error_fingerprint": fingerprint, "turn": turn},
     )

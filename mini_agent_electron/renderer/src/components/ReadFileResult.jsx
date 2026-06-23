@@ -59,27 +59,26 @@ const FILENAME_STYLE = {
 // -- component ---------------------------------------------------------------
 
 export default function ReadFileResult({ content, toolName }) {
-  const { source, filePath, lang, startLine, lineHashes } = useMemo(() => {
-    if (!content) return { source: '', filePath: null, lang: null, startLine: 1, lineHashes: [] };
+  const { source, filePath, lang, startLine, lineHashes, hasLineNumbers } = useMemo(() => {
+    if (!content) return { source: '', filePath: null, lang: null, startLine: 1, lineHashes: [], hasLineNumbers: false };
     const path = extractPath(toolName);
-    // Parse line numbers and optional hash anchors before stripping prefixes
     let startLine = 1;
     const lines = content.split('\n');
     const hashes = [];
+    // Check if content has line number prefixes (read_file with line_numbers=True)
     const firstMatch = lines[0]?.match(READFILE_HASHLINE_RE);
+    const hasLineNumbers = !!firstMatch;
     if (firstMatch) {
       startLine = parseInt(firstMatch[1], 10);
     }
-    // Strip the full line-number (and hash) prefix from each line,
-    // collecting hashes for the gutter display.
     const stripped = lines
       .map((line) => {
         const m = line.match(READFILE_HASHLINE_RE);
         hashes.push(m ? m[2] || null : null);
-        return line.replace(READFILE_HASHLINE_RE, '');
+        return hasLineNumbers ? line.replace(READFILE_HASHLINE_RE, '') : line;
       })
       .join('\n');
-    return { source: stripped, filePath: path, lang: extToLang(path), startLine, lineHashes: hashes };
+    return { source: stripped, filePath: path, lang: extToLang(path), startLine, lineHashes: hashes, hasLineNumbers };
   }, [content, toolName]);
 
   if (!source.trim()) return null;
@@ -101,7 +100,7 @@ export default function ReadFileResult({ content, toolName }) {
         fontSize="0.78em"
         language={lang}
         highlight={true}
-        lineNumbers={true}
+        lineNumbers={hasLineNumbers}
         startLine={startLine}
         lineHashes={lineHashes}
         wrap={true}

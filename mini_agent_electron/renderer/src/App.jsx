@@ -543,7 +543,8 @@ function AppShell() {
         toolName = summary;
         toolArgs = '';
       }
-      const key = `tool_${summary}`;
+      // Include counter to make key unique across repeated calls to same tool
+      const key = `tool_${summary}_${nextLineId()}`;
       // Push buffer with metadata + key for later upsert
       toolOutputStack.current.push({
         lines: [],
@@ -1305,7 +1306,12 @@ function AppShell() {
               </div>
             )}
             <div id="input-container">
-              <span className="prompt">{'\u276F'}</span>
+              <span className="prompt">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="9 10 4 15 9 20"/>
+                  <path d="M20 4v7a4 4 0 0 1-4 4H4"/>
+                </svg>
+              </span>
               <textarea
                 ref={inputRef}
                 id="user-input"

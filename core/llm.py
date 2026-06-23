@@ -19,7 +19,7 @@ from typing import Any, Callable, TYPE_CHECKING
 
 import requests
 
-from api import APIError, format_tool_detail, call_llm, call_deepseek  # noqa: F401 call_deepseek re-exported for tests
+from api import APIError, format_tool_detail, call_llm, call_deepseek, ContextWindowExceeded  # noqa: F401 call_deepseek re-exported for tests
 from .config import AgentConfig
 from tools import execute_tool, tool_summary, clear_tool_cache, _TOOL_CONTEXT
 from .safety import ReadSafetyGate, WriteSafetyGate
@@ -544,23 +544,11 @@ def _api_call_phase(
                 on_tool_start(tool_summary(tc))
             except Exception:
                 pass
-        # Debug logging to stderr -- best-effort, must not crash tool execution.
-        try:
-            import sys as _sys_otr
-            _sys_otr.stderr.write(f"[_on_tool_ready] calling execute_tool for '{tc.get('function',{}).get('name','?')}'...\n")
-            _sys_otr.stderr.flush()
-        except Exception:
-            pass
         try:
             result = execute_tool(tc, write_gate, read_gate,
                                   on_output=on_tool_output,
                                   approve_callback=approve_callback,
                                   cancel_event=cancel_event)
-            try:
-                _sys_otr.stderr.write(f"[_on_tool_ready] execute_tool returned success={result.success}\n")
-                _sys_otr.stderr.flush()
-            except Exception:
-                pass
             executed_tool_indices.add(idx)
         except Exception as _exc:
             # NEVER leave a tool_call_id orphaned -- a failure result
@@ -631,6 +619,9 @@ def _tool_execution_phase(
         # Record streaming-executed tools to ToolGraph
         _record_tool_sequence_to_graph(deferred_stream_results)
         _save_turn_summary(turn_count, msg, deferred_stream_results, messages)
+        # --- Emit real-time stats after streaming tool execution ---
+        _emit = getattr(_TOOL_CONTEXT, '_emit_realtime_stats', None)
+        if _emit: _emit()
         return False  # continue the turn loop
 
     # Keep all tool_calls so deferred results have a reference
@@ -664,6 +655,9 @@ def _tool_execution_phase(
     _record_tool_sequence_to_graph(all_results)
 
     _save_turn_summary(turn_count, msg, tool_results, messages)
+    # --- Emit real-time stats after tool execution ---
+    _emit = getattr(_TOOL_CONTEXT, '_emit_realtime_stats', None)
+    if _emit: _emit()
     return True  # continue the turn loop
 
 
@@ -735,6 +729,7 @@ def run_agent_turn(
             turn_count += 1
             _TOOL_CONTEXT._turn_count = turn_count
             if cancel_event is not None and cancel_event.is_set():
+                _TOOL_CONTEXT._in_tool_loop = False
                 return None
 
             # ----- phase 1: injection -----
@@ -748,15 +743,42 @@ def run_agent_turn(
             )
 
             # ----- phase 2: API call -----
-            msg, deferred_stream_results, executed_tool_indices = _api_call_phase(
-                messages, config, session, write_gate, read_gate,
-                on_token=on_token,
-                on_tool_start=on_tool_start,
-                on_tool_end=on_tool_end,
-                on_tool_output=on_tool_output,
-                approve_callback=approve_callback,
-                cancel_event=cancel_event,
-            )
+            try:
+                msg, deferred_stream_results, executed_tool_indices = _api_call_phase(
+                    messages, config, session, write_gate, read_gate,
+                    on_token=on_token,
+                    on_tool_start=on_tool_start,
+                    on_tool_end=on_tool_end,
+                    on_tool_output=on_tool_output,
+                    approve_callback=approve_callback,
+                    cancel_event=cancel_event,
+                )
+            except ContextWindowExceeded:
+                # Pi-style: auto-compact and retry on context overflow.
+                # Compact the conversation and retry the API call once.
+                _log.warning("context_window_exceeded, auto-compacting and retrying")
+                from core.pi_compaction import compact as _pi_compact
+                import os as _os_cw
+                _api_key = getattr(config, "api_key", "") or _os_cw.environ.get("DEEPSEEK_API_KEY", "")
+                _model = getattr(config, "summarizer_model", "") or "deepseek-chat"
+                _base = getattr(config, "summarizer_base_url", "") or "https://api.deepseek.com/v1"
+                _pi_compact(
+                    messages,
+                    config.context_window,
+                    api_key=_api_key,
+                    model=_model,
+                    base_url=_base,
+                )
+                # Retry once after compaction
+                msg, deferred_stream_results, executed_tool_indices = _api_call_phase(
+                    messages, config, session, write_gate, read_gate,
+                    on_token=on_token,
+                    on_tool_start=on_tool_start,
+                    on_tool_end=on_tool_end,
+                    on_tool_output=on_tool_output,
+                    approve_callback=approve_callback,
+                    cancel_event=cancel_event,
+                )
 
             if cancel_event is not None and cancel_event.is_set():
                 return None
@@ -788,10 +810,14 @@ def run_agent_turn(
                     msg["_turn_count"] = turn_count
                 messages.append(msg)
                 _save_turn_summary(turn_count, msg, [], messages)
+                _TOOL_CONTEXT._in_tool_loop = False
                 # _run_consolidation(messages, config)  # disabled: causes API connection collision + cost surge
                 return msg
 
             # ----- phase 3: tool execution -----
+            # Mark that we're inside a tool-call loop so _compact_if_needed
+            # won't fire and drop results the LLM hasn't processed yet.
+            _TOOL_CONTEXT._in_tool_loop = True
             # Failure pattern warnings are injected inside
             # _tool_execution_phase -> _inject_pre_execution_context()
             # (not here -- avoids double injection).
@@ -851,6 +877,7 @@ def run_agent_turn(
     finally:
         # Restore console title (glazewm detection marker)
         _set_console_title("mini_agent")
+        _TOOL_CONTEXT._in_tool_loop = False
         # Only close the session if we created it; caller-managed sessions
         # (passed via the session parameter) are the caller's responsibility.
         if session is not _original_session and hasattr(session, "close"):

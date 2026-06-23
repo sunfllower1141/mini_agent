@@ -475,7 +475,6 @@ CORE_TOOLS: list[str] = [
     "read_file",
     "write_file",
     "edit_file",
-    "edit_lines",
     "run_shell",
     "search_files",
     "list_directory",
