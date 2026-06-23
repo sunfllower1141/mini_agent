@@ -470,8 +470,9 @@ def _read_file(args: dict, _wg: WriteSafetyGate, rg: ReadSafetyGate) -> ToolResu
                     results.append(
                         f"--- {path} ---\n"
                         f"[WARNING] File is {fsize // 1024}KB, exceeds {_MAX_FILE_READ_SIZE // 1024}KB "
-                        f"limit for full reads. Use from_line/to_line to read ranges, "
-                        f"or get_file_skeleton / get_function for surgical reads."
+                        f"limit for full reads. Read in chunks: from_line=1, to_line=300, "
+                        f"then from_line=301, to_line=600, etc. "
+                        f"Or use get_file_skeleton / get_function for surgical reads."
                     )
                     continue
             except OSError:
