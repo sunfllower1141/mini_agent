@@ -1528,9 +1528,37 @@ def _edit_lines(args: dict, wg: WriteSafetyGate, _rg: ReadSafetyGate) -> ToolRes
 @_summarize("edit_lines")
 def _edit_lines_summary(args: dict) -> str:
     path = args.get("path", "?")
+    parts = path.replace("\\", "/").split("/")
+    short = "/".join(parts[-2:]) if len(parts) > 2 else path
     edits = args.get("edits", [])
     if not edits:
-        return f"edit_file({path}, 0 edits)"
+        return f"edit_file({short}, 0 edits)"
+
+    details = []
+    for edit in edits:
+        from_line = edit.get("from")
+        if from_line is not None:
+            edit_type = edit.get("edit_type", "replace")
+            to_line = edit.get("to", from_line)
+            new_text = edit.get("new_text", "")
+            new_lines = new_text.count("\n")
+            plus = f"+{new_lines}L" if new_lines else ""
+            if edit_type in ("insert_after", "insert_before"):
+                arrow = "\u2193" if edit_type == "insert_after" else "\u2191"
+                details.append(f"{arrow}L{from_line}{plus}")
+            elif from_line == to_line:
+                details.append(f"L{from_line}{plus}")
+            else:
+                details.append(f"L{from_line}\u2013{to_line}{plus}")
+        else:
+            old_t = edit.get("oldText", "")
+            preview = old_t[:30].replace("\n", " ")
+            if len(old_t) > 30:
+                preview += "..."
+            details.append('"' + preview + '"' if preview else "new")
+
+    detail_str = ", ".join(details)
+    return f"edit_file({short}, {len(edits)} edit{'s' if len(edits) != 1 else ''}: {detail_str})"
 
     parts = []
     for edit in edits:
@@ -1850,7 +1878,7 @@ def _get_file_skeleton(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate,
     if not paths:
         return ToolResult(success=False, content=_err("MISSING", "paths"))
 
-    include_anchors = args.get("include_anchors", True)
+    include_anchors = args.get("include_anchors", False)
     is_subagent = getattr(_TOOL_CONTEXT, "_is_subagent", False)
     task_id = getattr(_current_agent_id, "task_id", None)
 
@@ -1934,7 +1962,7 @@ def _get_function(args: dict, wg: WriteSafetyGate, rg: ReadSafetyGate,
     if not function_names:
         return ToolResult(success=False, content=_err("MISSING", "function_names"))
 
-    include_anchors = args.get("include_anchors", True)
+    include_anchors = args.get("include_anchors", False)
     task_id = getattr(_current_agent_id, "task_id", None)
 
     results = []
