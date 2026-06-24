@@ -1011,16 +1011,27 @@ def _inject_system_reminder(messages: list[dict], *, turn_count: int) -> None:
 def _compress_stale_tool_results(messages: list[dict]) -> None:
     """Compress tool results older than 12 messages behind the tail.
 
-    Uses the content-aware compression from ``memory_prune`` (same
-    algorithm used during persistence), so tool results are compressed
-    consistently throughout the turn loop -- not just on save.
-
-    Only tool results outside the *keep_recent* window are compressed;
-    recent results stay intact for the model to reference.
+    CRITICAL (Cache-First Loop): Only compresses tool results AFTER the last
+    non-transient user message.  Tool results in the cached prefix must stay
+    byte-identical or DeepSeek's KV-cache is invalidated.
     """
-    from memory.memory_prune import _compress_tool_results
+    # Find the last non-transient user message — everything before it is cached.
+    last_user_idx = -1
+    for i in range(len(messages) - 1, -1, -1):
+        m = messages[i]
+        if m.get("role") == "user" and not m.get("_transient"):
+            last_user_idx = i
+            break
 
-    _compress_tool_results(messages, keep_recent=12)
+    if last_user_idx < 0:
+        from memory.memory_prune import _compress_tool_results
+        _compress_tool_results(messages, keep_recent=12)
+        return
+
+    tail = messages[last_user_idx + 1:]
+    if tail:
+        from memory.memory_prune import _compress_tool_results
+        _compress_tool_results(tail, keep_recent=12)
 
 
 def _inject_failure_pattern_warnings(
