@@ -2,25 +2,25 @@ import { useState, useEffect, memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
+interface DeferredMarkdownProps {
+  text?: string;
+  markdown?: boolean;
+}
+
 /**
- * Shows raw text in a <pre> instantly (zero parse cost), then swaps to
- * ReactMarkdown on the next frame.  This prevents the synchronous
- * ReactMarkdown parse from blocking the main thread on large blocks.
- *
- * For thinking blocks, set markdown={false} to stay as plain <pre> forever.
+ * Shows raw text in a <pre> instantly, then swaps to ReactMarkdown on next frame.
  */
-const DeferredMarkdown = memo(function DeferredMarkdown({ text, markdown = true }) {
-  const [parsed, setParsed] = useState(null);
+const DeferredMarkdown = memo(function DeferredMarkdown({ text, markdown = true }: DeferredMarkdownProps) {
+  const [parsed, setParsed] = useState<string | null>(null);
 
   useEffect(() => {
     if (!markdown) return;
-    const id = requestAnimationFrame(() => setParsed(text));
+    const id = requestAnimationFrame(() => setParsed(text ?? null));
     return () => cancelAnimationFrame(id);
   }, [text, markdown]);
 
   if (!text || !text.trim()) return null;
 
-  // Plain pre mode -- used for thinking blocks
   if (!markdown) {
     return (
       <pre style={{ whiteSpace: 'pre-wrap', margin: 0, fontFamily: 'inherit', fontSize: 'inherit' }}>

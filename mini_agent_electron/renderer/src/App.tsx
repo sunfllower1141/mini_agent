@@ -202,12 +202,11 @@ function DiffView({ diff }) {
 // Web Audio notification chime -- short ascending two-tone beep
 function playNotificationSound() {
   try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
     const now = ctx.currentTime;
     const gain = ctx.createGain();
-    gain.connect(ctx.destination);
-    gain.gain.setValueAtTime(0.12, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+      gain.connect(ctx.destination);
+    gain.gain.setValueAtTime(0.12, now);   gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
     [660, 880].forEach((freq, i) => {
       const osc = ctx.createOscillator();
       osc.type = 'sine';

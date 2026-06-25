@@ -4,36 +4,35 @@ import remarkGfm from 'remark-gfm';
 import CodeBlock from './CodeBlock';
 import ThinkingBlock from './ThinkingBlock';
 
-const markdownComponents = {
-  code({ className, children, inline, ...props }) {
+const markdownComponents: Record<string, React.ComponentType<any>> = {
+  code({ className, children, inline, ...props }: any) {
     const match = /language-(\w+)/.exec(className || '');
     const lang = match ? match[1] : undefined;
     const code = String(children).replace(/\n$/, '');
-    return <CodeBlock code={code} language={lang} inline={inline} highlight={false} />;
+    return (
+      <CodeBlock code={code} language={lang} inline={inline} highlight={false} {...props} />
+    );
   },
 };
 
-/**
- * A single log line -- supports plain text, markdown,
- * and structured tool-name rendering.
- *
- * Security: We NEVER use dangerouslySetInnerHTML for LLM-generated content.
- */
-
-// React auto-escapes content inside {}, so we only need to coerce to string.
-// Manual HTML-escaping (the old version) caused double-escaping: " -> &quot;.
-function escapeHtml(text) {
+function escapeHtml(text: string): string {
   if (!text) return '';
-  return String(text);
+  const div = document.createElement('div');
+  div.appendChild(document.createTextNode(text));
+  return div.innerHTML;
 }
 
-const LogLine = memo(function LogLine({ line }) {
-  // React component -- render directly
+interface LogLineProps {
+  line: LogLine;
+}
+
+const LogLine = memo(function LogLine({ line }: LogLineProps) {
+  // Inline component (e.g. ReadFileResult, SearchResults)
   if (line.component) {
     return <div className={line.cls || ''}>{line.component}</div>;
   }
 
-  // Structured tool name (replaces the old dangerouslySetInnerHTML for html)
+  // Structured tool name
   if (line.toolName) {
     return (
       <div className={line.cls || ''}>
@@ -43,7 +42,7 @@ const LogLine = memo(function LogLine({ line }) {
     );
   }
 
-  // Markdown rendering (NO dangerouslySetInnerHTML -- LLM output is sanitised)
+  // Markdown rendering
   if (line.markdown) {
     return (
       <div className={`md-line ${line.cls || ''}`} style={{ whiteSpace: 'normal' }}>
@@ -54,18 +53,18 @@ const LogLine = memo(function LogLine({ line }) {
             ...markdownComponents,
           }}
         >
-          {line.text}
+          {line.text ?? ''}
         </ReactMarkdown>
       </div>
     );
   }
 
-  // Collapsible thinking box (sits inline among tool lines)
+  // Collapsible thinking box
   if (line.thinkingText !== undefined) {
     return <ThinkingBlock text={line.thinkingText} active={line.thinkingActive} />;
   }
 
-  // Prompt separator -- bold section divider marking user prompt boundaries in tools panel
+  // Prompt separator
   if (line.cls === 'prompt-separator') {
     return (
       <div className="prompt-separator">
@@ -74,12 +73,10 @@ const LogLine = memo(function LogLine({ line }) {
         <span className="prompt-separator-line" />
       </div>
     );
-
   }
 
-  // Plain text -- HTML-escaped
-
-  return <div className={line.cls || ''}>{escapeHtml(line.text)}</div>;
+  // Plain text
+  return <div className={line.cls || ''}>{escapeHtml(line.text ?? '')}</div>;
 });
 
 export default LogLine;

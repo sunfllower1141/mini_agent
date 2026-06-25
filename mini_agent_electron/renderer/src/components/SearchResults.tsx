@@ -1,85 +1,74 @@
 import { useMemo } from 'react';
 
-// -- parser ------------------------------------------------------------------
-
 // search_files / rg format:
-//   "E:\\path\\file.py:42:  matched content"
-//   "/unix/path/file.py:42:matched content"
-//
-// find_symbol format:
-//   "  def    some_func  ->  E:\\path\\file.py:322"
-//
-// Greedy .+ then backtrack to last :\d+: to handle Windows drive-letter colons.
 const SEARCH_LINE_RE = /^(.+):(\d+): ?(.*)$/;
 
-// find_symbol lines: optional leading whitespace, kind, name, "->", path:line
-const SYMBOL_LINE_RE = /^\s*(\S+)\s+(\S+)\s+->\s+(.+):(\d+)$/;
-
-function parseLine(line) {
-  // Try search_files format first
-  let m = line.match(SEARCH_LINE_RE);
-  if (m) {
-    return { file: m[1], lineno: parseInt(m[2], 10), content: m[3] };
-  }
-  // Try find_symbol format
-  m = line.match(SYMBOL_LINE_RE);
-  if (m) {
+function parseLine(line: string): Record<string, any> {
+  // find_symbol format
+  const symbolMatch = line.match(/^\s{2}(def|class|fn|const|let|var|function)\s+(.+?)\s+->\s+(.+?):(\d+)$/);
+  if (symbolMatch) {
     return {
-      kind: m[1],
-      symbol: m[2],
-      file: m[3],
-      lineno: parseInt(m[4], 10),
+      kind: symbolMatch[1],
+      symbol: symbolMatch[2],
+      file: symbolMatch[3],
+      lineno: symbolMatch[4],
+    };
+  }
+  // search_files format
+  const searchMatch = line.match(SEARCH_LINE_RE);
+  if (searchMatch) {
+    return {
+      file: searchMatch[1],
+      lineno: searchMatch[2],
+      content: searchMatch[3],
     };
   }
   return { raw: line };
 }
 
-// -- styles ------------------------------------------------------------------
-
-const CONTAINER_STYLE = {
+const CONTAINER_STYLE: React.CSSProperties = {
   padding: '6px 0',
   margin: '4px 0',
   maxWidth: '100%',
-  fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Code", monospace',
-  fontSize: '0.82em',
-  lineHeight: '1.65',
 };
 
-const ROW_STYLE = {
+const ROW_STYLE: React.CSSProperties = {
   padding: '1px 0',
   whiteSpace: 'pre-wrap',
   wordBreak: 'break-word',
 };
 
-const FILE_STYLE = {
+const FILE_STYLE: React.CSSProperties = {
   color: '#6cc8e8',
 };
 
-const LINENO_SPAN = {
+const LINENO_SPAN: React.CSSProperties = {
   color: '#b8d975',
   userSelect: 'none',
 };
 
-const CONTENT_STYLE = {
+const CONTENT_STYLE: React.CSSProperties = {
   color: '#e0e0e0',
 };
 
-const KIND_STYLE = {
+const KIND_STYLE: React.CSSProperties = {
   color: '#ce9d7c',
 };
 
-const SYMBOL_STYLE = {
+const SYMBOL_STYLE: React.CSSProperties = {
   color: '#dcdcaa',
 };
 
-const RAW_STYLE = {
+const RAW_STYLE: React.CSSProperties = {
   color: '#e0e0e0',
   padding: '1px 0',
 };
 
-// -- component ---------------------------------------------------------------
+interface SearchResultsProps {
+  content?: string;
+}
 
-export default function SearchResults({ content }) {
+export default function SearchResults({ content }: SearchResultsProps) {
   const lines = useMemo(() => {
     if (!content) return [];
     return content.split('\n').map((line, i) => ({
@@ -92,7 +81,7 @@ export default function SearchResults({ content }) {
 
   return (
     <div style={CONTAINER_STYLE}>
-      {lines.map((entry) => {
+      {lines.map((entry: any) => {
         if (entry.raw !== undefined) {
           return (
             <div key={entry.key} style={RAW_STYLE}>
@@ -100,7 +89,6 @@ export default function SearchResults({ content }) {
             </div>
           );
         }
-        // find_symbol format (has kind + symbol)
         if (entry.kind) {
           return (
             <div key={entry.key} style={ROW_STYLE}>
@@ -114,7 +102,6 @@ export default function SearchResults({ content }) {
             </div>
           );
         }
-        // search_files format (file + lineno + content)
         return (
           <div key={entry.key} style={ROW_STYLE}>
             <span style={FILE_STYLE}>{entry.file}</span>

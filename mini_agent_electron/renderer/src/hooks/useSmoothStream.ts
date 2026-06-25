@@ -1,56 +1,49 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
+const TICK_MS = 16; // ~60 fps
+
+interface UseSmoothStreamResult {
+  displayedText: string;
+  addChunk: (text: string) => void;
+  reset: () => void;
+  flush: () => string;
+}
+
 /**
  * useSmoothStream -- buffer incoming text chunks and animate them
- * with a smooth exponential catch-up at ~60 fps.  Each tick advances
- * by ceil(behind / 4), so the animation is fast when far behind and
- * slows naturally as it catches up -- no jarring discrete thresholds.
- *
- * Returns:
- *   displayedText  -- current visible text (animating)
- *   addChunk       -- call with each incoming token chunk
- *   reset          -- clear the stream
- *   flush          -- instantly display all buffered text
+ * with a smooth exponential catch-up at ~60 fps.
  */
-export default function useSmoothStream() {
+export default function useSmoothStream(): UseSmoothStreamResult {
   const [displayedText, setDisplayedText] = useState('');
   const fullRef = useRef('');
   const indexRef = useRef(0);
-  const timerRef = useRef(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tickRef = useRef<(() => void) | null>(null);
 
-  // ~60 fps -- smooth to the eye
-  const TICK_MS = 16;
-
-  // Use a ref to hold the latest tick function so addChunk can always
-  // schedule the current version without stale-closure issues.
-  const tickRef = useRef(null);
-
-  tickRef.current = () => {
+  const tick = useCallback(() => {
     const full = fullRef.current;
     const behind = full.length - indexRef.current;
     if (behind <= 0) {
       timerRef.current = null;
       return;
     }
-    // Smooth exponential catch-up: advance by ceil(behind / 4).
-    // Far behind -> big jumps.  Close -> 1 char per tick.
     const step = Math.max(1, Math.ceil(behind / 4));
     indexRef.current = Math.min(indexRef.current + step, full.length);
     setDisplayedText(full.slice(0, indexRef.current));
-
-    // Schedule next tick if still behind
     if (indexRef.current < full.length) {
-      timerRef.current = setTimeout(tickRef.current, TICK_MS);
+      timerRef.current = setTimeout(tickRef.current!, TICK_MS);
     } else {
       timerRef.current = null;
     }
-  };
+  }, []);
 
-  const addChunk = useCallback((text) => {
+  tickRef.current = tick;
+
+  const addChunk = useCallback((text: string) => {
     if (!text) return;
     fullRef.current += text;
     if (!timerRef.current) {
-      timerRef.current = setTimeout(tickRef.current, TICK_MS);
+      timerRef.current = setTimeout(tickRef.current!, TICK_MS);
     }
   }, []);
 
@@ -74,7 +67,6 @@ export default function useSmoothStream() {
     return fullRef.current;
   }, []);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (timerRef.current) {

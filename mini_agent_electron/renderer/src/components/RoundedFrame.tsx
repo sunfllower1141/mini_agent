@@ -1,9 +1,13 @@
 /**
  * Rounded frame wrapper for panels -- uses CSS border-radius styling.
- * (The old ASCII border characters ?-? / ?-? were hidden by CSS and
- *  are now removed entirely.)
  */
-export default function RoundedFrame({ id, children, className }) {
+interface RoundedFrameProps {
+  id?: string;
+  children?: React.ReactNode;
+  className?: string;
+}
+
+export default function RoundedFrame({ id, children, className }: RoundedFrameProps) {
   return (
     <div id={id} className={`panel rounded-frame${className ? ` ${className}` : ''}`}>
       <div className="frame-body">

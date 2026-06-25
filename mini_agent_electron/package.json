@@ -6,27 +6,25 @@
   "scripts": {
     "prestart": "node -e \"if(!require('fs').existsSync('renderer/dist/index.html')){console.log('[prestart] Building renderer...');try{require('child_process').execSync('npx --yes vite build',{stdio:'inherit',cwd:__dirname})}catch(e){console.error('[prestart] Build failed. Run: npm run build');process.exit(1)}}\"",
     "start": "electron .",
-    "dev": "electron . --dev",
-    "build": "npx vite build",
-    "dev:renderer": "npx vite --config vite.config.js",
-    "dist": "npm run build && electron-builder",
-    "dist:mac": "npm run build && electron-builder --mac",
-    "dist:win": "npm run build && electron-builder --win",
-    "dist:linux": "npm run build && electron-builder --linux"
+    "build": "vite build",
+    "dev": "vite",
+    "dev:electron": "electron . --dev",
+    "typecheck": "tsc --noEmit -p renderer/tsconfig.json",
+    "typecheck:main": "tsc --noEmit -p tsconfig.json"
   },
   "build": {
-    "appId": "com.miniagent.electron",
+    "appId": "com.mini-agent.app",
     "productName": "mini_agent",
-    "copyright": "MIT",
     "directories": {
-      "output": "dist-electron"
+      "output": "release"
     },
     "files": [
       "main.js",
+      "main.ts",
       "preload.js",
+      "preload.ts",
       "renderer/dist/**/*",
-      "backend_bundle/**/*",
-      "node_modules/**/*",
+      "package.json",
       "!node_modules/electron/dist/**",
       "!node_modules/**/*.md",
       "!node_modules/**/*.ts",
@@ -99,8 +97,13 @@
     "shiki": "^4.1.0"
   },
   "devDependencies": {
+    "@types/node": "^26.0.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.2",
     "electron-builder": "^26.0.12",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3",
     "vite": "^8.0.14"
   }
 }

@@ -1,17 +1,25 @@
-import { useState, useRef, useCallback, memo } from 'react';
+import { useState, useRef, useCallback, memo, ReactNode } from 'react';
+
+interface ToolCallBoxProps {
+  toolName: string;
+  toolArgs?: string;
+  ok?: boolean | null;
+  running?: boolean;
+  children?: ReactNode;
+}
 
 /**
  * Collapsible tool call box.
  * Collapsed by default — header shows tool name + args + preview.
  * Click header to expand; text selection is preserved (won't toggle).
- * Green left border for success, red for error.
  */
-const ToolCallBox = memo(function ToolCallBox({ toolName, toolArgs, ok, summary, running, children }) {
+const ToolCallBox = memo(function ToolCallBox({
+  toolName, toolArgs, ok, running = false, children
+}: ToolCallBoxProps) {
   const [open, setOpen] = useState(false);
   const selRef = useRef(false);
 
   const handleClick = useCallback(() => {
-    // Don't toggle if the user was selecting text
     if (selRef.current) {
       selRef.current = false;
       return;
@@ -21,15 +29,11 @@ const ToolCallBox = memo(function ToolCallBox({ toolName, toolArgs, ok, summary,
 
   const handleMouseDown = useCallback(() => {
     selRef.current = false;
-    const sel = window.getSelection();
-    if (sel) selRef.current = (sel.type === 'Range' && sel.toString().length > 0);
   }, []);
 
   const handleMouseUp = useCallback(() => {
     const sel = window.getSelection();
-    if (sel && sel.type === 'Range' && sel.toString().length > 0) {
-      selRef.current = true;
-    }
+    if (sel) selRef.current = (sel.type === 'Range' && sel.toString().length > 0);
   }, []);
 
   const cls = running
@@ -51,7 +55,6 @@ const ToolCallBox = memo(function ToolCallBox({ toolName, toolArgs, ok, summary,
         aria-label={open ? 'Collapse tool call' : 'Expand tool call'}
         aria-expanded={open}
       >
-
         <span className="accent">{toolName}</span>
         {toolArgs && <span className="dim">{toolArgs}</span>}
         {running && <span className="tool-call-spinner" />}

@@ -1,17 +1,20 @@
-import { useRef, useState, useCallback, memo } from 'react';
+import { useRef, useState, useCallback, memo, ReactNode } from 'react';
 import LogLine from './LogLine';
 import useAutoScroll from '../hooks/useAutoScroll';
 
+interface LogPanelProps {
+  id?: string;
+  className?: string;
+  lines?: LogLine[];
+  children?: ReactNode;
+}
+
 /**
  * Auto-scrolling log container -- memoized so it only re-renders when
- * its `lines` or `children` props actually change, not on every parent tick.
- *
- * When the user scrolls up to read history, auto-scroll pauses and a
- * "↓ Scroll to latest" button appears. Auto-scroll resumes when the
- * user scrolls back to the bottom or clicks the button.
+ * its `lines` or `children` props actually change.
  */
-const LogPanel = memo(function LogPanel({ id, className, lines, children }) {
-  const containerRef = useRef(null);
+const LogPanel = memo(function LogPanel({ id, className, lines, children }: LogPanelProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const { isAtBottom, scrollToBottom } = useAutoScroll(containerRef, [lines, children]);
   const [hovering, setHovering] = useState(false);
 
@@ -30,7 +33,6 @@ const LogPanel = memo(function LogPanel({ id, className, lines, children }) {
     >
       {lines && lines.map((line, i) => <LogLine key={line._key || line.id || `ln-${i}`} line={line} />)}
       {children}
-      {/* Scroll-to-bottom button */}
       {showJump && (
         <button
           className="scroll-jump-btn"
@@ -46,4 +48,3 @@ const LogPanel = memo(function LogPanel({ id, className, lines, children }) {
 });
 
 export default LogPanel;
-

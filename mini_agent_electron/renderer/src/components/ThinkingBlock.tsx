@@ -1,53 +1,32 @@
 import { useState, memo, useEffect, useRef } from 'react';
 
-/** TYPING_SPEED: ms between revealing each character (typewriter feel). */
 const TYPING_SPEED = 6;
+
+interface ThinkingBlockProps {
+  text?: string;
+  active?: boolean;
+}
 
 /**
  * Collapsible thinking… box that sits inline among tool calls.
- * Click the header to expand/collapse the full thinking text.
- *
- * Features:
- *  - Typewriter animation: text reveals character-by-character.
- *  - Collapsed: shows 2 lines then truncates with CSS line-clamp.
- *  - Expanded: full text visible, typing continues.
  */
-const ThinkingBlock = memo(function ThinkingBlock({ text, active }) {
+const ThinkingBlock = memo(function ThinkingBlock({ text = '', active = false }: ThinkingBlockProps) {
   const [open, setOpen] = useState(false);
   const [visible, setVisible] = useState(0);
-  const timerRef = useRef(null);
-  const prevActiveRef = useRef(false);
-  // Track whether this block was EVER active (streaming).
-  // If true, the full text was already visible -- bypass stale visible
-  // state to prevent a 1-frame blink when active transitions true→false.
   const wasEverActiveRef = useRef(false);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // --- Typewriter animation (only when not actively streaming) ---
+  // Track whether this block was ever streaming (active=true)
+  if (active) wasEverActiveRef.current = true;
+
   useEffect(() => {
-    const wasActive = prevActiveRef.current;
-    prevActiveRef.current = active;
-
-    // During active streaming, show text immediately — no typewriter
-    if (active) {
-      wasEverActiveRef.current = true;
+    // If this block was ever active (was streaming), show full text on replay
+    if (wasEverActiveRef.current) {
       setVisible(text.length);
       if (timerRef.current) clearInterval(timerRef.current);
       timerRef.current = null;
       return;
     }
-
-    // Just transitioned from active → inactive (streaming ended).
-    // Text was already fully displayed; don't replay.
-    if (wasActive) {
-      setVisible(text.length);
-      if (timerRef.current) clearInterval(timerRef.current);
-      timerRef.current = null;
-      return;
-    }
-
-    // Typewriter for brand-new non-streaming thinking blocks.
-    // Skip if this block was ever active (streaming) — don't replay.
-    if (wasEverActiveRef.current) return;
     wasEverActiveRef.current = false;
     setVisible(0);
     if (timerRef.current) clearInterval(timerRef.current);
@@ -59,7 +38,7 @@ const ThinkingBlock = memo(function ThinkingBlock({ text, active }) {
       i += 1;
       if (i >= text.length) {
         setVisible(text.length);
-        clearInterval(timerRef.current);
+        clearInterval(timerRef.current!);
         timerRef.current = null;
       } else {
         setVisible(i);
@@ -71,8 +50,6 @@ const ThinkingBlock = memo(function ThinkingBlock({ text, active }) {
     };
   }, [text, active]);
 
-  // Show full text if active OR if this block was ever active (avoids
-  // stale visible state during the active→inactive transition frame).
   const showFull = active || wasEverActiveRef.current;
   const revealed = showFull ? text : text.slice(0, visible);
   const typing = active ? false : visible < text.length;
@@ -92,7 +69,7 @@ const ThinkingBlock = memo(function ThinkingBlock({ text, active }) {
         aria-label={open ? 'Collapse thinking' : 'Expand thinking'}
         aria-expanded={open}
       >
-        <span className="thinking-box-label">thinking{typing ? '\u2026' : ''}</span>
+        <span className="thinking-box-label">thinking{typing ? '…' : ''}</span>
         {!open && (
           <span className="thinking-box-preview">
             {revealed || '\u200b'}
