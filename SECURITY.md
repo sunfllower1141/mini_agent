@@ -9,6 +9,66 @@ A prompt instruction is not a security control — the model can be wrong, confu
 content it reads. Every control below is therefore implemented in Python, in the code path that
 executes the tool, and is testable independently of model behavior.
 
+## Enforcement at a glance
+
+Two views. The first is the path every proposed action takes; the second shows where untrusted
+content enters and what it can reach.
+
+### 1. Every action passes through the enforcement stack
+
+```mermaid
+flowchart TD
+    LLM["LLM proposes a tool call<br/>model output is not trusted"]
+    G1["1 - Argument guard<br/>placeholder or empty arguments refused"]
+    G2["2 - Read-before-edit<br/>writing a .py file not read this session is rejected"]
+    G3["3 - Syntax gate<br/>compile() must pass before the write is applied"]
+    G4["4 - Command policy<br/>19 blocked patterns, force=True override is logged"]
+    G5["5 - Path containment<br/>DECLARED BUT NOT ENFORCED"]
+    EXEC["6 - Tool execution<br/>filesystem - shell - browser - desktop - MCP"]
+    LOG["7 - Audit log<br/>JSON lines, rotating"]
+    BAD["rejected"]
+
+    LLM --> G1 --> G2 --> G3 --> G4 --> G5
+    G5 -->|"passes today"| EXEC
+    G5 -.->|"cannot reject today"| BAD
+    EXEC --> LOG
+    LOG -.->|"result re-enters the model context"| LLM
+
+    classDef ok fill:#e8f5e9,stroke:#2e7d32,stroke-width:1px,color:#14210f
+    classDef gap fill:#fdecea,stroke:#c62828,stroke-width:2px,color:#14210f
+    classDef ex fill:#e3f2fd,stroke:#1565c0,stroke-width:1px,color:#0d1b2a
+    classDef no fill:#ffffff,stroke:#c62828,stroke-width:1px,stroke-dasharray:5 5,color:#c62828
+    class G1,G2,G3,G4,LOG ok
+    class G5 gap
+    class EXEC ex
+    class BAD no
+```
+
+### 2. Trust boundaries and the injection path
+
+```mermaid
+flowchart LR
+    subgraph U["Untrusted content - an attacker can write this"]
+        direction TB
+        A1["file contents"]
+        A2["web pages"]
+        A3["shell and tool output"]
+        A4["MCP responses"]
+    end
+    CTX["Model context"]
+    MDL["Model"]
+    ENF["Tool-layer enforcement"]
+    ACT["Side effects<br/>files - shell - browser - desktop"]
+
+    U --> CTX --> MDL --> ENF --> ACT
+    ACT -->|"output observed: untrusted text re-enters the context,<br/>no provenance tracking today"| CTX
+
+    classDef bad fill:#fdecea,stroke:#c62828,stroke-width:2px,color:#14210f
+    classDef n fill:#f5f5f5,stroke:#616161,stroke-width:1px,color:#14210f
+    class U bad
+    class CTX,MDL,ENF,ACT n
+```
+
 ## Trust boundaries
 
 | Component | Trust |
