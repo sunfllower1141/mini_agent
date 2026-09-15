@@ -55,6 +55,7 @@ package-lock.json
 _[!_]*.py
 _[!_]*.bat
 !core/_anchor_words.py
+_bot_boot.log
 nul
 list_pkgs_temp.py
 _cleanup_temp.py

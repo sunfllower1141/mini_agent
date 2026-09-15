@@ -1,15 +1,19 @@
 # mini_agent
 
-A terminal AI coding assistant powered by LLMs (DeepSeek, Claude, xAI/Grok) with 138 tools (81 core + 57 over 9 skills),
+A terminal AI coding assistant powered by LLMs (DeepSeek, Claude, xAI/Grok) with 96 registered tools (19 core, 62 skill-gated across 10 skill groups),
 multi-agent orchestration, SQLite memory, headless browser, desktop automation, and an Electron
 desktop app. The agent observes, diagnoses, and improves its own codebase — it's self-modifying.
+
+Tool-execution boundaries, what is enforced versus declared, and the known gaps are documented
+in [SECURITY.md](SECURITY.md).
 
 ## Features
 
 - **Multi-provider LLM support** — DeepSeek V3/R1, Claude Opus/Sonnet, xAI Grok 3, plus a
   provider fallback chain (primary fails → automatic failover)
-- **138 tools** across 9 skill groups: file ops, shell, search, LSP, browser automation,
-  desktop control, testing, multi-agent orchestration, web, and more
+- **96 tools** — 19 always available; the rest unlocked on demand from 10 skill groups spanning
+  file ops, shell, search, LSP, browser automation, desktop control, testing, multi-agent
+  orchestration, and web
 - **Multi-agent orchestration** — spawn sub-agents with turn budgets, typed inter-agent
   messaging (handoff, broadcast inbox), and parallel patterns (fan-out/in, pipeline, barrier,
   scatter-gather)
@@ -27,7 +31,7 @@ desktop app. The agent observes, diagnoses, and improves its own codebase — it
 ## Quick Start (macOS / Linux)
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/mini_agent.git
+git clone https://github.com/sunfllower1141/mini_agent.git
 cd mini_agent
 ./setup.sh
 ```
@@ -71,21 +75,22 @@ Quick start: `setup.bat` → `cd mini_agent_electron && npm start`
 
 ## Tool System
 
-The agent starts with **11 core tools** and unlocks more via skill groups. Available skills:
+The agent starts with **19 core tools** and unlocks more via skill groups. Available skills:
 
 | Skill | Tools | What it enables |
 |-------|-------|-----------------|
-| `git` | 6 | Git operations (add, commit, diff, log, push, restore) |
-| `test` | 3 | Test running, verification, test output parsing |
+| `agents` | 18 | Spawn/collect/cancel sub-agents, messaging, orchestration patterns |
+| `desktop` | 16 | Windows/macOS desktop automation (UIA, Atomacos) |
+| `web` | 8 | Web search, fetch URL, browser automation (Playwright), screenshots |
+| `git` | 5 | Git operations (status, diff, log, add, commit) |
 | `lsp` | 4 | Go-to-definition, find references, hover types, diagnostics |
-| `web` | 10 | Web search, fetch URL, browser automation (Playwright), screenshot |
-| `search` | 5 | Symbol index, find usages, semantic search, file search, session recall |
-| `agents` | 14 | Spawn/collect/cancel sub-agents, messaging, orchestration patterns |
-| `desktop` | 8 | macOS/Windows desktop automation (Atomacos, UIA) |
-| `planning` | 5 | Plan, plan_status, todo tracking, scratchpad |
-| `image` | 2 | Read and analyze images |
-| `bootstrap` | 3 | Session init, workspace setup |
-| `tasks` | 3 | Task management |
+| `search` | 4 | Symbol index, find usages, semantic search, session recall |
+| `test` | 3 | Test running, verification, failure diagnosis |
+| `bootstrap` | 2 | Session init, session stats |
+| `image` | 1 | Read and analyze images |
+| `tasks` | 1 | Background task status |
+
+Planning, scratchpad, and todo tools are core — always available.
 
 Lazy-loaded: skills activate on first use, and unused skills are pruned after turn 5 to save
 API tokens and stabilize the KV-cache prefix.
@@ -110,7 +115,7 @@ mini_agent/
 │   ├── memory.py           # MemoryStore: conversations, knowledge, scratchpad
 │   ├── memory_prune.py     # Content-aware compression, orphan stripping
 │   └── session.py          # Session lifecycle
-├── tools/                  # Tool implementations (138 tools: 81 core + 57 skill)
+├── tools/                  # Tool implementations (96 registered tools)
 │   ├── file_ops.py         # read/write/edit/list/info/scratchpad/diff
 │   ├── shell_ops.py        # run_shell, search_files, run_tests, verify
 │   ├── search_ops.py       # find_symbol, web_search, semantic_search
@@ -119,7 +124,7 @@ mini_agent/
 │   ├── lsp.py              # LSP client (pylsp integration)
 │   ├── browser_ops.py      # Playwright headless browser
 │   └── ...
-├── tests/                  # Test suite (~1100 tests)
+├── tests/                  # Test suite (1,500+ tests)
 ├── eval/                   # Evaluation harness (YAML tasks + SWE-bench)
 ├── mini_agent_electron/    # Electron desktop app (React + Node.js)
 │   ├── main.js             # Electron main process
@@ -150,7 +155,7 @@ mini_agent/
 ### Testing
 
 ```bash
-make test           # Fast suite (~1100 tests, excludes slow + benchmarks)
+make test           # Fast suite (1,500+ tests, excludes slow + benchmarks)
 make test-slow      # Slow tests (sub-agent threads, git, desktop ops)
 make test-all       # Full suite (fast + slow + benchmarks)
 make coverage       # With HTML coverage report
@@ -170,10 +175,35 @@ itself. This is governed by safety gates:
 
 ### Safety Boundaries
 
-- **Read-before-edit** — won't edit `.py` files it hasn't read this session
-- **Syntax validation** — Python files compiled before every write; syntax errors rejected
-- **Workspace isolation** — all reads/writes bounded to the workspace directory
-- **Backup before write** — every `edit_file` / `write_file` creates a backup
+**Enforced in code:**
+
+- **Read-before-edit** — `.py` writes are rejected unless the file was read this session
+  (`tools/file_ops.py`, `_READ_FILES`)
+- **Syntax validation** — Python is `compile()`d before every write; broken edits are rejected
+- **Placeholder guard** — tool arguments that are placeholders (`?`, `...`, empty) are refused
+  before they reach the OS (`_BOGUS_PATH_MARKERS`)
+- **Blocked-command policy** — 19 patterns rejected in `run_shell`: recursive/forced delete,
+  in-place edits, shell redirects that overwrite source, privilege escalation, raw disk writes,
+  force-push. Overriding requires an explicit `force=True` argument (`tools/shell_ops.py`)
+- **Backup before write** — `edit_file` / `write_file` snapshot previous content
+- **Bounded autonomy** — sub-agents run under a turn budget, and file reservations prevent two
+  agents from writing the same path
+
+**Known gaps** (documented, remediation scoped):
+
+- **Workspace isolation is declared but not enforced.** `ReadSafetyGate.check()` and
+  `WriteSafetyGate.check()` (`core/safety.py`) currently return `allowed=True` unconditionally:
+  the containment prefix is computed but never used, and `tests/test_safety.py` pins the
+  permissive behavior as expected. Call sites branch on `result.allowed`, so those branches
+  cannot reject today. Naive enforcement is not sufficient — the agent legitimately touches paths
+  outside the workspace (logs in `~/.mini_agent/logs`, temp files, environment probing) — so the
+  fix is deny-by-default containment for writes plus an explicit read allow-list.
+- **No defense against instruction injection from untrusted content.** File contents, web pages,
+  and tool output are fed back to the model as-is, so content the agent reads can attempt to
+  steer it. Mitigation direction: provenance tracking for untrusted text, and refusing tool
+  arguments derived from it.
+
+See [SECURITY.md](SECURITY.md) for the full tool-execution security model.
 
 ### Self-Review Cycle
 
